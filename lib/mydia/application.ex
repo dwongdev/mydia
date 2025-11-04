@@ -14,7 +14,8 @@ defmodule Mydia.Application do
         {Ecto.Migrator,
          repos: Application.fetch_env!(:mydia, :ecto_repos), skip: skip_migrations?()},
         {DNSCluster, query: Application.get_env(:mydia, :dns_cluster_query) || :ignore},
-        {Phoenix.PubSub, name: Mydia.PubSub}
+        {Phoenix.PubSub, name: Mydia.PubSub},
+        Mydia.Downloads.Client.Registry
       ] ++
         oban_children() ++
         [

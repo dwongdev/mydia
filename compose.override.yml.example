@@ -1,0 +1,271 @@
+# Docker Compose Override Example
+#
+# This file demonstrates how to customize your local development environment
+# without modifying the tracked compose.yml file.
+#
+# Usage:
+#   1. Copy this file to compose.override.yml:
+#      cp compose.override.yml.example compose.override.yml
+#
+#   2. Uncomment and customize the services you need
+#
+#   3. Start your environment:
+#      ./dev up -d
+#
+# Docker Compose automatically merges compose.override.yml with compose.yml.
+# The override file is gitignored, so your personal configuration stays local.
+#
+# Examples below include:
+#   - Adding new services (torrent clients, indexers)
+#   - Overriding existing service configuration
+#   - Setting up shared volumes for media files
+
+# ==============================================================================
+# OVERRIDE EXISTING APP SERVICE
+# ==============================================================================
+# Uncomment to customize the main application service
+
+# services:
+#   app:
+#     # Override environment variables
+#     environment:
+#       # Change the Phoenix port
+#       PORT: 5000
+#
+#       # Add custom environment variables
+#       MY_CUSTOM_VAR: "custom_value"
+#
+#       # Override database path
+#       # DATABASE_PATH: /app/mydia_custom.db
+#
+#       # -------------------------------------------------------------------------
+#       # AUTOMATIC SERVICE CONFIGURATION
+#       # -------------------------------------------------------------------------
+#       # Automatically configure Mydia to use the Transmission and Prowlarr
+#       # services defined below. When you uncomment these variables, Mydia will
+#       # connect to these services on startup without any manual configuration.
+#       #
+#       # Download Client: Transmission
+#       # The following variables configure Mydia to use the Transmission service
+#       # for downloading torrents. Credentials match the Transmission service below.
+#       DOWNLOAD_CLIENT_1_NAME: "Local Transmission"
+#       DOWNLOAD_CLIENT_1_TYPE: "transmission"
+#       DOWNLOAD_CLIENT_1_ENABLED: "true"
+#       DOWNLOAD_CLIENT_1_HOST: "transmission"
+#       DOWNLOAD_CLIENT_1_PORT: "9091"
+#       DOWNLOAD_CLIENT_1_USE_SSL: "false"
+#       DOWNLOAD_CLIENT_1_USERNAME: "admin"
+#       DOWNLOAD_CLIENT_1_PASSWORD: "admin"
+#
+#       # Indexer: Prowlarr
+#       # The following variables configure Mydia to use the Prowlarr service
+#       # for searching torrents across multiple indexers.
+#       #
+#       # IMPORTANT: You must set up Prowlarr first:
+#       #   1. Start services with: ./dev up -d
+#       #   2. Open Prowlarr at http://localhost:9696
+#       #   3. Go to Settings > General > Security
+#       #   4. Copy the API Key
+#       #   5. Replace YOUR_PROWLARR_API_KEY below with the actual key
+#       #
+#       INDEXER_1_NAME: "Local Prowlarr"
+#       INDEXER_1_TYPE: "prowlarr"
+#       INDEXER_1_ENABLED: "true"
+#       INDEXER_1_BASE_URL: "http://prowlarr:9696"
+#       INDEXER_1_API_KEY: "YOUR_PROWLARR_API_KEY"
+#
+#     # Override port mappings
+#     ports:
+#       - "5000:5000"  # Use different host port
+#
+#     # Add additional volumes
+#     volumes:
+#       # Mount a local media library directory
+#       - /path/to/your/media:/media:ro  # Read-only mount
+#
+#       # Mount a downloads directory
+#       - /path/to/downloads:/downloads
+
+# ==============================================================================
+# TORRENT CLIENTS
+# ==============================================================================
+# Add torrent download clients for automated media acquisition
+
+services:
+  # Transmission - Lightweight torrent client with web UI
+  transmission:
+    image: lscr.io/linuxserver/transmission:latest
+    container_name: mydia_transmission
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      # Optional: Set web UI credentials
+      - USER=admin
+      - PASS=admin
+    ports:
+      - "9091:9091"   # Web UI
+      - "51413:51413" # Peer port
+      - "51413:51413/udp"
+    volumes:
+      # Configuration persistence
+      - transmission_config:/config
+
+      # Downloads directory (shared with main app)
+      - transmission_downloads:/downloads
+
+      # Optional: Watch directory for .torrent files
+      - transmission_watch:/watch
+    restart: unless-stopped
+    #HealthCheck
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # qBittorrent - Alternative torrent client (uncomment to use instead)
+  # qbittorrent:
+  #   image: lscr.io/linuxserver/qbittorrent:latest
+  #   container_name: mydia_qbittorrent
+  #   environment:
+  #     - PUID=1000
+  #     - PGID=1000
+  #     - TZ=Etc/UTC
+  #     - WEBUI_PORT=8080
+  #   ports:
+  #     - "8080:8080"   # Web UI
+  #     - "6881:6881"   # Peer port
+  #     - "6881:6881/udp"
+  #   volumes:
+  #     - qbittorrent_config:/config
+  #     - qbittorrent_downloads:/downloads
+  #   restart: unless-stopped
+
+# ==============================================================================
+# INDEXERS & SEARCH PROVIDERS
+# ==============================================================================
+# Add indexer aggregators for torrent search
+
+  # Prowlarr - Indexer manager and proxy
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: mydia_prowlarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+    ports:
+      - "9696:9696"  # Web UI
+    volumes:
+      - prowlarr_config:/config
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9696"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # Jackett - Alternative indexer proxy (uncomment to use instead)
+  # jackett:
+  #   image: lscr.io/linuxserver/jackett:latest
+  #   container_name: mydia_jackett
+  #   environment:
+  #     - PUID=1000
+  #     - PGID=1000
+  #     - TZ=Etc/UTC
+  #     - AUTO_UPDATE=true
+  #   ports:
+  #     - "9117:9117"  # Web UI
+  #   volumes:
+  #     - jackett_config:/config
+  #     - jackett_downloads:/downloads
+  #   restart: unless-stopped
+
+# ==============================================================================
+# ADDITIONAL DEVELOPMENT SERVICES
+# ==============================================================================
+# Uncomment these for additional development tools
+
+  # PostgreSQL - Alternative database for testing (uncomment if needed)
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: mydia_postgres
+  #   environment:
+  #     POSTGRES_DB: mydia_dev
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: postgres
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+  # Adminer - Database management UI (uncomment if using PostgreSQL)
+  # adminer:
+  #   image: adminer:latest
+  #   container_name: mydia_adminer
+  #   ports:
+  #     - "8081:8080"
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - postgres
+
+  # Mock API Server - For testing external API integrations
+  # mockserver:
+  #   image: mockserver/mockserver:latest
+  #   container_name: mydia_mockserver
+  #   ports:
+  #     - "1080:1080"
+  #   environment:
+  #     MOCKSERVER_INITIALIZATION_JSON_PATH: /config/mockserver.json
+  #   volumes:
+  #     - ./test/fixtures/mockserver.json:/config/mockserver.json:ro
+  #   restart: unless-stopped
+
+# ==============================================================================
+# VOLUMES
+# ==============================================================================
+# Define named volumes for service data persistence
+
+volumes:
+  # Transmission volumes
+  transmission_config:
+    driver: local
+  transmission_downloads:
+    driver: local
+  transmission_watch:
+    driver: local
+
+  # qBittorrent volumes (uncomment if using qBittorrent)
+  # qbittorrent_config:
+  #   driver: local
+  # qbittorrent_downloads:
+  #   driver: local
+
+  # Prowlarr volumes
+  prowlarr_config:
+    driver: local
+
+  # Jackett volumes (uncomment if using Jackett)
+  # jackett_config:
+  #   driver: local
+  # jackett_downloads:
+  #   driver: local
+
+  # PostgreSQL volumes (uncomment if using PostgreSQL)
+  # postgres_data:
+  #   driver: local
+
+# ==============================================================================
+# NETWORKS
+# ==============================================================================
+# By default, all services share the default network created by Docker Compose.
+# Uncomment this section if you need custom network configuration.
+
+# networks:
+#   default:
+#     driver: bridge
+#     ipam:
+#       config:
+#         - subnet: 172.20.0.0/16

@@ -7,20 +7,22 @@ defmodule Mydia.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      MydiaWeb.Telemetry,
-      Mydia.Repo,
-      {Ecto.Migrator,
-       repos: Application.fetch_env!(:mydia, :ecto_repos), skip: skip_migrations?()},
-      {DNSCluster, query: Application.get_env(:mydia, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: Mydia.PubSub},
-      # Oban background job processing
-      {Oban, Application.fetch_env!(:mydia, Oban)},
-      # Start a worker by calling: Mydia.Worker.start_link(arg)
-      # {Mydia.Worker, arg},
-      # Start to serve requests, typically the last entry
-      MydiaWeb.Endpoint
-    ]
+    children =
+      [
+        MydiaWeb.Telemetry,
+        Mydia.Repo,
+        {Ecto.Migrator,
+         repos: Application.fetch_env!(:mydia, :ecto_repos), skip: skip_migrations?()},
+        {DNSCluster, query: Application.get_env(:mydia, :dns_cluster_query) || :ignore},
+        {Phoenix.PubSub, name: Mydia.PubSub}
+      ] ++
+        oban_children() ++
+        [
+          # Start a worker by calling: Mydia.Worker.start_link(arg)
+          # {Mydia.Worker, arg},
+          # Start to serve requests, typically the last entry
+          MydiaWeb.Endpoint
+        ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
@@ -34,6 +36,19 @@ defmodule Mydia.Application do
   def config_change(changed, _new, removed) do
     MydiaWeb.Endpoint.config_change(changed, removed)
     :ok
+  end
+
+  defp oban_children do
+    # Don't start Oban in test environment to avoid pool conflicts with SQL Sandbox
+    oban_config = Application.get_env(:mydia, Oban, [])
+
+    # Skip Oban if testing is manual or queues are disabled
+    if Keyword.get(oban_config, :testing) == :manual or
+         Keyword.get(oban_config, :queues) == false do
+      []
+    else
+      [{Oban, oban_config}]
+    end
   end
 
   defp skip_migrations?() do

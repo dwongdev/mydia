@@ -26,3 +26,11 @@ config :phoenix, :plug_init_mode, :runtime
 # Enable helpful, but potentially expensive runtime checks
 config :phoenix_live_view,
   enable_expensive_runtime_checks: true
+
+# Disable Oban during testing to prevent pool conflicts with SQL Sandbox
+# Using engine: false disables Oban's engine entirely in test mode
+config :mydia, Oban,
+  testing: :manual,
+  engine: false,
+  queues: false,
+  plugins: false

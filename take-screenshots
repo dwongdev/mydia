@@ -19,6 +19,10 @@ if ! docker compose ps --services --filter "status=running" | grep -q "^app$"; t
     sleep 3
 fi
 
+# Install Playwright and dependencies
+echo -e "${GREEN}Installing Playwright...${NC}\n"
+./dev exec app sh -c "cd assets && npx playwright install chromium --with-deps" > /dev/null 2>&1
+
 # Run screenshots
 echo -e "${GREEN}Capturing screenshots...${NC}\n"
 ./dev exec app sh -c "cd assets && npm run screenshots"

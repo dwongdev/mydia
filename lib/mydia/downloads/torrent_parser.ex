@@ -6,8 +6,16 @@ defmodule Mydia.Downloads.TorrentParser do
   - Title
   - Year (for movies)
   - Season and episode numbers (for TV shows)
+  - Season packs (full seasons without episode numbers)
   - Quality/resolution
   - Release group
+
+  Supports complex torrent names with:
+  - Website/tracker prefixes (e.g., [bitsearch.to], 【高清剧集网】)
+  - Multiple bracket types containing metadata
+  - Mixed Chinese and English titles
+  - Chinese season markers (第6季, 第四季)
+  - Language and subtitle indicators
 
   ## Examples
 
@@ -32,6 +40,18 @@ defmodule Mydia.Downloads.TorrentParser do
         source: "HDTV",
         codec: "x264",
         release_group: "CTU"
+      }}
+
+      iex> parse("House.of.the.Dragon.S01.COMPLETE.2160p.BluRay.x265-GROUP")
+      {:ok, %{
+        type: :tv_season,
+        title: "House of the Dragon",
+        season: 1,
+        season_pack: true,
+        quality: "2160p",
+        source: "BluRay",
+        codec: "x265",
+        release_group: "GROUP"
       }}
   """
 
@@ -64,6 +84,25 @@ defmodule Mydia.Downloads.TorrentParser do
     # Remove file extensions if present
     name
     |> String.replace(~r/\.(mkv|mp4|avi|mov|wmv|flv|webm)$/i, "")
+    |> strip_prefixes()
+    |> String.trim()
+  end
+
+  defp strip_prefixes(name) do
+    name
+    # Remove ALL Chinese brackets with content (e.g., 【高清剧集网 www.BTHDTV.com】)
+    # These appear throughout the name, not just at the start
+    |> String.replace(~r/【[^】]*】\s*/u, "")
+    # Remove ALL square brackets with content (metadata, website tags, etc.)
+    # e.g., [47BT], [Ex-torrenty.org], [全9集], [简繁英字幕]
+    |> String.replace(~r/\[[^\]]+\]\s*/u, "")
+    # Remove ALL curly braces with content
+    |> String.replace(~r/\{[^\}]+\}\s*/u, "")
+    # Clean up any Chinese season/episode markers like "第6季", "第四季"
+    # These often appear before the English title and confuse matching
+    |> String.replace(~r/第\d+季\s*/u, "")
+    |> String.replace(~r/第[一二三四五六七八九十]+季\s*/u, "")
+    # Trim any remaining leading/trailing whitespace
     |> String.trim()
   end
 
@@ -86,6 +125,14 @@ defmodule Mydia.Downloads.TorrentParser do
           ) ->
         build_tv_info(match, name)
 
+      # Season pack format: S01, S1, etc. (no episode number)
+      match =
+          Regex.named_captures(
+            ~r/^(?<title>.+?)[\s\.]S(?<season>\d{1,2})[\s\.\-]/i,
+            name
+          ) ->
+        build_season_pack_info(match, name)
+
       true ->
         nil
     end
@@ -104,6 +151,25 @@ defmodule Mydia.Downloads.TorrentParser do
       title: title,
       season: season,
       episode: episode,
+      quality: extract_quality(remaining),
+      source: extract_source(remaining),
+      codec: extract_codec(remaining),
+      release_group: extract_release_group(remaining)
+    }
+  end
+
+  defp build_season_pack_info(match, full_name) do
+    title = clean_title(match["title"])
+    season = String.to_integer(match["season"])
+
+    # Extract remaining parts after the season marker
+    remaining = extract_remaining_after_season(full_name, match)
+
+    %{
+      type: :tv_season,
+      title: title,
+      season: season,
+      season_pack: true,
       quality: extract_quality(remaining),
       source: extract_source(remaining),
       codec: extract_codec(remaining),
@@ -144,8 +210,22 @@ defmodule Mydia.Downloads.TorrentParser do
     |> String.replace(".", " ")
     |> String.replace("_", " ")
     |> String.trim()
+    # Remove common language codes and noise words from the end of titles
+    |> remove_trailing_noise()
     # Normalize multiple spaces
     |> String.replace(~r/\s+/, " ")
+  end
+
+  defp remove_trailing_noise(title) do
+    # Remove common language codes and noise at the end of titles
+    # E.g., "Naruto ITA JPN" -> "Naruto"
+    # Common patterns: MULTi, ITA, JPN, ENG, FRA, GER, SPA, etc.
+    title
+    |> String.replace(
+      ~r/\s+(MULTi|ITA|JPN|ENG|FRA|GER|SPA|POR|RUS|CHN|KOR|DUAL|COMPLETE|Reencode|Rebuild)\b.*$/i,
+      ""
+    )
+    |> String.trim()
   end
 
   defp extract_remaining_after_episode(full_name, match) do
@@ -155,6 +235,37 @@ defmodule Mydia.Downloads.TorrentParser do
     case String.split(full_name, pattern, parts: 2) do
       [_, remaining] -> remaining
       _ -> ""
+    end
+  end
+
+  defp extract_remaining_after_season(full_name, match) do
+    # Find where the season pattern ends
+    # Need to handle case-insensitive matching
+    season_str =
+      String.to_integer(match["season"]) |> Integer.to_string() |> String.pad_leading(2, "0")
+
+    cond do
+      # Try with S## format (uppercase)
+      remaining = extract_after_pattern(full_name, "S#{season_str}") ->
+        remaining
+
+      # Try with s## format (lowercase)
+      remaining = extract_after_pattern(full_name, "s#{season_str}") ->
+        remaining
+
+      # Try single digit
+      remaining = extract_after_pattern(full_name, "S#{match["season"]}") ->
+        remaining
+
+      true ->
+        ""
+    end
+  end
+
+  defp extract_after_pattern(full_name, pattern) do
+    case String.split(full_name, pattern, parts: 2) do
+      [_, remaining] -> remaining
+      _ -> nil
     end
   end
 

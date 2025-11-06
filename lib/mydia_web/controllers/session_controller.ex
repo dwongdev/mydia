@@ -19,8 +19,16 @@ defmodule MydiaWeb.SessionController do
       |> put_flash(:error, "Local authentication is not available in production")
       |> redirect(to: "/")
     else
-      render(conn, :new, changeset: Accounts.change_user(%Mydia.Accounts.User{}))
+      render(conn, :new,
+        changeset: Accounts.change_user(%Mydia.Accounts.User{}),
+        oidc_configured: oidc_configured?()
+      )
     end
+  end
+
+  # Check if OIDC is configured
+  defp oidc_configured? do
+    Application.get_env(:ueberauth, Ueberauth) != nil
   end
 
   @doc """

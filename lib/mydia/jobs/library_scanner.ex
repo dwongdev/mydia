@@ -15,7 +15,7 @@ defmodule Mydia.Jobs.LibraryScanner do
 
   require Logger
   alias Mydia.{Library, Settings, Repo, Metadata}
-  alias Mydia.Library.{MetadataMatcher, MetadataEnricher}
+  alias Mydia.Library.{MetadataMatcher, MetadataEnricher, FileParser, FileAnalyzer}
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
@@ -117,8 +117,9 @@ defmodule Mydia.Jobs.LibraryScanner do
         {:error, reason} -> raise "Scan failed: #{inspect(reason)}"
       end
 
-    # Get existing files from database
-    existing_files = Library.list_media_files()
+    # Get existing files from database - only files within this library path
+    # This prevents deleting files from other library paths during scan
+    existing_files = Library.list_media_files(path_prefix: library_path.path)
 
     # Detect changes
     changes = Library.Scanner.detect_changes(scan_result, existing_files)
@@ -189,6 +190,28 @@ defmodule Mydia.Jobs.LibraryScanner do
           {:error, _file_info} ->
             :ok
         end)
+
+        # Also re-enrich orphaned files (files without media_item_id or episode_id)
+        orphaned_files =
+          existing_files
+          |> Enum.filter(fn file ->
+            is_nil(file.media_item_id) and is_nil(file.episode_id)
+          end)
+
+        if orphaned_files != [] do
+          Logger.info("Re-enriching orphaned files", count: length(orphaned_files))
+
+          Enum.each(orphaned_files, fn media_file ->
+            # Find the file in scan_result to get file_info
+            file_info =
+              Enum.find(result.scan_result.files, fn f -> f.path == media_file.path end)
+
+            if file_info do
+              Logger.debug("Re-enriching orphaned file", path: media_file.path)
+              process_media_file(media_file, file_info, metadata_config)
+            end
+          end)
+        end
 
         {:ok, result}
 
@@ -304,6 +327,9 @@ defmodule Mydia.Jobs.LibraryScanner do
               title: media_item.title
             )
 
+            # Extract technical file metadata (resolution, codec, bitrate, etc.)
+            extract_and_update_file_metadata(media_file, file_info)
+
           {:error, reason} ->
             Logger.warning("Failed to enrich media",
               path: file_info.path,
@@ -338,5 +364,75 @@ defmodule Mydia.Jobs.LibraryScanner do
         path: file_info.path,
         error: Exception.message(error)
       )
+  end
+
+  # Extract technical metadata from file and update the media_file record
+  defp extract_and_update_file_metadata(media_file, file_info) do
+    # Parse filename for fallback metadata
+    filename_metadata = FileParser.parse(Path.basename(file_info.path))
+
+    # Extract technical metadata from the actual file using FFprobe
+    file_metadata =
+      case FileAnalyzer.analyze(file_info.path) do
+        {:ok, metadata} ->
+          Logger.debug("Extracted file metadata via FFprobe",
+            path: file_info.path,
+            resolution: metadata.resolution,
+            codec: metadata.codec
+          )
+
+          metadata
+
+        {:error, reason} ->
+          Logger.debug("Failed to analyze file with FFprobe, using filename metadata only",
+            path: file_info.path,
+            reason: reason
+          )
+
+          # Continue with empty metadata - we'll use filename fallback below
+          %{
+            resolution: nil,
+            codec: nil,
+            audio_codec: nil,
+            bitrate: nil,
+            hdr_format: nil
+          }
+      end
+
+    # Merge metadata: prefer actual file metadata, fall back to filename parsing
+    update_attrs = %{
+      resolution: file_metadata.resolution || filename_metadata.quality.resolution,
+      codec: file_metadata.codec || filename_metadata.quality.codec,
+      audio_codec: file_metadata.audio_codec || filename_metadata.quality.audio,
+      bitrate: file_metadata.bitrate,
+      hdr_format: file_metadata.hdr_format || filename_metadata.quality.hdr_format
+    }
+
+    case Library.update_media_file(media_file, update_attrs) do
+      {:ok, updated_file} ->
+        Logger.debug("Updated file with technical metadata",
+          path: file_info.path,
+          resolution: updated_file.resolution,
+          codec: updated_file.codec
+        )
+
+        :ok
+
+      {:error, changeset} ->
+        Logger.warning("Failed to update file with technical metadata",
+          path: file_info.path,
+          errors: inspect(changeset.errors)
+        )
+
+        :error
+    end
+  rescue
+    error ->
+      Logger.error("Exception while extracting file metadata",
+        path: file_info.path,
+        error: Exception.message(error)
+      )
+
+      :error
   end
 end

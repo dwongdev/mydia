@@ -123,6 +123,11 @@ defmodule Mydia.Library do
       {:episode_id, episode_id}, query ->
         where(query, [f], f.episode_id == ^episode_id)
 
+      {:path_prefix, prefix}, query ->
+        # Filter files by path prefix (for library path scans)
+        like_pattern = "#{prefix}%"
+        where(query, [f], like(f.path, ^like_pattern))
+
       _other, query ->
         query
     end)

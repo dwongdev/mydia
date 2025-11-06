@@ -251,6 +251,131 @@ defmodule Mydia.Downloads.TorrentMatcherTest do
     end
   end
 
+  describe "find_match/2 - TV season packs" do
+    setup do
+      # Create a TV show with episodes
+      tv_show =
+        insert(:media_item, %{
+          type: "tv_show",
+          title: "House of the Dragon",
+          monitored: true
+        })
+
+      episode1 =
+        insert(:episode, %{
+          media_item: tv_show,
+          season_number: 1,
+          episode_number: 1,
+          title: "The Heirs of the Dragon"
+        })
+
+      episode2 =
+        insert(:episode, %{
+          media_item: tv_show,
+          season_number: 1,
+          episode_number: 2,
+          title: "The Rogue Prince"
+        })
+
+      {:ok, %{tv_show: tv_show, episode1: episode1, episode2: episode2}}
+    end
+
+    test "matches season pack to show without requiring specific episode", %{tv_show: show} do
+      torrent_info = %{
+        type: :tv_season,
+        title: "House of the Dragon",
+        season: 1,
+        season_pack: true,
+        quality: "2160p",
+        source: "BluRay"
+      }
+
+      assert {:ok, match} = TorrentMatcher.find_match(torrent_info)
+      assert match.media_item.id == show.id
+      assert match.episode == nil
+      assert match.confidence > 0.8
+      assert match.match_reason =~ "season pack"
+    end
+
+    test "matches season pack with different formatting", %{tv_show: show} do
+      torrent_info = %{
+        type: :tv_season,
+        title: "House of Dragon",
+        season: 1,
+        season_pack: true,
+        quality: "1080p"
+      }
+
+      assert {:ok, match} = TorrentMatcher.find_match(torrent_info)
+      assert match.media_item.id == show.id
+      assert match.episode == nil
+    end
+
+    test "returns error when no matching show found for season pack" do
+      torrent_info = %{
+        type: :tv_season,
+        title: "Nonexistent Show",
+        season: 1,
+        season_pack: true,
+        quality: "1080p"
+      }
+
+      assert {:error, :no_match_found} = TorrentMatcher.find_match(torrent_info)
+    end
+
+    test "skips unmonitored shows for season packs by default" do
+      tv_show =
+        insert(:media_item, %{
+          type: "tv_show",
+          title: "Unmonitored Show",
+          monitored: false
+        })
+
+      insert(:episode, %{
+        media_item: tv_show,
+        season_number: 1,
+        episode_number: 1
+      })
+
+      torrent_info = %{
+        type: :tv_season,
+        title: "Unmonitored Show",
+        season: 1,
+        season_pack: true,
+        quality: "1080p"
+      }
+
+      assert {:error, :no_match_found} = TorrentMatcher.find_match(torrent_info)
+    end
+
+    test "can match unmonitored shows for season packs when monitored_only: false" do
+      tv_show =
+        insert(:media_item, %{
+          type: "tv_show",
+          title: "Unmonitored Show",
+          monitored: false
+        })
+
+      insert(:episode, %{
+        media_item: tv_show,
+        season_number: 1,
+        episode_number: 1
+      })
+
+      torrent_info = %{
+        type: :tv_season,
+        title: "Unmonitored Show",
+        season: 1,
+        season_pack: true,
+        quality: "1080p"
+      }
+
+      assert {:ok, match} = TorrentMatcher.find_match(torrent_info, monitored_only: false)
+      assert match.media_item.id == tv_show.id
+      assert match.episode == nil
+    end
+  end
+
   describe "confidence calculation" do
     test "exact movie match has very high confidence" do
       movie =

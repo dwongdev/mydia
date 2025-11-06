@@ -126,7 +126,8 @@ defmodule Mydia.Config.Loader do
       logging: load_logging_env(),
       oban: load_oban_env(),
       download_clients: load_download_clients_env(),
-      indexers: load_indexers_env()
+      indexers: load_indexers_env(),
+      library_paths: load_library_paths_env()
     }
     |> remove_empty_maps()
   end
@@ -180,6 +181,8 @@ defmodule Mydia.Config.Loader do
       System.get_env("MEDIA_SCAN_INTERVAL_HOURS"),
       &parse_integer/1
     )
+    |> put_if_present(:auto_search_on_add, System.get_env("AUTO_SEARCH_ON_ADD"), &parse_boolean/1)
+    |> put_if_present(:monitor_by_default, System.get_env("MONITOR_BY_DEFAULT"), &parse_boolean/1)
   end
 
   defp load_downloads_env do
@@ -285,6 +288,47 @@ defmodule Mydia.Config.Loader do
     |> Enum.reject(&(&1 == %{}))
   end
 
+  defp load_library_paths_env do
+    # Support environment variables for library paths in the format:
+    # LIBRARY_PATH_<N>_PATH, LIBRARY_PATH_<N>_TYPE, etc.
+    # where N is 1, 2, 3, etc.
+    env_vars = System.get_env()
+
+    # Find all library path indices by looking for *_PATH vars
+    indices =
+      env_vars
+      |> Enum.filter(fn {key, _value} ->
+        String.starts_with?(key, "LIBRARY_PATH_") and String.ends_with?(key, "_PATH")
+      end)
+      |> Enum.map(fn {key, _value} ->
+        key
+        |> String.replace_prefix("LIBRARY_PATH_", "")
+        |> String.replace_suffix("_PATH", "")
+      end)
+      |> Enum.uniq()
+
+    # Load each library path config
+    Enum.map(indices, fn index ->
+      prefix = "LIBRARY_PATH_#{index}_"
+
+      %{}
+      |> put_if_present(:path, System.get_env("#{prefix}PATH"))
+      |> put_if_present(:type, System.get_env("#{prefix}TYPE"), &parse_atom/1)
+      |> put_if_present(:monitored, System.get_env("#{prefix}MONITORED"), &parse_boolean/1)
+      |> put_if_present(
+        :scan_interval,
+        System.get_env("#{prefix}SCAN_INTERVAL"),
+        &parse_integer/1
+      )
+      |> put_if_present(
+        :quality_profile_id,
+        System.get_env("#{prefix}QUALITY_PROFILE_ID"),
+        &parse_integer/1
+      )
+    end)
+    |> Enum.reject(&(&1 == %{}))
+  end
+
   defp put_if_present(map, _key, nil, _parser), do: map
   defp put_if_present(map, _key, "", _parser), do: map
 
@@ -354,8 +398,9 @@ defmodule Mydia.Config.Loader do
   defp deep_merge(left, right) when is_map(left) and is_map(right) do
     Map.merge(left, right, fn key, left_val, right_val ->
       cond do
-        # For download_clients and indexers, merge lists (env entries are appended)
-        key in [:download_clients, :indexers] and is_list(left_val) and is_list(right_val) ->
+        # For download_clients, indexers, and library_paths, merge lists (env entries are appended)
+        key in [:download_clients, :indexers, :library_paths] and is_list(left_val) and
+            is_list(right_val) ->
           left_val ++ right_val
 
         # For nested maps, merge recursively

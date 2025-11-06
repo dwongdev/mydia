@@ -45,6 +45,8 @@ defmodule Mydia.Config.Schema do
       field :movies_path, :string, default: "/media/movies"
       field :tv_path, :string, default: "/media/tv"
       field :scan_interval_hours, :integer, default: 1
+      field :auto_search_on_add, :boolean, default: true
+      field :monitor_by_default, :boolean, default: true
     end
 
     embeds_one :downloads, Downloads, on_replace: :update, primary_key: false do
@@ -96,6 +98,14 @@ defmodule Mydia.Config.Schema do
       field :rate_limit, :integer
       field :timeout, :integer, default: 30000
     end
+
+    embeds_many :library_paths, LibraryPath, on_replace: :delete, primary_key: false do
+      field :path, :string
+      field :type, Ecto.Enum, values: [:movies, :series, :mixed]
+      field :monitored, :boolean, default: true
+      field :scan_interval, :integer, default: 3600
+      field :quality_profile_id, :integer
+    end
   end
 
   @doc """
@@ -115,6 +125,7 @@ defmodule Mydia.Config.Schema do
     |> cast_embed(:hooks, with: &hooks_changeset/2)
     |> cast_embed(:download_clients, with: &download_client_changeset/2)
     |> cast_embed(:indexers, with: &indexer_changeset/2)
+    |> cast_embed(:library_paths, with: &library_path_changeset/2)
     |> validate_configuration()
   end
 
@@ -174,7 +185,13 @@ defmodule Mydia.Config.Schema do
 
   defp media_changeset(schema, attrs) do
     schema
-    |> cast(attrs, [:movies_path, :tv_path, :scan_interval_hours])
+    |> cast(attrs, [
+      :movies_path,
+      :tv_path,
+      :scan_interval_hours,
+      :auto_search_on_add,
+      :monitor_by_default
+    ])
     |> validate_required([:movies_path, :tv_path])
     |> validate_number(:scan_interval_hours, greater_than: 0)
   end
@@ -251,6 +268,21 @@ defmodule Mydia.Config.Schema do
     |> validate_number(:timeout, greater_than: 0)
   end
 
+  defp library_path_changeset(schema, attrs) do
+    schema
+    |> cast(attrs, [
+      :path,
+      :type,
+      :monitored,
+      :scan_interval,
+      :quality_profile_id
+    ])
+    |> validate_required([:path, :type])
+    |> validate_inclusion(:type, [:movies, :series, :mixed])
+    |> validate_number(:scan_interval, greater_than: 0)
+    |> validate_number(:quality_profile_id, greater_than: 0)
+  end
+
   defp validate_oidc_config(changeset) do
     oidc_enabled = get_field(changeset, :oidc_enabled)
 
@@ -322,7 +354,8 @@ defmodule Mydia.Config.Schema do
       oban: %__MODULE__.Oban{},
       hooks: %__MODULE__.Hooks{},
       download_clients: [],
-      indexers: []
+      indexers: [],
+      library_paths: []
     }
 
     # Run through changeset to apply defaults from field definitions

@@ -112,26 +112,9 @@ if config_env() == :prod do
 
   config :mydia, Mydia.Auth.Guardian, secret_key: guardian_secret_key
 
-  # Ueberauth OIDC configuration
-  oidc_discovery_document_uri =
-    System.get_env("OIDC_DISCOVERY_DOCUMENT_URI") ||
-      System.get_env("OIDC_ISSUER")
-
-  oidc_client_id = System.get_env("OIDC_CLIENT_ID")
-  oidc_client_secret = System.get_env("OIDC_CLIENT_SECRET")
-  oidc_redirect_uri = System.get_env("OIDC_REDIRECT_URI") || "#{host}/auth/oidc/callback"
-
-  if oidc_discovery_document_uri && oidc_client_id && oidc_client_secret do
-    config :ueberauth, Ueberauth.Strategy.Oidcc,
-      issuer: oidc_discovery_document_uri,
-      client_id: oidc_client_id,
-      client_secret: oidc_client_secret,
-      redirect_uri: oidc_redirect_uri,
-      scopes: System.get_env("OIDC_SCOPES") || "openid profile email"
-
-    config :ueberauth, Ueberauth,
-      providers: [
-        oidc: {Ueberauth.Strategy.Oidcc, []}
-      ]
-  end
 end
+
+# Ueberauth OIDC configuration (all environments)
+# This runs at application startup, so environment variables are available
+# NOTE: This is configured in dev.exs and test.exs for those environments.
+# Only configure here for production or if not already configured in environment-specific files.

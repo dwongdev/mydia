@@ -143,7 +143,8 @@ defmodule MydiaWeb.Api.MediaController do
             )
 
             # Reload with preloads for response
-            media_item = Media.get_media_item!(updated_media_item.id, preload: [:library_path, :episodes])
+            media_item =
+              Media.get_media_item!(updated_media_item.id, preload: [:library_path, :episodes])
 
             conn
             |> put_status(:ok)

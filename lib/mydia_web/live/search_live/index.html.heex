@@ -259,30 +259,17 @@
               </td>
               <%!-- Actions Column --%>
               <td>
-                <div class="flex flex-col gap-1">
-                  <button
-                    class="btn btn-sm btn-primary"
-                    phx-click="add_to_library"
-                    phx-value-title={result.title}
-                    phx-value-download_url={result.download_url}
-                    phx-value-download="true"
-                    title="Add to library and download"
-                  >
-                    <.icon name="hero-arrow-down-tray" class="w-4 h-4" />
-                    <span class="hidden xl:inline">Download</span>
-                  </button>
-                  <button
-                    class="btn btn-sm btn-ghost"
-                    phx-click="add_to_library"
-                    phx-value-title={result.title}
-                    phx-value-download_url={result.download_url}
-                    phx-value-download="false"
-                    title="Add to library for monitoring"
-                  >
-                    <.icon name="hero-bookmark" class="w-4 h-4" />
-                    <span class="hidden xl:inline">Monitor</span>
-                  </button>
-                </div>
+                <button
+                  class="btn btn-sm btn-primary"
+                  phx-click="add_to_library"
+                  phx-value-title={result.title}
+                  phx-value-download_url={result.download_url}
+                  phx-value-download="true"
+                  title="Add to library and download"
+                >
+                  <.icon name="hero-arrow-down-tray" class="w-4 h-4" />
+                  <span class="hidden xl:inline">Download</span>
+                </button>
               </td>
             </tr>
           </tbody>
@@ -304,14 +291,14 @@
               :for={match <- @metadata_matches}
               class="card bg-base-200 hover:bg-base-300 cursor-pointer transition-colors"
               phx-click="select_metadata_match"
-              phx-value-match_id={match["id"]}
+              phx-value-match_id={match.provider_id}
             >
               <div class="card-body p-4">
                 <div class="flex gap-4">
-                  <%= if match["poster_path"] do %>
+                  <%= if match.poster_path do %>
                     <img
-                      src={"https://image.tmdb.org/t/p/w92#{match["poster_path"]}"}
-                      alt={match["title"] || match["name"]}
+                      src={"https://image.tmdb.org/t/p/w92#{match.poster_path}"}
+                      alt={match.title}
                       class="w-16 h-24 object-cover rounded"
                     />
                   <% else %>
@@ -321,16 +308,16 @@
                   <% end %>
                   <div class="flex-1 min-w-0">
                     <h4 class="font-semibold text-base line-clamp-2">
-                      {match["title"] || match["name"]}
+                      {match.title}
                     </h4>
-                    <%= if match["release_date"] || match["first_air_date"] do %>
+                    <%= if match.release_date || match.first_air_date do %>
                       <p class="text-sm text-base-content/60">
-                        {String.slice(match["release_date"] || match["first_air_date"], 0..3)}
+                        {String.slice(match.release_date || match.first_air_date, 0..3)}
                       </p>
                     <% end %>
-                    <%= if match["overview"] do %>
+                    <%= if match.overview do %>
                       <p class="text-xs text-base-content/50 mt-2 line-clamp-3">
-                        {match["overview"]}
+                        {match.overview}
                       </p>
                     <% end %>
                   </div>
@@ -384,17 +371,17 @@
                 :for={match <- @metadata_matches}
                 class="card bg-base-200 hover:bg-base-300 cursor-pointer transition-colors"
                 phx-click="select_manual_match"
-                phx-value-match_id={match["id"]}
+                phx-value-match_id={match.provider_id}
                 phx-value-media_type={
-                  if match["media_type"] == "tv", do: "tv_show", else: "movie"
+                  if match.media_type == :tv_show, do: "tv_show", else: "movie"
                 }
               >
                 <div class="card-body p-4">
                   <div class="flex gap-4">
-                    <%= if match["poster_path"] do %>
+                    <%= if match.poster_path do %>
                       <img
-                        src={"https://image.tmdb.org/t/p/w92#{match["poster_path"]}"}
-                        alt={match["title"] || match["name"]}
+                        src={"https://image.tmdb.org/t/p/w92#{match.poster_path}"}
+                        alt={match.title}
                         class="w-16 h-24 object-cover rounded"
                       />
                     <% else %>
@@ -404,21 +391,21 @@
                     <% end %>
                     <div class="flex-1 min-w-0">
                       <h4 class="font-semibold text-base line-clamp-2">
-                        {match["title"] || match["name"]}
+                        {match.title}
                       </h4>
                       <div class="flex gap-2 items-center mt-1">
-                        <%= if match["release_date"] || match["first_air_date"] do %>
+                        <%= if match.release_date || match.first_air_date do %>
                           <p class="text-sm text-base-content/60">
-                            {String.slice(match["release_date"] || match["first_air_date"], 0..3)}
+                            {String.slice(match.release_date || match.first_air_date, 0..3)}
                           </p>
                         <% end %>
                         <span class="badge badge-sm badge-outline">
-                          {if match["media_type"] == "tv", do: "TV Show", else: "Movie"}
+                          {if match.media_type == :tv_show, do: "TV Show", else: "Movie"}
                         </span>
                       </div>
-                      <%= if match["overview"] do %>
+                      <%= if match.overview do %>
                         <p class="text-xs text-base-content/50 mt-2 line-clamp-2">
-                          {match["overview"]}
+                          {match.overview}
                         </p>
                       <% end %>
                     </div>
@@ -544,15 +531,6 @@
           <div class="modal-action flex gap-2">
             <button class="btn btn-ghost" phx-click="close_detail_modal">
               Cancel
-            </button>
-            <button
-              class="btn btn-ghost"
-              phx-click="add_to_library"
-              phx-value-title={@selected_result.title}
-              phx-value-download_url={@selected_result.download_url}
-              phx-value-download="false"
-            >
-              <.icon name="hero-bookmark" class="w-5 h-5" /> Add to Library
             </button>
             <button
               class="btn btn-primary"

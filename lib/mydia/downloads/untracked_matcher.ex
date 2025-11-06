@@ -24,6 +24,9 @@ defmodule Mydia.Downloads.UntrackedMatcher do
   @doc """
   Finds untracked torrents in download clients and attempts to match them with library items.
 
+  Matches against ALL library items (both monitored and unmonitored) since users may
+  manually add torrents for shows they haven't marked as monitored yet.
+
   Returns a list of successfully created download records.
   """
   def find_and_match_untracked do
@@ -110,7 +113,7 @@ defmodule Mydia.Downloads.UntrackedMatcher do
     Logger.debug("Processing untracked torrent: #{torrent.name}")
 
     with {:ok, parsed_info} <- TorrentParser.parse(torrent.name),
-         {:ok, match} <- TorrentMatcher.find_match(parsed_info),
+         {:ok, match} <- TorrentMatcher.find_match(parsed_info, monitored_only: false),
          {:ok, download} <- create_download_record(torrent, match, parsed_info) do
       Logger.info(
         "Successfully matched and tracked torrent: #{torrent.name} -> #{match.media_item.title}",

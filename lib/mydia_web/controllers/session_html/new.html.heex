@@ -41,13 +41,15 @@
         </div>
       </.form>
 
-      <div class="divider">OR</div>
+      <%= if @oidc_configured do %>
+        <div class="divider">OR</div>
 
-      <div class="text-center">
-        <a href="/auth/oidc" class="btn btn-outline btn-secondary w-full">
-          Log in with OIDC
-        </a>
-      </div>
+        <div class="text-center">
+          <a href="/auth/oidc" class="btn btn-outline btn-secondary w-full">
+            Log in with OIDC
+          </a>
+        </div>
+      <% end %>
     </div>
   </div>
 </div>

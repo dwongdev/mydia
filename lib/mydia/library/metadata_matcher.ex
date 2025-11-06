@@ -10,7 +10,7 @@ defmodule Mydia.Library.MetadataMatcher do
   """
 
   require Logger
-  alias Mydia.Metadata
+  alias Mydia.{Media, Metadata}
   alias Mydia.Library.FileParser
 
   @type match_result :: %{
@@ -71,40 +71,58 @@ defmodule Mydia.Library.MetadataMatcher do
   @spec match_movie(map(), map(), keyword()) :: {:ok, match_result()} | {:error, term()}
   def match_movie(%{type: :movie} = parsed, config, opts \\ []) do
     if parsed.title do
-      # Search for the movie
-      search_opts = build_movie_search_opts(parsed, opts)
+      # First, try to match against existing media items in the local database
+      case find_local_movie(parsed) do
+        {:ok, match_result} ->
+          Logger.info("Matched file to existing local media item",
+            title: parsed.title,
+            local_title: match_result.title,
+            tmdb_id: match_result.provider_id
+          )
 
-      case Metadata.search(config, parsed.title, search_opts) do
-        {:ok, []} ->
-          # Try without year if we got no results
-          if parsed.year do
-            Logger.debug("No results with year, retrying without year",
-              title: parsed.title,
-              year: parsed.year
-            )
+          {:ok, match_result}
 
-            retry_opts = Keyword.delete(search_opts, :year)
-
-            case Metadata.search(config, parsed.title, retry_opts) do
-              {:ok, results} when length(results) > 0 ->
-                select_best_movie_match(results, parsed)
-
-              _ ->
-                {:error, :no_matches_found}
-            end
-          else
-            {:error, :no_matches_found}
-          end
-
-        {:ok, results} ->
-          select_best_movie_match(results, parsed)
-
-        {:error, reason} = error ->
-          Logger.error("Metadata search failed", title: parsed.title, reason: reason)
-          error
+        {:error, :no_local_match} ->
+          # No local match, search external metadata provider
+          search_external_movie(parsed, config, opts)
       end
     else
       {:error, :no_title_extracted}
+    end
+  end
+
+  # Search external metadata provider for movie
+  defp search_external_movie(parsed, config, opts) do
+    search_opts = build_movie_search_opts(parsed, opts)
+
+    case Metadata.search(config, parsed.title, search_opts) do
+      {:ok, []} ->
+        # Try without year if we got no results
+        if parsed.year do
+          Logger.debug("No results with year, retrying without year",
+            title: parsed.title,
+            year: parsed.year
+          )
+
+          retry_opts = Keyword.delete(search_opts, :year)
+
+          case Metadata.search(config, parsed.title, retry_opts) do
+            {:ok, results} when length(results) > 0 ->
+              select_best_movie_match(results, parsed)
+
+            _ ->
+              {:error, :no_matches_found}
+          end
+        else
+          {:error, :no_matches_found}
+        end
+
+      {:ok, results} ->
+        select_best_movie_match(results, parsed)
+
+      {:error, reason} = error ->
+        Logger.error("Metadata search failed", title: parsed.title, reason: reason)
+        error
     end
   end
 
@@ -116,44 +134,141 @@ defmodule Mydia.Library.MetadataMatcher do
   @spec match_tv_show(map(), map(), keyword()) :: {:ok, match_result()} | {:error, term()}
   def match_tv_show(%{type: :tv_show} = parsed, config, opts \\ []) do
     if parsed.title do
-      # Search for the TV show
-      search_opts = build_tv_search_opts(parsed, opts)
+      # First, try to match against existing media items in the local database
+      case find_local_tv_show(parsed) do
+        {:ok, match_result} ->
+          Logger.info("Matched file to existing local TV show",
+            title: parsed.title,
+            local_title: match_result.title,
+            tmdb_id: match_result.provider_id
+          )
 
-      case Metadata.search(config, parsed.title, search_opts) do
-        {:ok, []} ->
-          # Try without year if we got no results
-          if parsed.year do
-            Logger.debug("No TV show results with year, retrying without year",
-              title: parsed.title,
-              year: parsed.year
-            )
+          {:ok, match_result}
 
-            retry_opts = Keyword.delete(search_opts, :year)
-
-            case Metadata.search(config, parsed.title, retry_opts) do
-              {:ok, results} when length(results) > 0 ->
-                select_best_tv_match(results, parsed)
-
-              _ ->
-                {:error, :no_matches_found}
-            end
-          else
-            {:error, :no_matches_found}
-          end
-
-        {:ok, results} ->
-          select_best_tv_match(results, parsed)
-
-        {:error, reason} = error ->
-          Logger.error("Metadata search failed", title: parsed.title, reason: reason)
-          error
+        {:error, :no_local_match} ->
+          # No local match, search external metadata provider
+          search_external_tv_show(parsed, config, opts)
       end
     else
       {:error, :no_title_extracted}
     end
   end
 
+  # Search external metadata provider for TV show
+  defp search_external_tv_show(parsed, config, opts) do
+    search_opts = build_tv_search_opts(parsed, opts)
+
+    case Metadata.search(config, parsed.title, search_opts) do
+      {:ok, []} ->
+        # Try without year if we got no results
+        if parsed.year do
+          Logger.debug("No TV show results with year, retrying without year",
+            title: parsed.title,
+            year: parsed.year
+          )
+
+          retry_opts = Keyword.delete(search_opts, :year)
+
+          case Metadata.search(config, parsed.title, retry_opts) do
+            {:ok, results} when length(results) > 0 ->
+              select_best_tv_match(results, parsed)
+
+            _ ->
+              {:error, :no_matches_found}
+          end
+        else
+          {:error, :no_matches_found}
+        end
+
+      {:ok, results} ->
+        select_best_tv_match(results, parsed)
+
+      {:error, reason} = error ->
+        Logger.error("Metadata search failed", title: parsed.title, reason: reason)
+        error
+    end
+  end
+
   ## Private Functions
+
+  # Try to find a matching movie in the local database
+  defp find_local_movie(parsed) do
+    # Search for movies with matching title (case-insensitive)
+    media_items =
+      Media.list_media_items()
+      |> Enum.filter(fn item ->
+        item.type == "movie" &&
+          titles_match?(item.title, parsed.title) &&
+          years_compatible?(item.year, parsed.year)
+      end)
+
+    case media_items do
+      [] ->
+        {:error, :no_local_match}
+
+      [item | _] ->
+        # Found a match! Return a match_result struct
+        {:ok,
+         %{
+           provider_id: to_string(item.tmdb_id),
+           provider_type: :tmdb,
+           title: item.title,
+           year: item.year,
+           match_confidence: 0.95,
+           metadata: item.metadata || %{},
+           parsed_info: parsed,
+           from_local_db: true
+         }}
+    end
+  end
+
+  # Try to find a matching TV show in the local database
+  defp find_local_tv_show(parsed) do
+    # Search for TV shows with matching title (case-insensitive)
+    media_items =
+      Media.list_media_items()
+      |> Enum.filter(fn item ->
+        item.type == "tv_show" &&
+          titles_match?(item.title, parsed.title) &&
+          years_compatible?(item.year, parsed.year)
+      end)
+
+    case media_items do
+      [] ->
+        {:error, :no_local_match}
+
+      [item | _] ->
+        # Found a match! Return a match_result struct
+        {:ok,
+         %{
+           provider_id: to_string(item.tmdb_id),
+           provider_type: :tmdb,
+           title: item.title,
+           year: item.year,
+           match_confidence: 0.95,
+           metadata: item.metadata || %{},
+           parsed_info: parsed,
+           from_local_db: true
+         }}
+    end
+  end
+
+  # Check if two titles match (case-insensitive, normalized)
+  defp titles_match?(title1, title2) when is_binary(title1) and is_binary(title2) do
+    normalized1 = normalize_title(title1)
+    normalized2 = normalize_title(title2)
+
+    # Use title similarity to allow for small differences
+    # Lower threshold (0.70) to handle cases where file parser includes extra metadata tags
+    title_similarity(normalized1, normalized2) >= 0.70
+  end
+
+  defp titles_match?(_title1, _title2), do: false
+
+  # Check if years are compatible (nil means no year constraint)
+  defp years_compatible?(nil, _parsed_year), do: true
+  defp years_compatible?(_item_year, nil), do: true
+  defp years_compatible?(item_year, parsed_year), do: abs(item_year - parsed_year) <= 1
 
   defp build_movie_search_opts(parsed, opts) do
     base_opts = [media_type: :movie]

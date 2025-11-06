@@ -653,70 +653,109 @@ defmodule Mydia.Settings do
   @doc """
   Gets library paths from the runtime configuration.
 
-  Converts runtime config media paths (MOVIES_PATH, TV_PATH) to LibraryPath structs
-  for compatibility with the rest of the application. These structs have stable
-  runtime identifiers instead of database IDs (format: "runtime::library_path::/path/to/media").
+  Converts runtime config library paths to LibraryPath structs for compatibility
+  with the rest of the application. These structs have stable runtime identifiers
+  instead of database IDs (format: "runtime::library_path::/path/to/media").
+
+  Supports both the new library_paths schema and legacy media.movies_path/tv_path
+  configuration for backward compatibility.
   """
   def get_runtime_library_paths do
     runtime_config = get_runtime_config()
 
-    paths = []
+    # Start with new library_paths schema if available
+    paths =
+      if is_struct(runtime_config) and Map.has_key?(runtime_config, :library_paths) do
+        runtime_config.library_paths
+        |> Enum.map(&map_to_library_path/1)
+      else
+        []
+      end
 
-    # Add movies path if configured
+    # Add legacy movies path if configured and not already in library_paths
     paths =
       if is_struct(runtime_config) and Map.has_key?(runtime_config, :media) and
            runtime_config.media.movies_path do
         movies_path = runtime_config.media.movies_path
 
-        [
-          %LibraryPath{
-            id: build_runtime_id(:library_path, movies_path),
-            path: movies_path,
-            type: :movies,
-            monitored: true,
-            scan_interval: 360,
-            last_scan_at: nil,
-            last_scan_status: nil,
-            last_scan_error: nil,
-            quality_profile_id: nil,
-            updated_by_id: nil,
-            inserted_at: nil,
-            updated_at: nil
-          }
-          | paths
-        ]
+        # Only add if not already in library_paths
+        if Enum.any?(paths, &(&1.path == movies_path)) do
+          paths
+        else
+          [
+            %LibraryPath{
+              id: build_runtime_id(:library_path, movies_path),
+              path: movies_path,
+              type: :movies,
+              monitored: true,
+              scan_interval: 360,
+              last_scan_at: nil,
+              last_scan_status: nil,
+              last_scan_error: nil,
+              quality_profile_id: nil,
+              updated_by_id: nil,
+              inserted_at: nil,
+              updated_at: nil
+            }
+            | paths
+          ]
+        end
       else
         paths
       end
 
-    # Add TV path if configured
+    # Add legacy TV path if configured and not already in library_paths
     paths =
       if is_struct(runtime_config) and Map.has_key?(runtime_config, :media) and
            runtime_config.media.tv_path do
         tv_path = runtime_config.media.tv_path
 
-        [
-          %LibraryPath{
-            id: build_runtime_id(:library_path, tv_path),
-            path: tv_path,
-            type: :series,
-            monitored: true,
-            scan_interval: 360,
-            last_scan_at: nil,
-            last_scan_status: nil,
-            last_scan_error: nil,
-            quality_profile_id: nil,
-            updated_by_id: nil,
-            inserted_at: nil,
-            updated_at: nil
-          }
-          | paths
-        ]
+        # Only add if not already in library_paths
+        if Enum.any?(paths, &(&1.path == tv_path)) do
+          paths
+        else
+          [
+            %LibraryPath{
+              id: build_runtime_id(:library_path, tv_path),
+              path: tv_path,
+              type: :series,
+              monitored: true,
+              scan_interval: 360,
+              last_scan_at: nil,
+              last_scan_status: nil,
+              last_scan_error: nil,
+              quality_profile_id: nil,
+              updated_by_id: nil,
+              inserted_at: nil,
+              updated_at: nil
+            }
+            | paths
+          ]
+        end
       else
         paths
       end
 
     paths
+  end
+
+  defp map_to_library_path(map) when is_map(map) do
+    path = Map.get(map, :path)
+
+    %LibraryPath{
+      id: build_runtime_id(:library_path, path),
+      path: path,
+      type: Map.get(map, :type),
+      monitored: Map.get(map, :monitored, true),
+      scan_interval: Map.get(map, :scan_interval, 3600),
+      last_scan_at: nil,
+      last_scan_status: nil,
+      last_scan_error: nil,
+      quality_profile_id: Map.get(map, :quality_profile_id),
+      updated_by_id: nil,
+      inserted_at: nil,
+      updated_at: nil
+    }
   end
 
   @doc """

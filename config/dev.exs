@@ -93,23 +93,55 @@ config :phoenix_live_view,
 config :mydia, Mydia.Auth.Guardian,
   secret_key: "dev_secret_key_replace_in_production_with_secure_random_key"
 
+# Guardian JWT configuration for development
+# Override with GUARDIAN_SECRET_KEY environment variable if needed
+guardian_secret = System.get_env("GUARDIAN_SECRET_KEY") || "dev-secret-key-change-in-production"
+
+config :mydia, Mydia.Auth.Guardian,
+  issuer: "mydia",
+  secret_key: guardian_secret,
+  ttl: {30, :days}
+
 # Ueberauth OIDC configuration for development
-# These can be overridden with environment variables
+# These are read from environment variables set in Docker
 oidc_issuer = System.get_env("OIDC_ISSUER")
 oidc_client_id = System.get_env("OIDC_CLIENT_ID")
 oidc_client_secret = System.get_env("OIDC_CLIENT_SECRET")
 
-if oidc_issuer && oidc_client_id && oidc_client_secret do
-  config :ueberauth, Ueberauth.Strategy.Oidcc,
-    issuer: oidc_issuer,
-    client_id: oidc_client_id,
-    client_secret: oidc_client_secret,
-    redirect_uri:
-      System.get_env("OIDC_REDIRECT_URI") || "http://localhost:4000/auth/oidc/callback",
-    scopes: System.get_env("OIDC_SCOPES") || "openid profile email"
+IO.puts("Loading OIDC config:")
+IO.puts("  OIDC_ISSUER: #{inspect(oidc_issuer)}")
+IO.puts("  OIDC_CLIENT_ID: #{inspect(oidc_client_id)}")
+IO.puts("  OIDC_CLIENT_SECRET: #{inspect(oidc_client_secret)}")
 
+if oidc_issuer && oidc_client_id && oidc_client_secret do
+  IO.puts("Configuring Ueberauth with OIDC (ueberauth_oidcc style)...")
+
+  # Configure oidcc library to allow HTTP for development
+  config :oidcc, :http_cache_duration, 0
+  config :oidcc, :provider_configuration_opts, %{request_opts: %{transport_opts: []}}
+
+  # Step 1: Configure the OIDC issuer (required by ueberauth_oidcc)
+  config :ueberauth_oidcc, :issuers, [
+    %{name: :default_issuer, issuer: oidc_issuer}
+  ]
+
+  # Step 2: Configure Ueberauth provider with inline options
   config :ueberauth, Ueberauth,
     providers: [
-      oidc: {Ueberauth.Strategy.Oidcc, []}
+      oidc: {Ueberauth.Strategy.Oidcc, [
+        issuer: :default_issuer,
+        client_id: oidc_client_id,
+        client_secret: oidc_client_secret,
+        scopes: ["openid", "profile", "email"],
+        callback_path: "/auth/oidc/callback",
+        userinfo: true,
+        uid_field: "sub"
+      ]}
     ]
+
+  IO.puts("Ueberauth OIDC configured successfully!")
+  IO.puts("Issuer: #{oidc_issuer}")
+  IO.puts("Client ID: #{oidc_client_id}")
+else
+  IO.puts("OIDC not configured - missing environment variables")
 end

@@ -181,4 +181,167 @@ defmodule Mydia.Downloads.TorrentParserTest do
       assert info.codec == "x264"
     end
   end
+
+  describe "parse/1 - season packs" do
+    test "parses season pack with COMPLETE marker" do
+      {:ok, info} =
+        TorrentParser.parse("House.of.the.Dragon.S01.COMPLETE.2160p.BluRay.x265-GROUP")
+
+      assert info.type == :tv_season
+      assert info.title == "House of the Dragon"
+      assert info.season == 1
+      assert info.season_pack == true
+      assert info.quality == "2160p"
+      assert info.source == "BluRay"
+      assert info.codec == "x265"
+    end
+
+    test "parses season pack without COMPLETE marker" do
+      {:ok, info} = TorrentParser.parse("Yellowstone.S04.1080p.BluRay.x264-MIXED")
+
+      assert info.type == :tv_season
+      assert info.title == "Yellowstone"
+      assert info.season == 4
+      assert info.season_pack == true
+      assert info.quality == "1080p"
+    end
+
+    test "parses season pack with single digit season" do
+      {:ok, info} = TorrentParser.parse("Naruto.S2.720p.WEB-DL.x264-GRP")
+
+      assert info.type == :tv_season
+      assert info.title == "Naruto"
+      assert info.season == 2
+      assert info.season_pack == true
+    end
+
+    test "parses season pack with multiple quality info" do
+      {:ok, info} = TorrentParser.parse("The.Last.of.Us.S02.1080p.WEB-DL.DDP5.1.x265-GROUP")
+
+      assert info.type == :tv_season
+      assert info.title == "The Last of Us"
+      assert info.season == 2
+      assert info.quality == "1080p"
+      assert info.source == "WEB-DL"
+      assert info.codec == "x265"
+    end
+  end
+
+  describe "parse/1 - prefix stripping" do
+    test "strips Chinese bracket prefixes and season markers" do
+      {:ok, info} =
+        TorrentParser.parse("【高清剧集网 www.BTHDTV.com】猎魔人 第二季.The.Witcher.S02E01.1080p.WEB-DL.x265")
+
+      assert info.type == :tv
+      # Chinese season marker "第二季" should be removed
+      assert info.title == "猎魔人 The Witcher"
+      assert info.season == 2
+      assert info.episode == 1
+    end
+
+    test "strips website tracker tags" do
+      {:ok, info} = TorrentParser.parse("[47BT]Yellowstone.S02.1080p.BluRay.x264-MIXED")
+
+      assert info.type == :tv_season
+      assert info.title == "Yellowstone"
+      assert info.season == 2
+    end
+
+    test "strips tracker domain tags" do
+      {:ok, info} = TorrentParser.parse("[Ex-torrenty.org]The.Last.of.Us.S02.1080p.WEB-DL.x265")
+
+      assert info.type == :tv_season
+      assert info.title == "The Last of Us"
+      assert info.season == 2
+    end
+
+    test "strips multiple bracket types" do
+      {:ok, info} = TorrentParser.parse("[Tracker]Severance.S02.MULTi.1080p.WEB-DL.x264-GRP")
+
+      assert info.type == :tv_season
+      assert info.title == "Severance"
+      assert info.season == 2
+    end
+
+    test "handles complex Chinese torrent with multiple brackets" do
+      {:ok, info} =
+        TorrentParser.parse(
+          "[bitsearch.to] 【高清剧集网 www.BTHDTV.com】怪奇物语 第四季[全9集][简繁英字幕].Stranger.Things.S04.2022.NF.WEB-DL.2160p.HEVC.HDR.DDP-Xiaomi"
+        )
+
+      assert info.type == :tv_season
+      # All brackets and Chinese season markers should be removed
+      assert info.title == "怪奇物语 Stranger Things"
+      assert info.season == 4
+    end
+
+    test "handles Chinese torrent with numbered season marker" do
+      {:ok, info} =
+        TorrentParser.parse(
+          "47BT.老友记.第6季.Friends.S06.1999.BluRay.2160p.10Bit.DV.HDR.HEVC.DDP5.1"
+        )
+
+      assert info.type == :tv_season
+      # "第6季" should be removed, leaving Chinese and English titles
+      assert info.title == "47BT 老友记 Friends"
+      assert info.season == 6
+    end
+
+    test "handles multiple leading brackets and Chinese content" do
+      {:ok, info} =
+        TorrentParser.parse(
+          "[bitsearch.to] 【高清剧集网发布 www.DDHDTV.com】黄石 第一季[全9集][中文字幕].Yellowstone.S01.2018.2160p.NF.WEB-DL.DDP5.1.H.265-LelveTV"
+        )
+
+      assert info.type == :tv_season
+      assert info.title == "黄石 Yellowstone"
+      assert info.season == 1
+    end
+  end
+
+  describe "parse/1 - multiple language codes" do
+    test "handles multiple language codes in title" do
+      {:ok, info} = TorrentParser.parse("Naruto.S04.ITA.JPN.1080p.WEB-DL.x264-GRP")
+
+      assert info.type == :tv_season
+      assert info.title == "Naruto"
+      assert info.season == 4
+      assert info.quality == "1080p"
+    end
+
+    test "handles MULTi language marker" do
+      {:ok, info} = TorrentParser.parse("Severance.S02.MULTi.1080p.WEB-DL.x264-GRP")
+
+      assert info.type == :tv_season
+      assert info.title == "Severance"
+      assert info.season == 2
+    end
+
+    test "handles DUAL language marker" do
+      {:ok, info} = TorrentParser.parse("Breaking.Bad.S05E01.DUAL.1080p.BluRay.x264-GRP")
+
+      assert info.type == :tv
+      assert info.title == "Breaking Bad"
+      assert info.season == 5
+      assert info.episode == 1
+    end
+  end
+
+  describe "parse/1 - non-standard formats" do
+    test "handles reencode marker" do
+      {:ok, info} = TorrentParser.parse("Rebuild of Naruto S02 - Rvby1 Reencode.mkv")
+
+      assert info.type == :tv_season
+      assert info.title == "Rebuild of Naruto"
+      assert info.season == 2
+    end
+
+    test "handles series with periods in name" do
+      {:ok, info} = TorrentParser.parse("Mysteria.Friends.S01.1080p.WEB-DL.x264")
+
+      assert info.type == :tv_season
+      assert info.title == "Mysteria Friends"
+      assert info.season == 1
+    end
+  end
 end

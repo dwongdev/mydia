@@ -6,6 +6,7 @@ defmodule MydiaWeb.SearchLive.Index do
   alias Mydia.Metadata
   alias Mydia.Media
   alias Mydia.Downloads
+  alias Mydia.Jobs.{MovieSearch, TVShowSearch}
 
   require Logger
 
@@ -158,7 +159,7 @@ defmodule MydiaWeb.SearchLive.Index do
   def handle_event("select_metadata_match", %{"match_id" => match_id}, socket) do
     # Find the selected match
     selected_match =
-      Enum.find(socket.assigns.metadata_matches, fn m -> to_string(m["id"]) == match_id end)
+      Enum.find(socket.assigns.metadata_matches, fn m -> to_string(m.provider_id) == match_id end)
 
     if selected_match do
       # Fetch full metadata and create media item
@@ -218,7 +219,7 @@ defmodule MydiaWeb.SearchLive.Index do
       ) do
     # Find the selected match from manual search
     selected_match =
-      Enum.find(socket.assigns.metadata_matches, fn m -> to_string(m["id"]) == match_id end)
+      Enum.find(socket.assigns.metadata_matches, fn m -> to_string(m.provider_id) == match_id end)
 
     if selected_match do
       media_type_atom = String.to_existing_atom(media_type)
@@ -796,7 +797,7 @@ defmodule MydiaWeb.SearchLive.Index do
   end
 
   defp fetch_full_metadata(config, match, media_type) do
-    provider_id = match["id"] || match["provider_id"]
+    provider_id = match.provider_id
 
     case Metadata.fetch_by_id(config, to_string(provider_id), media_type: media_type) do
       {:ok, metadata} ->
@@ -810,7 +811,7 @@ defmodule MydiaWeb.SearchLive.Index do
 
   defp create_media_item_from_metadata(parsed, metadata) do
     # Check if media already exists by TMDB ID
-    tmdb_id = metadata["id"]
+    tmdb_id = metadata.provider_id
 
     case Media.get_media_item_by_tmdb(tmdb_id) do
       nil ->
@@ -823,7 +824,7 @@ defmodule MydiaWeb.SearchLive.Index do
             media_item =
               if parsed.type == :tv_show do
                 # If parsed from release with specific season/episodes, create those
-                if parsed.season and parsed.episodes do
+                if parsed.season && parsed.episodes do
                   create_episodes_for_release(media_item, parsed)
                 end
 
@@ -856,17 +857,22 @@ defmodule MydiaWeb.SearchLive.Index do
         _ -> "movie"
       end
 
+    # Get monitor_by_default setting from config
+    config = Mydia.Config.get()
+    monitor_by_default = config.media.monitor_by_default
+
     %{
       type: type,
-      title: metadata["title"] || metadata["name"] || parsed.title,
-      original_title: metadata["original_title"] || metadata["original_name"],
+      title: metadata.title || parsed.title,
+      original_title: metadata.original_title,
       year:
-        (metadata["release_date"] && extract_year_from_date(metadata["release_date"])) ||
-          (metadata["first_air_date"] && extract_year_from_date(metadata["first_air_date"])) ||
+        metadata.year ||
+          (metadata.release_date && extract_year_from_date(metadata.release_date)) ||
+          (metadata.first_air_date && extract_year_from_date(metadata.first_air_date)) ||
           parsed.year,
-      tmdb_id: metadata["id"],
+      tmdb_id: metadata.provider_id,
       metadata: metadata,
-      monitored: true
+      monitored: monitor_by_default
     }
   end
 
@@ -893,6 +899,8 @@ defmodule MydiaWeb.SearchLive.Index do
       end
     end)
   end
+
+  defp extract_year_from_date(%Date{} = date), do: date.year
 
   defp extract_year_from_date(date_string) when is_binary(date_string) do
     case String.split(date_string, "-") do
@@ -932,19 +940,84 @@ defmodule MydiaWeb.SearchLive.Index do
         _ -> "movie"
       end
 
+    # Get monitor_by_default setting from config
+    config = Mydia.Config.get()
+    monitor_by_default = config.media.monitor_by_default
+
     %{
       type: type,
-      title: metadata["title"] || metadata["name"],
-      original_title: metadata["original_title"] || metadata["original_name"],
+      title: metadata.title,
+      original_title: metadata.original_title,
       year:
-        (metadata["release_date"] && extract_year_from_date(metadata["release_date"])) ||
-          (metadata["first_air_date"] && extract_year_from_date(metadata["first_air_date"])),
-      tmdb_id: metadata["id"],
+        metadata.year ||
+          (metadata.release_date && extract_year_from_date(metadata.release_date)) ||
+          (metadata.first_air_date && extract_year_from_date(metadata.first_air_date)),
+      tmdb_id: metadata.provider_id,
       metadata: metadata,
-      monitored: true
+      monitored: monitor_by_default
     }
   end
 
   defp format_client_error(error) when is_binary(error), do: error
   defp format_client_error(error), do: inspect(error)
+
+  defp maybe_queue_auto_search(media_item) do
+    # Get auto_search_on_add setting from config
+    config = Mydia.Config.get()
+    auto_search_on_add = config.media.auto_search_on_add
+
+    if auto_search_on_add do
+      Logger.info("Auto-search enabled, queueing search job",
+        media_item_id: media_item.id,
+        title: media_item.title,
+        type: media_item.type
+      )
+
+      # Queue the appropriate search job based on media type
+      job =
+        case media_item.type do
+          "movie" ->
+            %{mode: "specific", media_item_id: media_item.id}
+            |> MovieSearch.new()
+
+          "tv_show" ->
+            %{mode: "show", media_item_id: media_item.id}
+            |> TVShowSearch.new()
+
+          _ ->
+            Logger.warning("Unknown media type for auto-search", type: media_item.type)
+            nil
+        end
+
+      if job do
+        case Oban.insert(job) do
+          {:ok, _oban_job} ->
+            Logger.info("Auto-search job queued successfully",
+              media_item_id: media_item.id,
+              title: media_item.title
+            )
+
+            :ok
+
+          {:error, reason} ->
+            Logger.error("Failed to queue auto-search job",
+              media_item_id: media_item.id,
+              title: media_item.title,
+              reason: inspect(reason)
+            )
+
+            :error
+        end
+      else
+        :ok
+      end
+    else
+      Logger.debug("Auto-search disabled, skipping auto-queue",
+        media_item_id: media_item.id,
+        title: media_item.title
+      )
+
+      :ok
+    end
+  end
 end

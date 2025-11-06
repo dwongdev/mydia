@@ -6,20 +6,53 @@ defmodule MydiaWeb.AuthController do
   """
   use MydiaWeb, :controller
 
-  # Only load Ueberauth if OIDC is configured
-  if Application.compile_env(:ueberauth, Ueberauth) do
-    plug Ueberauth
-  end
+  # Always load Ueberauth plug (configuration is checked at runtime)
+  plug Ueberauth
 
   alias Mydia.Accounts
   alias Mydia.Auth.Guardian
 
   @doc """
   Initiates OIDC login by redirecting to the identity provider.
+
+  This action is called after the Ueberauth plug has processed the request.
+  If Ueberauth encountered an error, we handle it here.
+  Otherwise, Ueberauth has already halted the connection and redirected.
   """
-  def request(conn, _params) do
-    # Ueberauth handles the redirect to the OIDC provider
-    conn
+  def request(conn, params) do
+    require Logger
+    Logger.debug("OIDC request called with params: #{inspect(params)}")
+    Logger.debug("Connection halted? #{conn.halted}")
+    Logger.debug("Response sent? #{conn.state}")
+
+    # Check if OIDC is configured
+    if oidc_configured?() do
+      # If we reach here and the connection wasn't halted by Ueberauth,
+      # it means there was an error or the strategy didn't run.
+      # Check if there's a ueberauth_failure assign
+      case conn.assigns do
+        %{ueberauth_failure: failure} ->
+          Logger.error("Ueberauth failure: #{inspect(failure)}")
+
+          conn
+          |> put_flash(:error, "Authentication failed: #{format_errors(failure.errors)}")
+          |> redirect(to: "/auth/login")
+
+        _ ->
+          # No failure, but also not redirected - this shouldn't happen
+          Logger.error("Ueberauth didn't handle the request and no failure was set")
+
+          conn
+          |> put_flash(:error, "OIDC authentication configuration error")
+          |> redirect(to: "/auth/login")
+      end
+    else
+      Logger.warning("OIDC is not configured, redirecting to login page")
+
+      conn
+      |> put_flash(:error, "OIDC authentication is not configured.")
+      |> redirect(to: "/auth/login")
+    end
   end
 
   @doc """
@@ -110,5 +143,10 @@ defmodule MydiaWeb.AuthController do
     errors
     |> Enum.map(fn error -> error.message end)
     |> Enum.join(", ")
+  end
+
+  # Check if OIDC is configured
+  defp oidc_configured? do
+    Application.get_env(:ueberauth, Ueberauth) != nil
   end
 end

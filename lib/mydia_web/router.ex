@@ -117,6 +117,18 @@ defmodule MydiaWeb.Router do
     post "/media/:id/match", MediaController, :match
   end
 
+  # API routes - admin only
+  scope "/api/v1", MydiaWeb.Api do
+    pipe_through [:api, :api_auth, :require_authenticated, :require_admin]
+
+    # Configuration management
+    get "/config", ConfigController, :index
+    get "/config/:key", ConfigController, :show
+    put "/config/:key", ConfigController, :update
+    delete "/config/:key", ConfigController, :delete
+    post "/config/test-connection", ConfigController, :test_connection
+  end
+
   # Enable LiveDashboard in development
   if Application.compile_env(:mydia, :dev_routes) do
     # If you want to use the LiveDashboard in production, you should put

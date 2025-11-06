@@ -36,6 +36,9 @@ defmodule Mydia.Downloads.TorrentMatcher do
 
       :tv ->
         find_tv_match(torrent_info, monitored_only, confidence_threshold)
+
+      :tv_season ->
+        find_tv_season_match(torrent_info, monitored_only, confidence_threshold)
     end
   end
 
@@ -155,6 +158,42 @@ defmodule Mydia.Downloads.TorrentMatcher do
 
   defp build_tv_match_reason(show, episode, torrent_info, confidence) do
     "Matched '#{torrent_info.title}' S#{torrent_info.season}E#{torrent_info.episode} to '#{show.title}' S#{episode.season_number}E#{episode.episode_number} with #{Float.round(confidence * 100, 1)}% confidence"
+  end
+
+  ## Private Functions - TV Season Pack Matching
+
+  defp find_tv_season_match(torrent_info, monitored_only, threshold) do
+    # Get all TV shows from the library
+    tv_shows = list_tv_shows(monitored_only)
+
+    # Find potential show matches
+    show_matches =
+      tv_shows
+      |> Enum.map(fn show ->
+        confidence = calculate_tv_show_confidence(show, torrent_info)
+        {show, confidence}
+      end)
+      |> Enum.filter(fn {_show, confidence} -> confidence >= threshold end)
+      |> Enum.sort_by(fn {_show, confidence} -> confidence end, :desc)
+
+    case show_matches do
+      [{show, confidence} | _] ->
+        # For season packs, match the show but don't require a specific episode
+        {:ok,
+         %{
+           media_item: show,
+           episode: nil,
+           confidence: confidence,
+           match_reason: build_tv_season_match_reason(show, torrent_info, confidence)
+         }}
+
+      [] ->
+        {:error, :no_match_found}
+    end
+  end
+
+  defp build_tv_season_match_reason(show, torrent_info, confidence) do
+    "Matched season pack '#{torrent_info.title}' S#{torrent_info.season} to '#{show.title}' with #{Float.round(confidence * 100, 1)}% confidence"
   end
 
   ## Private Functions - String Similarity

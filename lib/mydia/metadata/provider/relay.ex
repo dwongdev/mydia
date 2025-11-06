@@ -288,7 +288,9 @@ defmodule Mydia.Metadata.Provider.Relay do
       backdrop_path: result["backdrop_path"],
       popularity: result["popularity"],
       vote_average: result["vote_average"],
-      vote_count: result["vote_count"]
+      vote_count: result["vote_count"],
+      release_date: result["release_date"],
+      first_air_date: result["first_air_date"]
     }
   end
 

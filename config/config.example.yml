@@ -103,29 +103,71 @@ auth:
 # You can use movies_path and tv_path for simple setup with a single path for
 # each media type. These paths will be monitored automatically.
 #
-# Advanced Configuration (Multiple Paths):
-# For more advanced setups with multiple libraries, use the web UI to add
-# additional library paths. The UI provides full control over:
-#   - Path and type (movies, series, or mixed)
-#   - Monitoring enabled/disabled
-#   - Scan interval per path
-#   - Quality profile assignment
+# Advanced Configuration (library_paths):
+# Use the library_paths list below for full control over multiple library paths.
+# This allows you to configure all properties including type, monitoring,
+# scan interval, and quality profiles.
 #
 # Note: Paths must exist and be readable by the application at startup.
 # The application will validate these paths on startup and log warnings
 # for any invalid paths.
 media:
-  # Path to movies library
+  # Path to movies library (legacy - simple configuration)
   # This creates a monitored library path of type "movies"
   movies_path: "/media/movies"
 
-  # Path to TV shows library
+  # Path to TV shows library (legacy - simple configuration)
   # This creates a monitored library path of type "series"
   tv_path: "/media/tv"
 
   # How often to scan the media library (in hours)
   # This is the default scan interval for library paths
   scan_interval_hours: 1
+
+  # Automatically trigger search & download when adding media to library
+  # When true: Adding a movie/show automatically queues a search job
+  # When false: Requires manual "Auto Search & Download" button click
+  auto_search_on_add: true
+
+  # Enable monitoring by default when adding media to library
+  # When true: New items are monitored automatically
+  # When false: New items are not monitored (manual enable required)
+  monitor_by_default: true
+
+# Advanced Library Paths Configuration
+# -------------------------------------
+# Configure multiple library paths with full control over all properties.
+# These paths are merged with environment variable configurations and the
+# legacy movies_path/tv_path settings above.
+#
+# Note: If you use library_paths, you don't need to set movies_path/tv_path
+# unless you want backward compatibility.
+library_paths:
+  # Example: Movies library
+  - path: "/media/movies"
+    type: "movies"          # Type: movies, series, or mixed
+    monitored: true         # Enable/disable monitoring
+    scan_interval: 3600     # Scan interval in seconds (3600 = 1 hour)
+    # quality_profile_id: 1 # Optional: Assign a quality profile
+
+  # Example: TV shows library
+  - path: "/media/tv-shows"
+    type: "series"
+    monitored: true
+    scan_interval: 3600
+
+  # Example: Mixed media library (not monitored)
+  # - path: "/media/mixed"
+  #   type: "mixed"
+  #   monitored: false
+  #   scan_interval: 7200   # 2 hours
+
+  # Example: 4K Movies library with quality profile
+  # - path: "/media/movies-4k"
+  #   type: "movies"
+  #   monitored: true
+  #   scan_interval: 3600
+  #   quality_profile_id: 2  # Assign specific quality profile
 
 # Download Configuration
 # ----------------------

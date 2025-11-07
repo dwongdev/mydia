@@ -58,7 +58,7 @@ LABEL org.opencontainers.image.title="Mydia" \
       org.opencontainers.image.url="https://github.com/getmydia/mydia" \
       org.opencontainers.image.source="https://github.com/getmydia/mydia" \
       org.opencontainers.image.vendor="Mydia" \
-      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later" \
       maintainer="Mydia"
 
 # Install runtime dependencies including LSIO-compatible tools

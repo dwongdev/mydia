@@ -10,6 +10,7 @@ defmodule Mydia.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
+      licenses: ["AGPL-3.0-or-later"],
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader]
     ]

@@ -14,6 +14,8 @@ defmodule Mydia.Hooks.Executor do
     config = Application.get_env(:mydia, :runtime_config, %{hooks: %{default_timeout_ms: 5000}})
     default_timeout =
       case config do
+        %Mydia.Config.Schema{hooks: hooks} when not is_nil(hooks) ->
+          hooks.default_timeout_ms || 5000
         %{hooks: %{default_timeout_ms: timeout}} when is_integer(timeout) -> timeout
         %{hooks: hooks} when is_map(hooks) -> Map.get(hooks, :default_timeout_ms, 5000)
         _ -> 5000
@@ -74,6 +76,8 @@ defmodule Mydia.Hooks.Executor do
     config = Application.get_env(:mydia, :runtime_config, %{hooks: %{default_timeout_ms: 5000}})
     default_timeout =
       case config do
+        %Mydia.Config.Schema{hooks: hooks} when not is_nil(hooks) ->
+          hooks.default_timeout_ms || 5000
         %{hooks: %{default_timeout_ms: timeout}} when is_integer(timeout) -> timeout
         %{hooks: hooks} when is_map(hooks) -> Map.get(hooks, :default_timeout_ms, 5000)
         _ -> 5000

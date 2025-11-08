@@ -14,8 +14,7 @@ defmodule MydiaWeb.Api.ConfigController do
 
   use MydiaWeb, :controller
 
-  alias Mydia.{Settings, Repo}
-  alias Mydia.Settings.ConfigSetting
+  alias Mydia.Settings
   require Logger
 
   @doc """
@@ -201,7 +200,7 @@ defmodule MydiaWeb.Api.ConfigController do
     - 422: Connection failed
     - 501: Not yet implemented
   """
-  def test_connection(conn, params) do
+  def test_connection(conn, _params) do
     # TODO: Implement connection testing for download clients and indexers
     # This will require calling the respective test functions from their controllers
     conn

@@ -189,6 +189,7 @@ defmodule Mydia.Jobs.DownloadMonitor do
       "download_id" => download.id,
       "save_path" => download_map.save_path,
       "cleanup_client" => true,
+      "use_hardlinks" => true,
       "move_files" => false
     }
     |> Mydia.Jobs.MediaImport.new()

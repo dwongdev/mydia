@@ -235,22 +235,21 @@ defmodule Mydia.Metadata.Provider.HTTP do
     maybe_add_params(req, [{String.to_atom(param_name), api_key}])
   end
 
-  defp append_path(request, path) do
-    # Ensure path starts with /
-    path = if String.starts_with?(path, "/"), do: path, else: "/#{path}"
-
-    current_url = request.url
-
-    # Combine base path with request path
-    base_path = current_url.path || ""
-    new_path = "#{base_path}#{path}"
-
-    new_url = %{current_url | path: new_path}
-
-    %{request | url: new_url}
-  end
-
-  defp maybe_add_params(req, []), do: req
+  # Unused - kept for potential future use
+  # defp append_path(request, path) do
+  #   # Ensure path starts with /
+  #   path = if String.starts_with?(path, "/"), do: path, else: "/#{path}"
+  #
+  #   current_url = request.url
+  #
+  #   # Combine base path with request path
+  #   base_path = current_url.path || ""
+  #   new_path = "#{base_path}#{path}"
+  #
+  #   new_url = %{current_url | path: new_path}
+  #
+  #   %{request | url: new_url}
+  # end
 
   defp maybe_add_params(req, params) when is_list(params) or is_map(params) do
     # Get existing params and merge with new ones

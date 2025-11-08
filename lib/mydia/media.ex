@@ -545,7 +545,7 @@ defmodule Mydia.Media do
     end
   end
 
-  def refresh_episodes_for_tv_show(%MediaItem{type: type}, opts) do
+  def refresh_episodes_for_tv_show(%MediaItem{type: type}, _opts) do
     {:error, {:invalid_type, "Expected tv_show, got #{type}"}}
   end
 

@@ -10,8 +10,7 @@ defmodule Mydia.Library.MetadataEnricher do
   """
 
   require Logger
-  alias Mydia.{Media, Metadata, Repo}
-  alias Mydia.Media.{MediaItem, Episode}
+  alias Mydia.{Media, Metadata}
 
   @doc """
   Enriches a media item with full metadata from the provider.

@@ -55,7 +55,7 @@ defmodule Mydia.Jobs.MetadataRefresh do
         {:error, reason}
     end
   rescue
-    e in Ecto.NoResultsError ->
+    _e in Ecto.NoResultsError ->
       Logger.error("Media item not found", media_item_id: media_item_id)
       {:error, :not_found}
   end
@@ -75,10 +75,6 @@ defmodule Mydia.Jobs.MetadataRefresh do
           items_processed: count
         )
 
-        :ok
-
-      :ok ->
-        Logger.info("Metadata refresh all completed", duration_ms: duration)
         :ok
 
       {:error, reason} ->
@@ -184,7 +180,7 @@ defmodule Mydia.Jobs.MetadataRefresh do
     Metadata.fetch_by_id(config, to_string(tmdb_id), fetch_opts)
   end
 
-  defp build_update_attrs(metadata, media_type) do
+  defp build_update_attrs(metadata, _media_type) do
     %{
       title: metadata.title || metadata.name,
       original_title: metadata.original_title || metadata.original_name,

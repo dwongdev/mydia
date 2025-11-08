@@ -97,7 +97,7 @@ defmodule Mydia.Jobs.TVShowSearch do
           episode_id: episode_id
         )
 
-        :no_results
+        :ok
 
       {:error, reason} ->
         Logger.error("Episode search failed",
@@ -179,7 +179,7 @@ defmodule Mydia.Jobs.TVShowSearch do
           season_number: season_number
         )
 
-        :no_results
+        :ok
 
       {:error, reason} ->
         Logger.error("Season search failed",

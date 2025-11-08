@@ -11,7 +11,7 @@ defmodule MydiaWeb.AdminConfigLiveTest do
         email: "admin@example.com",
         username: "admin",
         password_hash: "$2b$12$test",
-        role: :admin
+        role: "admin"
       })
 
     # Generate JWT token for the user
@@ -34,7 +34,7 @@ defmodule MydiaWeb.AdminConfigLiveTest do
           email: "user@example.com",
           username: "user",
           password_hash: "$2b$12$test",
-          role: :user
+          role: "user"
         })
 
       {:ok, regular_token, _claims} = Mydia.Auth.Guardian.encode_and_sign(regular_user)
@@ -53,6 +53,7 @@ defmodule MydiaWeb.AdminConfigLiveTest do
     test "allows admin access", %{conn: conn, token: token} do
       conn =
         conn
+        |> init_test_session(%{})
         |> put_session(:guardian_default_token, token)
         |> put_req_header("authorization", "Bearer #{token}")
 
@@ -65,6 +66,7 @@ defmodule MydiaWeb.AdminConfigLiveTest do
     setup %{conn: conn, token: token} do
       conn =
         conn
+        |> init_test_session(%{})
         |> put_session(:guardian_default_token, token)
         |> put_req_header("authorization", "Bearer #{token}")
 
@@ -117,6 +119,7 @@ defmodule MydiaWeb.AdminConfigLiveTest do
     setup %{conn: conn, token: token} do
       conn =
         conn
+        |> init_test_session(%{})
         |> put_session(:guardian_default_token, token)
         |> put_req_header("authorization", "Bearer #{token}")
 
@@ -194,6 +197,7 @@ defmodule MydiaWeb.AdminConfigLiveTest do
     setup %{conn: conn, token: token} do
       conn =
         conn
+        |> init_test_session(%{})
         |> put_session(:guardian_default_token, token)
         |> put_req_header("authorization", "Bearer #{token}")
 
@@ -234,6 +238,7 @@ defmodule MydiaWeb.AdminConfigLiveTest do
     setup %{conn: conn, token: token} do
       conn =
         conn
+        |> init_test_session(%{})
         |> put_session(:guardian_default_token, token)
         |> put_req_header("authorization", "Bearer #{token}")
 
@@ -272,6 +277,7 @@ defmodule MydiaWeb.AdminConfigLiveTest do
     setup %{conn: conn, token: token} do
       conn =
         conn
+        |> init_test_session(%{})
         |> put_session(:guardian_default_token, token)
         |> put_req_header("authorization", "Bearer #{token}")
 

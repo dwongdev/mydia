@@ -76,11 +76,6 @@ defmodule MydiaWeb.DownloadsLive.Index do
     end
   end
 
-  defp reload_stream(socket) do
-    downloads = get_current_downloads(socket)
-    stream(socket, :downloads, downloads, reset: true)
-  end
-
   def handle_event("cancel_download", %{"id" => id}, socket) do
     download = Downloads.get_download!(id)
 
@@ -186,9 +181,6 @@ defmodule MydiaWeb.DownloadsLive.Index do
         {:noreply, put_flash(socket, :error, "Failed to delete download")}
     end
   end
-
-  defp maybe_add_opt(opts, _key, nil), do: opts
-  defp maybe_add_opt(opts, key, value), do: Keyword.put(opts, key, value)
 
   def handle_event("batch_retry", _params, socket) do
     selected_ids = MapSet.to_list(socket.assigns.selected_ids)
@@ -301,6 +293,14 @@ defmodule MydiaWeb.DownloadsLive.Index do
   end
 
   # Private functions
+
+  defp reload_stream(socket) do
+    downloads = get_current_downloads(socket)
+    stream(socket, :downloads, downloads, reset: true)
+  end
+
+  defp maybe_add_opt(opts, _key, nil), do: opts
+  defp maybe_add_opt(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp load_downloads(socket) do
     filter =

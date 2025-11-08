@@ -121,7 +121,7 @@ defmodule Mydia.Settings.DefaultQualityProfiles do
         upgrade_until_quality: nil,
         rules: %{
           min_size_mb: 40960,
-          max_size_mb: 102400,
+          max_size_mb: 102_400,
           preferred_sources: ["REMUX"],
           description: "Lossless 4K REMUX releases. Ultimate quality (40-100GB)."
         }

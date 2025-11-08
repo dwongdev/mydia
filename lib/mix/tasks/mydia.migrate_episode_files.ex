@@ -33,7 +33,7 @@ defmodule Mix.Tasks.Mydia.MigrateEpisodeFiles do
   use Mix.Task
   require Logger
 
-  alias Mydia.{Library, Media, Repo}
+  alias Mydia.{Library, Repo}
   alias Mydia.Library.{MediaFile, FileParser}
   alias Mydia.Media.{Episode, MediaItem}
   import Ecto.Query

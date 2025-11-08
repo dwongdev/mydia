@@ -63,7 +63,17 @@ defmodule MydiaWeb.Live.UserAuth do
   # Mount the current user from the session
   defp mount_current_user(socket, session) do
     case session do
+      %{"guardian_default_token" => token} ->
+        case Guardian.verify_token(token) do
+          {:ok, user} ->
+            assign(socket, current_user: user)
+
+          {:error, _reason} ->
+            assign(socket, current_user: nil)
+        end
+
       %{"guardian_token" => token} ->
+        # Legacy key for backward compatibility
         case Guardian.verify_token(token) do
           {:ok, user} ->
             assign(socket, current_user: user)

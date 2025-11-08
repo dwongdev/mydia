@@ -3,11 +3,18 @@ defmodule Mydia.Jobs.MediaImport do
   Background job for importing completed downloads into the media library.
 
   This job:
-  - Moves or copies downloaded files from download client path to library path
+  - Imports downloaded files using hardlinks (when on same filesystem), moves, or copies
   - Organizes files according to media type (Movies/Title/ or TV/Show/Season XX/)
   - Creates media_files records with correct associations
   - Handles conflicts and errors gracefully
   - Optionally removes download from client after successful import
+
+  ## File Operation Priority
+
+  When importing files, the following priority is used:
+  1. Hardlink (instant, no duplicate storage) - requires same filesystem
+  2. Move (when use_hardlinks=false and move_files=true)
+  3. Copy (default, safest option)
   """
 
   use Oban.Worker,
@@ -520,33 +527,90 @@ defmodule Mydia.Jobs.MediaImport do
   end
 
   defp copy_or_move_file(source, dest, args) do
-    # Default to copy for safety, allow move via config
-    if args["move_files"] == true do
-      case File.rename(source, dest) do
-        :ok ->
-          Logger.debug("Moved file", from: source, to: dest)
-          :ok
-
-        {:error, :exdev} ->
-          # Cross-device move not supported, fall back to copy + delete
-          with :ok <- File.cp(source, dest),
-               :ok <- File.rm(source) do
-            Logger.debug("Moved file via copy+delete", from: source, to: dest)
+    # Priority: hardlink > move > copy
+    cond do
+      # Try hardlink first if enabled and on same filesystem
+      args["use_hardlinks"] != false && same_filesystem?(source, dest) ->
+        case File.ln(source, dest) do
+          :ok ->
+            Logger.debug("Created hardlink", from: source, to: dest)
             :ok
-          end
 
-        error ->
-          error
+          {:error, reason} ->
+            Logger.warning("Hardlink failed, falling back to copy",
+              from: source,
+              to: dest,
+              reason: inspect(reason)
+            )
+
+            # Fallback to copy
+            File.cp(source, dest)
+        end
+
+      # Move file if requested
+      args["move_files"] == true ->
+        case File.rename(source, dest) do
+          :ok ->
+            Logger.debug("Moved file", from: source, to: dest)
+            :ok
+
+          {:error, :exdev} ->
+            # Cross-device move not supported, fall back to copy + delete
+            with :ok <- File.cp(source, dest),
+                 :ok <- File.rm(source) do
+              Logger.debug("Moved file via copy+delete", from: source, to: dest)
+              :ok
+            end
+
+          error ->
+            error
+        end
+
+      # Default to copy
+      true ->
+        case File.cp(source, dest) do
+          :ok ->
+            Logger.debug("Copied file", from: source, to: dest)
+            :ok
+
+          error ->
+            error
+        end
+    end
+  end
+
+  defp same_filesystem?(path1, path2) do
+    # Use File.stat!/1 to check if both paths are on the same device
+    # path2 might not exist yet, so check its parent directory
+    with %{device: dev1} <- File.stat(path1),
+         parent_path2 = Path.dirname(path2),
+         %{device: dev2} <- File.stat(parent_path2) do
+      same = dev1 == dev2
+
+      if same do
+        Logger.debug("Paths on same filesystem",
+          path1: path1,
+          path2: path2,
+          device: dev1
+        )
+      else
+        Logger.debug("Paths on different filesystems, hardlink not possible",
+          path1: path1,
+          path2: path2,
+          device1: dev1,
+          device2: dev2
+        )
       end
+
+      same
     else
-      case File.cp(source, dest) do
-        :ok ->
-          Logger.debug("Copied file", from: source, to: dest)
-          :ok
+      _ ->
+        Logger.debug("Could not determine filesystem, assuming different",
+          path1: path1,
+          path2: path2
+        )
 
-        error ->
-          error
-      end
+        false
     end
   end
 

@@ -117,7 +117,7 @@ defmodule Mydia.Jobs.MovieSearch do
           media_item_id: media_item_id
         )
 
-        :no_results
+        :ok
 
       {:error, reason} ->
         Logger.error("Movie search failed",

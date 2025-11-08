@@ -45,7 +45,7 @@ defmodule MydiaWeb.AuthHelpers do
 
     conn
     |> init_test_session(%{})
-    |> put_session(:guardian_token, token)
+    |> put_session(:guardian_default_token, token)
     |> put_session(:user_id, user.id)
   end
 
@@ -78,7 +78,7 @@ defmodule MydiaWeb.AuthHelpers do
 
     conn
     |> Phoenix.ConnTest.init_test_session(%{})
-    |> put_session(:guardian_token, token)
+    |> put_session(:guardian_default_token, token)
     |> put_session(:user_id, user.id)
   end
 end

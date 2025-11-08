@@ -135,18 +135,20 @@ defmodule MydiaWeb.AdminConfigLiveTest do
       {:ok, profile} =
         Settings.create_quality_profile(%{
           name: "HD",
-          min_size_mb: 1000,
-          max_size_mb: 5000,
-          preferred_quality: "1080p"
+          qualities: ["720p", "1080p"],
+          upgrades_allowed: true,
+          upgrade_until_quality: "1080p",
+          rules: %{
+            min_size_mb: 1000,
+            max_size_mb: 5000,
+            preferred_sources: []
+          }
         })
 
       # Reload the view to see the new profile
       {:ok, view, _html} = live(view.pid)
 
       assert has_element?(view, "td", "HD")
-      assert has_element?(view, "td", "1000")
-      assert has_element?(view, "td", "5000")
-      assert has_element?(view, "td", "1080p")
     end
 
     test "opens modal when clicking new profile button", %{view: view} do

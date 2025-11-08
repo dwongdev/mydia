@@ -8,6 +8,8 @@ defmodule MetadataRelay.Application do
     port = String.to_integer(System.get_env("PORT", "4000"))
 
     children = [
+      # TVDB authentication GenServer
+      MetadataRelay.TVDB.Auth,
       # HTTP server with Bandit
       {Bandit, plug: MetadataRelay.Router, scheme: :http, port: port}
     ]

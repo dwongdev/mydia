@@ -6,6 +6,7 @@ defmodule MetadataRelay.Router do
   use Plug.Router
 
   alias MetadataRelay.TMDB.Handler
+  alias MetadataRelay.TVDB.Handler, as: TVDBHandler
 
   plug(Plug.Logger)
   plug(Plug.Parsers, parsers: [:urlencoded, :json], json_decoder: Jason)
@@ -84,6 +85,60 @@ defmodule MetadataRelay.Router do
     handle_tmdb_request(conn, fn -> Handler.trending_tv(params) end)
   end
 
+  # TVDB Search
+  get "/tvdb/search" do
+    params = extract_query_params(conn)
+    handle_tvdb_request(conn, fn -> TVDBHandler.search(params) end)
+  end
+
+  # TVDB Series Details
+  get "/tvdb/series/:id" do
+    params = extract_query_params(conn)
+    handle_tvdb_request(conn, fn -> TVDBHandler.get_series(id, params) end)
+  end
+
+  # TVDB Series Extended Details
+  get "/tvdb/series/:id/extended" do
+    params = extract_query_params(conn)
+    handle_tvdb_request(conn, fn -> TVDBHandler.get_series_extended(id, params) end)
+  end
+
+  # TVDB Series Episodes
+  get "/tvdb/series/:id/episodes" do
+    params = extract_query_params(conn)
+    handle_tvdb_request(conn, fn -> TVDBHandler.get_series_episodes(id, params) end)
+  end
+
+  # TVDB Season Details
+  get "/tvdb/seasons/:id" do
+    params = extract_query_params(conn)
+    handle_tvdb_request(conn, fn -> TVDBHandler.get_season(id, params) end)
+  end
+
+  # TVDB Season Extended Details
+  get "/tvdb/seasons/:id/extended" do
+    params = extract_query_params(conn)
+    handle_tvdb_request(conn, fn -> TVDBHandler.get_season_extended(id, params) end)
+  end
+
+  # TVDB Episode Details
+  get "/tvdb/episodes/:id" do
+    params = extract_query_params(conn)
+    handle_tvdb_request(conn, fn -> TVDBHandler.get_episode(id, params) end)
+  end
+
+  # TVDB Episode Extended Details
+  get "/tvdb/episodes/:id/extended" do
+    params = extract_query_params(conn)
+    handle_tvdb_request(conn, fn -> TVDBHandler.get_episode_extended(id, params) end)
+  end
+
+  # TVDB Artwork
+  get "/tvdb/artwork/:id" do
+    params = extract_query_params(conn)
+    handle_tvdb_request(conn, fn -> TVDBHandler.get_artwork(id, params) end)
+  end
+
   # 404 catch-all
   match _ do
     send_resp(conn, 404, "Not found")
@@ -102,6 +157,40 @@ defmodule MetadataRelay.Router do
         conn
         |> put_resp_content_type("application/json")
         |> send_resp(status, Jason.encode!(body))
+
+      {:error, reason} ->
+        error_response = %{
+          error: "Internal server error",
+          message: inspect(reason)
+        }
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(500, Jason.encode!(error_response))
+    end
+  end
+
+  defp handle_tvdb_request(conn, handler_fn) do
+    case handler_fn.() do
+      {:ok, body} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(200, Jason.encode!(body))
+
+      {:error, {:http_error, status, body}} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(status, Jason.encode!(body))
+
+      {:error, {:authentication_failed, reason}} ->
+        error_response = %{
+          error: "Authentication failed",
+          message: "Failed to authenticate with TVDB: #{inspect(reason)}"
+        }
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(401, Jason.encode!(error_response))
 
       {:error, reason} ->
         error_response = %{

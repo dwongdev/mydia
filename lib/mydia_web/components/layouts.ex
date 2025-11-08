@@ -188,7 +188,7 @@ defmodule MydiaWeb.Layouts do
             
     <!-- Theme toggle (desktop only) -->
             <div class="hidden lg:flex mt-2 justify-center">
-              <.theme_toggle />
+              <.theme_toggle id="theme-toggle-sidebar" />
             </div>
           </div>
         </aside>
@@ -247,16 +247,17 @@ defmodule MydiaWeb.Layouts do
 
   See <head> in root.html.heex which applies the theme before page load.
   """
+  attr :id, :string, default: "theme-toggle"
+
   def theme_toggle(assigns) do
     ~H"""
     <div
-      id="theme-toggle"
+      id={@id}
       class="relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full"
       phx-hook="ThemeToggle"
     >
       <div
-        id="theme-indicator"
-        class="absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 brightness-200 transition-[left] duration-200"
+        class="theme-indicator absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 brightness-200 transition-[left] duration-200"
         style="left: 0"
       />
 

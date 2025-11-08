@@ -31,7 +31,7 @@ const ThemeToggle = {
     // Update indicator position based on current theme
     const updateIndicator = () => {
       const preference = window.mydiaTheme.getTheme()
-      const indicator = this.el.querySelector('#theme-indicator')
+      const indicator = this.el.querySelector('.theme-indicator')
 
       if (!indicator) return
 

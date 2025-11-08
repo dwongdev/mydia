@@ -11,6 +11,7 @@ services:
       - PORT=4001
       - MIX_ENV=dev
       - TMDB_API_KEY=${TMDB_API_KEY:-your_api_key_here}
+      - TVDB_API_KEY=${TVDB_API_KEY:-your_tvdb_key_here}
     volumes:
       # Mount source code for live reloading
       - .:/app

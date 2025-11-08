@@ -77,16 +77,48 @@ defmodule Mydia.Accounts do
   end
 
   @doc """
+  Checks if at least one admin user exists in the system.
+  """
+  def admin_exists? do
+    User
+    |> where([u], u.role == "admin")
+    |> Repo.exists?()
+  end
+
+  @doc """
   Creates or updates a user from OIDC claims.
+
+  If this is the first user in the system (no admin exists) and it's a new user,
+  automatically promotes them to admin role regardless of OIDC claims.
+  This ensures that production deployments with OIDC-only auth have an initial admin.
   """
   def upsert_user_from_oidc(oidc_sub, oidc_issuer, attrs) do
+    require Logger
+
     case get_user_by_oidc(oidc_sub, oidc_issuer) do
       nil ->
+        # New user - check if we need to auto-promote to admin
+        attrs_with_oidc = Map.merge(attrs, %{oidc_sub: oidc_sub, oidc_issuer: oidc_issuer})
+
+        final_attrs =
+          if admin_exists?() do
+            # Admin exists - use role from OIDC claims
+            attrs_with_oidc
+          else
+            # No admin exists - promote this first user to admin
+            Logger.info(
+              "Auto-promoting first OIDC user to admin (email: #{attrs[:email] || "unknown"})"
+            )
+
+            Map.put(attrs_with_oidc, :role, "admin")
+          end
+
         %User{}
-        |> User.oidc_changeset(Map.merge(attrs, %{oidc_sub: oidc_sub, oidc_issuer: oidc_issuer}))
+        |> User.oidc_changeset(final_attrs)
         |> Repo.insert()
 
       user ->
+        # Existing user - update with OIDC claims (never auto-promote existing users)
         user
         |> User.oidc_changeset(attrs)
         |> Repo.update()

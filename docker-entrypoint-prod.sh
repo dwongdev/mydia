@@ -29,15 +29,39 @@ CURRENT_GID=$(id -g mydia 2>/dev/null || echo 1000)
 if [ "$PUID" != "$CURRENT_UID" ] || [ "$PGID" != "$CURRENT_GID" ]; then
     echo "Updating mydia user UID:GID to $PUID:$PGID..."
 
-    # Update group ID if needed
-    if [ "$PGID" != "$CURRENT_GID" ]; then
-        groupmod -g "$PGID" mydia
+    # Check if target GID is already in use by another group
+    EXISTING_GROUP=$(getent group "$PGID" 2>/dev/null | cut -d: -f1)
+    if [ -n "$EXISTING_GROUP" ] && [ "$EXISTING_GROUP" != "mydia" ]; then
+        echo "  GID $PGID is already in use by group '$EXISTING_GROUP', removing it..."
+        # Try multiple deletion methods
+        if ! delgroup "$EXISTING_GROUP" 2>/dev/null && \
+           ! groupdel "$EXISTING_GROUP" 2>/dev/null && \
+           ! sed -i "/^$EXISTING_GROUP:/d" /etc/group 2>/dev/null; then
+            echo "  Warning: Could not remove group '$EXISTING_GROUP', will work around it..."
+        fi
     fi
 
-    # Update user ID if needed
-    if [ "$PUID" != "$CURRENT_UID" ]; then
-        usermod -u "$PUID" mydia
+    # Check if target UID is already in use by another user
+    EXISTING_USER=$(getent passwd "$PUID" 2>/dev/null | cut -d: -f1)
+    if [ -n "$EXISTING_USER" ] && [ "$EXISTING_USER" != "mydia" ]; then
+        echo "  UID $PUID is already in use by user '$EXISTING_USER', removing it..."
+        deluser "$EXISTING_USER" 2>/dev/null || userdel "$EXISTING_USER" 2>/dev/null || true
     fi
+
+    # Try to update existing user/group, or recreate if it fails
+    if ! groupmod -g "$PGID" mydia 2>/dev/null; then
+        echo "  Recreating group with GID $PGID..."
+        deluser mydia 2>/dev/null || true
+        delgroup mydia 2>/dev/null || true
+        addgroup -g "$PGID" mydia
+        adduser -D -u "$PUID" -G mydia mydia
+    elif ! usermod -u "$PUID" mydia 2>/dev/null; then
+        echo "  Recreating user with UID $PUID..."
+        deluser mydia 2>/dev/null || true
+        adduser -D -u "$PUID" -G mydia mydia
+    fi
+
+    echo "  Successfully set mydia user to UID:GID $PUID:$PGID"
 fi
 
 # Ensure critical directories exist and have correct ownership

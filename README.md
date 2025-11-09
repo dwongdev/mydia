@@ -243,6 +243,17 @@ Example output: `uid=1000(your_user) gid=1000(your_user)`
 
 Use these values for `PUID` and `PGID` in your container configuration.
 
+**Conflict Handling:**
+
+The entrypoint script automatically handles conflicts when the specified PUID/PGID is already in use by another user or group in the container. For example, GID 100 is typically used by the "users" group in Alpine Linux. The container will automatically resolve these conflicts by removing the conflicting user/group and applying your specified IDs.
+
+**Common scenarios:**
+- Using `PGID=100` (conflicts with "users" group) - automatically handled ✓
+- Using `PUID=99` (conflicts with "nobody" user on some systems) - automatically handled ✓
+- Any custom UID/GID that matches your host system - automatically handled ✓
+
+The container logs will show which conflicts were resolved during startup.
+
 ## 🔄 Updating the Container
 
 ### Via Docker Compose

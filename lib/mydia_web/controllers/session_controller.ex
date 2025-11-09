@@ -44,7 +44,10 @@ defmodule MydiaWeb.SessionController do
         nil ->
           conn
           |> put_flash(:error, "Invalid username or password")
-          |> render(:new, changeset: Accounts.change_user(%Mydia.Accounts.User{}))
+          |> render(:new,
+            changeset: Accounts.change_user(%Mydia.Accounts.User{}),
+            oidc_configured: oidc_configured?()
+          )
 
         user ->
           if Accounts.verify_password(user, password) do
@@ -62,7 +65,10 @@ defmodule MydiaWeb.SessionController do
           else
             conn
             |> put_flash(:error, "Invalid username or password")
-            |> render(:new, changeset: Accounts.change_user(%Mydia.Accounts.User{}))
+            |> render(:new,
+              changeset: Accounts.change_user(%Mydia.Accounts.User{}),
+              oidc_configured: oidc_configured?()
+            )
           end
       end
     end

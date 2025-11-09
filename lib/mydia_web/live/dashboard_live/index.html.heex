@@ -1,5 +1,6 @@
 <Layouts.app
   flash={@flash}
+  current_user={@current_user}
   movie_count={@movie_count}
   tv_show_count={@tv_show_count}
   downloads_count={@downloads_count}
@@ -60,71 +61,120 @@
   <div class="mb-8">
     <h2 class="text-2xl font-bold mb-4">Quick Actions</h2>
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <.link
-        navigate={~p"/add/movie"}
-        class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow"
-      >
-        <div class="card-body flex-row items-center gap-4">
-          <div class="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-            <.icon name="hero-plus" class="w-6 h-6 text-primary" />
-          </div>
-          <div class="flex-1">
-            <h3 class="font-semibold">Add Movie</h3>
-            <p class="text-sm text-base-content/60">Search and add movies</p>
-          </div>
-        </div>
-      </.link>
-
-      <.link
-        navigate={~p"/add/series"}
-        class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow"
-      >
-        <div class="card-body flex-row items-center gap-4">
-          <div class="w-12 h-12 rounded-full bg-secondary/10 flex items-center justify-center">
-            <.icon name="hero-plus" class="w-6 h-6 text-secondary" />
-          </div>
-          <div class="flex-1">
-            <h3 class="font-semibold">Add TV Show</h3>
-            <p class="text-sm text-base-content/60">Search and add series</p>
-          </div>
-        </div>
-      </.link>
-
-      <.link
-        navigate={~p"/import"}
-        class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow"
-      >
-        <div class="card-body flex-row items-center gap-4">
-          <div class="w-12 h-12 rounded-full bg-accent/10 flex items-center justify-center">
-            <.icon name="hero-arrow-down-tray" class="w-6 h-6 text-accent" />
-          </div>
-          <div class="flex-1">
-            <h3 class="font-semibold">Import Files</h3>
-            <p class="text-sm text-base-content/60">Scan and import media</p>
-          </div>
-        </div>
-      </.link>
-
-      <%= if @pending_requests_count > 0 do %>
+      <%= if @current_user && @current_user.role == "guest" do %>
+        <%!-- Guest users see request options --%>
         <.link
-          navigate={~p"/admin/requests"}
-          class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow border-2 border-warning"
+          navigate={~p"/request/movie"}
+          class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow"
         >
           <div class="card-body flex-row items-center gap-4">
-            <div class="w-12 h-12 rounded-full bg-warning/10 flex items-center justify-center">
-              <.icon name="hero-inbox-stack" class="w-6 h-6 text-warning" />
+            <div class="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+              <.icon name="hero-film" class="w-6 h-6 text-primary" />
             </div>
             <div class="flex-1">
-              <h3 class="font-semibold">Pending Requests</h3>
-              <p class="text-sm text-base-content/60">
-                {@pending_requests_count} request(s) awaiting review
-              </p>
+              <h3 class="font-semibold">Request Movie</h3>
+              <p class="text-sm text-base-content/60">Submit a movie request</p>
             </div>
-            <%= if @pending_requests_count > 0 do %>
-              <div class="badge badge-warning">{@pending_requests_count}</div>
-            <% end %>
           </div>
         </.link>
+
+        <.link
+          navigate={~p"/request/series"}
+          class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow"
+        >
+          <div class="card-body flex-row items-center gap-4">
+            <div class="w-12 h-12 rounded-full bg-secondary/10 flex items-center justify-center">
+              <.icon name="hero-tv" class="w-6 h-6 text-secondary" />
+            </div>
+            <div class="flex-1">
+              <h3 class="font-semibold">Request Series</h3>
+              <p class="text-sm text-base-content/60">Submit a series request</p>
+            </div>
+          </div>
+        </.link>
+
+        <.link
+          navigate={~p"/requests"}
+          class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow"
+        >
+          <div class="card-body flex-row items-center gap-4">
+            <div class="w-12 h-12 rounded-full bg-accent/10 flex items-center justify-center">
+              <.icon name="hero-queue-list" class="w-6 h-6 text-accent" />
+            </div>
+            <div class="flex-1">
+              <h3 class="font-semibold">My Requests</h3>
+              <p class="text-sm text-base-content/60">View your requests</p>
+            </div>
+          </div>
+        </.link>
+      <% else %>
+        <%!-- Admin users see add and import options --%>
+        <.link
+          navigate={~p"/add/movie"}
+          class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow"
+        >
+          <div class="card-body flex-row items-center gap-4">
+            <div class="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+              <.icon name="hero-plus" class="w-6 h-6 text-primary" />
+            </div>
+            <div class="flex-1">
+              <h3 class="font-semibold">Add Movie</h3>
+              <p class="text-sm text-base-content/60">Search and add movies</p>
+            </div>
+          </div>
+        </.link>
+
+        <.link
+          navigate={~p"/add/series"}
+          class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow"
+        >
+          <div class="card-body flex-row items-center gap-4">
+            <div class="w-12 h-12 rounded-full bg-secondary/10 flex items-center justify-center">
+              <.icon name="hero-plus" class="w-6 h-6 text-secondary" />
+            </div>
+            <div class="flex-1">
+              <h3 class="font-semibold">Add TV Show</h3>
+              <p class="text-sm text-base-content/60">Search and add series</p>
+            </div>
+          </div>
+        </.link>
+
+        <.link
+          navigate={~p"/import"}
+          class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow"
+        >
+          <div class="card-body flex-row items-center gap-4">
+            <div class="w-12 h-12 rounded-full bg-accent/10 flex items-center justify-center">
+              <.icon name="hero-arrow-down-tray" class="w-6 h-6 text-accent" />
+            </div>
+            <div class="flex-1">
+              <h3 class="font-semibold">Import Files</h3>
+              <p class="text-sm text-base-content/60">Scan and import media</p>
+            </div>
+          </div>
+        </.link>
+
+        <%= if @pending_requests_count > 0 do %>
+          <.link
+            navigate={~p"/admin/requests"}
+            class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow border-2 border-warning"
+          >
+            <div class="card-body flex-row items-center gap-4">
+              <div class="w-12 h-12 rounded-full bg-warning/10 flex items-center justify-center">
+                <.icon name="hero-inbox-stack" class="w-6 h-6 text-warning" />
+              </div>
+              <div class="flex-1">
+                <h3 class="font-semibold">Pending Requests</h3>
+                <p class="text-sm text-base-content/60">
+                  {@pending_requests_count} request(s) awaiting review
+                </p>
+              </div>
+              <%= if @pending_requests_count > 0 do %>
+                <div class="badge badge-warning">{@pending_requests_count}</div>
+              <% end %>
+            </div>
+          </.link>
+        <% end %>
       <% end %>
     </div>
   </div>
@@ -188,19 +238,30 @@
                   <p class="text-xs text-base-content/60">{movie.year}</p>
                 <% end %>
                 <%= if not movie.in_library do %>
-                  <button
-                    phx-click="add_to_library"
-                    phx-value-tmdb_id={movie.provider_id}
-                    phx-value-media_type="movie"
-                    disabled={@adding_item_id == to_string(movie.provider_id)}
-                    class="btn btn-primary btn-sm mt-2 w-full"
-                  >
-                    <%= if @adding_item_id == to_string(movie.provider_id) do %>
-                      <span class="loading loading-spinner loading-xs"></span> Adding...
-                    <% else %>
-                      <.icon name="hero-plus" class="w-4 h-4" /> Add to Library
-                    <% end %>
-                  </button>
+                  <%= if @current_user && @current_user.role == "guest" do %>
+                    <%!-- Guest users request content --%>
+                    <.link
+                      navigate={~p"/request/movie?tmdb_id=#{movie.provider_id}"}
+                      class="btn btn-primary btn-sm mt-2 w-full"
+                    >
+                      <.icon name="hero-paper-airplane" class="w-4 h-4" /> Request
+                    </.link>
+                  <% else %>
+                    <%!-- Admin users add directly --%>
+                    <button
+                      phx-click="add_to_library"
+                      phx-value-tmdb_id={movie.provider_id}
+                      phx-value-media_type="movie"
+                      disabled={@adding_item_id == to_string(movie.provider_id)}
+                      class="btn btn-primary btn-sm mt-2 w-full"
+                    >
+                      <%= if @adding_item_id == to_string(movie.provider_id) do %>
+                        <span class="loading loading-spinner loading-xs"></span> Adding...
+                      <% else %>
+                        <.icon name="hero-plus" class="w-4 h-4" /> Add to Library
+                      <% end %>
+                    </button>
+                  <% end %>
                 <% else %>
                   <.link navigate={"/movies/#{movie.id}"} class="btn btn-ghost btn-sm mt-2 w-full">
                     <.icon name="hero-arrow-right" class="w-4 h-4" /> Go to Movie
@@ -272,19 +333,30 @@
                   <p class="text-xs text-base-content/60">{show.year}</p>
                 <% end %>
                 <%= if not show.in_library do %>
-                  <button
-                    phx-click="add_to_library"
-                    phx-value-tmdb_id={show.provider_id}
-                    phx-value-media_type="tv_show"
-                    disabled={@adding_item_id == to_string(show.provider_id)}
-                    class="btn btn-primary btn-sm mt-2 w-full"
-                  >
-                    <%= if @adding_item_id == to_string(show.provider_id) do %>
-                      <span class="loading loading-spinner loading-xs"></span> Adding...
-                    <% else %>
-                      <.icon name="hero-plus" class="w-4 h-4" /> Add to Library
-                    <% end %>
-                  </button>
+                  <%= if @current_user && @current_user.role == "guest" do %>
+                    <%!-- Guest users request content --%>
+                    <.link
+                      navigate={~p"/request/series?tmdb_id=#{show.provider_id}"}
+                      class="btn btn-primary btn-sm mt-2 w-full"
+                    >
+                      <.icon name="hero-paper-airplane" class="w-4 h-4" /> Request
+                    </.link>
+                  <% else %>
+                    <%!-- Admin users add directly --%>
+                    <button
+                      phx-click="add_to_library"
+                      phx-value-tmdb_id={show.provider_id}
+                      phx-value-media_type="tv_show"
+                      disabled={@adding_item_id == to_string(show.provider_id)}
+                      class="btn btn-primary btn-sm mt-2 w-full"
+                    >
+                      <%= if @adding_item_id == to_string(show.provider_id) do %>
+                        <span class="loading loading-spinner loading-xs"></span> Adding...
+                      <% else %>
+                        <.icon name="hero-plus" class="w-4 h-4" /> Add to Library
+                      <% end %>
+                    </button>
+                  <% end %>
                 <% else %>
                   <.link navigate={"/tv/#{show.id}"} class="btn btn-ghost btn-sm mt-2 w-full">
                     <.icon name="hero-arrow-right" class="w-4 h-4" /> Go to Show

@@ -102,6 +102,7 @@ defmodule MydiaWeb.Router do
     live_session :admin,
       on_mount: [
         {MydiaWeb.Live.UserAuth, :ensure_authenticated},
+        {MydiaWeb.Live.UserAuth, {:ensure_role, :admin}},
         {MydiaWeb.Live.UserAuth, :load_navigation_data}
       ] do
       live "/", AdminStatusLive.Index, :index

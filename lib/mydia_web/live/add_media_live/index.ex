@@ -2,6 +2,7 @@ defmodule MydiaWeb.AddMediaLive.Index do
   use MydiaWeb, :live_view
 
   alias Mydia.{Media, Metadata, Settings}
+  alias MydiaWeb.Live.Authorization
 
   @impl true
   def mount(_params, session, socket) do
@@ -81,15 +82,19 @@ defmodule MydiaWeb.AddMediaLive.Index do
   end
 
   def handle_event("quick_add", %{"index" => index_str}, socket) do
-    index = String.to_integer(index_str)
-    result = Enum.at(socket.assigns.search_results, index)
+    with :ok <- Authorization.authorize_create_media(socket) do
+      index = String.to_integer(index_str)
+      result = Enum.at(socket.assigns.search_results, index)
 
-    if result do
-      send(self(), {:create_media_item, index, result, build_config_from_toolbar(socket)})
+      if result do
+        send(self(), {:create_media_item, index, result, build_config_from_toolbar(socket)})
 
-      {:noreply, assign(socket, :adding_index, index)}
+        {:noreply, assign(socket, :adding_index, index)}
+      else
+        {:noreply, socket}
+      end
     else
-      {:noreply, socket}
+      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 
@@ -116,21 +121,25 @@ defmodule MydiaWeb.AddMediaLive.Index do
   end
 
   def handle_event("submit_config_modal", %{"config" => config_params}, socket) do
-    changeset = validate_config(config_params, socket.assigns)
+    with :ok <- Authorization.authorize_create_media(socket) do
+      changeset = validate_config(config_params, socket.assigns)
 
-    if changeset.valid? do
-      config = Ecto.Changeset.apply_changes(changeset)
-      index = socket.assigns.config_modal_index
-      result = socket.assigns.config_modal_result
+      if changeset.valid? do
+        config = Ecto.Changeset.apply_changes(changeset)
+        index = socket.assigns.config_modal_index
+        result = socket.assigns.config_modal_result
 
-      send(self(), {:create_media_item, index, result, config})
+        send(self(), {:create_media_item, index, result, config})
 
-      {:noreply,
-       socket
-       |> assign(:show_config_modal, false)
-       |> assign(:adding_index, index)}
+        {:noreply,
+         socket
+         |> assign(:show_config_modal, false)
+         |> assign(:adding_index, index)}
+      else
+        {:noreply, assign(socket, :config_form, to_form(changeset, as: :config))}
+      end
     else
-      {:noreply, assign(socket, :config_form, to_form(changeset, as: :config))}
+      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 

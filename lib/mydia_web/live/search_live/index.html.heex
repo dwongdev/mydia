@@ -1,5 +1,6 @@
 <Layouts.app
   flash={@flash}
+  current_user={@current_user}
   movie_count={@movie_count}
   tv_show_count={@tv_show_count}
   downloads_count={@downloads_count}
@@ -264,17 +265,28 @@
               </td>
               <%!-- Actions Column --%>
               <td>
-                <button
-                  class="btn btn-sm btn-primary"
-                  phx-click="add_to_library"
-                  phx-value-title={result.title}
-                  phx-value-download_url={result.download_url}
-                  phx-value-download="true"
-                  title="Add to library and download"
-                >
-                  <.icon name="hero-arrow-down-tray" class="w-4 h-4" />
-                  <span class="hidden xl:inline">Download</span>
-                </button>
+                <%= if @current_user && @current_user.role == "guest" do %>
+                  <%!-- Guest users cannot download directly from search --%>
+                  <div class="tooltip" data-tip="Please use the request system">
+                    <button class="btn btn-sm btn-ghost" disabled>
+                      <.icon name="hero-lock-closed" class="w-4 h-4" />
+                      <span class="hidden xl:inline">Restricted</span>
+                    </button>
+                  </div>
+                <% else %>
+                  <%!-- Admin users can download --%>
+                  <button
+                    class="btn btn-sm btn-primary"
+                    phx-click="add_to_library"
+                    phx-value-title={result.title}
+                    phx-value-download_url={result.download_url}
+                    phx-value-download="true"
+                    title="Add to library and download"
+                  >
+                    <.icon name="hero-arrow-down-tray" class="w-4 h-4" />
+                    <span class="hidden xl:inline">Download</span>
+                  </button>
+                <% end %>
               </td>
             </tr>
           </tbody>
@@ -537,15 +549,26 @@
             <button class="btn btn-ghost" phx-click="close_detail_modal">
               Cancel
             </button>
-            <button
-              class="btn btn-primary"
-              phx-click="add_to_library"
-              phx-value-title={@selected_result.title}
-              phx-value-download_url={@selected_result.download_url}
-              phx-value-download="true"
-            >
-              <.icon name="hero-arrow-down-tray" class="w-5 h-5" /> Download
-            </button>
+            <%= if @current_user && @current_user.role == "guest" do %>
+              <%!-- Guest users see a message about using the request system --%>
+              <div class="alert alert-info flex-1">
+                <.icon name="hero-information-circle" class="w-5 h-5" />
+                <span class="text-sm">
+                  Please use the request system to add media to the library
+                </span>
+              </div>
+            <% else %>
+              <%!-- Admin users can download --%>
+              <button
+                class="btn btn-primary"
+                phx-click="add_to_library"
+                phx-value-title={@selected_result.title}
+                phx-value-download_url={@selected_result.download_url}
+                phx-value-download="true"
+              >
+                <.icon name="hero-arrow-down-tray" class="w-5 h-5" /> Download
+              </button>
+            <% end %>
           </div>
         </div>
       </div>

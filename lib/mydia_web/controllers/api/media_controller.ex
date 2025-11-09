@@ -9,6 +9,8 @@ defmodule MydiaWeb.Api.MediaController do
 
   alias Mydia.{Media, Metadata, Repo}
   alias Mydia.Library.MetadataEnricher
+  alias Mydia.Accounts.Authorization
+  alias Mydia.Auth.Guardian
   require Logger
 
   @doc """
@@ -60,31 +62,40 @@ defmodule MydiaWeb.Api.MediaController do
     - 422: Metadata fetch failed or update failed
   """
   def match(conn, %{"id" => id} = params) do
-    provider_id = params["provider_id"]
-    provider_type = parse_provider_type(params["provider_type"])
-    fetch_episodes = Map.get(params, "fetch_episodes", true)
+    # Check authorization - only users with update_media permission can manually match metadata
+    current_user = Guardian.Plug.current_resource(conn)
 
-    cond do
-      is_nil(provider_id) or provider_id == "" ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: "provider_id is required"})
+    if Authorization.can_update_media?(current_user) do
+      provider_id = params["provider_id"]
+      provider_type = parse_provider_type(params["provider_type"])
+      fetch_episodes = Map.get(params, "fetch_episodes", true)
 
-      is_nil(provider_type) ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: "invalid provider_type, must be 'tmdb' or 'tvdb'"})
+      cond do
+        is_nil(provider_id) or provider_id == "" ->
+          conn
+          |> put_status(:bad_request)
+          |> json(%{error: "provider_id is required"})
 
-      true ->
-        case Media.get_media_item!(id) do
-          nil ->
-            conn
-            |> put_status(:not_found)
-            |> json(%{error: "Media item not found"})
+        is_nil(provider_type) ->
+          conn
+          |> put_status(:bad_request)
+          |> json(%{error: "invalid provider_type, must be 'tmdb' or 'tvdb'"})
 
-          media_item ->
-            perform_manual_match(conn, media_item, provider_id, provider_type, fetch_episodes)
-        end
+        true ->
+          case Media.get_media_item!(id) do
+            nil ->
+              conn
+              |> put_status(:not_found)
+              |> json(%{error: "Media item not found"})
+
+            media_item ->
+              perform_manual_match(conn, media_item, provider_id, provider_type, fetch_episodes)
+          end
+      end
+    else
+      conn
+      |> put_status(:forbidden)
+      |> json(%{error: "You do not have permission to modify media items"})
     end
   rescue
     Ecto.NoResultsError ->

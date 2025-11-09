@@ -36,6 +36,7 @@ defmodule MydiaWeb.Layouts do
     default: nil,
     doc: "the current [scope](https://hexdocs.pm/phoenix/scopes.html)"
 
+  attr :current_user, :map, default: nil, doc: "the currently authenticated user"
   attr :movie_count, :integer, default: 0, doc: "number of movies in library"
   attr :tv_show_count, :integer, default: 0, doc: "number of TV shows in library"
   attr :downloads_count, :integer, default: 0, doc: "number of active downloads"
@@ -71,7 +72,7 @@ defmodule MydiaWeb.Layouts do
         </main>
         
     <!-- Mobile dock navigation -->
-        <.mobile_dock />
+        <.mobile_dock current_user={@current_user} />
       </div>
       
     <!-- Sidebar -->
@@ -134,30 +135,54 @@ defmodule MydiaWeb.Layouts do
                 </a>
               </li>
 
-              <li class="menu-title mt-4">
-                <span>Administration</span>
-              </li>
+              <%= if @current_user && @current_user.role == "admin" do %>
+                <li class="menu-title mt-4">
+                  <span>Administration</span>
+                </li>
 
-              <li>
-                <a href="/admin">
-                  <.icon name="hero-server" class="w-5 h-5" /> System Status
-                </a>
-              </li>
-              <li>
-                <a href="/admin/users">
-                  <.icon name="hero-users" class="w-5 h-5" /> Users
-                </a>
-              </li>
-              <li>
-                <a href="/admin/config">
-                  <.icon name="hero-cog-6-tooth" class="w-5 h-5" /> Configuration
-                </a>
-              </li>
-              <li>
-                <a href="/admin/jobs">
-                  <.icon name="hero-queue-list" class="w-5 h-5" /> Background Jobs
-                </a>
-              </li>
+                <li>
+                  <a href="/admin">
+                    <.icon name="hero-server" class="w-5 h-5" /> System Status
+                  </a>
+                </li>
+                <li>
+                  <a href="/admin/users">
+                    <.icon name="hero-users" class="w-5 h-5" /> Users
+                  </a>
+                </li>
+                <li>
+                  <a href="/admin/config">
+                    <.icon name="hero-cog-6-tooth" class="w-5 h-5" /> Configuration
+                  </a>
+                </li>
+                <li>
+                  <a href="/admin/jobs">
+                    <.icon name="hero-queue-list" class="w-5 h-5" /> Background Jobs
+                  </a>
+                </li>
+              <% end %>
+
+              <%= if @current_user && @current_user.role == "guest" do %>
+                <li class="menu-title mt-4">
+                  <span>Requests</span>
+                </li>
+
+                <li>
+                  <a href="/request/movie">
+                    <.icon name="hero-film" class="w-5 h-5" /> Request Movie
+                  </a>
+                </li>
+                <li>
+                  <a href="/request/series">
+                    <.icon name="hero-tv" class="w-5 h-5" /> Request Series
+                  </a>
+                </li>
+                <li>
+                  <a href="/requests">
+                    <.icon name="hero-queue-list" class="w-5 h-5" /> My Requests
+                  </a>
+                </li>
+              <% end %>
             </ul>
           </nav>
           
@@ -167,10 +192,27 @@ defmodule MydiaWeb.Layouts do
               <label tabindex="0" class="btn btn-ghost w-full justify-start">
                 <div class="avatar placeholder">
                   <div class="bg-neutral text-neutral-content rounded-full w-8">
-                    <span class="text-xs">AD</span>
+                    <span class="text-xs">
+                      <%= if @current_user do %>
+                        {String.upcase(
+                          String.slice(@current_user.username || @current_user.email || "U", 0..1)
+                        )}
+                      <% else %>
+                        U
+                      <% end %>
+                    </span>
                   </div>
                 </div>
-                <span class="flex-1 text-left">Admin</span>
+                <div class="flex-1 text-left">
+                  <%= if @current_user do %>
+                    <div class="text-sm font-medium">
+                      {@current_user.username || @current_user.email}
+                    </div>
+                    <div class="text-xs opacity-60 capitalize">{@current_user.role}</div>
+                  <% else %>
+                    <span>Guest</span>
+                  <% end %>
+                </div>
                 <.icon name="hero-chevron-up" class="w-4 h-4" />
               </label>
               <ul
@@ -303,6 +345,8 @@ defmodule MydiaWeb.Layouts do
   Provides quick access to primary navigation items with smooth transitions.
   Hidden on desktop/tablet screen sizes.
   """
+  attr :current_user, :map, default: nil, doc: "the currently authenticated user"
+
   def mobile_dock(assigns) do
     ~H"""
     <nav
@@ -319,29 +363,49 @@ defmodule MydiaWeb.Layouts do
             <span class="text-xs mt-1">Home</span>
           </.link>
 
-          <.link
-            navigate="/movies"
-            class="flex flex-col items-center justify-center min-w-[60px] min-h-[60px] rounded-lg hover:bg-base-300 transition-colors"
-          >
-            <.icon name="hero-film" class="w-6 h-6" />
-            <span class="text-xs mt-1">Movies</span>
-          </.link>
+          <%= if @current_user && @current_user.role == "guest" do %>
+            <%!-- Guest users see request options --%>
+            <.link
+              navigate="/request/movie"
+              class="flex flex-col items-center justify-center min-w-[60px] min-h-[60px] rounded-lg hover:bg-base-300 transition-colors"
+            >
+              <.icon name="hero-film" class="w-6 h-6" />
+              <span class="text-xs mt-1">Request</span>
+            </.link>
 
-          <.link
-            navigate="/tv"
-            class="flex flex-col items-center justify-center min-w-[60px] min-h-[60px] rounded-lg hover:bg-base-300 transition-colors"
-          >
-            <.icon name="hero-tv" class="w-6 h-6" />
-            <span class="text-xs mt-1">TV</span>
-          </.link>
+            <.link
+              navigate="/requests"
+              class="flex flex-col items-center justify-center min-w-[60px] min-h-[60px] rounded-lg hover:bg-base-300 transition-colors"
+            >
+              <.icon name="hero-queue-list" class="w-6 h-6" />
+              <span class="text-xs mt-1">Requests</span>
+            </.link>
+          <% else %>
+            <%!-- Admin users see library navigation --%>
+            <.link
+              navigate="/movies"
+              class="flex flex-col items-center justify-center min-w-[60px] min-h-[60px] rounded-lg hover:bg-base-300 transition-colors"
+            >
+              <.icon name="hero-film" class="w-6 h-6" />
+              <span class="text-xs mt-1">Movies</span>
+            </.link>
 
-          <.link
-            navigate="/downloads"
-            class="flex flex-col items-center justify-center min-w-[60px] min-h-[60px] rounded-lg hover:bg-base-300 transition-colors"
-          >
-            <.icon name="hero-arrow-down-tray" class="w-6 h-6" />
-            <span class="text-xs mt-1">Downloads</span>
-          </.link>
+            <.link
+              navigate="/tv"
+              class="flex flex-col items-center justify-center min-w-[60px] min-h-[60px] rounded-lg hover:bg-base-300 transition-colors"
+            >
+              <.icon name="hero-tv" class="w-6 h-6" />
+              <span class="text-xs mt-1">TV</span>
+            </.link>
+
+            <.link
+              navigate="/downloads"
+              class="flex flex-col items-center justify-center min-w-[60px] min-h-[60px] rounded-lg hover:bg-base-300 transition-colors"
+            >
+              <.icon name="hero-arrow-down-tray" class="w-6 h-6" />
+              <span class="text-xs mt-1">Downloads</span>
+            </.link>
+          <% end %>
 
           <.link
             navigate="/activity"

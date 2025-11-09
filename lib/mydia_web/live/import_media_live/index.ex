@@ -3,6 +3,7 @@ defmodule MydiaWeb.ImportMediaLive.Index do
 
   alias Mydia.{Library, Metadata, Settings}
   alias Mydia.Library.{Scanner, MetadataMatcher}
+  alias MydiaWeb.Live.Authorization
 
   @impl true
   def mount(_params, _session, socket) do
@@ -47,17 +48,21 @@ defmodule MydiaWeb.ImportMediaLive.Index do
   end
 
   def handle_event("start_scan", _params, socket) do
-    if String.trim(socket.assigns.scan_path) != "" do
-      send(self(), {:perform_scan, socket.assigns.scan_path})
+    with :ok <- Authorization.authorize_import_media(socket) do
+      if String.trim(socket.assigns.scan_path) != "" do
+        send(self(), {:perform_scan, socket.assigns.scan_path})
 
-      {:noreply,
-       socket
-       |> assign(:scanning, true)
-       |> assign(:step, :scanning)
-       |> assign(:discovered_files, [])
-       |> assign(:matched_files, [])}
+        {:noreply,
+         socket
+         |> assign(:scanning, true)
+         |> assign(:step, :scanning)
+         |> assign(:discovered_files, [])
+         |> assign(:matched_files, [])}
+      else
+        {:noreply, put_flash(socket, :error, "Please enter a path to scan")}
+      end
     else
-      {:noreply, put_flash(socket, :error, "Please enter a path to scan")}
+      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 
@@ -92,19 +97,23 @@ defmodule MydiaWeb.ImportMediaLive.Index do
   end
 
   def handle_event("start_import", _params, socket) do
-    if MapSet.size(socket.assigns.selected_files) > 0 do
-      send(self(), :perform_import)
+    with :ok <- Authorization.authorize_import_media(socket) do
+      if MapSet.size(socket.assigns.selected_files) > 0 do
+        send(self(), :perform_import)
 
-      {:noreply,
-       socket
-       |> assign(:importing, true)
-       |> assign(:step, :importing)
-       |> assign(
-         :import_progress,
-         %{current: 0, total: MapSet.size(socket.assigns.selected_files)}
-       )}
+        {:noreply,
+         socket
+         |> assign(:importing, true)
+         |> assign(:step, :importing)
+         |> assign(
+           :import_progress,
+           %{current: 0, total: MapSet.size(socket.assigns.selected_files)}
+         )}
+      else
+        {:noreply, put_flash(socket, :error, "Please select at least one file to import")}
+      end
     else
-      {:noreply, put_flash(socket, :error, "Please select at least one file to import")}
+      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 

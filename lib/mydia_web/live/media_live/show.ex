@@ -8,6 +8,7 @@ defmodule MydiaWeb.MediaLive.Show do
   alias Mydia.Indexers
   alias Mydia.Indexers.SearchResult
   alias Mydia.Events
+  alias MydiaWeb.Live.Authorization
 
   require Logger
 
@@ -104,93 +105,107 @@ defmodule MydiaWeb.MediaLive.Show do
 
   @impl true
   def handle_event("toggle_monitored", _params, socket) do
-    media_item = socket.assigns.media_item
-    {:ok, updated_item} = Media.update_media_item(media_item, %{monitored: !media_item.monitored})
+    with :ok <- Authorization.authorize_update_media(socket) do
+      media_item = socket.assigns.media_item
 
-    {:noreply,
-     socket
-     |> assign(:media_item, updated_item)
-     |> put_flash(
-       :info,
-       "Monitoring #{if updated_item.monitored, do: "enabled", else: "disabled"}"
-     )}
+      {:ok, updated_item} =
+        Media.update_media_item(media_item, %{monitored: !media_item.monitored})
+
+      {:noreply,
+       socket
+       |> assign(:media_item, updated_item)
+       |> put_flash(
+         :info,
+         "Monitoring #{if updated_item.monitored, do: "enabled", else: "disabled"}"
+       )}
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
+    end
   end
 
   def handle_event("manual_search", _params, socket) do
-    media_item = socket.assigns.media_item
+    with :ok <- Authorization.authorize_manage_downloads(socket) do
+      media_item = socket.assigns.media_item
 
-    # Build search query from media item
-    search_query =
-      case media_item.type do
-        "movie" ->
-          # For movies, search with title and year
-          if media_item.year do
-            "#{media_item.title} #{media_item.year}"
-          else
+      # Build search query from media item
+      search_query =
+        case media_item.type do
+          "movie" ->
+            # For movies, search with title and year
+            if media_item.year do
+              "#{media_item.title} #{media_item.year}"
+            else
+              media_item.title
+            end
+
+          "tv_show" ->
+            # For TV shows, just use the title
             media_item.title
-          end
+        end
 
-        "tv_show" ->
-          # For TV shows, just use the title
-          media_item.title
-      end
+      # Open modal and start search
+      min_seeders = socket.assigns.min_seeders
 
-    # Open modal and start search
-    min_seeders = socket.assigns.min_seeders
-
-    {:noreply,
-     socket
-     |> assign(:show_manual_search_modal, true)
-     |> assign(:manual_search_query, search_query)
-     |> assign(:manual_search_context, %{type: :media_item})
-     |> assign(:searching, true)
-     |> assign(:results_empty?, false)
-     |> stream(:search_results, [], reset: true)
-     |> start_async(:search, fn -> perform_search(search_query, min_seeders) end)}
+      {:noreply,
+       socket
+       |> assign(:show_manual_search_modal, true)
+       |> assign(:manual_search_query, search_query)
+       |> assign(:manual_search_context, %{type: :media_item})
+       |> assign(:searching, true)
+       |> assign(:results_empty?, false)
+       |> stream(:search_results, [], reset: true)
+       |> start_async(:search, fn -> perform_search(search_query, min_seeders) end)}
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
+    end
   end
 
   def handle_event("auto_search_download", _params, socket) do
-    media_item = socket.assigns.media_item
+    with :ok <- Authorization.authorize_manage_downloads(socket) do
+      media_item = socket.assigns.media_item
 
-    # Queue the background job based on media type
-    case media_item.type do
-      "movie" ->
-        # Queue MovieSearchJob for this specific movie
-        %{mode: "specific", media_item_id: media_item.id}
-        |> Mydia.Jobs.MovieSearch.new()
-        |> Oban.insert()
+      # Queue the background job based on media type
+      case media_item.type do
+        "movie" ->
+          # Queue MovieSearchJob for this specific movie
+          %{mode: "specific", media_item_id: media_item.id}
+          |> Mydia.Jobs.MovieSearch.new()
+          |> Oban.insert()
 
-        Logger.info("Queued auto search for movie",
-          media_item_id: media_item.id,
-          title: media_item.title
-        )
+          Logger.info("Queued auto search for movie",
+            media_item_id: media_item.id,
+            title: media_item.title
+          )
 
-        # Set a timeout to reset auto_searching state if no download is created
-        Process.send_after(self(), :auto_search_timeout, 30_000)
+          # Set a timeout to reset auto_searching state if no download is created
+          Process.send_after(self(), :auto_search_timeout, 30_000)
 
-        {:noreply,
-         socket
-         |> assign(:auto_searching, true)
-         |> put_flash(:info, "Searching indexers for #{media_item.title}...")}
+          {:noreply,
+           socket
+           |> assign(:auto_searching, true)
+           |> put_flash(:info, "Searching indexers for #{media_item.title}...")}
 
-      "tv_show" ->
-        # Queue TVShowSearchJob for all missing episodes
-        %{mode: "show", media_item_id: media_item.id}
-        |> Mydia.Jobs.TVShowSearch.new()
-        |> Oban.insert()
+        "tv_show" ->
+          # Queue TVShowSearchJob for all missing episodes
+          %{mode: "show", media_item_id: media_item.id}
+          |> Mydia.Jobs.TVShowSearch.new()
+          |> Oban.insert()
 
-        Logger.info("Queued auto search for TV show",
-          media_item_id: media_item.id,
-          title: media_item.title
-        )
+          Logger.info("Queued auto search for TV show",
+            media_item_id: media_item.id,
+            title: media_item.title
+          )
 
-        # Set a timeout to reset auto_searching state if no download is created
-        Process.send_after(self(), :auto_search_timeout, 30_000)
+          # Set a timeout to reset auto_searching state if no download is created
+          Process.send_after(self(), :auto_search_timeout, 30_000)
 
-        {:noreply,
-         socket
-         |> assign(:auto_searching, true)
-         |> put_flash(:info, "Searching for all missing episodes of #{media_item.title}...")}
+          {:noreply,
+           socket
+           |> assign(:auto_searching, true)
+           |> put_flash(:info, "Searching for all missing episodes of #{media_item.title}...")}
+      end
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 
@@ -286,19 +301,23 @@ defmodule MydiaWeb.MediaLive.Show do
   end
 
   def handle_event("save_edit", %{"media_item" => media_params}, socket) do
-    media_item = socket.assigns.media_item
+    with :ok <- Authorization.authorize_update_media(socket) do
+      media_item = socket.assigns.media_item
 
-    case Media.update_media_item(media_item, media_params) do
-      {:ok, updated_item} ->
-        {:noreply,
-         socket
-         |> assign(:media_item, updated_item)
-         |> assign(:show_edit_modal, false)
-         |> assign(:edit_form, nil)
-         |> put_flash(:info, "Settings updated successfully")}
+      case Media.update_media_item(media_item, media_params) do
+        {:ok, updated_item} ->
+          {:noreply,
+           socket
+           |> assign(:media_item, updated_item)
+           |> assign(:show_edit_modal, false)
+           |> assign(:edit_form, nil)
+           |> put_flash(:info, "Settings updated successfully")}
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign(socket, :edit_form, to_form(changeset))}
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:noreply, assign(socket, :edit_form, to_form(changeset))}
+      end
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 
@@ -311,71 +330,87 @@ defmodule MydiaWeb.MediaLive.Show do
   end
 
   def handle_event("delete_media", _params, socket) do
-    media_item = socket.assigns.media_item
+    with :ok <- Authorization.authorize_delete_media(socket) do
+      media_item = socket.assigns.media_item
 
-    case Media.delete_media_item(media_item) do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "#{media_item.title} deleted successfully")
-         |> push_navigate(to: ~p"/media")}
+      case Media.delete_media_item(media_item) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "#{media_item.title} deleted successfully")
+           |> push_navigate(to: ~p"/media")}
 
-      {:error, _changeset} ->
-        {:noreply,
-         socket
-         |> put_flash(:error, "Failed to delete #{media_item.title}")
-         |> assign(:show_delete_confirm, false)}
+        {:error, _changeset} ->
+          {:noreply,
+           socket
+           |> put_flash(:error, "Failed to delete #{media_item.title}")
+           |> assign(:show_delete_confirm, false)}
+      end
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 
   def handle_event("toggle_episode_monitored", %{"episode-id" => episode_id}, socket) do
-    episode = Media.get_episode!(episode_id)
-    {:ok, _updated_episode} = Media.update_episode(episode, %{monitored: !episode.monitored})
+    with :ok <- Authorization.authorize_update_media(socket) do
+      episode = Media.get_episode!(episode_id)
+      {:ok, _updated_episode} = Media.update_episode(episode, %{monitored: !episode.monitored})
 
-    {:noreply,
-     socket
-     |> assign(:media_item, load_media_item(socket.assigns.media_item.id))
-     |> put_flash(
-       :info,
-       "Episode monitoring #{if episode.monitored, do: "disabled", else: "enabled"}"
-     )}
+      {:noreply,
+       socket
+       |> assign(:media_item, load_media_item(socket.assigns.media_item.id))
+       |> put_flash(
+         :info,
+         "Episode monitoring #{if episode.monitored, do: "disabled", else: "enabled"}"
+       )}
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
+    end
   end
 
   def handle_event("monitor_season", %{"season-number" => season_number_str}, socket) do
-    season_number = String.to_integer(season_number_str)
-    media_item = socket.assigns.media_item
+    with :ok <- Authorization.authorize_update_media(socket) do
+      season_number = String.to_integer(season_number_str)
+      media_item = socket.assigns.media_item
 
-    case Media.update_season_monitoring(media_item.id, season_number, true) do
-      {:ok, count} ->
-        {:noreply,
-         socket
-         |> assign(:media_item, load_media_item(media_item.id))
-         |> put_flash(
-           :info,
-           "Monitoring enabled for #{count} episodes in Season #{season_number}"
-         )}
+      case Media.update_season_monitoring(media_item.id, season_number, true) do
+        {:ok, count} ->
+          {:noreply,
+           socket
+           |> assign(:media_item, load_media_item(media_item.id))
+           |> put_flash(
+             :info,
+             "Monitoring enabled for #{count} episodes in Season #{season_number}"
+           )}
 
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to update season monitoring")}
+        {:error, _reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to update season monitoring")}
+      end
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 
   def handle_event("unmonitor_season", %{"season-number" => season_number_str}, socket) do
-    season_number = String.to_integer(season_number_str)
-    media_item = socket.assigns.media_item
+    with :ok <- Authorization.authorize_update_media(socket) do
+      season_number = String.to_integer(season_number_str)
+      media_item = socket.assigns.media_item
 
-    case Media.update_season_monitoring(media_item.id, season_number, false) do
-      {:ok, count} ->
-        {:noreply,
-         socket
-         |> assign(:media_item, load_media_item(media_item.id))
-         |> put_flash(
-           :info,
-           "Monitoring disabled for #{count} episodes in Season #{season_number}"
-         )}
+      case Media.update_season_monitoring(media_item.id, season_number, false) do
+        {:ok, count} ->
+          {:noreply,
+           socket
+           |> assign(:media_item, load_media_item(media_item.id))
+           |> put_flash(
+             :info,
+             "Monitoring disabled for #{count} episodes in Season #{season_number}"
+           )}
 
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to update season monitoring")}
+        {:error, _reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to update season monitoring")}
+      end
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 
@@ -507,23 +542,27 @@ defmodule MydiaWeb.MediaLive.Show do
   end
 
   def handle_event("delete_media_file", _params, socket) do
-    file = socket.assigns.file_to_delete
+    with :ok <- Authorization.authorize_delete_media(socket) do
+      file = socket.assigns.file_to_delete
 
-    case Library.delete_media_file(file) do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> assign(:media_item, load_media_item(socket.assigns.media_item.id))
-         |> assign(:show_file_delete_confirm, false)
-         |> assign(:file_to_delete, nil)
-         |> put_flash(:info, "Media file deleted successfully")}
+      case Library.delete_media_file(file) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> assign(:media_item, load_media_item(socket.assigns.media_item.id))
+           |> assign(:show_file_delete_confirm, false)
+           |> assign(:file_to_delete, nil)
+           |> put_flash(:info, "Media file deleted successfully")}
 
-      {:error, _changeset} ->
-        {:noreply,
-         socket
-         |> put_flash(:error, "Failed to delete media file")
-         |> assign(:show_file_delete_confirm, false)
-         |> assign(:file_to_delete, nil)}
+        {:error, _changeset} ->
+          {:noreply,
+           socket
+           |> put_flash(:error, "Failed to delete media file")
+           |> assign(:show_file_delete_confirm, false)
+           |> assign(:file_to_delete, nil)}
+      end
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 
@@ -787,65 +826,69 @@ defmodule MydiaWeb.MediaLive.Show do
         },
         socket
       ) do
-    media_item = socket.assigns.media_item
-    context = socket.assigns.manual_search_context
+    with :ok <- Authorization.authorize_manage_downloads(socket) do
+      media_item = socket.assigns.media_item
+      context = socket.assigns.manual_search_context
 
-    # Determine if this is for a specific episode or the media item
-    {media_item_id, episode_id} =
-      case context do
-        %{type: :episode, episode_id: ep_id} ->
-          {media_item.id, ep_id}
+      # Determine if this is for a specific episode or the media item
+      {media_item_id, episode_id} =
+        case context do
+          %{type: :episode, episode_id: ep_id} ->
+            {media_item.id, ep_id}
 
-        %{type: :season, season_number: _season_num} ->
-          # Season pack - associate with media item, not specific episode
-          {media_item.id, nil}
+          %{type: :season, season_number: _season_num} ->
+            # Season pack - associate with media item, not specific episode
+            {media_item.id, nil}
 
-        _ ->
-          {media_item.id, nil}
+          _ ->
+            {media_item.id, nil}
+        end
+
+      # Create SearchResult struct to pass to initiate_download
+      search_result = %SearchResult{
+        download_url: download_url,
+        title: title,
+        indexer: indexer,
+        size: parse_int(size),
+        seeders: parse_int(seeders),
+        leechers: parse_int(leechers),
+        quality: quality
+      }
+
+      # Build options for initiate_download
+      opts =
+        []
+        |> maybe_add_opt(:media_item_id, media_item_id)
+        |> maybe_add_opt(:episode_id, episode_id)
+
+      case Downloads.initiate_download(search_result, opts) do
+        {:ok, _download} ->
+          Logger.info("Download initiated: #{title}")
+
+          {:noreply,
+           socket
+           |> put_flash(:info, "Download started: #{title}")
+           |> assign(:media_item, load_media_item(media_item.id))
+           |> assign(
+             :downloads_with_status,
+             load_downloads_with_status(load_media_item(media_item.id))
+           )
+           |> assign(:show_manual_search_modal, false)
+           |> assign(:manual_search_query, "")
+           |> assign(:manual_search_context, nil)
+           |> assign(:searching, false)
+           |> assign(:results_empty?, false)
+           |> stream(:search_results, [], reset: true)}
+
+        {:error, reason} ->
+          Logger.error("Failed to initiate download: #{inspect(reason)}")
+
+          {:noreply,
+           socket
+           |> put_flash(:error, "Failed to start download: #{inspect(reason)}")}
       end
-
-    # Create SearchResult struct to pass to initiate_download
-    search_result = %SearchResult{
-      download_url: download_url,
-      title: title,
-      indexer: indexer,
-      size: parse_int(size),
-      seeders: parse_int(seeders),
-      leechers: parse_int(leechers),
-      quality: quality
-    }
-
-    # Build options for initiate_download
-    opts =
-      []
-      |> maybe_add_opt(:media_item_id, media_item_id)
-      |> maybe_add_opt(:episode_id, episode_id)
-
-    case Downloads.initiate_download(search_result, opts) do
-      {:ok, _download} ->
-        Logger.info("Download initiated: #{title}")
-
-        {:noreply,
-         socket
-         |> put_flash(:info, "Download started: #{title}")
-         |> assign(:media_item, load_media_item(media_item.id))
-         |> assign(
-           :downloads_with_status,
-           load_downloads_with_status(load_media_item(media_item.id))
-         )
-         |> assign(:show_manual_search_modal, false)
-         |> assign(:manual_search_query, "")
-         |> assign(:manual_search_context, nil)
-         |> assign(:searching, false)
-         |> assign(:results_empty?, false)
-         |> stream(:search_results, [], reset: true)}
-
-      {:error, reason} ->
-        Logger.error("Failed to initiate download: #{inspect(reason)}")
-
-        {:noreply,
-         socket
-         |> put_flash(:error, "Failed to start download: #{inspect(reason)}")}
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 

@@ -2,6 +2,7 @@ defmodule MydiaWeb.DownloadsLive.Index do
   use MydiaWeb, :live_view
   alias Mydia.Downloads
   alias Phoenix.PubSub
+  alias MydiaWeb.Live.Authorization
 
   @items_per_page 50
 
@@ -77,108 +78,128 @@ defmodule MydiaWeb.DownloadsLive.Index do
   end
 
   def handle_event("cancel_download", %{"id" => id}, socket) do
-    download = Downloads.get_download!(id)
+    with :ok <- Authorization.authorize_manage_downloads(socket) do
+      download = Downloads.get_download!(id)
 
-    case Downloads.cancel_download(download, delete_files: false) do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Download cancelled and removed from client")
-         |> load_downloads()}
+      case Downloads.cancel_download(download, delete_files: false) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Download cancelled and removed from client")
+           |> load_downloads()}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to cancel download: #{inspect(reason)}")}
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to cancel download: #{inspect(reason)}")}
+      end
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 
   def handle_event("pause_download", %{"id" => id}, socket) do
-    download = Downloads.get_download!(id)
+    with :ok <- Authorization.authorize_manage_downloads(socket) do
+      download = Downloads.get_download!(id)
 
-    case Downloads.pause_download(download) do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Download paused")
-         |> load_downloads()}
+      case Downloads.pause_download(download) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Download paused")
+           |> load_downloads()}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to pause download: #{inspect(reason)}")}
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to pause download: #{inspect(reason)}")}
+      end
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 
   def handle_event("resume_download", %{"id" => id}, socket) do
-    download = Downloads.get_download!(id)
+    with :ok <- Authorization.authorize_manage_downloads(socket) do
+      download = Downloads.get_download!(id)
 
-    case Downloads.resume_download(download) do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Download resumed")
-         |> load_downloads()}
+      case Downloads.resume_download(download) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Download resumed")
+           |> load_downloads()}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to resume download: #{inspect(reason)}")}
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to resume download: #{inspect(reason)}")}
+      end
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 
   def handle_event("retry_download", %{"id" => id}, socket) do
-    download = Downloads.get_download!(id, preload: [:media_item, :episode])
+    with :ok <- Authorization.authorize_manage_downloads(socket) do
+      download = Downloads.get_download!(id, preload: [:media_item, :episode])
 
-    # Clear error message if any
-    case Downloads.update_download(download, %{error_message: nil}) do
-      {:ok, updated} ->
-        # Re-add to client using the original download URL
-        search_result = %Mydia.Indexers.SearchResult{
-          download_url: updated.download_url,
-          title: updated.title,
-          indexer: updated.indexer,
-          size: updated.metadata["size"],
-          seeders: updated.metadata["seeders"],
-          leechers: updated.metadata["leechers"],
-          quality: updated.metadata["quality"]
-        }
+      # Clear error message if any
+      case Downloads.update_download(download, %{error_message: nil}) do
+        {:ok, updated} ->
+          # Re-add to client using the original download URL
+          search_result = %Mydia.Indexers.SearchResult{
+            download_url: updated.download_url,
+            title: updated.title,
+            indexer: updated.indexer,
+            size: updated.metadata["size"],
+            seeders: updated.metadata["seeders"],
+            leechers: updated.metadata["leechers"],
+            quality: updated.metadata["quality"]
+          }
 
-        opts =
-          []
-          |> maybe_add_opt(:media_item_id, updated.media_item_id)
-          |> maybe_add_opt(:episode_id, updated.episode_id)
-          |> maybe_add_opt(:client_name, updated.download_client)
+          opts =
+            []
+            |> maybe_add_opt(:media_item_id, updated.media_item_id)
+            |> maybe_add_opt(:episode_id, updated.episode_id)
+            |> maybe_add_opt(:client_name, updated.download_client)
 
-        # Delete old download record and create new one
-        Downloads.delete_download(updated)
+          # Delete old download record and create new one
+          Downloads.delete_download(updated)
 
-        case Downloads.initiate_download(search_result, opts) do
-          {:ok, _new_download} ->
-            {:noreply,
-             socket
-             |> put_flash(:info, "Download re-initiated")
-             |> load_downloads()}
+          case Downloads.initiate_download(search_result, opts) do
+            {:ok, _new_download} ->
+              {:noreply,
+               socket
+               |> put_flash(:info, "Download re-initiated")
+               |> load_downloads()}
 
-          {:error, reason} ->
-            {:noreply, put_flash(socket, :error, "Failed to retry download: #{inspect(reason)}")}
-        end
+            {:error, reason} ->
+              {:noreply, put_flash(socket, :error, "Failed to retry download: #{inspect(reason)}")}
+          end
 
-      {:error, _changeset} ->
-        {:noreply, put_flash(socket, :error, "Failed to update download")}
+        {:error, _changeset} ->
+          {:noreply, put_flash(socket, :error, "Failed to update download")}
+      end
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 
   def handle_event("delete_download", %{"id" => id}, socket) do
-    download = Downloads.get_download!(id)
+    with :ok <- Authorization.authorize_manage_downloads(socket) do
+      download = Downloads.get_download!(id)
 
-    # First try to remove from client (ignore errors if already removed)
-    _ = Downloads.cancel_download(download, delete_files: true)
+      # First try to remove from client (ignore errors if already removed)
+      _ = Downloads.cancel_download(download, delete_files: true)
 
-    # Then delete from database
-    case Downloads.delete_download(download) do
-      {:ok, _deleted} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Download removed")
-         |> load_downloads()}
+      # Then delete from database
+      case Downloads.delete_download(download) do
+        {:ok, _deleted} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Download removed")
+           |> load_downloads()}
 
-      {:error, _changeset} ->
-        {:noreply, put_flash(socket, :error, "Failed to delete download")}
+        {:error, _changeset} ->
+          {:noreply, put_flash(socket, :error, "Failed to delete download")}
+      end
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 

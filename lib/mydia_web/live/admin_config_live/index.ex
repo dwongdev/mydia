@@ -5,6 +5,9 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   alias Mydia.Downloads.ClientHealth
   alias Mydia.Indexers.Health, as: IndexerHealth
 
+  require Logger
+  alias Mydia.Logger, as: MydiaLogger
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
@@ -60,9 +63,29 @@ defmodule MydiaWeb.AdminConfigLive.Index do
        |> put_flash(:info, "Settings updated successfully")
        |> load_configuration_data()}
     else
+      # Log failed updates
+      failed_results =
+        results
+        |> Enum.with_index()
+        |> Enum.reject(fn {result, _} -> match?({:ok, _}, result) end)
+
+      Enum.each(failed_results, fn {{:error, error}, idx} ->
+        setting_key = Enum.at(Map.keys(settings), idx)
+
+        MydiaLogger.log_error(:liveview, "Failed to update setting",
+          error: error,
+          operation: :update_setting,
+          category: parsed_category,
+          setting_key: setting_key,
+          user_id: socket.assigns.current_user.id
+        )
+      end)
+
+      error_msg = MydiaLogger.user_error_message(:update_setting, :multiple_failures)
+
       {:noreply,
        socket
-       |> put_flash(:error, "Failed to update some settings")}
+       |> put_flash(:error, error_msg)}
     end
   end
 
@@ -87,10 +110,20 @@ defmodule MydiaWeb.AdminConfigLive.Index do
          socket
          |> load_configuration_data()}
 
-      {:error, _changeset} ->
+      {:error, changeset} ->
+        MydiaLogger.log_error(:liveview, "Failed to toggle setting",
+          error: changeset,
+          operation: :update_setting,
+          category: parsed_category,
+          setting_key: key,
+          user_id: socket.assigns.current_user.id
+        )
+
+        error_msg = MydiaLogger.user_error_message(:update_setting, changeset)
+
         {:noreply,
          socket
-         |> put_flash(:error, "Failed to update setting")}
+         |> put_flash(:error, error_msg)}
     end
   end
 
@@ -189,10 +222,19 @@ defmodule MydiaWeb.AdminConfigLive.Index do
          |> put_flash(:info, "Quality profile duplicated successfully")
          |> load_configuration_data()}
 
-      {:error, _changeset} ->
+      {:error, changeset} ->
+        MydiaLogger.log_error(:liveview, "Failed to duplicate quality profile",
+          error: changeset,
+          operation: :duplicate_quality_profile,
+          profile_id: id,
+          user_id: socket.assigns.current_user.id
+        )
+
+        error_msg = MydiaLogger.user_error_message(:duplicate_quality_profile, changeset)
+
         {:noreply,
          socket
-         |> put_flash(:error, "Failed to duplicate quality profile")}
+         |> put_flash(:error, error_msg)}
     end
   end
 
@@ -208,6 +250,13 @@ defmodule MydiaWeb.AdminConfigLive.Index do
          |> load_configuration_data()}
 
       {:error, :profile_in_use} ->
+        MydiaLogger.log_warning(:liveview, "Attempted to delete quality profile in use",
+          operation: :delete_quality_profile,
+          profile_id: id,
+          profile_name: profile.name,
+          user_id: socket.assigns.current_user.id
+        )
+
         {:noreply,
          socket
          |> put_flash(
@@ -215,10 +264,20 @@ defmodule MydiaWeb.AdminConfigLive.Index do
            "Cannot delete quality profile - it is assigned to one or more media items. Please reassign those items first."
          )}
 
-      {:error, _changeset} ->
+      {:error, error} ->
+        MydiaLogger.log_error(:liveview, "Failed to delete quality profile",
+          error: error,
+          operation: :delete_quality_profile,
+          profile_id: id,
+          profile_name: profile.name,
+          user_id: socket.assigns.current_user.id
+        )
+
+        error_msg = MydiaLogger.user_error_message(:delete_quality_profile, error)
+
         {:noreply,
          socket
-         |> put_flash(:error, "Failed to delete quality profile")}
+         |> put_flash(:error, error_msg)}
     end
   end
 
@@ -307,10 +366,20 @@ defmodule MydiaWeb.AdminConfigLive.Index do
          |> put_flash(:info, "Download client deleted successfully")
          |> load_configuration_data()}
 
-      {:error, _changeset} ->
+      {:error, error} ->
+        MydiaLogger.log_error(:liveview, "Failed to delete download client",
+          error: error,
+          operation: :delete_download_client,
+          client_id: id,
+          client_name: client.name,
+          user_id: socket.assigns.current_user.id
+        )
+
+        error_msg = MydiaLogger.user_error_message(:delete_download_client, error)
+
         {:noreply,
          socket
-         |> put_flash(:error, "Failed to delete download client")}
+         |> put_flash(:error, error_msg)}
     end
   end
 
@@ -357,10 +426,19 @@ defmodule MydiaWeb.AdminConfigLive.Index do
          |> put_flash(:info, "Connection successful! #{version_info}")}
 
       {:error, error} ->
+        MydiaLogger.log_error(:liveview, "Download client connection test failed",
+          error: error,
+          operation: :test_download_client,
+          client_id: id,
+          client_type: client.type,
+          client_host: client.host,
+          user_id: socket.assigns.current_user.id
+        )
+
         error_msg =
           case error do
             %{message: msg} -> msg
-            _ -> "Connection failed: #{inspect(error)}"
+            _ -> MydiaLogger.extract_error_message(error)
           end
 
         {:noreply,
@@ -446,10 +524,20 @@ defmodule MydiaWeb.AdminConfigLive.Index do
          |> put_flash(:info, "Indexer deleted successfully")
          |> load_configuration_data()}
 
-      {:error, _changeset} ->
+      {:error, error} ->
+        MydiaLogger.log_error(:liveview, "Failed to delete indexer",
+          error: error,
+          operation: :delete_indexer,
+          indexer_id: id,
+          indexer_name: indexer.name,
+          user_id: socket.assigns.current_user.id
+        )
+
+        error_msg = MydiaLogger.user_error_message(:delete_indexer, error)
+
         {:noreply,
          socket
-         |> put_flash(:error, "Failed to delete indexer")}
+         |> put_flash(:error, error_msg)}
     end
   end
 
@@ -471,20 +559,42 @@ defmodule MydiaWeb.AdminConfigLive.Index do
          |> load_configuration_data()}
 
       {:ok, %{status: :unhealthy, error: error}} ->
+        MydiaLogger.log_warning(:liveview, "Indexer health check returned unhealthy status",
+          operation: :test_indexer,
+          indexer_id: id,
+          error: error,
+          user_id: socket.assigns.current_user.id
+        )
+
         {:noreply,
          socket
          |> put_flash(:error, "Indexer connection failed: #{error}")
          |> load_configuration_data()}
 
       {:error, :not_found} ->
+        MydiaLogger.log_error(:liveview, "Indexer not found for health check",
+          operation: :test_indexer,
+          indexer_id: id,
+          user_id: socket.assigns.current_user.id
+        )
+
         {:noreply,
          socket
          |> put_flash(:error, "Indexer not found")}
 
       {:error, reason} ->
+        MydiaLogger.log_error(:liveview, "Indexer health check failed",
+          error: reason,
+          operation: :test_indexer,
+          indexer_id: id,
+          user_id: socket.assigns.current_user.id
+        )
+
+        error_msg = MydiaLogger.extract_error_message(reason)
+
         {:noreply,
          socket
-         |> put_flash(:error, "Health check failed: #{inspect(reason)}")
+         |> put_flash(:error, "Health check failed: #{error_msg}")
          |> load_configuration_data()}
     end
   end
@@ -589,10 +699,20 @@ defmodule MydiaWeb.AdminConfigLive.Index do
          |> put_flash(:info, "Library path deleted successfully")
          |> load_configuration_data()}
 
-      {:error, _changeset} ->
+      {:error, error} ->
+        MydiaLogger.log_error(:liveview, "Failed to delete library path",
+          error: error,
+          operation: :delete_library_path,
+          path_id: id,
+          path: path.path,
+          user_id: socket.assigns.current_user.id
+        )
+
+        error_msg = MydiaLogger.user_error_message(:delete_library_path, error)
+
         {:noreply,
          socket
-         |> put_flash(:error, "Failed to delete library path")}
+         |> put_flash(:error, error_msg)}
     end
   end
 

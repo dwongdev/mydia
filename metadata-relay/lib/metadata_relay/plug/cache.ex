@@ -30,6 +30,13 @@ defmodule MetadataRelay.Plug.Cache do
   def init(opts), do: opts
 
   @impl true
+  def call(%Plug.Conn{method: "GET", request_path: path} = conn, _opts)
+      when path in ["/health", "/stats"] do
+    # Skip caching for health/stats endpoints
+    conn
+  end
+
+  @impl true
   def call(%Plug.Conn{method: "GET"} = conn, _opts) do
     cache_key = build_cache_key(conn)
 

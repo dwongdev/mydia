@@ -1,5 +1,5 @@
 defmodule MydiaWeb.AdminConfigLiveTest do
-  use MydiaWeb.ConnCase
+  use MydiaWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
   alias Mydia.{Accounts, Settings}

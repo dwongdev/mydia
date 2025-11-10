@@ -2,6 +2,7 @@ defmodule MydiaWeb.AdminStatusLive.Index do
   use MydiaWeb, :live_view
   alias Mydia.Settings
   alias Mydia.Repo
+  alias Mydia.System
 
   @impl true
   def mount(_params, _session, socket) do
@@ -124,7 +125,7 @@ defmodule MydiaWeb.AdminStatusLive.Index do
   end
 
   defp get_setting_source(env_var_name) do
-    if System.get_env(env_var_name), do: :env, else: :default
+    if Elixir.System.get_env(env_var_name), do: :env, else: :default
   end
 
   defp get_database_info do
@@ -157,7 +158,9 @@ defmodule MydiaWeb.AdminStatusLive.Index do
 
   defp get_system_info do
     %{
-      elixir_version: System.version(),
+      app_version: System.app_version(),
+      dev_mode: System.dev_mode?(),
+      elixir_version: Elixir.System.version(),
       otp_version: :erlang.system_info(:otp_release) |> to_string(),
       uptime: format_uptime(:erlang.statistics(:wall_clock) |> elem(0))
     }

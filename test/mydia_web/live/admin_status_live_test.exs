@@ -46,6 +46,7 @@ defmodule MydiaWeb.AdminStatusLiveTest do
 
     test "displays system information", %{view: view} do
       assert has_element?(view, "h2", "System Information")
+      assert has_element?(view, ".stat-title", "App Version")
       assert has_element?(view, ".stat-title", "Elixir Version")
       assert has_element?(view, ".stat-title", "OTP Version")
       assert has_element?(view, ".stat-title", "Uptime")

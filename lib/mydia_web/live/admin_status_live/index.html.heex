@@ -15,7 +15,16 @@
     <div class="card bg-base-100 shadow-xl mb-6">
       <div class="card-body">
         <h2 class="card-title text-2xl mb-4">System Information</h2>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="stat">
+            <div class="stat-title">App Version</div>
+            <div class="stat-value text-2xl">
+              {@system_info.app_version}
+              <%= if @system_info.dev_mode do %>
+                <span class="badge badge-warning badge-sm ml-2">dev</span>
+              <% end %>
+            </div>
+          </div>
           <div class="stat">
             <div class="stat-title">Elixir Version</div>
             <div class="stat-value text-2xl">{@system_info.elixir_version}</div>

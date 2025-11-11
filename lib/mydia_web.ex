@@ -86,6 +86,8 @@ defmodule MydiaWeb do
       import Phoenix.HTML
       # Core UI components
       import MydiaWeb.CoreComponents
+      # Metadata search components
+      import MydiaWeb.Live.Components.MetadataSearchForm
 
       # Common modules used in templates
       alias Phoenix.LiveView.JS

@@ -2,8 +2,9 @@ defmodule MydiaWeb.ImportMediaLive.Index do
   use MydiaWeb, :live_view
 
   alias Mydia.{Library, Metadata, Settings}
-  alias Mydia.Library.{Scanner, MetadataMatcher}
+  alias Mydia.Library.{Scanner, MetadataMatcher, FileGrouper}
   alias MydiaWeb.Live.Authorization
+  alias MydiaWeb.ImportMediaLive.Components
 
   @impl true
   def mount(_params, _session, socket) do
@@ -329,7 +330,7 @@ defmodule MydiaWeb.ImportMediaLive.Index do
           List.replace_at(socket.assigns.matched_files, index, updated_matched_file)
 
         # Re-group files to update the hierarchical view
-        grouped_files = group_files_hierarchically(updated_matched_files)
+        grouped_files = FileGrouper.group_files(updated_matched_files)
 
         # Recalculate scan stats if we just matched an unmatched file
         scan_stats =
@@ -445,7 +446,7 @@ defmodule MydiaWeb.ImportMediaLive.Index do
         List.replace_at(socket.assigns.matched_files, index, updated_matched_file)
 
       # Re-group files
-      grouped_files = group_files_hierarchically(updated_matched_files)
+      grouped_files = FileGrouper.group_files(updated_matched_files)
 
       # Remove from selected files if it was selected
       selected_files = MapSet.delete(socket.assigns.selected_files, index)
@@ -663,7 +664,7 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     unmatched_count = length(matched_files) - matched_count
 
     # Group files hierarchically
-    grouped_files = group_files_hierarchically(matched_files)
+    grouped_files = FileGrouper.group_files(matched_files)
 
     # Auto-select files with high confidence matches
     auto_selected =
@@ -678,7 +679,7 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     # Auto-expand series that have matched episodes
     auto_expanded_series =
       grouped_files.series
-      |> Enum.map(fn series -> series_key(series) end)
+      |> Enum.map(fn series -> FileGrouper.series_key(series) end)
       |> MapSet.new()
 
     {:noreply,
@@ -912,22 +913,6 @@ defmodule MydiaWeb.ImportMediaLive.Index do
   defp format_error(:permission_denied), do: "Permission denied"
   defp format_error(reason), do: inspect(reason)
 
-  defp format_file_size(size) when size < 1024, do: "#{size} B"
-  defp format_file_size(size) when size < 1_048_576, do: "#{Float.round(size / 1024, 1)} KB"
-
-  defp format_file_size(size) when size < 1_073_741_824,
-    do: "#{Float.round(size / 1_048_576, 1)} MB"
-
-  defp format_file_size(size), do: "#{Float.round(size / 1_073_741_824, 1)} GB"
-
-  defp confidence_badge_class(confidence) when confidence >= 0.8, do: "badge-success"
-  defp confidence_badge_class(confidence) when confidence >= 0.5, do: "badge-warning"
-  defp confidence_badge_class(_), do: "badge-error"
-
-  defp confidence_label(confidence) when confidence >= 0.8, do: "High"
-  defp confidence_label(confidence) when confidence >= 0.5, do: "Medium"
-  defp confidence_label(_), do: "Low"
-
   # Parse helper functions for edit form
   defp parse_optional_int(""), do: {:ok, nil}
 
@@ -983,88 +968,6 @@ defmodule MydiaWeb.ImportMediaLive.Index do
   defp normalize_media_type_string("movie"), do: "movie"
   defp normalize_media_type_string(type) when is_atom(type), do: to_string(type)
   defp normalize_media_type_string(type), do: type
-
-  # Group files hierarchically by series/season for TV shows
-  defp group_files_hierarchically(matched_files) do
-    matched_files
-    |> Enum.with_index()
-    |> Enum.reduce(%{series: %{}, movies: [], ungrouped: []}, fn {matched_file, index}, acc ->
-      case matched_file.match_result do
-        nil ->
-          # No match - add to ungrouped
-          %{acc | ungrouped: acc.ungrouped ++ [Map.put(matched_file, :index, index)]}
-
-        match when match.parsed_info.type == :tv_show ->
-          # TV show episode - group by series and season
-          series_id = series_key(match)
-          season_num = match.parsed_info.season || 0
-
-          # Get or create series entry
-          series_entry =
-            Map.get(acc.series, series_id, %{
-              title: match.title,
-              provider_id: match.provider_id,
-              year: match.year,
-              seasons: %{}
-            })
-
-          # Get or create season entry
-          season_entry =
-            Map.get(series_entry.seasons, season_num, %{
-              season_number: season_num,
-              episodes: []
-            })
-
-          # Add episode to season
-          episode_entry = Map.put(matched_file, :index, index)
-          updated_season = %{season_entry | episodes: season_entry.episodes ++ [episode_entry]}
-          updated_series = put_in(series_entry.seasons[season_num], updated_season)
-          updated_series_map = Map.put(acc.series, series_id, updated_series)
-
-          %{acc | series: updated_series_map}
-
-        match when match.parsed_info.type == :movie ->
-          # Movie - add to movies list
-          %{acc | movies: acc.movies ++ [Map.put(matched_file, :index, index)]}
-
-        _other ->
-          # Unknown type - add to ungrouped
-          %{acc | ungrouped: acc.ungrouped ++ [Map.put(matched_file, :index, index)]}
-      end
-    end)
-    |> finalize_grouping()
-  end
-
-  # Convert series map to list and sort seasons
-  defp finalize_grouping(grouped) do
-    series_list =
-      grouped.series
-      |> Map.values()
-      |> Enum.map(fn series ->
-        seasons_list =
-          series.seasons
-          |> Map.values()
-          |> Enum.sort_by(& &1.season_number)
-
-        Map.put(series, :seasons, seasons_list)
-      end)
-      |> Enum.sort_by(& &1.title)
-
-    %{
-      series: series_list,
-      movies: grouped.movies,
-      ungrouped: grouped.ungrouped
-    }
-  end
-
-  # Generate a unique key for a series
-  defp series_key(%{title: title, provider_id: provider_id}) do
-    "#{title}-#{provider_id}"
-  end
-
-  defp series_key(match_result) when is_map(match_result) do
-    "#{match_result.title}-#{match_result.provider_id}"
-  end
 
   # Suggest directories based on partial path input
   defp suggest_directories(path) when is_binary(path) do

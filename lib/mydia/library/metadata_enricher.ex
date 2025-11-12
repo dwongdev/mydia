@@ -60,11 +60,13 @@ defmodule Mydia.Library.MetadataEnricher do
           # Add media_file_id to match_result so it can be used for episode file association
           match_result_with_file_id =
             if media_file_id do
-              Logger.info("Adding media_file_id to match_result for episode association",
-                media_file_id: media_file_id,
-                season: get_in(match_result, [:parsed_info, :season]),
-                episodes: get_in(match_result, [:parsed_info, :episodes])
-              )
+              Logger.info("""
+              Adding media_file_id to match_result for episode association:
+                media_file_id: #{inspect(media_file_id)}
+                season: #{inspect(get_in(match_result, [:parsed_info, :season]))}
+                episodes: #{inspect(get_in(match_result, [:parsed_info, :episodes]))}
+                parsed_info keys: #{inspect(Map.keys(match_result.parsed_info))}
+              """)
 
               Map.put(match_result, :media_file_id, media_file_id)
             else
@@ -294,13 +296,13 @@ defmodule Mydia.Library.MetadataEnricher do
               )
 
               # If this is the episode from the file we're processing, associate it
-              Logger.info("Attempting to associate file with newly created episode",
-                episode_id: episode.id,
-                episode_season: episode.season_number,
-                episode_number: episode.episode_number,
-                has_media_file_id: Map.has_key?(match_result, :media_file_id),
-                match_result_keys: Map.keys(match_result)
-              )
+              Logger.info("""
+              Attempting to associate file with newly created episode:
+                episode S#{episode.season_number}E#{episode.episode_number} (ID: #{episode.id})
+                has_media_file_id in match_result: #{Map.has_key?(match_result, :media_file_id)}
+                has_parsed_info in match_result: #{Map.has_key?(match_result, :parsed_info)}
+                match_result keys: #{inspect(Map.keys(match_result))}
+              """)
 
               maybe_associate_episode_file(episode, match_result)
 
@@ -443,23 +445,16 @@ defmodule Mydia.Library.MetadataEnricher do
   end
 
   defp maybe_associate_episode_file(episode, match_result) do
-    Logger.warning("maybe_associate_episode_file called but pattern match failed",
-      episode_id: episode.id,
-      has_parsed_info: Map.has_key?(match_result, :parsed_info),
-      has_media_file_id: Map.has_key?(match_result, :media_file_id),
-      media_file_id: Map.get(match_result, :media_file_id),
-      media_file_id_type:
-        if(Map.has_key?(match_result, :media_file_id),
-          do:
-            match_result.media_file_id
-            |> then(&"#{&1}")
-            |> String.to_charlist()
-            |> :erlang.term_to_binary()
-            |> byte_size(),
-          else: nil
-        ),
-      match_result_keys: Map.keys(match_result)
-    )
+    Logger.warning("""
+    maybe_associate_episode_file PATTERN MATCH FAILED:
+      episode_id: #{episode.id}
+      has_parsed_info: #{Map.has_key?(match_result, :parsed_info)}
+      has_media_file_id: #{Map.has_key?(match_result, :media_file_id)}
+      media_file_id: #{inspect(Map.get(match_result, :media_file_id))}
+      media_file_id_type: #{if Map.has_key?(match_result, :media_file_id), do: "#{match_result.media_file_id |> then(&(&1.__struct__ || :integer))}", else: "N/A"}
+      match_result_keys: #{inspect(Map.keys(match_result))}
+      parsed_info: #{inspect(Map.get(match_result, :parsed_info))}
+    """)
 
     :ok
   end

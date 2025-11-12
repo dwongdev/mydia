@@ -19,8 +19,6 @@ defmodule MydiaWeb.ImportMediaLive.Index do
      |> assign(:discovered_files, [])
      |> assign(:matched_files, [])
      |> assign(:grouped_files, %{series: [], movies: [], ungrouped: []})
-     |> assign(:expanded_series, MapSet.new())
-     |> assign(:expanded_seasons, MapSet.new())
      |> assign(:selected_files, MapSet.new())
      |> assign(:scan_stats, %{total: 0, matched: 0, unmatched: 0, skipped: 0, orphaned: 0})
      |> assign(:library_paths, Settings.list_library_paths())
@@ -140,28 +138,6 @@ defmodule MydiaWeb.ImportMediaLive.Index do
 
   def handle_event("deselect_all_files", _params, socket) do
     {:noreply, assign(socket, :selected_files, MapSet.new())}
-  end
-
-  def handle_event("toggle_series_expansion", %{"series_key" => series_key}, socket) do
-    expanded_series =
-      if MapSet.member?(socket.assigns.expanded_series, series_key) do
-        MapSet.delete(socket.assigns.expanded_series, series_key)
-      else
-        MapSet.put(socket.assigns.expanded_series, series_key)
-      end
-
-    {:noreply, assign(socket, :expanded_series, expanded_series)}
-  end
-
-  def handle_event("toggle_season_expansion", %{"season_key" => season_key}, socket) do
-    expanded_seasons =
-      if MapSet.member?(socket.assigns.expanded_seasons, season_key) do
-        MapSet.delete(socket.assigns.expanded_seasons, season_key)
-      else
-        MapSet.put(socket.assigns.expanded_seasons, season_key)
-      end
-
-    {:noreply, assign(socket, :expanded_seasons, expanded_seasons)}
   end
 
   def handle_event("toggle_season_selection", %{"indices" => indices_str}, socket) do
@@ -376,38 +352,6 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     perform_search(query, socket)
   end
 
-  defp perform_search(query, socket) do
-    if String.trim(query) != "" && String.length(query) >= 2 do
-      # Search both movies and TV shows
-      config = socket.assigns.metadata_config
-
-      movie_results =
-        case Metadata.search(config, query, media_type: :movie) do
-          {:ok, results} -> Enum.map(results, &Map.put(&1, :media_type, "movie"))
-          _ -> []
-        end
-
-      tv_results =
-        case Metadata.search(config, query, media_type: :tv_show) do
-          {:ok, results} -> Enum.map(results, &Map.put(&1, :media_type, "tv"))
-          _ -> []
-        end
-
-      # Combine and limit to first 10 results
-      search_results = (movie_results ++ tv_results) |> Enum.take(10)
-
-      {:noreply,
-       socket
-       |> assign(:search_query, query)
-       |> assign(:search_results, search_results)}
-    else
-      {:noreply,
-       socket
-       |> assign(:search_query, query)
-       |> assign(:search_results, [])}
-    end
-  end
-
   def handle_event(
         "select_search_result",
         %{"provider_id" => provider_id, "title" => title, "year" => year, "type" => type},
@@ -575,6 +519,40 @@ defmodule MydiaWeb.ImportMediaLive.Index do
      })}
   end
 
+  ## Private Helpers
+
+  defp perform_search(query, socket) do
+    if String.trim(query) != "" && String.length(query) >= 2 do
+      # Search both movies and TV shows
+      config = socket.assigns.metadata_config
+
+      movie_results =
+        case Metadata.search(config, query, media_type: :movie) do
+          {:ok, results} -> Enum.map(results, &Map.put(&1, :media_type, "movie"))
+          _ -> []
+        end
+
+      tv_results =
+        case Metadata.search(config, query, media_type: :tv_show) do
+          {:ok, results} -> Enum.map(results, &Map.put(&1, :media_type, "tv"))
+          _ -> []
+        end
+
+      # Combine and limit to first 10 results
+      search_results = (movie_results ++ tv_results) |> Enum.take(10)
+
+      {:noreply,
+       socket
+       |> assign(:search_query, query)
+       |> assign(:search_results, search_results)}
+    else
+      {:noreply,
+       socket
+       |> assign(:search_query, query)
+       |> assign(:search_results, [])}
+    end
+  end
+
   ## Async Handlers
 
   @impl true
@@ -676,19 +654,12 @@ defmodule MydiaWeb.ImportMediaLive.Index do
       |> Enum.map(fn {_file, idx} -> idx end)
       |> MapSet.new()
 
-    # Auto-expand series that have matched episodes
-    auto_expanded_series =
-      grouped_files.series
-      |> Enum.map(fn series -> FileGrouper.series_key(series) end)
-      |> MapSet.new()
-
     {:noreply,
      socket
      |> assign(:matching, false)
      |> assign(:step, :review)
      |> assign(:matched_files, matched_files)
      |> assign(:grouped_files, grouped_files)
-     |> assign(:expanded_series, auto_expanded_series)
      |> assign(:selected_files, auto_selected)
      |> assign(:scan_stats, %{
        total: length(files),
@@ -865,47 +836,6 @@ defmodule MydiaWeb.ImportMediaLive.Index do
       end
 
     "#{action}: '#{match_result.title}'"
-  end
-
-  defp import_file(%{match_result: nil}, _config), do: :error
-
-  defp import_file(%{file: file, match_result: match_result}, config) do
-    # Check if this file is orphaned and needs re-matching
-    media_file_result =
-      if file[:orphaned_media_file_id] do
-        # Use existing orphaned media file - don't update it yet
-        # The enricher will handle associating it with the media item
-        try do
-          media_file = Library.get_media_file!(file.orphaned_media_file_id)
-          {:ok, media_file}
-        rescue
-          _ -> {:error, :not_found}
-        end
-      else
-        # Create new media file record
-        Library.create_scanned_media_file(%{
-          path: file.path,
-          size: file.size,
-          verified_at: DateTime.utc_now()
-        })
-      end
-
-    case media_file_result do
-      {:ok, media_file} ->
-        # Enrich with metadata
-        case Library.MetadataEnricher.enrich(match_result,
-               config: config,
-               media_file_id: media_file.id
-             ) do
-          {:ok, _media_item} -> :ok
-          {:error, _reason} -> :error
-        end
-
-      {:error, _changeset} ->
-        :error
-    end
-  rescue
-    _ -> :error
   end
 
   defp format_error(:not_found), do: "Directory not found"

@@ -66,107 +66,74 @@
         <%!-- Selection Controls --%>
         <Components.selection_controls selected_files={@selected_files} />
 
-        <%!-- Files List - Hierarchical Grouped View --%>
-        <div class="space-y-3">
-          <%!-- TV Series (Grouped by Series and Season) --%>
+        <%!-- Files List - Flat List View --%>
+        <div class="space-y-4">
+          <%!-- TV Series (Flat List by Series and Season) --%>
           <%= for series <- @grouped_files.series do %>
-            <% series_id = "#{series.title}-#{series.provider_id}" %>
-            <% is_expanded = MapSet.member?(@expanded_series, series_id) %>
-            <div class="card bg-base-100 shadow border-2 border-primary/20">
-              <div class="card-body p-4">
-                <%!-- Series Header --%>
-                <div
-                  class="flex items-center gap-3 cursor-pointer hover:bg-base-200/50 -m-2 p-2 rounded"
-                  phx-click="toggle_series_expansion"
-                  phx-value-series_key={series_id}
-                >
-                  <.icon
-                    name={if(is_expanded, do: "hero-chevron-down", else: "hero-chevron-right")}
-                    class="w-5 h-5 text-primary"
-                  />
-                  <div class="flex-1">
-                    <h3 class="font-bold text-lg">{series.title}</h3>
+            <div class="bg-base-100 rounded-lg shadow border border-base-300">
+              <%!-- Series Header --%>
+              <div class="bg-primary/10 px-4 py-2 border-b border-base-300">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h3 class="font-bold text-base">{series.title}</h3>
                     <%= if series.year do %>
                       <p class="text-xs text-base-content/60">({series.year})</p>
                     <% end %>
                   </div>
-                  <div class="badge badge-info badge-lg">
-                    TV Series - {length(series.seasons)} {if(length(series.seasons) == 1,
+                  <div class="badge badge-info badge-sm">
+                    TV Series • {length(series.seasons)} {if(length(series.seasons) == 1,
                       do: "Season",
                       else: "Seasons"
                     )}
                   </div>
                 </div>
+              </div>
 
-                <%!-- Seasons (shown when series is expanded) --%>
-                <%= if is_expanded do %>
-                  <div class="mt-4 space-y-3 pl-4 border-l-2 border-primary/20">
-                    <%= for season <- series.seasons do %>
-                      <% season_id = "#{series_id}-s#{season.season_number}" %>
-                      <% is_season_expanded = MapSet.member?(@expanded_seasons, season_id) %>
-                      <% episode_indices = Enum.map(season.episodes, & &1.index) %>
-                      <% all_selected =
-                        Enum.all?(episode_indices, &MapSet.member?(@selected_files, &1)) %>
-                      <% some_selected =
-                        Enum.any?(episode_indices, &MapSet.member?(@selected_files, &1)) and
-                          not all_selected %>
-                      <div class="card bg-base-200 shadow-sm">
-                        <div class="card-body p-3">
-                          <%!-- Season Header --%>
-                          <div class="flex items-center gap-3">
-                            <input
-                              type="checkbox"
-                              class={"checkbox checkbox-primary " <> if(some_selected, do: "checkbox-warning", else: "")}
-                              checked={all_selected or some_selected}
-                              phx-click="toggle_season_selection"
-                              phx-value-indices={Enum.join(episode_indices, ",")}
-                            />
-                            <div
-                              class="flex-1 cursor-pointer flex items-center gap-2"
-                              phx-click="toggle_season_expansion"
-                              phx-value-season_key={season_id}
-                            >
-                              <.icon
-                                name={
-                                  if(is_season_expanded,
-                                    do: "hero-chevron-down",
-                                    else: "hero-chevron-right"
-                                  )
-                                }
-                                class="w-4 h-4"
-                              />
-                              <h4 class="font-semibold">
-                                Season {season.season_number}
-                              </h4>
-                            </div>
-                            <div class="badge badge-sm">
-                              {length(season.episodes)} {if(length(season.episodes) == 1,
-                                do: "Episode",
-                                else: "Episodes"
-                              )}
-                            </div>
-                            <%= if some_selected do %>
-                              <div class="badge badge-warning badge-sm">Partially Selected</div>
-                            <% end %>
-                          </div>
-
-                          <%!-- Episodes (shown when season is expanded) --%>
-                          <%= if is_season_expanded do %>
-                            <div class="mt-3 space-y-2 pl-6">
-                              <%= for episode <- season.episodes do %>
-                                <Components.episode_card
-                                  episode={episode}
-                                  is_selected={MapSet.member?(@selected_files, episode.index)}
-                                  is_editing={@editing_file_index == episode.index}
-                                  edit_form={@edit_form}
-                                  search_results={@search_results}
-                                />
-                              <% end %>
-                            </div>
-                          <% end %>
-                        </div>
+              <%!-- Seasons and Episodes (All shown in flat lists) --%>
+              <div>
+                <%= for season <- series.seasons do %>
+                  <% episode_indices = Enum.map(season.episodes, & &1.index) %>
+                  <% all_selected =
+                    Enum.all?(episode_indices, &MapSet.member?(@selected_files, &1)) %>
+                  <% some_selected =
+                    Enum.any?(episode_indices, &MapSet.member?(@selected_files, &1)) and
+                      not all_selected %>
+                  <div class="border-b border-base-300 last:border-b-0">
+                    <%!-- Season Header --%>
+                    <div class="bg-base-200/50 px-4 py-2 flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        class={"checkbox checkbox-primary checkbox-sm " <> if(some_selected, do: "checkbox-warning", else: "")}
+                        checked={all_selected or some_selected}
+                        phx-click="toggle_season_selection"
+                        phx-value-indices={Enum.join(episode_indices, ",")}
+                      />
+                      <h4 class="font-semibold text-sm flex-1">
+                        Season {season.season_number}
+                      </h4>
+                      <div class="badge badge-xs">
+                        {length(season.episodes)} {if(length(season.episodes) == 1,
+                          do: "Episode",
+                          else: "Episodes"
+                        )}
                       </div>
-                    <% end %>
+                      <%= if some_selected do %>
+                        <div class="badge badge-warning badge-xs">Partial</div>
+                      <% end %>
+                    </div>
+
+                    <%!-- Episodes List --%>
+                    <ul class="divide-y divide-base-300">
+                      <%= for episode <- season.episodes do %>
+                        <Components.episode_list_item
+                          episode={episode}
+                          is_selected={MapSet.member?(@selected_files, episode.index)}
+                          is_editing={@editing_file_index == episode.index}
+                          edit_form={@edit_form}
+                          search_results={@search_results}
+                        />
+                      <% end %>
+                    </ul>
                   </div>
                 <% end %>
               </div>
@@ -174,24 +141,42 @@
           <% end %>
 
           <%!-- Movies (Flat List) --%>
-          <%= for movie <- @grouped_files.movies do %>
-            <Components.movie_card
-              movie={movie}
-              is_selected={MapSet.member?(@selected_files, movie.index)}
-              is_editing={@editing_file_index == movie.index}
-              edit_form={@edit_form}
-              search_results={@search_results}
-            />
+          <%= if @grouped_files.movies != [] do %>
+            <div class="bg-base-100 rounded-lg shadow border border-base-300">
+              <div class="bg-accent/10 px-4 py-2 border-b border-base-300">
+                <h3 class="font-bold text-base">Movies</h3>
+              </div>
+              <ul class="divide-y divide-base-300">
+                <%= for movie <- @grouped_files.movies do %>
+                  <Components.movie_list_item
+                    movie={movie}
+                    is_selected={MapSet.member?(@selected_files, movie.index)}
+                    is_editing={@editing_file_index == movie.index}
+                    edit_form={@edit_form}
+                    search_results={@search_results}
+                  />
+                <% end %>
+              </ul>
+            </div>
           <% end %>
 
           <%!-- Ungrouped/Unmatched Files --%>
-          <%= for file <- @grouped_files.ungrouped do %>
-            <Components.unmatched_file_card
-              file={file}
-              is_editing={@editing_file_index == file.index}
-              edit_form={@edit_form}
-              search_results={@search_results}
-            />
+          <%= if @grouped_files.ungrouped != [] do %>
+            <div class="bg-base-100 rounded-lg shadow border border-base-300">
+              <div class="bg-error/10 px-4 py-2 border-b border-base-300">
+                <h3 class="font-bold text-base text-error">Unmatched Files</h3>
+              </div>
+              <ul class="divide-y divide-base-300">
+                <%= for file <- @grouped_files.ungrouped do %>
+                  <Components.unmatched_file_list_item
+                    file={file}
+                    is_editing={@editing_file_index == file.index}
+                    edit_form={@edit_form}
+                    search_results={@search_results}
+                  />
+                <% end %>
+              </ul>
+            </div>
           <% end %>
         </div>
       </div>

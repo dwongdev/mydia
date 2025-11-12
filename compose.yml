@@ -17,7 +17,7 @@ services:
       MIX_ENV: dev
 
       # Metadata relay configuration
-      METADATA_RELAY_URL: ${METADATA_RELAY_URL:-https://metadata-relay.fly.dev}
+      METADATA_RELAY_URL: ${METADATA_RELAY_URL:-https://metadata-relay.arsfeld.dev}
 
       # For interactive debugging
       MIX_HOME: /app/.mix

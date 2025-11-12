@@ -203,7 +203,7 @@ defmodule Mydia.Metadata do
       }
   """
   def default_relay_config do
-    base_url = System.get_env("METADATA_RELAY_URL", "https://metadata-relay.fly.dev")
+    base_url = System.get_env("METADATA_RELAY_URL", "https://metadata-relay.arsfeld.dev")
 
     %{
       type: :metadata_relay,
@@ -232,7 +232,7 @@ defmodule Mydia.Metadata do
       }
   """
   def default_tvdb_relay_config do
-    base_url = System.get_env("METADATA_RELAY_URL", "https://metadata-relay.fly.dev")
+    base_url = System.get_env("METADATA_RELAY_URL", "https://metadata-relay.arsfeld.dev")
 
     %{
       type: :metadata_relay,

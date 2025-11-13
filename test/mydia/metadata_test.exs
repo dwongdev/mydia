@@ -378,7 +378,7 @@ defmodule Mydia.MetadataTest do
       System.delete_env("METADATA_RELAY_URL")
 
       config = Metadata.default_relay_config()
-      assert config.base_url == "https://metadata-relay.fly.dev"
+      assert config.base_url == "https://metadata-relay.arsfeld.dev"
     end
   end
 end

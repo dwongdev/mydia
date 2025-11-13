@@ -198,7 +198,7 @@ defmodule Mydia.Metadata do
       iex> Mydia.Metadata.default_relay_config()
       %{
         type: :metadata_relay,
-        base_url: "https://metadata-relay.fly.dev",
+        base_url: "https://metadata-relay.arsfeld.dev",
         options: %{language: "en-US", include_adult: false}
       }
   """

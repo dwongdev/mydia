@@ -391,10 +391,10 @@ defmodule MydiaWeb.AdminConfigLiveTest do
       )
       |> render_submit()
 
-      assert has_element?(view, "td", "/media/movies")
-
-      # Wait for modal to close (async operation in CI)
+      # Wait for LiveView to process the update (important for CI)
       Process.sleep(100)
+
+      assert has_element?(view, "td", "/media/movies")
       refute has_element?(view, ~s{div[class*="modal-open"]})
     end
   end

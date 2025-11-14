@@ -91,7 +91,7 @@ defmodule MydiaWeb.MediaLive.IndexTest do
       # Search for "matrix" (lowercase)
       html =
         view
-        |> element("#search-form")
+        |> element("form#library-search-form")
         |> render_change(%{"search" => "matrix"})
 
       # Debug: print what's in the rendered HTML
@@ -110,7 +110,7 @@ defmodule MydiaWeb.MediaLive.IndexTest do
 
       # Search for "1999"
       view
-      |> element("#search-form")
+      |> element("#library-search-form")
       |> render_change(%{"search" => "1999"})
 
       # Should show The Matrix (1999)
@@ -128,7 +128,7 @@ defmodule MydiaWeb.MediaLive.IndexTest do
 
       # Search by original Japanese title (partial match)
       view
-      |> element("#search-form")
+      |> element("#library-search-form")
       |> render_change(%{"search" => "千と"})
 
       # Should show Spirited Away
@@ -142,7 +142,7 @@ defmodule MydiaWeb.MediaLive.IndexTest do
 
       # Search for "chemistry"
       view
-      |> element("#search-form")
+      |> element("#library-search-form")
       |> render_change(%{"search" => "chemistry"})
 
       # Should show Breaking Bad
@@ -161,7 +161,7 @@ defmodule MydiaWeb.MediaLive.IndexTest do
 
       # First, apply a search
       view
-      |> element("#search-form")
+      |> element("#library-search-form")
       |> render_change(%{"search" => "matrix"})
 
       # Only The Matrix should be visible
@@ -169,7 +169,7 @@ defmodule MydiaWeb.MediaLive.IndexTest do
 
       # Clear the search
       view
-      |> element("#search-form")
+      |> element("#library-search-form")
       |> render_change(%{"search" => ""})
 
       # All items should be visible again
@@ -183,7 +183,7 @@ defmodule MydiaWeb.MediaLive.IndexTest do
 
       # Search for "Bad" - should match Breaking Bad
       view
-      |> element("#search-form")
+      |> element("#library-search-form")
       |> render_change(%{"search" => "Bad"})
 
       assert has_element?(view, "#media-items-grid", show1.title)
@@ -191,7 +191,7 @@ defmodule MydiaWeb.MediaLive.IndexTest do
 
       # Search for "Matrix" - should match The Matrix
       view
-      |> element("#search-form")
+      |> element("#library-search-form")
       |> render_change(%{"search" => "Matrix"})
 
       assert has_element?(view, "#media-items-grid", movie1.title)
@@ -203,7 +203,7 @@ defmodule MydiaWeb.MediaLive.IndexTest do
 
       # Search for something that doesn't exist
       view
-      |> element("#search-form")
+      |> element("#library-search-form")
       |> render_change(%{"search" => "NonexistentMovie12345"})
 
       # Should show empty state with helpful message
@@ -228,7 +228,7 @@ defmodule MydiaWeb.MediaLive.IndexTest do
 
       # Search for "matrix"
       view
-      |> element("#search-form")
+      |> element("#library-search-form")
       |> render_change(%{"search" => "matrix"})
 
       # Should show The Matrix in list view
@@ -245,7 +245,7 @@ defmodule MydiaWeb.MediaLive.IndexTest do
 
       # Apply search in grid view
       view
-      |> element("#search-form")
+      |> element("#library-search-form")
       |> render_change(%{"search" => "matrix"})
 
       # Switch to list view
@@ -274,7 +274,7 @@ defmodule MydiaWeb.MediaLive.IndexTest do
 
       # Search for "Things"
       view
-      |> element("#search-form")
+      |> element("#library-search-form")
       |> render_change(%{"search" => "Things"})
 
       # Should show Stranger Things
@@ -282,7 +282,7 @@ defmodule MydiaWeb.MediaLive.IndexTest do
 
       # Apply monitored filter
       view
-      |> element("select[name='monitored']")
+      |> element("form#library-filter-form")
       |> render_change(%{"monitored" => "true"})
 
       # Should not show Stranger Things (it's unmonitored)

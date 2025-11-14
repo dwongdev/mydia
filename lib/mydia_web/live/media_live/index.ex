@@ -67,24 +67,9 @@ defmodule MydiaWeb.MediaLive.Index do
     {:noreply, assign(socket, :view_mode, view_mode)}
   end
 
-  def handle_event("search", %{"search" => search_params}, socket) do
+  def handle_event("search", params, socket) do
     require Logger
-    Logger.debug("Search params: #{inspect(search_params)}")
-
-    query = search_params["search"] || search_params["value"] || ""
-
-    {:noreply,
-     socket
-     |> assign(:search_query, query)
-     |> assign(:page, 0)
-     |> assign(:selected_ids, MapSet.new())
-     |> load_media_items(reset: true)}
-  end
-
-  # Fallback for direct params (when not using form component)
-  def handle_event("search", params, socket) when is_map(params) do
-    require Logger
-    Logger.debug("Search params (direct): #{inspect(params)}")
+    Logger.debug("Search params: #{inspect(params)}")
 
     query = params["search"] || params["value"] || ""
 
@@ -96,42 +81,9 @@ defmodule MydiaWeb.MediaLive.Index do
      |> load_media_items(reset: true)}
   end
 
-  def handle_event("filter", %{"filter" => filter_params}, socket) do
+  def handle_event("filter", params, socket) do
     require Logger
-    Logger.debug("Filter params: #{inspect(filter_params)}")
-
-    monitored =
-      case filter_params["monitored"] do
-        "all" -> nil
-        "true" -> true
-        "false" -> false
-        _ -> nil
-      end
-
-    quality =
-      case filter_params["quality"] do
-        "" -> nil
-        q when q in ["720p", "1080p", "2160p"] -> q
-        _ -> nil
-      end
-
-    sort_by = filter_params["sort_by"] || socket.assigns.sort_by
-    Logger.debug("Sort by: #{inspect(sort_by)}")
-
-    {:noreply,
-     socket
-     |> assign(:filter_monitored, monitored)
-     |> assign(:filter_quality, quality)
-     |> assign(:sort_by, sort_by)
-     |> assign(:page, 0)
-     |> assign(:selected_ids, MapSet.new())
-     |> load_media_items(reset: true)}
-  end
-
-  # Fallback for direct params (when not using form component)
-  def handle_event("filter", params, socket) when is_map(params) do
-    require Logger
-    Logger.debug("Filter params (direct): #{inspect(params)}")
+    Logger.debug("Filter params: #{inspect(params)}")
 
     monitored =
       case params["monitored"] do

@@ -161,7 +161,7 @@
     <div class="flex flex-col md:flex-row gap-3 md:gap-4 mb-4 md:mb-6">
       <%!-- Search input --%>
       <div class="flex-1">
-        <.form for={%{}} as={:search} phx-change="search" id="library-search-form" class="w-full">
+        <.form for={%{}} phx-change="search" id="library-search-form" class="w-full">
           <input
             type="text"
             name="search"
@@ -174,7 +174,7 @@
       </div>
 
       <%!-- Filters and Sort --%>
-      <.form for={%{}} as={:filter} phx-change="filter" id="library-filter-form" class="join">
+      <.form for={%{}} phx-change="filter" id="library-filter-form" class="join">
         <select
           name="monitored"
           class="select select-bordered join-item"

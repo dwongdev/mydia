@@ -36,9 +36,6 @@ defmodule MydiaWeb.AddMediaLive.Index do
   end
 
   defp apply_action(socket, :add_series, _params) do
-    require Logger
-    Logger.info("apply_action: :add_series - setting media_type to :tv_show")
-
     socket
     |> assign(:page_title, "Add Series")
     |> assign(:media_type, :tv_show)
@@ -160,16 +157,6 @@ defmodule MydiaWeb.AddMediaLive.Index do
 
   @impl true
   def handle_info({:perform_search, query}, socket) do
-    require Logger
-
-    Logger.info(
-      "perform_search: socket.assigns.media_type = #{inspect(socket.assigns.media_type)}"
-    )
-
-    Logger.info(
-      "perform_search: socket.assigns.live_action = #{inspect(socket.assigns.live_action)}"
-    )
-
     media_type_filter =
       case socket.assigns.media_type do
         :movie -> :movie
@@ -177,12 +164,10 @@ defmodule MydiaWeb.AddMediaLive.Index do
         _ -> nil
       end
 
-    Logger.info("perform_search: media_type_filter = #{inspect(media_type_filter)}")
     opts = [media_type: media_type_filter]
 
     case Metadata.search(socket.assigns.metadata_config, query, opts) do
       {:ok, results} ->
-        Logger.info("perform_search: got #{length(results)} results")
         # Check which results are already in the library
         added_item_ids = check_existing_items(results, socket.assigns.media_type)
 
@@ -396,7 +381,6 @@ defmodule MydiaWeb.AddMediaLive.Index do
   defp extract_year_from_date(_), do: nil
 
   defp check_existing_items(results, media_type) do
-    require Logger
     # Extract TMDB IDs from search results (provider_id is a string)
     tmdb_ids =
       results
@@ -404,29 +388,15 @@ defmodule MydiaWeb.AddMediaLive.Index do
       |> Enum.reject(&is_nil/1)
       |> Enum.map(&String.to_integer/1)
 
-    Logger.info(
-      "check_existing_items for media_type=#{media_type}: TMDB IDs: #{inspect(tmdb_ids)}"
-    )
-
     if tmdb_ids == [] do
       %{}
     else
       # Query for existing media items with these TMDB IDs
       type_string = if media_type == :movie, do: "movie", else: "tv_show"
 
-      existing_items = Media.list_media_items(type: type_string)
-
-      Logger.info(
-        "check_existing_items: Found #{length(existing_items)} items of type '#{type_string}' in library"
-      )
-
-      filtered_items = Enum.filter(existing_items, &(&1.tmdb_id in tmdb_ids))
-      Logger.info("check_existing_items: #{length(filtered_items)} items match search results")
-
-      result_map = Map.new(filtered_items, &{&1.tmdb_id, &1.id})
-      Logger.info("check_existing_items: result map: #{inspect(result_map)}")
-
-      result_map
+      Media.list_media_items(type: type_string)
+      |> Enum.filter(&(&1.tmdb_id in tmdb_ids))
+      |> Map.new(&{&1.tmdb_id, &1.id})
     end
   end
 

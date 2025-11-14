@@ -204,12 +204,14 @@ defmodule MydiaWeb.AddMediaLive.Index do
             end
 
             # Stay on page with success message
+            tmdb_id = String.to_integer(selected.provider_id)
+
             {:noreply,
              socket
              |> assign(:adding_index, nil)
              |> assign(
                :added_item_ids,
-               Map.put(socket.assigns.added_item_ids, selected.provider_id, media_item.id)
+               Map.put(socket.assigns.added_item_ids, tmdb_id, media_item.id)
              )
              |> put_flash(:info, "#{media_item.title} has been added to your library")}
 

@@ -157,6 +157,40 @@ custom classes must fully style the input
 - Predicate function names should not start with `is_` and should end in a question mark. Names like `is_thing` should be reserved for guards
 - Elixir's builtin OTP primitives like `DynamicSupervisor` and `Registry`, require names in the child spec, such as `{DynamicSupervisor, name: MyApp.MyDynamicSup}`, then you can use `DynamicSupervisor.start_child(MyApp.MyDynamicSup, child_spec)`
 - Use `Task.async_stream(collection, callback, options)` for concurrent enumeration with back-pressure. The majority of times you will want to pass `timeout: :infinity` as option
+- **Always** use Structs instead of plain maps for proper type safety and compile-time guarantees. Structs provide:
+  - Compile-time validation of field names (typos in field names will be caught at compile time)
+  - Clear documentation of expected fields
+  - Pattern matching on struct type
+  - Better tooling support and code completion
+
+  **Never do this (maps)**:
+
+      def create_user(name, email) do
+        %{name: name, email: email, role: "user"}
+      end
+
+  Instead, **always** define and use a struct:
+
+      defmodule User do
+        defstruct [:name, :email, role: "user"]
+      end
+
+      def create_user(name, email) do
+        %User{name: name, email: email}
+      end
+
+  **For JSON parsing and external data**, parse to a map then immediately convert to a struct using `Ecto.Changeset` or similar:
+
+      # Parse JSON
+      {:ok, json_map} = Jason.decode(json_string)
+
+      # Immediately validate and convert to struct
+      changeset = User.changeset(%User{}, json_map)
+
+      case Ecto.Changeset.apply_action(changeset, :insert) do
+        {:ok, user_struct} -> # Work with type-safe struct
+        {:error, changeset} -> # Handle validation errors
+      end
 
 ## Mix guidelines
 

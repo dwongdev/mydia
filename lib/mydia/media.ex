@@ -625,8 +625,8 @@ defmodule Mydia.Media do
             |> Repo.delete_all()
           end
 
-          # Get seasons from metadata (using atom key since metadata comes from provider)
-          seasons = metadata[:seasons] || []
+          # Get seasons from metadata struct
+          seasons = metadata.seasons || []
 
           Logger.info(
             "Fetching episodes for TV show: #{media_item.title}, found #{length(seasons)} seasons in metadata"

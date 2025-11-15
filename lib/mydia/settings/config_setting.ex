@@ -51,7 +51,7 @@ defmodule Mydia.Settings.ConfigSetting do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @categories [:server, :auth, :media, :downloads, :notifications, :general]
+  @categories [:server, :auth, :media, :downloads, :notifications, :crash_reporting, :general]
 
   schema "config_settings" do
     field :key, :string

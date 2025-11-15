@@ -929,9 +929,37 @@ defmodule MydiaWeb.AdminConfigLive.Index do
           source:
             get_source("DOWNLOAD_MONITOR_INTERVAL_MINUTES", "downloads.monitor_interval_minutes")
         }
+      ],
+      "Crash Reporting" => [
+        %{
+          key: "crash_reporting.enabled",
+          label: "Share Crashes with Developers",
+          value: get_crash_reporting_enabled(),
+          source: get_source("CRASH_REPORTING_ENABLED", "crash_reporting.enabled")
+        }
       ]
     }
   end
+
+  defp get_crash_reporting_enabled do
+    case Settings.get_config_setting_by_key("crash_reporting.enabled") do
+      nil ->
+        # Fall back to environment variable
+        case System.get_env("CRASH_REPORTING_ENABLED") do
+          nil -> false
+          value -> parse_boolean_value(value)
+        end
+
+      setting ->
+        parse_boolean_value(setting.value)
+    end
+  end
+
+  defp parse_boolean_value(value) when is_boolean(value), do: value
+  defp parse_boolean_value("true"), do: true
+  defp parse_boolean_value("1"), do: true
+  defp parse_boolean_value("yes"), do: true
+  defp parse_boolean_value(_), do: false
 
   defp get_source(env_var_name, key) do
     cond do
@@ -982,6 +1010,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
       "authentication" -> :auth
       "media" -> :media
       "downloads" -> :downloads
+      "crash reporting" -> :crash_reporting
       _ -> :general
     end
   end

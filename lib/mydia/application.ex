@@ -29,7 +29,8 @@ defmodule Mydia.Application do
         {Task.Supervisor, name: Mydia.TaskSupervisor},
         Mydia.Hooks.Manager,
         {Registry, keys: :unique, name: Mydia.Streaming.HlsSessionRegistry},
-        Mydia.Streaming.HlsSessionSupervisor
+        Mydia.Streaming.HlsSessionSupervisor,
+        Mydia.CrashReporter.Queue
       ] ++
         client_health_children() ++
         indexer_health_children() ++

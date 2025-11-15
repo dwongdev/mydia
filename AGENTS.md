@@ -1,5 +1,40 @@
 This is a web application written using the Phoenix web framework.
 
+## About Mydia
+
+Mydia is a self-hosted media management application for organizing and tracking TV shows and movies. It helps users:
+
+- Manage their personal media libraries
+- Track TV show episodes and seasons
+- Organize movies and their metadata
+- Monitor media files and their locations
+- Automatically fetch metadata from external sources
+
+The application is designed to be deployed on personal servers or home lab environments, giving users complete control over their media collection data.
+
+## Metadata Relay Service
+
+Mydia uses a companion service called **metadata-relay**, which is a developer-owned service that:
+
+- **Proxies metadata requests** to external services like TVDB and TMDB
+- **Protects API keys** by avoiding direct client-to-service connections
+- **Reduces rate limiting issues** by centralizing API requests
+- **Prevents API key leakage** in client applications
+
+### Key Points
+
+- The metadata-relay service is **developed together with mydia** but **deployed completely separately**
+- Mydia instances connect to metadata-relay instead of hitting TVDB/TMDB directly
+- This architecture allows multiple mydia instances to share a single metadata-relay deployment
+- The service handles authentication and rate limiting centrally
+
+### When Working on Metadata Integration
+
+- **Always** use the metadata-relay endpoints instead of direct TVDB/TMDB API calls
+- **Never** embed TVDB or TMDB API keys directly in the mydia application
+- Configure the metadata-relay base URL via application configuration
+- Handle metadata-relay service failures gracefully with appropriate error messages
+
 ## Project guidelines
 
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues

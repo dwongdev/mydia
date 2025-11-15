@@ -105,6 +105,7 @@ defmodule Mydia.MixProject do
       # Telemetry & Monitoring
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
+      {:error_tracker, "~> 0.5"},
 
       # Core
       {:gettext, "~> 0.26"},

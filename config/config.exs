@@ -297,6 +297,15 @@ config :mydia, :features,
 # This is overridden in dev.exs if OIDC is configured
 config :ueberauth, Ueberauth, providers: []
 
+# Configure ErrorTracker for local crash reporting
+config :error_tracker,
+  repo: Mydia.Repo,
+  otp_app: :mydia,
+  # Store crashes for 30 days
+  prune_after: 30 * 24 * 60 * 60,
+  # Enable in production and development, but not test
+  enabled: config_env() != :test
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

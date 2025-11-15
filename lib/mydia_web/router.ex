@@ -1,5 +1,6 @@
 defmodule MydiaWeb.Router do
   use MydiaWeb, :router
+  use ErrorTracker.Web, :router
 
   pipeline :browser do
     plug :accepts, ["html"]
@@ -112,6 +113,12 @@ defmodule MydiaWeb.Router do
       live "/requests", AdminRequestsLive.Index, :index
       live "/users", AdminUsersLive.Index, :index
     end
+  end
+
+  # ErrorTracker dashboard - admin only
+  scope "/admin" do
+    pipe_through [:browser, :auth, :require_authenticated, :require_admin]
+    error_tracker_dashboard("/errors")
   end
 
   # API routes - authenticated with JWT or API key

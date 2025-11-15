@@ -268,7 +268,7 @@
                               <.icon name="hero-information-circle" class="w-4 h-4 text-error" />
                             </div>
                           <% end %>
-                          <%= if health.status == :healthy and health[:details][:version] do %>
+                          <%= if health.status == :healthy and health[:details] && Map.get(health.details, :version) do %>
                             <div
                               class="tooltip tooltip-left"
                               data-tip={"Version: #{health.details.version}"}
@@ -375,7 +375,7 @@
                               <.icon name="hero-information-circle" class="w-4 h-4 text-error" />
                             </div>
                           <% end %>
-                          <%= if health.status == :healthy and health[:details][:version] do %>
+                          <%= if health.status == :healthy and health[:details] && Map.get(health.details, :version) do %>
                             <div
                               class="tooltip tooltip-left"
                               data-tip={"Version: #{health.details.version}"}

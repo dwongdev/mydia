@@ -485,7 +485,7 @@ defmodule MydiaWeb.MediaLive.Index do
     socket =
       socket
       |> assign(:has_more, has_more)
-      |> assign(:media_items_empty?, reset? and paginated_items == [])
+      |> assign(:media_items_empty?, reset? and items == [])
 
     # When resetting, delete all items that are not in the new filtered set
     socket =

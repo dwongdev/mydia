@@ -19,6 +19,10 @@ defmodule Mydia.Library.MediaFile do
     field :verified_at, :utc_datetime
     field :metadata, :map
 
+    # Relative path storage (Phase 1)
+    field :relative_path, :string
+    belongs_to :library_path, Mydia.Settings.LibraryPath
+
     belongs_to :media_item, Mydia.Media.MediaItem
     belongs_to :episode, Mydia.Media.Episode
     belongs_to :quality_profile, Mydia.Settings.QualityProfile

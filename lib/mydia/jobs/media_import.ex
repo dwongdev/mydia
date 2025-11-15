@@ -274,7 +274,7 @@ defmodule Mydia.Jobs.MediaImport do
       # Import each file - destination path is determined per-file for TV shows
       results =
         Enum.map(video_files, fn file ->
-          import_file(file, download, library_path.path, args)
+          import_file(file, download, library_path, args)
         end)
 
       # Check if all succeeded
@@ -337,13 +337,16 @@ defmodule Mydia.Jobs.MediaImport do
     end)
   end
 
-  defp import_file(file, download, library_root, args) do
+  defp import_file(file, download, library_path, args) do
     # Parse filename to extract episode info for TV shows
     parsed = FileParser.parse(file.name)
 
     # Check if this is a season pack download
     is_season_pack = get_in(download.metadata, ["season_pack"]) == true
     season_pack_season = get_in(download.metadata, ["season_number"])
+
+    # Get library root from library_path struct
+    library_root = library_path.path
 
     # Determine episode and destination path
     {episode, dest_dir} =
@@ -509,7 +512,7 @@ defmodule Mydia.Jobs.MediaImport do
       case Library.get_media_file_by_path(dest_path) do
         nil ->
           # File exists but not in DB - this is a conflict
-          handle_file_conflict(file, dest_path, episode, download, args)
+          handle_file_conflict(file, dest_path, episode, download, library_path, args)
 
         existing_file ->
           # File exists and is in DB - reuse it
@@ -520,7 +523,7 @@ defmodule Mydia.Jobs.MediaImport do
       # Copy or move file
       case copy_or_move_file(file.path, dest_path, args) do
         :ok ->
-          create_media_file_record(dest_path, file.size, episode, download)
+          create_media_file_record(dest_path, file.size, episode, download, library_path)
 
         {:error, reason} ->
           Logger.error("Failed to copy/move file",
@@ -534,14 +537,14 @@ defmodule Mydia.Jobs.MediaImport do
     end
   end
 
-  defp handle_file_conflict(file, dest_path, episode, download, args) do
+  defp handle_file_conflict(file, dest_path, episode, download, library_path, args) do
     # Check if sizes match
     dest_size = File.stat!(dest_path).size
 
     if dest_size == file.size do
       # Files are likely identical - create DB record
       Logger.info("File sizes match, creating DB record", path: dest_path)
-      create_media_file_record(dest_path, file.size, episode, download)
+      create_media_file_record(dest_path, file.size, episode, download, library_path)
     else
       # Files differ - rename new file
       new_dest = generate_unique_path(dest_path)
@@ -549,7 +552,7 @@ defmodule Mydia.Jobs.MediaImport do
 
       case copy_or_move_file(file.path, new_dest, args) do
         :ok ->
-          create_media_file_record(new_dest, file.size, episode, download)
+          create_media_file_record(new_dest, file.size, episode, download, library_path)
 
         {:error, reason} ->
           {:error, reason}
@@ -691,7 +694,7 @@ defmodule Mydia.Jobs.MediaImport do
     end
   end
 
-  defp create_media_file_record(path, size, episode, download) do
+  defp create_media_file_record(path, size, episode, download, library_path) do
     # Extract metadata from filename first (as fallback)
     filename_metadata = FileParser.parse(Path.basename(path))
 
@@ -732,9 +735,20 @@ defmodule Mydia.Jobs.MediaImport do
           }
       end
 
+    # Calculate relative path from absolute path and library path
+    relative_path = Path.relative_to(path, library_path.path)
+
+    Logger.debug("Storing media file with relative path",
+      absolute_path: path,
+      library_path: library_path.path,
+      relative_path: relative_path,
+      library_path_id: library_path.id
+    )
+
     # Merge metadata: prefer actual file metadata, fall back to filename parsing
     attrs = %{
-      path: path,
+      relative_path: relative_path,
+      library_path_id: library_path.id,
       size: file_metadata.size || size,
       resolution: file_metadata.resolution || filename_metadata.quality.resolution,
       codec: file_metadata.codec || filename_metadata.quality.codec,

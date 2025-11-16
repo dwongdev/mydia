@@ -415,9 +415,16 @@
             <h2 class="card-title text-2xl">
               Indexers <span class="badge badge-sm">{length(@indexers)}</span>
             </h2>
-            <button class="btn btn-primary" phx-click="new_indexer">
-              <.icon name="hero-plus" class="w-5 h-5" /> New Indexer
-            </button>
+            <div class="flex gap-2">
+              <%= if Mydia.Indexers.CardigannFeatureFlags.enabled?() do %>
+                <.link navigate={~p"/admin/config/indexers/library"} class="btn btn-secondary">
+                  <.icon name="hero-book-open" class="w-5 h-5" /> Cardigann Library
+                </.link>
+              <% end %>
+              <button class="btn btn-primary" phx-click="new_indexer">
+                <.icon name="hero-plus" class="w-5 h-5" /> New Indexer
+              </button>
+            </div>
           </div>
 
           <%= if @indexers == [] do %>

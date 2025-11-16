@@ -26,7 +26,10 @@ defmodule Mydia.Indexers do
   alias Mydia.Indexers.Adapter
   alias Mydia.Indexers.SearchResult
   alias Mydia.Indexers.RateLimiter
+  alias Mydia.Indexers.CardigannDefinition
   alias Mydia.Settings
+  alias Mydia.Repo
+  import Ecto.Query
 
   @doc """
   Registers all known indexer adapters with the registry.
@@ -367,4 +370,168 @@ defmodule Mydia.Indexers do
   defp default_port("https"), do: 443
   defp default_port("http"), do: 80
   defp default_port(_), do: 80
+
+  ## Cardigann Definition Management
+
+  @doc """
+  Lists all Cardigann definitions with optional filtering.
+
+  ## Options
+    - `:type` - Filter by indexer type ("public", "private", "semi-private")
+    - `:language` - Filter by language code (e.g., "en-US")
+    - `:enabled` - Filter by enabled status (true/false)
+    - `:search` - Search by name or description (case-insensitive)
+
+  ## Examples
+
+      iex> Mydia.Indexers.list_cardigann_definitions()
+      [%CardigannDefinition{}, ...]
+
+      iex> Mydia.Indexers.list_cardigann_definitions(type: "public", enabled: true)
+      [%CardigannDefinition{}, ...]
+  """
+  def list_cardigann_definitions(opts \\ []) do
+    query = from(d in CardigannDefinition, order_by: [asc: d.name])
+
+    query
+    |> apply_cardigann_filters(opts)
+    |> Repo.all()
+  end
+
+  @doc """
+  Gets a single Cardigann definition by ID.
+
+  Raises `Ecto.NoResultsError` if the definition does not exist.
+  """
+  def get_cardigann_definition!(id) do
+    Repo.get!(CardigannDefinition, id)
+  end
+
+  @doc """
+  Gets a single Cardigann definition by indexer_id.
+
+  Returns nil if the definition does not exist.
+  """
+  def get_cardigann_definition_by_indexer_id(indexer_id) do
+    Repo.get_by(CardigannDefinition, indexer_id: indexer_id)
+  end
+
+  @doc """
+  Enables a Cardigann indexer definition.
+
+  ## Examples
+
+      iex> enable_cardigann_definition(definition)
+      {:ok, %CardigannDefinition{enabled: true}}
+  """
+  def enable_cardigann_definition(%CardigannDefinition{} = definition) do
+    definition
+    |> CardigannDefinition.toggle_changeset(%{enabled: true})
+    |> Repo.update()
+  end
+
+  @doc """
+  Disables a Cardigann indexer definition.
+
+  ## Examples
+
+      iex> disable_cardigann_definition(definition)
+      {:ok, %CardigannDefinition{enabled: false}}
+  """
+  def disable_cardigann_definition(%CardigannDefinition{} = definition) do
+    definition
+    |> CardigannDefinition.toggle_changeset(%{enabled: false})
+    |> Repo.update()
+  end
+
+  @doc """
+  Updates the configuration for a Cardigann definition (credentials, etc.).
+
+  ## Examples
+
+      iex> configure_cardigann_definition(definition, %{username: "user", password: "pass"})
+      {:ok, %CardigannDefinition{config: %{username: "user", ...}}}
+  """
+  def configure_cardigann_definition(%CardigannDefinition{} = definition, config) do
+    definition
+    |> CardigannDefinition.config_changeset(%{config: config})
+    |> Repo.update()
+  end
+
+  @doc """
+  Tests the connection to a Cardigann indexer definition.
+
+  This validates that the indexer is reachable and properly configured.
+
+  ## Examples
+
+      iex> test_cardigann_definition(definition)
+      {:ok, %{status: :healthy}}
+  """
+  def test_cardigann_definition(%CardigannDefinition{} = _definition) do
+    # For now, we'll use the Cardigann adapter's test functionality
+    # This will need to be implemented to parse the definition and test the connection
+    # TODO: Implement actual testing logic in the Cardigann adapter
+    {:ok, %{status: :not_implemented}}
+  end
+
+  @doc """
+  Counts Cardigann definitions by status.
+
+  Returns a map with counts for enabled, disabled, and total definitions.
+
+  ## Examples
+
+      iex> count_cardigann_definitions()
+      %{total: 100, enabled: 25, disabled: 75}
+  """
+  def count_cardigann_definitions do
+    total = Repo.aggregate(CardigannDefinition, :count, :id)
+    enabled = Repo.aggregate(from(d in CardigannDefinition, where: d.enabled), :count, :id)
+
+    %{
+      total: total,
+      enabled: enabled,
+      disabled: total - enabled
+    }
+  end
+
+  ## Private Cardigann Helpers
+
+  defp apply_cardigann_filters(query, []), do: query
+
+  defp apply_cardigann_filters(query, [{:type, type} | rest]) when is_binary(type) do
+    query
+    |> where([d], d.type == ^type)
+    |> apply_cardigann_filters(rest)
+  end
+
+  defp apply_cardigann_filters(query, [{:language, language} | rest]) when is_binary(language) do
+    query
+    |> where([d], d.language == ^language)
+    |> apply_cardigann_filters(rest)
+  end
+
+  defp apply_cardigann_filters(query, [{:enabled, enabled} | rest]) when is_boolean(enabled) do
+    query
+    |> where([d], d.enabled == ^enabled)
+    |> apply_cardigann_filters(rest)
+  end
+
+  defp apply_cardigann_filters(query, [{:search, search_term} | rest])
+       when is_binary(search_term) do
+    search_pattern = "%#{String.downcase(search_term)}%"
+
+    query
+    |> where(
+      [d],
+      like(fragment("lower(?)", d.name), ^search_pattern) or
+        like(fragment("lower(?)", d.description), ^search_pattern)
+    )
+    |> apply_cardigann_filters(rest)
+  end
+
+  defp apply_cardigann_filters(query, [_unknown | rest]) do
+    apply_cardigann_filters(query, rest)
+  end
 end

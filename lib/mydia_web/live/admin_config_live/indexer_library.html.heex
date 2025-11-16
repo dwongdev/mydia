@@ -1,0 +1,267 @@
+<Layouts.app {assigns}>
+  <div class="container mx-auto px-4 py-8">
+    <div class="mb-8">
+      <h1 class="text-4xl font-bold mb-2">Cardigann Indexer Library</h1>
+      <p class="text-base-content/70">
+        Browse and enable indexers from the Prowlarr/Cardigann definition library
+      </p>
+      <div class="flex gap-4 mt-4">
+        <div class="stat bg-base-200 rounded-box">
+          <div class="stat-title">Total Indexers</div>
+          <div class="stat-value">{@stats.total}</div>
+        </div>
+        <div class="stat bg-base-200 rounded-box">
+          <div class="stat-title">Enabled</div>
+          <div class="stat-value text-success">{@stats.enabled}</div>
+        </div>
+        <div class="stat bg-base-200 rounded-box">
+          <div class="stat-title">Disabled</div>
+          <div class="stat-value text-ghost">{@stats.disabled}</div>
+        </div>
+      </div>
+    </div>
+    <%!-- Filters and Search --%>
+    <div class="card bg-base-100 shadow-xl mb-6">
+      <div class="card-body">
+        <div class="flex flex-wrap gap-4 items-end">
+          <%!-- Search --%>
+          <div class="form-control flex-1 min-w-64">
+            <label class="label">
+              <span class="label-text">Search</span>
+            </label>
+            <.form for={%{}} id="search-form" phx-change="search">
+              <input
+                type="text"
+                name="search[query]"
+                value={@search_query}
+                placeholder="Search by name or description..."
+                class="input input-bordered w-full"
+              />
+            </.form>
+          </div>
+          <%!-- Type Filter --%>
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Type</span>
+            </label>
+            <select
+              class="select select-bordered"
+              phx-change="filter_type"
+              name="type"
+              value={@filter_type}
+            >
+              <option value="all">All Types</option>
+              <option value="public">Public</option>
+              <option value="private">Private</option>
+              <option value="semi-private">Semi-Private</option>
+            </select>
+          </div>
+          <%!-- Language Filter --%>
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Language</span>
+            </label>
+            <select
+              class="select select-bordered"
+              phx-change="filter_language"
+              name="language"
+              value={@filter_language}
+            >
+              <option value="all">All Languages</option>
+              <%= for language <- @available_languages do %>
+                <option value={language}>{language}</option>
+              <% end %>
+            </select>
+          </div>
+          <%!-- Status Filter --%>
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Status</span>
+            </label>
+            <select
+              class="select select-bordered"
+              phx-change="filter_enabled"
+              name="enabled"
+              value={@filter_enabled}
+            >
+              <option value="all">All Status</option>
+              <option value="enabled">Enabled</option>
+              <option value="disabled">Disabled</option>
+            </select>
+          </div>
+          <%!-- Sync Button --%>
+          <div class="form-control">
+            <button class="btn btn-primary" phx-click="sync_definitions">
+              <.icon name="hero-arrow-path" class="w-5 h-5" /> Sync Definitions
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <%!-- Indexer List --%>
+    <%= if @definitions == [] do %>
+      <div class="alert alert-info">
+        <.icon name="hero-information-circle" class="w-6 h-6" />
+        <span>
+          <%= if @search_query != "" or @filter_type != "all" or @filter_language != "all" or @filter_enabled != "all" do %>
+            No indexers match your filters. Try adjusting your search criteria.
+          <% else %>
+            No Cardigann definitions available. Click "Sync Definitions" to fetch indexers from the repository.
+          <% end %>
+        </span>
+      </div>
+    <% else %>
+      <div class="overflow-x-auto">
+        <table class="table table-zebra w-full">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Language</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <%= for definition <- @definitions do %>
+              <tr>
+                <td>
+                  <div class="flex flex-col">
+                    <span class="font-medium">{definition.name}</span>
+                    <%= if definition.description do %>
+                      <span class="text-sm text-base-content/70">{definition.description}</span>
+                    <% end %>
+                  </div>
+                </td>
+                <td>
+                  <span class={"badge badge-sm #{indexer_type_badge_class(definition.type)}"}>
+                    {definition.type}
+                  </span>
+                </td>
+                <td>
+                  <span class="badge badge-sm badge-ghost">{definition.language || "N/A"}</span>
+                </td>
+                <td>
+                  <div class="flex items-center gap-2">
+                    <span class={"badge badge-sm #{indexer_status_class(definition)}"}>
+                      {indexer_status_label(definition)}
+                    </span>
+                    <%= if needs_configuration?(definition) and definition.enabled do %>
+                      <div class="tooltip" data-tip="This indexer requires configuration">
+                        <.icon name="hero-exclamation-triangle" class="w-4 h-4 text-warning" />
+                      </div>
+                    <% end %>
+                  </div>
+                </td>
+                <td>
+                  <div class="flex gap-2">
+                    <%!-- Enable/Disable Toggle --%>
+                    <input
+                      type="checkbox"
+                      class="toggle toggle-success"
+                      checked={definition.enabled}
+                      phx-click="toggle_indexer"
+                      phx-value-id={definition.id}
+                      title={if definition.enabled, do: "Disable", else: "Enable"}
+                    />
+                    <%!-- Configure Button (only for private/semi-private) --%>
+                    <%= if definition.type in ["private", "semi-private"] do %>
+                      <button
+                        class="btn btn-sm btn-ghost"
+                        phx-click="configure_indexer"
+                        phx-value-id={definition.id}
+                        title="Configure"
+                      >
+                        <.icon name="hero-cog-6-tooth" class="w-4 h-4" />
+                      </button>
+                    <% end %>
+                  </div>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    <% end %>
+    <%!-- Configuration Modal --%>
+    <%= if assigns[:show_config_modal] do %>
+      <div class="modal modal-open">
+        <div class="modal-box max-w-2xl">
+          <h3 class="font-bold text-lg mb-4">
+            Configure {@configuring_definition.name}
+          </h3>
+
+          <div class="alert alert-info mb-4">
+            <.icon name="hero-information-circle" class="w-6 h-6" />
+            <span>
+              Private indexers require authentication. Enter your credentials below.
+            </span>
+          </div>
+
+          <.form for={%{}} id="config-form" phx-submit="save_config">
+            <div class="space-y-4">
+              <%!-- Username --%>
+              <div class="form-control">
+                <label class="label">
+                  <span class="label-text">Username</span>
+                </label>
+                <input
+                  type="text"
+                  name="config[username]"
+                  value={get_in(@configuring_definition.config || %{}, ["username"])}
+                  class="input input-bordered"
+                  placeholder="Your indexer username"
+                />
+              </div>
+              <%!-- Password --%>
+              <div class="form-control">
+                <label class="label">
+                  <span class="label-text">Password</span>
+                </label>
+                <input
+                  type="password"
+                  name="config[password]"
+                  value={get_in(@configuring_definition.config || %{}, ["password"])}
+                  class="input input-bordered"
+                  placeholder="Your indexer password"
+                />
+              </div>
+              <%!-- API Key (optional) --%>
+              <div class="form-control">
+                <label class="label">
+                  <span class="label-text">API Key (if applicable)</span>
+                </label>
+                <input
+                  type="password"
+                  name="config[api_key]"
+                  value={get_in(@configuring_definition.config || %{}, ["api_key"])}
+                  class="input input-bordered"
+                  placeholder="Optional API key"
+                />
+              </div>
+              <%!-- Cookie (optional) --%>
+              <div class="form-control">
+                <label class="label">
+                  <span class="label-text">Cookie String (if applicable)</span>
+                </label>
+                <textarea
+                  name="config[cookie]"
+                  rows="3"
+                  class="textarea textarea-bordered"
+                  placeholder="Optional cookie string for authentication"
+                >{get_in(@configuring_definition.config || %{}, ["cookie"])}</textarea>
+              </div>
+            </div>
+
+            <div class="modal-action">
+              <button type="button" class="btn" phx-click="close_config_modal">
+                Cancel
+              </button>
+              <button type="submit" class="btn btn-primary">Save Configuration</button>
+            </div>
+          </.form>
+        </div>
+      </div>
+    <% end %>
+  </div>
+</Layouts.app>

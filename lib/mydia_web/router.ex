@@ -44,14 +44,24 @@ defmodule MydiaWeb.Router do
     get "/health", HealthController, :check
   end
 
+  # First-time setup (no authentication required)
+  scope "/", MydiaWeb do
+    pipe_through :browser
+
+    live "/setup", FirstTimeSetupLive.Index, :index
+  end
+
   # Authentication routes
   scope "/auth", MydiaWeb do
     pipe_through :browser
 
-    # Local authentication (development only)
+    # Local authentication
     get "/login", SessionController, :new
     get "/local/login", SessionController, :new
     post "/local/login", SessionController, :create
+
+    # Auto-login (for first-time setup)
+    get "/auto-login", AuthController, :auto_login
 
     # OIDC authentication
     get "/:provider", AuthController, :request

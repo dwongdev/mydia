@@ -1,28 +1,39 @@
 defmodule MydiaWeb.SessionController do
   @moduledoc """
-  Local authentication controller for development environments.
+  Local authentication controller.
 
-  Provides username/password login as a fallback when OIDC is not configured.
-  Should only be used in development mode.
+  Provides username/password login when LOCAL_AUTH_ENABLED is true.
+  Can be disabled in favor of OIDC-only authentication.
   """
   use MydiaWeb, :controller
 
   alias Mydia.Accounts
   alias Mydia.Auth.Guardian
+  alias Mydia.Config
 
   @doc """
   Renders the login form.
   """
   def new(conn, _params) do
-    if Application.get_env(:mydia, :env) == :prod do
+    # Redirect to first-time setup if no users exist
+    # The setup page will offer both local admin creation and OIDC login options
+    if not Accounts.any_users_exist?() do
       conn
-      |> put_flash(:error, "Local authentication is not available in production")
-      |> redirect(to: "/")
+      |> redirect(to: ~p"/setup")
     else
-      render(conn, :new,
-        changeset: Accounts.change_user(%Mydia.Accounts.User{}),
-        oidc_configured: oidc_configured?()
-      )
+      # Check if local auth is enabled
+      config = Config.get()
+
+      if config.auth.local_enabled do
+        render(conn, :new,
+          changeset: Accounts.change_user(%Mydia.Accounts.User{}),
+          oidc_configured: oidc_configured?()
+        )
+      else
+        conn
+        |> put_flash(:error, "Local authentication is disabled")
+        |> redirect(to: "/")
+      end
     end
   end
 
@@ -38,9 +49,12 @@ defmodule MydiaWeb.SessionController do
   Handles local login with username and password.
   """
   def create(conn, %{"user" => %{"username" => username, "password" => password}}) do
-    if Application.get_env(:mydia, :env) == :prod do
+    # Check if local auth is enabled
+    config = Config.get()
+
+    if not config.auth.local_enabled do
       conn
-      |> put_flash(:error, "Local authentication is not available in production")
+      |> put_flash(:error, "Local authentication is disabled")
       |> redirect(to: "/")
     else
       case Accounts.get_user_by_username(username) do

@@ -77,6 +77,13 @@ defmodule Mydia.Accounts do
   end
 
   @doc """
+  Checks if any users exist in the system.
+  """
+  def any_users_exist? do
+    Repo.exists?(User)
+  end
+
+  @doc """
   Checks if at least one admin user exists in the system.
   """
   def admin_exists? do

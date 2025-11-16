@@ -97,10 +97,7 @@ openssl rand -base64 48
 
 2. Set up your container using Docker Compose (recommended) or Docker CLI
 3. Access the web interface at `http://your-server:4000`
-4. On first startup, a default admin user is automatically created:
-   - Check the container logs for the generated password
-   - Default username: `admin` (configurable via `ADMIN_USERNAME`)
-   - Or set `ADMIN_PASSWORD_HASH` to use a pre-hashed password
+4. On first visit, you'll be guided through creating the initial admin user
 5. Configure download clients and indexers in the Admin section
 
 ## 📦 Usage
@@ -382,9 +379,6 @@ See [DEPLOYMENT.md](docs/deployment/DEPLOYMENT.md) for advanced deployment topic
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `LOCAL_AUTH_ENABLED` | Enable local username/password auth | `true` |
-| `ADMIN_USERNAME` | Default admin username (created on first startup) | `admin` |
-| `ADMIN_EMAIL` | Default admin email (created on first startup) | `admin@mydia.local` |
-| `ADMIN_PASSWORD_HASH` | Pre-hashed admin password (bcrypt). If not set, a random password is generated and logged | - |
 | `OIDC_ENABLED` | Enable OIDC/OpenID Connect auth | `false` |
 | `OIDC_DISCOVERY_DOCUMENT_URI` | OIDC discovery endpoint URL | - |
 | `OIDC_CLIENT_ID` | OIDC client ID | - |
@@ -411,20 +405,19 @@ See [docs/OIDC_TESTING.md](docs/OIDC_TESTING.md) for detailed setup instructions
 
 **OIDC Auto-Promotion**: The first user to log in via OIDC is automatically promoted to admin role. Subsequent OIDC users are assigned the guest role by default.
 
-**Admin User Creation:**
+**First-Time Setup:**
 
-On first startup, if no admin user exists, Mydia automatically creates one:
-- **Random Password** (default): A secure random password is generated and displayed in the container logs
-- **Pre-set Password**: Use `ADMIN_PASSWORD_HASH` with a bcrypt hash for production deployments
+When you first access Mydia, you'll be guided through a setup flow to create the initial admin user. You can either:
+- Set a custom password of your choice
+- Generate a secure random password that will be displayed once
 
-Generate a bcrypt hash:
-```bash
-# Using Elixir/Mix (if available)
-mix run -e "IO.puts Bcrypt.hash_pwd_salt(\"your_secure_password\")"
+After the admin user is created, you'll be automatically logged in and can begin configuring your media library.
 
-# Using Python
-python3 -c "import bcrypt; print(bcrypt.hashpw(b'your_secure_password', bcrypt.gensalt()).decode())"
-```
+### Feature Flags
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ENABLE_PLAYBACK` | Enable media playback feature | `false` |
 
 ### Download Clients
 

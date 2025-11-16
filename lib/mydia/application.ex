@@ -59,7 +59,6 @@ defmodule Mydia.Application do
         validate_library_paths()
         # Sync library paths and populate relative paths for media files
         Mydia.Library.StartupSync.sync_all()
-        Mydia.Accounts.DefaultAdmin.ensure_admin_exists()
         # Clean up stale HLS session directories
         cleanup_stale_hls_sessions()
       end

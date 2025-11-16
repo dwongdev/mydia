@@ -1,0 +1,187 @@
+<div class="flex min-h-screen items-center justify-center bg-base-200">
+  <div class="card w-full max-w-2xl bg-base-100 shadow-xl">
+    <div class="card-body">
+      <%= if @generated_password do %>
+        <%!-- Password generated - show it once --%>
+        <h2 class="card-title text-2xl font-bold">Your Admin Password</h2>
+
+        <div class="alert alert-warning my-4">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="stroke-current shrink-0 h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+            />
+          </svg>
+          <div>
+            <h3 class="font-bold">Save this password now!</h3>
+            <div class="text-sm">
+              This password will only be shown once and cannot be recovered.
+            </div>
+          </div>
+        </div>
+
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text font-medium">Your Admin Password</span>
+          </label>
+          <div class="flex gap-2">
+            <input
+              type="text"
+              value={@generated_password}
+              class="input input-bordered w-full font-mono"
+              readonly
+              id="generated-password"
+            />
+            <button
+              type="button"
+              class="btn btn-square btn-outline"
+              phx-click={JS.dispatch("phx:copy", to: "#generated-password")}
+            >
+              <.icon name="hero-clipboard" class="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        <div class="card-actions justify-end mt-6">
+          <button type="button" phx-click="continue_to_app" class="btn btn-primary">
+            Continue to Mydia
+          </button>
+        </div>
+      <% else %>
+        <%!-- Setup form --%>
+        <h2 class="card-title text-2xl font-bold">Welcome to Mydia!</h2>
+
+        <%= if @local_auth_enabled and @oidc_configured do %>
+          <p class="text-sm text-base-content/70 mb-4">
+            Choose how you'd like to set up your admin account:
+          </p>
+        <% else %>
+          <p class="text-sm text-base-content/70 mb-4">
+            Let's create your admin account to get started.
+          </p>
+        <% end %>
+
+        <%= if @oidc_configured do %>
+          <div class="alert alert-info mb-4">
+            <.icon name="hero-information-circle" class="w-5 h-5" />
+            <div>
+              <div class="font-semibold">OIDC Authentication Available</div>
+              <div class="text-sm">
+                You can log in with OIDC - the first user will automatically become an admin.
+              </div>
+            </div>
+          </div>
+
+          <a href="/auth/oidc" class="btn btn-primary btn-outline w-full mb-4">
+            <.icon name="hero-arrow-right-on-rectangle" class="w-5 h-5" /> Log in with OIDC
+          </a>
+
+          <%= if @local_auth_enabled do %>
+            <div class="divider">OR</div>
+
+            <p class="text-sm text-base-content/70 mb-4">
+              Create a local admin account:
+            </p>
+          <% end %>
+        <% end %>
+
+        <%= if @local_auth_enabled do %>
+          <.form for={@form} id="setup-form" phx-submit="create_admin" phx-change="validate">
+            <div class="form-control">
+              <label class="label" for="user_username">
+                <span class="label-text">Username</span>
+              </label>
+              <.input field={@form[:username]} type="text" required autofocus />
+            </div>
+
+            <div class="form-control mt-4">
+              <label class="label" for="user_email">
+                <span class="label-text">Email</span>
+              </label>
+              <.input field={@form[:email]} type="email" required />
+            </div>
+
+            <div class="form-control mt-4">
+              <label class="label" for="user_display_name">
+                <span class="label-text">Display Name (Optional)</span>
+              </label>
+              <.input field={@form[:display_name]} type="text" />
+            </div>
+
+            <div class="divider">Password Setup</div>
+
+            <div class="form-control">
+              <label class="label cursor-pointer">
+                <span class="label-text">Choose how to set your password</span>
+              </label>
+              <div class="flex gap-4">
+                <label class="label cursor-pointer gap-2">
+                  <input
+                    type="radio"
+                    name="password_mode"
+                    value="custom"
+                    class="radio radio-primary"
+                    checked={@password_mode == :custom}
+                    phx-click="change_password_mode"
+                    phx-value-mode="custom"
+                  />
+                  <span class="label-text">Set my own password</span>
+                </label>
+                <label class="label cursor-pointer gap-2">
+                  <input
+                    type="radio"
+                    name="password_mode"
+                    value="random"
+                    class="radio radio-primary"
+                    checked={@password_mode == :random}
+                    phx-click="change_password_mode"
+                    phx-value-mode="random"
+                  />
+                  <span class="label-text">Generate random password</span>
+                </label>
+              </div>
+            </div>
+
+            <%= if @password_mode == :custom do %>
+              <div class="form-control mt-4">
+                <label class="label" for="user_password">
+                  <span class="label-text">Password</span>
+                </label>
+                <.input field={@form[:password]} type="password" required />
+              </div>
+            <% else %>
+              <div class="alert alert-info mt-4">
+                <.icon name="hero-information-circle" class="w-5 h-5" />
+                <span>
+                  A secure random password will be generated and displayed after creation.
+                </span>
+              </div>
+            <% end %>
+
+            <div class="card-actions justify-end mt-6">
+              <button type="submit" class="btn btn-primary">
+                Create Admin Account
+              </button>
+            </div>
+          </.form>
+        <% end %>
+
+        <%= if not @local_auth_enabled and not @oidc_configured do %>
+          <div class="alert alert-error">
+            <.icon name="hero-exclamation-triangle" class="w-5 h-5" />
+            <span>
+              No authentication methods are configured. Please enable LOCAL_AUTH_ENABLED or configure OIDC.
+            </span>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+  </div>
+</div>

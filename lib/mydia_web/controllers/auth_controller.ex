@@ -88,6 +88,35 @@ defmodule MydiaWeb.AuthController do
   end
 
   @doc """
+  Auto-login endpoint for first-time setup.
+
+  Accepts a valid Guardian token in the query params and sets up the session.
+  This is used after initial admin user creation to automatically log them in.
+  """
+  def auto_login(conn, %{"token" => token}) do
+    case Guardian.decode_and_verify(token) do
+      {:ok, claims} ->
+        case Accounts.get_user!(claims["sub"]) do
+          nil ->
+            conn
+            |> put_flash(:error, "Invalid authentication token")
+            |> redirect(to: "/")
+
+          user ->
+            conn
+            |> Guardian.Plug.sign_in(user)
+            |> put_session(:guardian_token, token)
+            |> redirect(to: "/")
+        end
+
+      {:error, _reason} ->
+        conn
+        |> put_flash(:error, "Invalid or expired authentication token")
+        |> redirect(to: "/")
+    end
+  end
+
+  @doc """
   Logs out the user by revoking the token and clearing the session.
   """
   def logout(conn, _params) do

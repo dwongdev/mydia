@@ -5,8 +5,8 @@
 export const testUsers = {
   admin: {
     username: 'admin',
-    password: 'admin',
-    email: 'admin@example.com',
+    password: 'adminpass',
+    email: 'admin@localhost',
     role: 'admin'
   },
   user: {

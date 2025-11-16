@@ -7,7 +7,14 @@
   "scripts": {
     "deploy": "cd .. && mix assets.deploy && rm -f _build/esbuild*",
     "screenshots": "node screenshots.js",
-    "populate-media": "node populate-media.js"
+    "populate-media": "node populate-media.js",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:chromium": "playwright test --project=chromium",
+    "test:e2e:firefox": "playwright test --project=firefox",
+    "test:e2e:webkit": "playwright test --project=webkit"
   },
   "dependencies": {
     "alpinejs": "^3.15.1",
@@ -20,9 +27,11 @@
     "@catppuccin/daisyui": "^2.1.1",
     "@playwright/test": "^1.56.1",
     "@tailwindcss/forms": "^0.5.7",
+    "@types/node": "^24.10.1",
     "autoprefixer": "^10.4.16",
     "daisyui": "^5.4.3",
     "postcss": "^8.4.32",
-    "tailwindcss": "^4.0.0"
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.9.3"
   }
 }

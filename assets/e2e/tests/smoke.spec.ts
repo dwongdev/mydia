@@ -44,14 +44,12 @@ test.describe('Application Smoke Test', () => {
     }, { timeout: 5000 });
 
     // Check if Phoenix LiveView JavaScript is present
-    // Either the Phoenix global or LiveView socket connection indicators
+    // Check for liveSocket (exposed on line 172 of app.js) or LiveView-specific elements
     const hasLiveView = await page.evaluate(() => {
-      // Check for Phoenix global or LiveView-specific elements
-      const hasPhoenix = typeof (window as any).Phoenix !== 'undefined';
       const hasLiveSocket = typeof (window as any).liveSocket !== 'undefined';
       const hasPhxElements = document.querySelector('[data-phx-main]') !== null;
 
-      return hasPhoenix || hasLiveSocket || hasPhxElements;
+      return hasLiveSocket || hasPhxElements;
     });
 
     expect(hasLiveView).toBe(true);

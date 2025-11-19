@@ -80,6 +80,7 @@ defmodule MydiaWeb.MediaLive.Show do
      |> assign(:manual_search_query, "")
      |> assign(:manual_search_context, nil)
      |> assign(:searching, false)
+     |> assign(:downloading_release_url, nil)
      |> assign(:min_seeders, 0)
      |> assign(:quality_filter, nil)
      |> assign(:sort_by, :quality)
@@ -1005,32 +1006,16 @@ defmodule MydiaWeb.MediaLive.Show do
         |> maybe_add_opt(:media_item_id, media_item_id)
         |> maybe_add_opt(:episode_id, episode_id)
 
-      case Downloads.initiate_download(search_result, opts) do
-        {:ok, _download} ->
-          Logger.info("Download initiated: #{title}")
-
-          {:noreply,
-           socket
-           |> put_flash(:info, "Download started: #{title}")
-           |> assign(:media_item, load_media_item(media_item.id))
-           |> assign(
-             :downloads_with_status,
-             load_downloads_with_status(load_media_item(media_item.id))
-           )
-           |> assign(:show_manual_search_modal, false)
-           |> assign(:manual_search_query, "")
-           |> assign(:manual_search_context, nil)
-           |> assign(:searching, false)
-           |> assign(:results_empty?, false)
-           |> stream(:search_results, [], reset: true)}
-
-        {:error, reason} ->
-          Logger.error("Failed to initiate download: #{inspect(reason)}")
-
-          {:noreply,
-           socket
-           |> put_flash(:error, "Failed to start download: #{inspect(reason)}")}
-      end
+      # Start async download to provide immediate UI feedback
+      {:noreply,
+       socket
+       |> assign(:downloading_release_url, download_url)
+       |> start_async(:download_release, fn ->
+         # Add small delay to ensure UI feedback is visible
+         result = Downloads.initiate_download(search_result, opts)
+         Process.sleep(400)
+         {result, title, media_item.id}
+       end)}
     else
       {:unauthorized, socket} -> {:noreply, socket}
     end
@@ -1520,6 +1505,40 @@ defmodule MydiaWeb.MediaLive.Show do
      socket
      |> assign(:renaming_files, false)
      |> put_flash(:error, "File rename failed unexpectedly")}
+  end
+
+  # Download from search async handlers
+
+  def handle_async(:download_release, {:ok, {{:ok, _download}, title, media_item_id}}, socket) do
+    Logger.info("Download initiated: #{title}")
+
+    {:noreply,
+     socket
+     |> assign(:downloading_release_url, nil)
+     |> put_flash(:info, "Download started: #{title}")
+     |> assign(:media_item, load_media_item(media_item_id))
+     |> assign(
+       :downloads_with_status,
+       load_downloads_with_status(load_media_item(media_item_id))
+     )}
+  end
+
+  def handle_async(:download_release, {:ok, {{:error, reason}, title, _media_item_id}}, socket) do
+    Logger.error("Failed to initiate download for #{title}: #{inspect(reason)}")
+
+    {:noreply,
+     socket
+     |> assign(:downloading_release_url, nil)
+     |> put_flash(:error, "Failed to start download: #{inspect(reason)}")}
+  end
+
+  def handle_async(:download_release, {:exit, reason}, socket) do
+    Logger.error("Download task crashed: #{inspect(reason)}")
+
+    {:noreply,
+     socket
+     |> assign(:downloading_release_url, nil)
+     |> put_flash(:error, "Download failed unexpectedly")}
   end
 
   # Subtitle async handlers

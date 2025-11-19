@@ -527,6 +527,7 @@ defmodule MydiaWeb.MediaLive.Show.Modals do
   attr :media_item, :map, required: true
   attr :manual_search_query, :string, required: true
   attr :searching, :boolean, required: true
+  attr :downloading_release_url, :string, default: nil
   attr :results_empty?, :boolean, required: true
   attr :streams, :map, required: true
   attr :quality_filter, :string, default: nil
@@ -677,7 +678,6 @@ defmodule MydiaWeb.MediaLive.Show.Modals do
             <div class="overflow-x-auto">
               <table
                 id="manual-search-results"
-                phx-update="stream"
                 class="table table-zebra w-full bg-base-100 shadow-lg"
               >
                 <thead>
@@ -689,7 +689,7 @@ defmodule MydiaWeb.MediaLive.Show.Modals do
                     <th class="w-32">Actions</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody id="manual-search-results-body" phx-update="stream">
                   <tr
                     :for={{id, result} <- @streams.search_results}
                     id={id}
@@ -759,7 +759,10 @@ defmodule MydiaWeb.MediaLive.Show.Modals do
                     <%!-- Actions Column --%>
                     <td>
                       <button
-                        class="btn btn-primary btn-sm"
+                        class={[
+                          "btn btn-primary btn-sm",
+                          @downloading_release_url == result.download_url && "btn-disabled"
+                        ]}
                         phx-click="download_from_search"
                         phx-value-download-url={result.download_url}
                         phx-value-title={result.title}
@@ -769,8 +772,13 @@ defmodule MydiaWeb.MediaLive.Show.Modals do
                         phx-value-leechers={result.leechers || 0}
                         phx-value-quality={get_search_quality_badge(result) || "Unknown"}
                         title="Download this release"
+                        disabled={@downloading_release_url == result.download_url}
                       >
-                        <.icon name="hero-arrow-down-tray" class="w-4 h-4" /> Download
+                        <%= if @downloading_release_url == result.download_url do %>
+                          <span class="loading loading-spinner loading-xs"></span> Downloading...
+                        <% else %>
+                          <.icon name="hero-arrow-down-tray" class="w-4 h-4" /> Download
+                        <% end %>
                       </button>
                     </td>
                   </tr>

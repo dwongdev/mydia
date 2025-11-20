@@ -39,6 +39,10 @@ WORKDIR /app
 # Copy the release from the builder stage
 COPY --from=builder --chown=relay:relay /app/_build/prod/rel/metadata_relay ./
 
+# Copy entrypoint script
+COPY --chown=relay:relay docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
 # Set environment
 ENV MIX_ENV=prod
 ENV PORT=4001
@@ -53,5 +57,5 @@ EXPOSE 4001
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:4001/health || exit 1
 
-# Run the application
-CMD ["./bin/metadata_relay", "start"]
+# Run the application with automatic migrations
+CMD ["/app/docker-entrypoint.sh"]

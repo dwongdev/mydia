@@ -389,6 +389,8 @@ For manual deployments or initial setup, you can deploy directly using the Fly C
    fly deploy
    ```
 
+   Database migrations will run automatically on container startup.
+
 5. **Verify deployment**:
    ```bash
    fly open /health
@@ -409,6 +411,8 @@ After the initial setup, deploy updates with:
 ```bash
 fly deploy
 ```
+
+Database migrations will run automatically on container startup.
 
 #### Monitoring
 
@@ -550,6 +554,50 @@ All TVDB endpoints support query parameters compatible with the TVDB API v4.
 - `GET /tvdb/episodes/:id/extended` - Get extended episode details
 - `GET /tvdb/artwork/:id` - Get artwork details
 
+### Error Tracking Dashboard
+
+The metadata-relay includes an integrated error tracking dashboard powered by ErrorTracker:
+
+```
+GET /errors
+```
+
+**Features:**
+- View all errors and exceptions from the metadata-relay service
+- See crash reports submitted by Mydia instances
+- Browse error details including stacktraces and context
+- Group similar errors together
+- Track error frequency and trends
+
+**Access:** Navigate to `https://your-metadata-relay-domain.com/errors` in your browser.
+
+**Note:** Database migrations run automatically on container startup, so the dashboard is available immediately after deployment.
+
+### Crash Report Ingestion
+
+Mydia instances can submit crash reports to the metadata-relay:
+
+```
+POST /crashes/report
+```
+
+**Request body:**
+```json
+{
+  "error_type": "RuntimeError",
+  "error_message": "Something went wrong",
+  "stacktrace": [
+    {"file": "lib/mydia.ex", "line": 42, "function": "process"}
+  ],
+  "version": "1.0.0",
+  "environment": "production",
+  "occurred_at": "2025-11-19T23:00:00Z",
+  "metadata": {}
+}
+```
+
+**Rate limiting:** 10 requests per minute per IP address.
+
 ## Project Structure
 
 ```
@@ -557,7 +605,12 @@ metadata-relay/
 ├── lib/
 │   ├── metadata_relay/
 │   │   ├── application.ex     # OTP application supervisor
+│   │   ├── release.ex         # Release tasks (migrations)
 │   │   └── router.ex          # HTTP router with Plug
+│   ├── metadata_relay_web/
+│   │   ├── components/
+│   │   │   └── layouts/       # Error page templates
+│   │   └── router.ex          # Phoenix router for dashboard
 │   └── metadata_relay.ex      # Main module
 ├── config/
 │   ├── config.exs             # Base configuration
@@ -565,15 +618,32 @@ metadata-relay/
 │   ├── test.exs               # Test config
 │   ├── prod.exs               # Production config
 │   └── runtime.exs            # Runtime environment config
+├── priv/
+│   └── repo/
+│       └── migrations/        # Database migrations
 ├── test/
 │   └── test_helper.exs        # Test configuration
 ├── mix.exs                    # Project definition and dependencies
 ├── Dockerfile                 # Container image definition
+├── docker-entrypoint.sh       # Startup script with auto-migrations
 ├── docker-compose.yml         # Local development setup
 └── README.md                  # This file
 ```
 
 ## Monitoring and Logging
+
+### Error Tracking
+
+The metadata-relay includes integrated error tracking with the ErrorTracker dashboard:
+
+- **Dashboard URL**: `https://your-domain.com/errors`
+- **Automatic setup**: Database migrations run automatically on container startup
+- **Features**:
+  - Track all errors and exceptions from the relay service
+  - Receive and view crash reports from Mydia instances
+  - Browse error details with full stacktraces
+  - Group similar errors together
+  - Monitor error frequency and trends
 
 ### Application Logging
 

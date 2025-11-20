@@ -430,7 +430,8 @@ defmodule Mydia.Indexers.CardigannSearchEngine do
     base_opts = [
       headers: request_params.headers,
       receive_timeout: 30_000,
-      redirect: definition.follow_redirect
+      redirect: definition.follow_redirect,
+      retry: false
     ]
 
     # Add query params for GET, body for POST

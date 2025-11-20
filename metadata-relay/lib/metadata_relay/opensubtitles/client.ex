@@ -97,7 +97,7 @@ defmodule MetadataRelay.OpenSubtitles.Client do
   """
   def post(path, body, opts \\ []) do
     with {:ok, client} <- new() do
-      case Req.post(client, url: path, json: body, opts) do
+      case Req.post(client, [url: path, json: body] ++ opts) do
         {:ok, %{status: status, body: response_body}} when status in 200..299 ->
           {:ok, response_body}
 

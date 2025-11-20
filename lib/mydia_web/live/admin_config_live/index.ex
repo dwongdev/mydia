@@ -1235,33 +1235,35 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     require Logger
     Logger.debug("validate_config_setting called with attrs: #{inspect(attrs)}")
 
+    # Include category in types so it gets included in apply_changes result
     types = %{
       key: :string,
-      value: :string
+      value: :string,
+      category: :string
     }
 
     # Category is already an atom from category_string_to_atom/1,
-    # so we don't cast it - we add it directly to avoid :atom.cast/1 error
-    changeset =
-      {%{}, types}
-      |> Ecto.Changeset.cast(attrs, Map.keys(types))
-
-    Logger.debug("After cast, changeset.changes: #{inspect(changeset.changes)}")
-
-    # Manually add category to changes since it's already an atom
-    # Only add if category exists and is not nil
-    changeset =
+    # Convert it to string before casting to avoid issues
+    attrs_with_string_category =
       case Map.get(attrs, :category) do
         nil ->
           Logger.error("Category is nil in attrs!")
-          changeset
+          attrs
+
+        category when is_atom(category) ->
+          Logger.debug("Converting category atom to string: #{inspect(category)}")
+          Map.put(attrs, :category, to_string(category))
 
         category ->
-          Logger.debug("Adding category to changes: #{inspect(category)}")
-          %{changeset | changes: Map.put(changeset.changes, :category, category)}
+          Logger.debug("Category is already a string: #{inspect(category)}")
+          attrs
       end
 
-    Logger.debug("Final changeset.changes before validation: #{inspect(changeset.changes)}")
+    changeset =
+      {%{}, types}
+      |> Ecto.Changeset.cast(attrs_with_string_category, Map.keys(types))
+
+    Logger.debug("After cast, changeset.changes: #{inspect(changeset.changes)}")
 
     # Only require key and category to match ConfigSetting schema validation
     # Value is optional and can be nil/empty for some settings
@@ -1297,7 +1299,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     key = Map.get(attrs_map, :key) || Map.get(attrs_map, "key")
 
     # Convert atom keys to string keys for Ecto.Changeset.cast/3
-    # Keep category as atom since ConfigSetting schema uses Ecto.Enum which handles atoms
+    # Category is already a string from validate_config_setting
     string_attrs = %{
       "key" => Map.get(attrs_map, :key),
       "value" => Map.get(attrs_map, :value),

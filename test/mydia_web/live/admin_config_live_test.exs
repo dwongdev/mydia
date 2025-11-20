@@ -356,20 +356,51 @@ defmodule MydiaWeb.AdminConfigLiveTest do
     test "toggles authentication settings without :atom.cast/1 error", %{view: view} do
       # This test verifies the fix for task-228
       # Previously, toggling auth.local_enabled would cause :atom.cast/1 error
-      result =
+      html =
         view
-        |> element("#settings-form-Authentication")
-        |> render_change(%{
-          "category" => "Authentication",
-          "settings" => %{
-            "auth.local_enabled" => "true"
-          }
-        })
+        |> element("input[type='checkbox'][phx-value-key='auth.local_enabled']")
+        |> render_click()
 
-      # Should not crash with UndefinedFunctionError
-      assert result
+      # Should not crash with UndefinedFunctionError or :atom.cast/1 error
+      assert html =~ "Setting updated successfully"
       # Verify the form still renders without error
       assert has_element?(view, "#settings-form-Authentication")
+    end
+
+    test "toggles crash reporting setting without category validation error", %{
+      view: view,
+      user: user
+    } do
+      # This test verifies the fix for task-236
+      # Previously, toggling crash_reporting.enabled would cause "Category can't be blank" error
+
+      # First, ensure there's no existing crash reporting setting
+      case Settings.get_config_setting_by_key("crash_reporting.enabled") do
+        nil -> :ok
+        existing -> Settings.delete_config_setting(existing)
+      end
+
+      # Click the crash reporting toggle
+      html =
+        view
+        |> element("input[type='checkbox'][phx-value-key='crash_reporting.enabled']")
+        |> render_click()
+
+      # Verify no "Category can't be blank" error
+      refute html =~ "Category can&#39;t be blank",
+             "Should not have 'Category can't be blank' error"
+
+      refute html =~ "Category can't be blank", "Should not have 'Category can't be blank' error"
+
+      # Verify success message is present
+      assert html =~ "Setting updated successfully", "Should have success message"
+      assert has_element?(view, ".alert-info", "Setting updated successfully")
+
+      # Verify the setting was created in the database
+      setting = Settings.get_config_setting_by_key("crash_reporting.enabled")
+      assert setting != nil
+      assert setting.category == :crash_reporting
+      assert setting.updated_by_id == user.id
     end
   end
 

@@ -114,7 +114,7 @@ defmodule Mydia.Library do
   """
   def verify_media_file(%MediaFile{} = media_file) do
     media_file
-    |> Ecto.Changeset.change(verified_at: DateTime.utc_now())
+    |> Ecto.Changeset.change(verified_at: DateTime.utc_now() |> DateTime.truncate(:second))
     |> Repo.update()
   end
 
@@ -1035,7 +1035,7 @@ defmodule Mydia.Library do
             hdr_format:
               file_metadata.hdr_format || Map.get(filename_metadata.quality, :hdr_format),
             size: file_metadata.size || File.stat!(absolute_path).size,
-            verified_at: DateTime.utc_now()
+            verified_at: DateTime.utc_now() |> DateTime.truncate(:second)
           }
 
           case update_media_file(media_file, update_attrs) do
@@ -1127,4 +1127,108 @@ defmodule Mydia.Library do
   defp maybe_preload(query, nil), do: query
   defp maybe_preload(query, []), do: query
   defp maybe_preload(query, preloads), do: preload(query, ^preloads)
+
+  ## Import Sessions
+
+  alias Mydia.Library.ImportSession
+
+  @doc """
+  Creates a new import session for a user.
+  """
+  def create_import_session(attrs \\ %{}) do
+    attrs
+    |> ImportSession.create_changeset()
+    |> Repo.insert()
+  end
+
+  @doc """
+  Gets the active import session for a user.
+  Returns nil if no active session exists.
+  """
+  def get_active_import_session(user_id) do
+    ImportSession
+    |> where([s], s.user_id == ^user_id and s.status == :active)
+    |> order_by([s], desc: s.updated_at)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  @doc """
+  Gets an import session by ID.
+  Returns nil if not found.
+  """
+  def get_import_session(id) do
+    Repo.get(ImportSession, id)
+  end
+
+  @doc """
+  Gets an import session by ID.
+  Raises Ecto.NoResultsError if not found.
+  """
+  def get_import_session!(id) do
+    Repo.get!(ImportSession, id)
+  end
+
+  @doc """
+  Updates an import session.
+  """
+  def update_import_session(%ImportSession{} = session, attrs) do
+    session
+    |> ImportSession.changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Marks an import session as completed.
+  """
+  def complete_import_session(%ImportSession{} = session) do
+    session
+    |> ImportSession.complete_changeset()
+    |> Repo.update()
+  end
+
+  @doc """
+  Abandons all active import sessions for a user.
+  This is called when starting a new import session.
+  """
+  def abandon_active_import_sessions(user_id) do
+    from(s in ImportSession,
+      where: s.user_id == ^user_id and s.status == :active
+    )
+    |> Repo.update_all(
+      set: [status: :abandoned, updated_at: DateTime.utc_now() |> DateTime.truncate(:second)]
+    )
+  end
+
+  @doc """
+  Deletes expired import sessions.
+  Returns the count of deleted sessions.
+  """
+  def delete_expired_import_sessions do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    {count, _} =
+      from(s in ImportSession,
+        where: s.expires_at < ^now
+      )
+      |> Repo.delete_all()
+
+    {:ok, count}
+  end
+
+  @doc """
+  Deletes completed import sessions older than the given number of days.
+  Returns the count of deleted sessions.
+  """
+  def delete_old_completed_sessions(days \\ 7) do
+    cutoff = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.add(-days, :day)
+
+    {count, _} =
+      from(s in ImportSession,
+        where: s.status == :completed and s.completed_at < ^cutoff
+      )
+      |> Repo.delete_all()
+
+    {:ok, count}
+  end
 end

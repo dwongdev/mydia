@@ -250,7 +250,9 @@ config :mydia, Oban,
        # Sync Cardigann definitions daily at 3 AM
        {"0 3 * * *", Mydia.Jobs.DefinitionSync},
        # Check Cardigann indexer health every hour
-       {"0 * * * *", Mydia.Jobs.CardigannHealthCheck}
+       {"0 * * * *", Mydia.Jobs.CardigannHealthCheck},
+       # Clean up old import sessions daily at 4 AM
+       {"0 4 * * *", Mydia.Jobs.ImportSessionCleanup}
      ]}
   ]
 

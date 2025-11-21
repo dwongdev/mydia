@@ -230,7 +230,7 @@ defmodule Mydia.Library.MetadataMatcher do
             # Return partial match result
             series_metadata =
               MediaMetadata.from_api_response(
-                series,
+                Map.from_struct(series),
                 :tv_show,
                 to_string(series.provider_id)
               )
@@ -408,7 +408,7 @@ defmodule Mydia.Library.MetadataMatcher do
 
         movie_metadata =
           MediaMetadata.from_api_response(
-            best_match,
+            Map.from_struct(best_match),
             :movie,
             to_string(best_match.provider_id)
           )
@@ -452,7 +452,7 @@ defmodule Mydia.Library.MetadataMatcher do
 
         tv_metadata =
           MediaMetadata.from_api_response(
-            best_match,
+            Map.from_struct(best_match),
             :tv_show,
             to_string(best_match.provider_id)
           )

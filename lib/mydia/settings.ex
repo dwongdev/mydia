@@ -104,11 +104,77 @@ defmodule Mydia.Settings do
 
   @doc """
   Updates a quality profile.
+
+  If quality_standards are changed, automatically triggers re-evaluation of all
+  associated media files in the background to ensure scores reflect the new criteria.
+
+  ## Options
+    - `:skip_reevaluation` - Skip automatic re-evaluation (default: false)
   """
-  def update_quality_profile(%QualityProfile{} = quality_profile, attrs) do
-    quality_profile
-    |> QualityProfile.changeset(attrs)
-    |> Repo.update()
+  def update_quality_profile(%QualityProfile{} = quality_profile, attrs, opts \\ []) do
+    skip_reevaluation = Keyword.get(opts, :skip_reevaluation, false)
+
+    changeset = QualityProfile.changeset(quality_profile, attrs)
+
+    # Check if quality_standards are changing
+    quality_standards_changed? =
+      Ecto.Changeset.get_change(changeset, :quality_standards) != nil
+
+    case Repo.update(changeset) do
+      {:ok, updated_profile} = result ->
+        # Trigger re-evaluation if quality_standards changed and not skipped
+        if quality_standards_changed? and not skip_reevaluation do
+          trigger_profile_reevaluation(updated_profile.id)
+        end
+
+        result
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Triggers background re-evaluation of all files associated with a quality profile.
+
+  This is called automatically when a profile's quality_standards are updated.
+  It spawns a background task to re-evaluate all associated files without blocking.
+
+  ## Parameters
+    - `profile_id` - ID of the profile to re-evaluate
+
+  ## Returns
+    - `:ok` - Re-evaluation task spawned successfully
+  """
+  def trigger_profile_reevaluation(profile_id) do
+    require Logger
+
+    Logger.info("Triggering background re-evaluation for quality profile",
+      profile_id: profile_id
+    )
+
+    # Spawn a supervised task to re-evaluate files
+    Task.Supervisor.start_child(Mydia.TaskSupervisor, fn ->
+      alias Mydia.Settings.QualityProfileEngine
+
+      case QualityProfileEngine.reevaluate_profile_files(profile_id) do
+        {:ok, summary} ->
+          Logger.info("Quality profile re-evaluation completed",
+            profile_id: profile_id,
+            processed: summary.processed,
+            updated: summary.updated,
+            errors: length(summary.errors)
+          )
+
+        {:error, reason} ->
+          Logger.error("Quality profile re-evaluation failed",
+            profile_id: profile_id,
+            reason: inspect(reason)
+          )
+      end
+    end)
+
+    :ok
   end
 
   @doc """

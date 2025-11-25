@@ -130,6 +130,23 @@ const PathAutocomplete = {
   },
 };
 
+// File download hook for quality profile exports
+const DownloadFile = {
+  mounted() {
+    this.handleEvent("download_file", ({ content, filename, mime_type }) => {
+      const blob = new Blob([content], { type: mime_type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+  },
+};
+
 // Initialize Alpine.js FIRST (before LiveView)
 window.Alpine = Alpine;
 
@@ -145,7 +162,13 @@ const csrfToken = document
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: { _csrf_token: csrfToken },
-  hooks: { ...colocatedHooks, ThemeToggle, VideoPlayer, PathAutocomplete },
+  hooks: {
+    ...colocatedHooks,
+    ThemeToggle,
+    VideoPlayer,
+    PathAutocomplete,
+    DownloadFile,
+  },
 });
 
 // Show progress bar on live navigation and form submits

@@ -521,7 +521,7 @@ defmodule MydiaWeb.MediaLive.Show.Modals do
 
   @doc """
   Manual search modal for searching and downloading content manually.
-  Large modal with search results, filters, and sorting.
+  Uses DaisyUI list components for a cleaner, more scannable UI.
   """
   attr :manual_search_context, :map, default: nil
   attr :media_item, :map, required: true
@@ -548,22 +548,22 @@ defmodule MydiaWeb.MediaLive.Show.Modals do
 
     ~H"""
     <div class="modal modal-open">
-      <div class="modal-box max-w-7xl h-[90vh] flex flex-col p-0">
+      <div class="modal-box max-w-4xl h-[90vh] flex flex-col p-0">
         <%!-- Modal Header --%>
-        <div class="sticky top-0 z-10 bg-base-100 border-b border-base-300 p-6">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-2xl font-bold">
+        <div class="sticky top-0 z-10 bg-base-100 border-b border-base-300 p-4 sm:p-6">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-xl sm:text-2xl font-bold">
               Manual Search
               <%= if @manual_search_context do %>
                 <%= case @manual_search_context.type do %>
                   <% :episode -> %>
-                    <span class="text-base text-base-content/70">for Episode</span>
+                    <span class="text-sm sm:text-base text-base-content/70">for Episode</span>
                   <% :season -> %>
-                    <span class="text-base text-base-content/70">
+                    <span class="text-sm sm:text-base text-base-content/70">
                       for {@media_item.title} - Season {@manual_search_context.season_number}
                     </span>
                   <% :media_item -> %>
-                    <span class="text-base text-base-content/70">
+                    <span class="text-sm sm:text-base text-base-content/70">
                       for {@media_item.title}
                     </span>
                   <% _ -> %>
@@ -581,76 +581,50 @@ defmodule MydiaWeb.MediaLive.Show.Modals do
           </div>
           <%!-- Search Query Display --%>
           <div class="flex items-center gap-2 text-sm">
-            <.icon name="hero-magnifying-glass" class="w-5 h-5 text-base-content/60" />
+            <.icon name="hero-magnifying-glass" class="w-4 h-4 text-base-content/60" />
             <span class="text-base-content/70">Searching for:</span>
-            <span class="font-semibold">{@manual_search_query}</span>
+            <span class="font-semibold truncate">{@manual_search_query}</span>
           </div>
         </div>
-        <%!-- Modal Body --%>
-        <div class="flex-1 overflow-y-auto p-6">
-          <%!-- Filters and Sort --%>
-          <%= if !@searching do %>
-            <div class="flex flex-col lg:flex-row gap-4 mb-6">
-              <%!-- Filters --%>
-              <div class="card bg-base-200 shadow flex-1">
-                <div class="card-body p-4">
-                  <h4 class="font-semibold mb-3 flex items-center gap-2">
-                    <.icon name="hero-funnel" class="w-5 h-5" /> Filters
-                  </h4>
-                  <form phx-change="filter_search" class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <%!-- Quality filter --%>
-                    <div class="form-control">
-                      <label class="label label-text text-xs">Quality</label>
-                      <select name="quality" class="select select-bordered select-sm">
-                        <option value="" selected={is_nil(@quality_filter)}>All</option>
-                        <option value="720p" selected={@quality_filter == "720p"}>720p</option>
-                        <option value="1080p" selected={@quality_filter == "1080p"}>1080p</option>
-                        <option value="2160p" selected={@quality_filter in ["2160p", "4k"]}>
-                          4K (2160p)
-                        </option>
-                      </select>
-                    </div>
-                    <%!-- Min seeders filter --%>
-                    <div class="form-control">
-                      <label class="label label-text text-xs">Min Seeders</label>
-                      <input
-                        type="number"
-                        name="min_seeders"
-                        value={@min_seeders}
-                        min="0"
-                        class="input input-bordered input-sm"
-                        placeholder="0"
-                      />
-                    </div>
-                  </form>
+        <%!-- Filters Bar (compact) --%>
+        <%= if !@searching do %>
+          <div class="bg-base-200/50 border-b border-base-300 px-4 py-3">
+            <div class="flex flex-wrap items-center gap-3">
+              <form phx-change="filter_search" class="flex flex-wrap items-center gap-3">
+                <select name="quality" class="select select-bordered select-sm">
+                  <option value="" selected={is_nil(@quality_filter)}>All Quality</option>
+                  <option value="720p" selected={@quality_filter == "720p"}>720p</option>
+                  <option value="1080p" selected={@quality_filter == "1080p"}>1080p</option>
+                  <option value="2160p" selected={@quality_filter in ["2160p", "4k"]}>4K</option>
+                </select>
+                <div class="join">
+                  <span class="join-item btn btn-sm btn-ghost no-animation pointer-events-none">
+                    Min Seeds
+                  </span>
+                  <input
+                    type="number"
+                    name="min_seeders"
+                    value={@min_seeders}
+                    min="0"
+                    class="input input-bordered input-sm w-16 join-item"
+                    placeholder="0"
+                  />
                 </div>
-              </div>
-              <%!-- Sort options --%>
-              <div class="card bg-base-200 shadow lg:w-64">
-                <div class="card-body p-4">
-                  <h4 class="font-semibold mb-3 flex items-center gap-2">
-                    <.icon name="hero-arrows-up-down" class="w-5 h-5" /> Sort By
-                  </h4>
-                  <form phx-change="sort_search">
-                    <select name="sort_by" class="select select-bordered select-sm w-full">
-                      <option value="quality" selected={@sort_by == :quality}>
-                        Score (Best First)
-                      </option>
-                      <option value="seeders" selected={@sort_by == :seeders}>
-                        Seeders (Most First)
-                      </option>
-                      <option value="size" selected={@sort_by == :size}>
-                        Size (Largest First)
-                      </option>
-                      <option value="date" selected={@sort_by == :date}>
-                        Date (Newest First)
-                      </option>
-                    </select>
-                  </form>
-                </div>
-              </div>
+              </form>
+              <div class="flex-1"></div>
+              <form phx-change="sort_search">
+                <select name="sort_by" class="select select-bordered select-sm">
+                  <option value="quality" selected={@sort_by == :quality}>Best Score</option>
+                  <option value="seeders" selected={@sort_by == :seeders}>Most Seeds</option>
+                  <option value="size" selected={@sort_by == :size}>Largest</option>
+                  <option value="date" selected={@sort_by == :date}>Newest</option>
+                </select>
+              </form>
             </div>
-          <% end %>
+          </div>
+        <% end %>
+        <%!-- Modal Body --%>
+        <div class="flex-1 overflow-y-auto">
           <%!-- Loading State --%>
           <%= if @searching do %>
             <div class="flex flex-col items-center justify-center py-16">
@@ -665,155 +639,110 @@ defmodule MydiaWeb.MediaLive.Show.Modals do
           <% end %>
           <%!-- Empty State (no results) --%>
           <%= if @results_empty? && !@searching do %>
-            <div class="flex flex-col items-center justify-center py-16 text-center">
-              <.icon name="hero-exclamation-circle" class="w-20 h-20 text-base-content/20 mb-6" />
-              <h3 class="text-2xl font-semibold text-base-content/70 mb-3">
+            <div class="flex flex-col items-center justify-center py-16 text-center px-4">
+              <.icon name="hero-exclamation-circle" class="w-16 h-16 text-base-content/20 mb-4" />
+              <h3 class="text-xl font-semibold text-base-content/70 mb-2">
                 No Results Found
               </h3>
-              <p class="text-base-content/50 max-w-md mb-4">
+              <p class="text-base-content/50 max-w-sm mb-4">
                 We couldn't find any releases matching
                 "<span class="font-semibold">{@manual_search_query}</span>"
               </p>
               <div class="text-sm text-base-content/60">
-                <p>Try:</p>
-                <ul class="list-disc list-inside mt-2 space-y-1">
-                  <li>Using different keywords or spelling</li>
-                  <li>Removing or adjusting filters</li>
-                  <li>Checking that your indexers are configured and enabled</li>
-                </ul>
+                <p>Try different keywords, adjusting filters, or checking your indexers.</p>
               </div>
             </div>
           <% end %>
-          <%!-- Results Table --%>
+          <%!-- Results List --%>
           <%= if !@searching && !@results_empty? do %>
-            <div class="overflow-x-auto">
-              <table
-                id="manual-search-results"
-                class="table table-zebra w-full bg-base-100 shadow-lg"
+            <ul id="manual-search-results" class="list bg-base-100" phx-update="stream">
+              <li
+                :for={{id, result} <- @streams.search_results}
+                id={id}
+                class="list-row hover:bg-base-200/50 transition-colors px-4 py-3 border-b border-base-200 last:border-b-0"
               >
-                <thead>
-                  <tr class="bg-base-300">
-                    <th class="w-16">Score</th>
-                    <th class="w-2/5">Release Title</th>
-                    <th class="w-1/6">Quality & Size</th>
-                    <th class="w-1/6 hidden md:table-cell">Health</th>
-                    <th class="w-1/6 hidden lg:table-cell">Source</th>
-                    <th class="w-32">Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="manual-search-results-body" phx-update="stream">
-                  <tr
-                    :for={{id, result} <- @streams.search_results}
-                    id={id}
-                    class="hover cursor-pointer"
+                <%!-- Score (prominently displayed) --%>
+                <% score = profile_score(result, @quality_profile, @media_type) %>
+                <div class="flex items-center justify-center">
+                  <div
+                    class={[
+                      "radial-progress text-sm font-bold",
+                      score >= 80 && "text-success",
+                      score >= 50 && score < 80 && "text-warning",
+                      score < 50 && "text-error"
+                    ]}
+                    style={"--value:#{trunc(score)}; --size:3rem; --thickness:4px;"}
+                    role="progressbar"
+                    title={"Profile Score: #{Float.round(score, 1)}"}
                   >
-                    <%!-- Score Column --%>
-                    <td>
-                      <% score = profile_score(result, @quality_profile, @media_type) %>
-                      <div
-                        class={[
-                          "radial-progress text-xs font-bold",
-                          score >= 80 && "text-success",
-                          score >= 50 && score < 80 && "text-warning",
-                          score < 50 && "text-error"
-                        ]}
-                        style={"--value:#{trunc(score)}; --size:2.5rem;"}
-                        role="progressbar"
-                        title={"Profile Score: #{Float.round(score, 1)}"}
-                      >
-                        {trunc(score)}
-                      </div>
-                    </td>
-                    <%!-- Title Column --%>
-                    <td>
-                      <div class="flex flex-col">
-                        <div class="font-semibold text-sm line-clamp-2" title={result.title}>
-                          {result.title}
-                        </div>
-                        <%!-- Mobile-only compact info --%>
-                        <div class="flex gap-2 mt-2 md:hidden flex-wrap">
-                          <span class="badge badge-ghost badge-sm">
-                            <.icon name="hero-arrow-up" class="w-3 h-3 mr-1" /> {result.seeders}
-                            <span class="mx-1 text-base-content/30">/</span>
-                            <.icon name="hero-arrow-down" class="w-3 h-3 mr-1" /> {result.leechers}
-                          </span>
-                          <span class="badge badge-outline badge-sm">{result.indexer}</span>
-                        </div>
-                      </div>
-                    </td>
-                    <%!-- Quality & Size Column --%>
-                    <td>
-                      <div class="flex flex-col gap-1">
-                        <span class="badge badge-primary badge-sm">
-                          {get_search_quality_badge(result)}
-                        </span>
-                        <span class="text-xs font-mono text-base-content/70">
-                          {format_search_size(result)}
-                        </span>
-                      </div>
-                    </td>
-                    <%!-- Health Column (Seeders/Peers with indicator) --%>
-                    <td class="hidden md:table-cell">
-                      <div class="flex items-center gap-3">
-                        <%!-- Health indicator --%>
-                        <div
-                          class="radial-progress text-xs"
-                          style={"--value:#{trunc(search_health_score(result) * 100)}; --size:2.5rem;"}
-                          role="progressbar"
-                        >
-                          {trunc(search_health_score(result) * 100)}%
-                        </div>
-                        <%!-- Seeders/Peers --%>
-                        <div class="flex flex-col text-xs">
-                          <div class="flex items-center gap-1">
-                            <.icon name="hero-arrow-up" class="w-3 h-3 text-success" />
-                            <span class="font-semibold text-success">{result.seeders}</span>
-                          </div>
-                          <div class="flex items-center gap-1">
-                            <.icon name="hero-arrow-down" class="w-3 h-3 text-info" />
-                            <span class="text-base-content/70">{result.leechers}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <%!-- Source Column (Indexer + Date) --%>
-                    <td class="hidden lg:table-cell">
-                      <div class="flex flex-col gap-1">
-                        <span class="badge badge-outline badge-sm">{result.indexer}</span>
-                        <span class="text-xs text-base-content/60">
-                          {format_search_date(result.published_at)}
-                        </span>
-                      </div>
-                    </td>
-                    <%!-- Actions Column --%>
-                    <td>
-                      <button
-                        class={[
-                          "btn btn-primary btn-sm",
-                          @downloading_release_url == result.download_url && "btn-disabled"
-                        ]}
-                        phx-click="download_from_search"
-                        phx-value-download-url={result.download_url}
-                        phx-value-title={result.title}
-                        phx-value-indexer={result.indexer}
-                        phx-value-size={result.size || 0}
-                        phx-value-seeders={result.seeders || 0}
-                        phx-value-leechers={result.leechers || 0}
-                        phx-value-quality={get_search_quality_badge(result) || "Unknown"}
-                        title="Download this release"
-                        disabled={@downloading_release_url == result.download_url}
-                      >
-                        <%= if @downloading_release_url == result.download_url do %>
-                          <span class="loading loading-spinner loading-xs"></span> Downloading...
-                        <% else %>
-                          <.icon name="hero-arrow-down-tray" class="w-4 h-4" /> Download
-                        <% end %>
-                      </button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+                    {trunc(score)}
+                  </div>
+                </div>
+                <%!-- Main content (title + badges) --%>
+                <div class="flex-1 min-w-0">
+                  <%!-- Release Title --%>
+                  <div
+                    class="font-medium text-sm leading-tight mb-2 line-clamp-2"
+                    title={result.title}
+                  >
+                    {result.title}
+                  </div>
+                  <%!-- Quality badges row --%>
+                  <div class="flex flex-wrap gap-1.5">
+                    <%!-- Resolution/Quality badge --%>
+                    <span class="badge badge-primary badge-sm">
+                      {get_search_quality_badge(result)}
+                    </span>
+                    <%!-- Size badge --%>
+                    <span class="badge badge-ghost badge-sm font-mono">
+                      {format_search_size(result)}
+                    </span>
+                    <%!-- Seeders badge --%>
+                    <span class={[
+                      "badge badge-sm",
+                      result.seeders >= 50 && "badge-success",
+                      result.seeders >= 10 && result.seeders < 50 && "badge-warning",
+                      result.seeders < 10 && "badge-error badge-outline"
+                    ]}>
+                      <.icon name="hero-arrow-up" class="w-3 h-3 mr-0.5" />
+                      {result.seeders}
+                    </span>
+                    <%!-- Indexer badge (visible on larger screens) --%>
+                    <span class="badge badge-outline badge-sm hidden sm:inline-flex">
+                      {result.indexer}
+                    </span>
+                  </div>
+                </div>
+                <%!-- Download Action --%>
+                <div class="flex items-center">
+                  <button
+                    class={[
+                      "btn btn-primary btn-sm",
+                      @downloading_release_url == result.download_url && "btn-disabled"
+                    ]}
+                    phx-click="download_from_search"
+                    phx-value-download-url={result.download_url}
+                    phx-value-title={result.title}
+                    phx-value-indexer={result.indexer}
+                    phx-value-size={result.size || 0}
+                    phx-value-seeders={result.seeders || 0}
+                    phx-value-leechers={result.leechers || 0}
+                    phx-value-quality={get_search_quality_badge(result) || "Unknown"}
+                    title="Download this release"
+                    disabled={@downloading_release_url == result.download_url}
+                  >
+                    <%= if @downloading_release_url == result.download_url do %>
+                      <span class="loading loading-spinner loading-xs"></span>
+                    <% else %>
+                      <.icon name="hero-arrow-down-tray" class="w-4 h-4" />
+                    <% end %>
+                    <span class="hidden sm:inline">
+                      {if @downloading_release_url == result.download_url, do: "...", else: "Download"}
+                    </span>
+                  </button>
+                </div>
+              </li>
+            </ul>
           <% end %>
         </div>
       </div>

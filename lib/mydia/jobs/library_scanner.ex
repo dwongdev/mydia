@@ -644,8 +644,9 @@ defmodule Mydia.Jobs.LibraryScanner do
     library_path = media_file.library_path
 
     # Early validation: check if file type is compatible with library type
-    # Parse the file to determine its type (movie or TV show)
-    parsed = FileParser.parse(file_info.path)
+    # Parse the file using full path to leverage folder structure for TV shows
+    # This ensures files in "/media/tv/Show Name/Season XX/" are correctly identified
+    parsed = FileParser.parse_with_path(file_info.path)
 
     case validate_file_type_for_library(parsed.type, library_path, file_info.path) do
       :ok ->
@@ -843,10 +844,9 @@ defmodule Mydia.Jobs.LibraryScanner do
         media_item_id: media_file.media_item_id
       )
 
-      # Parse the filename to extract season/episode info
-      filename = Path.basename(media_file.relative_path)
-
-      parsed = FileParser.parse(filename)
+      # Parse using full path to extract season from folder structure if available
+      # This handles files where filename doesn't contain season info but folder does
+      parsed = FileParser.parse_with_path(path_for_log)
 
       case parsed do
         %{type: :tv_show, season: season, episodes: episodes}
@@ -943,10 +943,12 @@ defmodule Mydia.Jobs.LibraryScanner do
 
   # Re-validates a TV file's episode association by re-parsing the filename
   defp revalidate_tv_file_association(media_file) do
-    # Parse the filename to see what season/episode it claims to be
-    filename = Path.basename(media_file.relative_path)
+    # Preload library_path for path resolution
+    media_file = Mydia.Repo.preload(media_file, :library_path)
+    full_path = Mydia.Library.MediaFile.absolute_path(media_file)
 
-    parsed = FileParser.parse(filename)
+    # Parse using full path to extract season from folder structure if available
+    parsed = FileParser.parse_with_path(full_path)
 
     case parsed do
       %{type: :tv_show, season: season, episodes: episodes}
@@ -957,12 +959,8 @@ defmodule Mydia.Jobs.LibraryScanner do
         # Check if this matches the current association
         if media_file.episode.season_number != season or
              media_file.episode.episode_number != episode_number do
-          # Preload library_path association for path resolution
-          media_file = Mydia.Repo.preload(media_file, :library_path)
-          path_for_log = Mydia.Library.MediaFile.absolute_path(media_file)
-
           Logger.info("File association mismatch detected",
-            path: path_for_log,
+            path: full_path,
             current_season: media_file.episode.season_number,
             current_episode: media_file.episode.episode_number,
             parsed_season: season,
@@ -985,11 +983,11 @@ defmodule Mydia.Jobs.LibraryScanner do
               false
 
             new_episode ->
-              # Update the association (path_for_log already defined above)
+              # Update the association
               case Library.update_media_file(media_file, %{episode_id: new_episode.id}) do
                 {:ok, _updated_file} ->
                   Logger.info("Updated file association",
-                    path: path_for_log,
+                    path: full_path,
                     old_episode:
                       "S#{media_file.episode.season_number}E#{media_file.episode.episode_number}",
                     new_episode: "S#{new_episode.season_number}E#{new_episode.episode_number}"
@@ -999,7 +997,7 @@ defmodule Mydia.Jobs.LibraryScanner do
 
                 {:error, reason} ->
                   Logger.error("Failed to update file association",
-                    path: path_for_log,
+                    path: full_path,
                     reason: reason
                   )
 

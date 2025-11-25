@@ -15,7 +15,6 @@ defmodule Mydia.Jobs.MetadataRefresh do
 
   require Logger
   alias Mydia.{Media, Metadata}
-  alias Mydia.Metadata.Structs.SearchResult
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"media_item_id" => media_item_id} = args}) do
@@ -87,25 +86,25 @@ defmodule Mydia.Jobs.MetadataRefresh do
     tmdb_id = get_or_extract_tmdb_id(media_item)
     media_type = parse_media_type(media_item.type)
 
-    # If no TMDB ID, try to recover it by searching by title
-    tmdb_id =
+    # If no TMDB ID, try to recover it via the shared Media function
+    {tmdb_id, media_item} =
       if tmdb_id do
-        tmdb_id
+        {tmdb_id, media_item}
       else
         Logger.info("No TMDB ID found, attempting to recover by title search",
           media_item_id: media_item.id,
           title: media_item.title
         )
 
-        case search_for_tmdb_id(media_item, media_type, config) do
-          {:ok, found_id} ->
+        case Media.recover_tmdb_id_by_title(media_item, media_type) do
+          {:ok, found_id, updated_item} ->
             Logger.info("Successfully recovered TMDB ID via title search",
               media_item_id: media_item.id,
               title: media_item.title,
               tmdb_id: found_id
             )
 
-            found_id
+            {found_id, updated_item}
 
           {:error, reason} ->
             Logger.warning("Failed to recover TMDB ID via title search",
@@ -114,7 +113,7 @@ defmodule Mydia.Jobs.MetadataRefresh do
               reason: reason
             )
 
-            nil
+            {nil, media_item}
         end
       end
 
@@ -264,135 +263,4 @@ defmodule Mydia.Jobs.MetadataRefresh do
         nil
     end
   end
-
-  # Search for TMDB ID by title when it's missing from the media item
-  defp search_for_tmdb_id(media_item, media_type, config) do
-    search_opts = build_search_opts(media_item, media_type)
-
-    case Metadata.search(config, media_item.title, search_opts) do
-      {:ok, []} ->
-        # Try without year if we got no results
-        if media_item.year do
-          retry_opts = Keyword.delete(search_opts, :year)
-
-          case Metadata.search(config, media_item.title, retry_opts) do
-            {:ok, results} when results != [] ->
-              select_best_match(results, media_item)
-
-            _ ->
-              {:error, :no_matches_found}
-          end
-        else
-          {:error, :no_matches_found}
-        end
-
-      {:ok, results} ->
-        select_best_match(results, media_item)
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp build_search_opts(media_item, media_type) do
-    opts = [media_type: media_type]
-
-    if media_item.year do
-      Keyword.put(opts, :year, media_item.year)
-    else
-      opts
-    end
-  end
-
-  # Select the best match from search results based on title similarity and year
-  defp select_best_match(results, media_item) do
-    scored_results =
-      Enum.map(results, fn result ->
-        score = calculate_match_score(result, media_item)
-        {result, score}
-      end)
-
-    case Enum.max_by(scored_results, fn {_result, score} -> score end, fn -> nil end) do
-      {%SearchResult{provider_id: provider_id}, score} when score >= 0.5 ->
-        case Integer.parse(provider_id) do
-          {id, ""} -> {:ok, id}
-          _ -> {:error, :invalid_provider_id}
-        end
-
-      _ ->
-        {:error, :no_confident_match}
-    end
-  end
-
-  defp calculate_match_score(result, media_item) do
-    base_score = 0.5
-    title_sim = title_similarity(result.title, media_item.title)
-
-    score =
-      base_score
-      |> add_score(title_sim, 0.25)
-      |> add_score(year_match?(result.year, media_item.year), 0.15)
-      |> add_score(exact_title_match?(result.title, media_item.title), 0.15)
-      |> add_score(title_derivative_penalty(result.title, media_item.title), 1.0)
-
-    min(score, 1.0)
-  end
-
-  defp add_score(current, true, amount), do: current + amount
-  defp add_score(current, score, amount) when is_float(score), do: current + score * amount
-  defp add_score(current, _false_or_nil, _amount), do: current
-
-  defp title_similarity(title1, title2) when is_binary(title1) and is_binary(title2) do
-    norm1 = normalize_title(title1)
-    norm2 = normalize_title(title2)
-
-    cond do
-      norm1 == norm2 -> 1.0
-      String.contains?(norm1, norm2) or String.contains?(norm2, norm1) -> 0.8
-      true -> String.jaro_distance(norm1, norm2)
-    end
-  end
-
-  defp title_similarity(_title1, _title2), do: 0.0
-
-  defp normalize_title(title) do
-    title
-    |> String.downcase()
-    |> String.replace(~r/[^\w\s]/, "")
-    |> String.replace(~r/\s+/, " ")
-    |> String.trim()
-  end
-
-  defp exact_title_match?(result_title, search_title)
-       when is_binary(result_title) and is_binary(search_title) do
-    normalize_title(result_title) == normalize_title(search_title)
-  end
-
-  defp exact_title_match?(_result_title, _search_title), do: false
-
-  defp title_derivative_penalty(result_title, search_title)
-       when is_binary(result_title) and is_binary(search_title) do
-    norm_result = String.downcase(result_title) |> String.trim()
-    norm_search = String.downcase(search_title) |> String.trim()
-
-    if norm_result != norm_search and String.contains?(norm_result, norm_search) do
-      search_len = String.length(norm_search)
-      result_len = String.length(norm_result)
-      extra_ratio = (result_len - search_len) / result_len
-      -extra_ratio * 0.15
-    else
-      0.0
-    end
-  end
-
-  defp title_derivative_penalty(_result_title, _search_title), do: 0.0
-
-  defp year_match?(result_year, nil), do: result_year != nil
-  defp year_match?(nil, _media_year), do: false
-
-  defp year_match?(result_year, media_year) when is_integer(result_year) do
-    abs(result_year - media_year) <= 1
-  end
-
-  defp year_match?(_result_year, _media_year), do: false
 end

@@ -602,12 +602,24 @@ defmodule Mydia.Media do
 
     season_monitoring = Keyword.get(opts, :season_monitoring, "all")
     force = Keyword.get(opts, :force, false)
+    config = Metadata.default_relay_config()
 
-    # Get TMDB ID from metadata
+    # Get TMDB ID from metadata, or try to recover it via title search
     tmdb_id =
       case media_item.metadata do
         %{"provider_id" => id} when is_binary(id) -> id
         _ -> media_item.tmdb_id
+      end
+
+    # If no TMDB ID, try to recover it by searching by title
+    {tmdb_id, media_item} =
+      if is_nil(tmdb_id) or tmdb_id == "" do
+        case do_recover_tmdb_id_by_title(media_item, :tv_show, config) do
+          {:ok, recovered_id, updated_item} -> {recovered_id, updated_item}
+          {:error, _reason} -> {nil, media_item}
+        end
+      else
+        {tmdb_id, media_item}
       end
 
     if is_nil(tmdb_id) or tmdb_id == "" do
@@ -922,4 +934,166 @@ defmodule Mydia.Media do
       metadata: media_item.metadata
     }
   end
+
+  @doc """
+  Recover TMDB ID by searching for the media item by title.
+
+  This is useful when a media item was created without a TMDB ID (e.g., due to a bug)
+  and needs to have its ID recovered via a title search.
+
+  Returns {:ok, tmdb_id, updated_media_item} or {:error, reason}
+  """
+  def recover_tmdb_id_by_title(%MediaItem{} = media_item, media_type) do
+    alias Mydia.Metadata
+    config = Metadata.default_relay_config()
+    do_recover_tmdb_id_by_title(media_item, media_type, config)
+  end
+
+  defp do_recover_tmdb_id_by_title(%MediaItem{} = media_item, media_type, config) do
+    alias Mydia.Metadata
+    alias Mydia.Metadata.Structs.SearchResult
+
+    Logger.info("Attempting to recover TMDB ID by title search",
+      media_item_id: media_item.id,
+      title: media_item.title,
+      media_type: media_type
+    )
+
+    search_opts =
+      if media_item.year do
+        [media_type: media_type, year: media_item.year]
+      else
+        [media_type: media_type]
+      end
+
+    case Metadata.search(config, media_item.title, search_opts) do
+      {:ok, []} ->
+        # Retry without year if no results
+        if media_item.year do
+          case Metadata.search(config, media_item.title, media_type: media_type) do
+            {:ok, results} when results != [] ->
+              select_and_update_tmdb_id(results, media_item)
+
+            _ ->
+              {:error, :no_matches_found}
+          end
+        else
+          {:error, :no_matches_found}
+        end
+
+      {:ok, results} ->
+        select_and_update_tmdb_id(results, media_item)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp select_and_update_tmdb_id(results, media_item) do
+    alias Mydia.Metadata.Structs.SearchResult
+
+    # Score and select best match
+    scored_results =
+      Enum.map(results, fn result ->
+        score = calculate_title_match_score(result, media_item)
+        {result, score}
+      end)
+
+    case Enum.max_by(scored_results, fn {_result, score} -> score end, fn -> nil end) do
+      {%SearchResult{provider_id: provider_id}, score} when score >= 0.5 ->
+        case Integer.parse(provider_id) do
+          {tmdb_id, ""} ->
+            Logger.info("Recovered TMDB ID via title search",
+              media_item_id: media_item.id,
+              title: media_item.title,
+              tmdb_id: tmdb_id,
+              match_score: score
+            )
+
+            # Update the media item with the recovered TMDB ID
+            case update_media_item(media_item, %{tmdb_id: tmdb_id}) do
+              {:ok, updated_item} ->
+                {:ok, tmdb_id, updated_item}
+
+              {:error, _changeset} ->
+                # Even if update fails, return the ID so refresh can proceed
+                {:ok, tmdb_id, media_item}
+            end
+
+          _ ->
+            {:error, :invalid_provider_id}
+        end
+
+      _ ->
+        {:error, :no_confident_match}
+    end
+  end
+
+  defp calculate_title_match_score(result, media_item) do
+    base_score = 0.5
+    title_sim = title_similarity(result.title, media_item.title)
+
+    score =
+      base_score +
+        title_sim * 0.25 +
+        if(year_matches?(result.year, media_item.year), do: 0.15, else: 0.0) +
+        if(exact_title_match?(result.title, media_item.title), do: 0.15, else: 0.0) +
+        title_derivative_penalty(result.title, media_item.title)
+
+    min(score, 1.0)
+  end
+
+  defp title_similarity(title1, title2) when is_binary(title1) and is_binary(title2) do
+    norm1 = normalize_title(title1)
+    norm2 = normalize_title(title2)
+
+    cond do
+      norm1 == norm2 -> 1.0
+      String.contains?(norm1, norm2) or String.contains?(norm2, norm1) -> 0.8
+      true -> String.jaro_distance(norm1, norm2)
+    end
+  end
+
+  defp title_similarity(_title1, _title2), do: 0.0
+
+  defp normalize_title(title) do
+    title
+    |> String.downcase()
+    |> String.replace(~r/[^\w\s]/, "")
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+  end
+
+  defp exact_title_match?(result_title, search_title)
+       when is_binary(result_title) and is_binary(search_title) do
+    normalize_title(result_title) == normalize_title(search_title)
+  end
+
+  defp exact_title_match?(_result_title, _search_title), do: false
+
+  defp title_derivative_penalty(result_title, search_title)
+       when is_binary(result_title) and is_binary(search_title) do
+    norm_result = String.downcase(result_title) |> String.trim()
+    norm_search = String.downcase(search_title) |> String.trim()
+
+    if norm_result != norm_search and String.contains?(norm_result, norm_search) do
+      search_len = String.length(norm_search)
+      result_len = String.length(norm_result)
+      extra_ratio = (result_len - search_len) / result_len
+      -extra_ratio * 0.15
+    else
+      0.0
+    end
+  end
+
+  defp title_derivative_penalty(_result_title, _search_title), do: 0.0
+
+  defp year_matches?(result_year, nil), do: result_year != nil
+  defp year_matches?(nil, _media_year), do: false
+
+  defp year_matches?(result_year, media_year) when is_integer(result_year) do
+    abs(result_year - media_year) <= 1
+  end
+
+  defp year_matches?(_result_year, _media_year), do: false
 end

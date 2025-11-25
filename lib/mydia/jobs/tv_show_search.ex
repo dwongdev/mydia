@@ -870,9 +870,9 @@ defmodule Mydia.Jobs.TVShowSearch do
 
   defp build_quality_options(quality_profile) do
     # Extract preferred qualities from quality profile
-    # Quality profile is a struct, use field access
+    # The :qualities field contains the list of allowed resolutions in preference order
     quality_opts =
-      case quality_profile.allowed_qualities do
+      case quality_profile.qualities do
         nil -> []
         qualities when is_list(qualities) -> [preferred_qualities: qualities]
         _ -> []

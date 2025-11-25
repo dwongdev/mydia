@@ -142,8 +142,62 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpers do
   def profile_score(%SearchResult{} = result, %QualityProfile{} = profile, media_type) do
     # Convert search result to media_attrs format for scoring
     media_attrs = search_result_to_media_attrs(result, media_type)
-    score_result = QualityProfile.score_media_file(profile, media_attrs)
+
+    # Ensure quality_standards has preferred_resolutions set from the qualities field
+    # This is the fallback when the user hasn't explicitly set preferred_resolutions
+    profile_with_resolution_fallback = ensure_preferred_resolutions(profile)
+
+    score_result = QualityProfile.score_media_file(profile_with_resolution_fallback, media_attrs)
     score_result.score
+  end
+
+  # Ensure preferred_resolutions in quality_standards falls back to the qualities field
+  # Note: The scoring functions use atom keys, so we set atom keys here
+  defp ensure_preferred_resolutions(%QualityProfile{quality_standards: nil} = profile) do
+    # No quality_standards set, create one with qualities as preferred_resolutions
+    case profile.qualities do
+      nil -> profile
+      [] -> profile
+      qualities -> %{profile | quality_standards: %{preferred_resolutions: qualities}}
+    end
+  end
+
+  defp ensure_preferred_resolutions(%QualityProfile{quality_standards: standards} = profile) do
+    # Check if preferred_resolutions is already set (could be string or atom key from JSON)
+    existing =
+      Map.get(standards, :preferred_resolutions) || Map.get(standards, "preferred_resolutions")
+
+    case existing do
+      nil ->
+        # Use qualities field as fallback - use atom key to match scoring functions
+        case profile.qualities do
+          nil ->
+            profile
+
+          [] ->
+            profile
+
+          qualities ->
+            %{profile | quality_standards: Map.put(standards, :preferred_resolutions, qualities)}
+        end
+
+      [] ->
+        # Empty list, use qualities field as fallback
+        case profile.qualities do
+          nil ->
+            profile
+
+          [] ->
+            profile
+
+          qualities ->
+            %{profile | quality_standards: Map.put(standards, :preferred_resolutions, qualities)}
+        end
+
+      _resolutions ->
+        # Already has preferred_resolutions, use as-is
+        profile
+    end
   end
 
   # Convert SearchResult to the media_attrs format expected by QualityProfile.score_media_file/2

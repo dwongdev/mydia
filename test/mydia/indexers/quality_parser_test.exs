@@ -176,14 +176,32 @@ defmodule Mydia.Indexers.QualityParserTest do
 
     test "extracts AC3 audio" do
       assert QualityParser.extract_audio("Movie.1080p.BluRay.AC3") == "AC3"
-      assert QualityParser.extract_audio("Movie.1080p.BluRay.DD") == "AC3"
+      # DD5.1 is detected as AC3 (Dolby Digital)
+      assert QualityParser.extract_audio("Movie.1080p.BluRay.DD5.1") == "AC3"
+    end
+
+    test "extracts DD+ (Dolby Digital Plus) audio" do
+      assert QualityParser.extract_audio("Movie.1080p.WEB-DL.DDP5.1") == "DD+"
+      assert QualityParser.extract_audio("Movie.1080p.WEB-DL.DD+") == "DD+"
+      assert QualityParser.extract_audio("Movie.1080p.WEB-DL.E-AC3") == "DD+"
+    end
+
+    test "extracts TrueHD Atmos audio" do
+      # TrueHD Atmos is a specific lossless format with object audio
+      assert QualityParser.extract_audio("Movie.TrueHD.Atmos") == "TrueHD Atmos"
+      assert QualityParser.extract_audio("Movie.TrueHD.7.1.Atmos") == "TrueHD Atmos"
+    end
+
+    test "extracts DTS-HD MA audio" do
+      assert QualityParser.extract_audio("Movie.DTS-HD.MA.5.1") == "DTS-HD MA"
+      assert QualityParser.extract_audio("Movie.DTS-HD.MA") == "DTS-HD MA"
     end
 
     test "extracts other audio codecs" do
       assert QualityParser.extract_audio("Movie.MP3") == "MP3"
       assert QualityParser.extract_audio("Movie.FLAC") == "FLAC"
       assert QualityParser.extract_audio("Movie.Opus") == "Opus"
-      assert QualityParser.extract_audio("Movie.Atmos") == "Atmos"
+      # Note: Plain "Atmos" without TrueHD is ambiguous - DD+ Atmos is still DD+
     end
 
     test "returns nil when no audio codec found" do
@@ -251,7 +269,25 @@ defmodule Mydia.Indexers.QualityParserTest do
   end
 
   describe "quality_score/1" do
-    test "scores 2160p BluRay with HDR highest" do
+    test "scores 2160p BluRay with DV HDR highest" do
+      quality =
+        QualityInfo.new(
+          resolution: "2160p",
+          source: "BluRay",
+          codec: "x265",
+          audio: "TrueHD Atmos",
+          hdr: true,
+          hdr_format: "DV",
+          proper: false,
+          repack: false
+        )
+
+      score = QualityParser.quality_score(quality)
+      # 2160p(1000) + BluRay(450) + x265(150) + TrueHD Atmos(200) + DV(100) = 1900
+      assert score == 1900
+    end
+
+    test "scores 2160p BluRay with generic HDR" do
       quality =
         QualityInfo.new(
           resolution: "2160p",
@@ -259,12 +295,14 @@ defmodule Mydia.Indexers.QualityParserTest do
           codec: "x265",
           audio: nil,
           hdr: true,
+          hdr_format: "HDR",
           proper: false,
           repack: false
         )
 
       score = QualityParser.quality_score(quality)
-      assert score == 1650
+      # 2160p(1000) + BluRay(450) + x265(150) + HDR(40) = 1640
+      assert score == 1640
     end
 
     test "scores 1080p WEB-DL x264 appropriately" do
@@ -280,10 +318,11 @@ defmodule Mydia.Indexers.QualityParserTest do
         )
 
       score = QualityParser.quality_score(quality)
+      # 1080p(800) + WEB-DL(400) + x264(100) = 1300
       assert score == 1300
     end
 
-    test "adds bonus for PROPER" do
+    test "adds bonus for PROPER (25 points)" do
       quality_without =
         QualityInfo.new(
           resolution: "1080p",
@@ -298,10 +337,10 @@ defmodule Mydia.Indexers.QualityParserTest do
       quality_with = %{quality_without | proper: true}
 
       assert QualityParser.quality_score(quality_with) ==
-               QualityParser.quality_score(quality_without) + 10
+               QualityParser.quality_score(quality_without) + 25
     end
 
-    test "adds bonus for REPACK" do
+    test "adds bonus for REPACK (15 points)" do
       quality_without =
         QualityInfo.new(
           resolution: "1080p",
@@ -316,7 +355,7 @@ defmodule Mydia.Indexers.QualityParserTest do
       quality_with = %{quality_without | repack: true}
 
       assert QualityParser.quality_score(quality_with) ==
-               QualityParser.quality_score(quality_without) + 5
+               QualityParser.quality_score(quality_without) + 15
     end
 
     test "handles nil values gracefully" do
@@ -352,26 +391,41 @@ defmodule Mydia.Indexers.QualityParserTest do
   end
 
   describe "real world examples" do
-    test "parses typical movie release" do
+    test "parses typical movie release with DTS-HD MA" do
       title = "The.Movie.2023.1080p.BluRay.x264.DTS-HD.MA.5.1-Group"
       quality = QualityParser.parse(title)
 
       assert quality.resolution == "1080p"
       assert quality.source == "BluRay"
       assert quality.codec == "x264"
-      assert quality.audio == "DTS-HD"
+      assert quality.audio == "DTS-HD MA"
       assert quality.hdr == false
+      assert quality.hdr_format == nil
     end
 
-    test "parses 4K HDR release" do
+    test "parses 4K Dolby Vision release with DD+" do
+      # DD+ Atmos is still DD+ as the base codec (Atmos is an extension)
       title = "Movie.Name.2023.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-Group"
       quality = QualityParser.parse(title)
 
       assert quality.resolution == "2160p"
       assert quality.source == "WEB-DL"
       assert quality.codec == "H.265"
-      assert quality.audio == "Atmos"
+      assert quality.audio == "DD+"
       assert quality.hdr == true
+      assert quality.hdr_format == "DV"
+    end
+
+    test "parses 4K REMUX with TrueHD Atmos" do
+      title = "Movie.2023.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-FraMeSToR"
+      quality = QualityParser.parse(title)
+
+      assert quality.resolution == "2160p"
+      assert quality.source == "REMUX"
+      assert quality.codec == "x265"
+      assert quality.audio == "TrueHD Atmos"
+      assert quality.hdr == true
+      assert quality.hdr_format == "DV"
     end
 
     test "parses TV episode release" do
@@ -392,6 +446,17 @@ defmodule Mydia.Indexers.QualityParserTest do
       assert quality.repack == true
       assert quality.resolution == "1080p"
       assert quality.source == "BluRay"
+    end
+
+    test "parses HDR10+ release" do
+      title = "Movie.2023.2160p.UHD.BluRay.HDR10Plus.HEVC.DTS-HD.MA.5.1-Group"
+      quality = QualityParser.parse(title)
+
+      assert quality.resolution == "2160p"
+      assert quality.source == "BluRay"
+      assert quality.hdr == true
+      assert quality.hdr_format == "HDR10+"
+      assert quality.audio == "DTS-HD MA"
     end
   end
 end

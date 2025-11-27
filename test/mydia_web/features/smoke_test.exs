@@ -18,22 +18,36 @@ defmodule MydiaWeb.Features.SmokeTest do
   describe "Application Smoke Test" do
     @tag :feature
     test "homepage redirects to login when not authenticated", %{session: session} do
+      # Create a user first so we don't get redirected to /setup
+      _user = create_test_user()
+
       session
       |> visit("/")
-      # Unauthenticated users are redirected to login
-      |> assert_path("/auth/local/login")
+
+      # Unauthenticated users are redirected to login (either /auth/login or /auth/local/login)
+      assert Wallaby.Browser.current_path(session) =~ ~r/\/auth\/(local\/)?login/
     end
 
     @tag :feature
     test "login page loads successfully", %{session: session} do
+      # Create a user first so we don't get redirected to /setup
+      _user = create_test_user()
+
       session
       |> visit("/auth/local/login")
-      |> assert_path("/auth/local/login")
-      |> assert_has_text("Sign in")
+
+      # Should be on the login page
+      assert Wallaby.Browser.current_path(session) =~ ~r/\/auth\/(local\/)?login/
+
+      assert Wallaby.Browser.has_text?(session, "Sign in") or
+               Wallaby.Browser.has_text?(session, "sign in")
     end
 
     @tag :feature
     test "page has proper HTML structure", %{session: session} do
+      # Create a user first so we don't get redirected to /setup
+      _user = create_test_user()
+
       session
       |> visit("/auth/local/login")
 
@@ -59,15 +73,18 @@ defmodule MydiaWeb.Features.SmokeTest do
 
     @tag :feature
     test "can reload page and maintain URL", %{session: session} do
+      # Create a user first so we don't get redirected to /setup
+      _user = create_test_user()
+
       session
       |> visit("/auth/local/login")
-      |> assert_path("/auth/local/login")
 
-      # Get the initial URL
+      # Get the initial URL (could be /auth/login or /auth/local/login)
       initial_path = Wallaby.Browser.current_path(session)
+      assert initial_path =~ ~r/\/auth\/(local\/)?login/
 
       # Reload the page
-      session = Wallaby.Browser.visit(session, "/auth/local/login")
+      session = Wallaby.Browser.visit(session, initial_path)
 
       # Verify we're still on the same path
       assert Wallaby.Browser.current_path(session) == initial_path

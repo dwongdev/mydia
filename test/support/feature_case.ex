@@ -142,7 +142,7 @@ defmodule MydiaWeb.FeatureCase do
     |> Wallaby.Browser.visit("/auth/local/login")
     |> Wallaby.Browser.fill_in(Wallaby.Query.text_field("user[username]"), with: username)
     |> Wallaby.Browser.fill_in(Wallaby.Query.text_field("user[password]"), with: password)
-    |> Wallaby.Browser.click(Wallaby.Query.button("Sign in"))
+    |> Wallaby.Browser.click(Wallaby.Query.button("Log In"))
   end
 
   @doc """

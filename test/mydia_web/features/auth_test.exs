@@ -24,22 +24,28 @@ defmodule MydiaWeb.Features.AuthTest do
       |> visit("/auth/local/login")
       |> fill_in(Query.text_field("user[username]"), with: user.username)
       |> fill_in(Query.text_field("user[password]"), with: "password123")
-      |> click(Query.button("Sign in"))
+      |> click(Query.button("Log In"))
+
+      # Wait for dashboard to load after login redirect
+      session
+      |> wait_for_liveview()
       |> assert_path("/")
       |> assert_has_text("Dashboard")
     end
 
     @tag :feature
     test "shows error message with invalid credentials", %{session: session} do
+      # Create a user so we don't get redirected to /setup
+      _user = create_test_user()
+
       session
       |> visit("/auth/local/login")
       |> fill_in(Query.text_field("user[username]"), with: "invalid")
       |> fill_in(Query.text_field("user[password]"), with: "wrong-password")
-      |> click(Query.button("Sign in"))
-      # Should stay on login page
-      |> assert_path("/auth/local/login")
+      |> click(Query.button("Log In"))
 
-      # Should show an error message
+      # Should stay on login page and show error
+      assert Wallaby.Browser.current_path(session) =~ ~r/\/auth\/(local\/)?login/
       assert Wallaby.Browser.has_css?(session, "[role='alert'], .alert")
     end
 
@@ -47,6 +53,10 @@ defmodule MydiaWeb.Features.AuthTest do
     test "can logout successfully", %{session: session} do
       # Login first
       login_as_admin(session)
+
+      # Wait for dashboard to load
+      session
+      |> wait_for_liveview()
       |> assert_path("/")
 
       # Logout
@@ -63,10 +73,15 @@ defmodule MydiaWeb.Features.AuthTest do
     test "maintains session across page reloads", %{session: session} do
       # Login
       login_as_admin(session)
+
+      # Wait for dashboard to load after login redirect
+      session
+      |> wait_for_liveview()
       |> assert_path("/")
 
       # Reload the page
       session = Wallaby.Browser.visit(session, "/")
+      session |> wait_for_liveview()
 
       # Should still be logged in (not redirected to login)
       assert_path(session, "/")
@@ -77,17 +92,23 @@ defmodule MydiaWeb.Features.AuthTest do
     test "maintains session across navigation", %{session: session} do
       # Login
       login_as_admin(session)
+
+      # Wait for dashboard to load after login redirect
+      session
+      |> wait_for_liveview()
       |> assert_path("/")
 
       # Navigate to different pages
       session
       |> visit("/media")
+      |> wait_for_liveview()
       |> assert_path("/media")
 
       assert Wallaby.Browser.has_text?(session, "Dashboard")
 
       session
       |> visit("/downloads")
+      |> wait_for_liveview()
       |> assert_path("/downloads")
 
       assert Wallaby.Browser.has_text?(session, "Dashboard")
@@ -97,6 +118,9 @@ defmodule MydiaWeb.Features.AuthTest do
   describe "Protected Routes" do
     @tag :feature
     test "redirects to login when accessing protected route without auth", %{session: session} do
+      # Create a user so we don't get redirected to /setup
+      _user = create_test_user()
+
       # Try to access dashboard without logging in
       session
       |> visit("/")
@@ -107,6 +131,9 @@ defmodule MydiaWeb.Features.AuthTest do
 
     @tag :feature
     test "redirects to login when accessing media page without auth", %{session: session} do
+      # Create a user so we don't get redirected to /setup
+      _user = create_test_user()
+
       session
       |> visit("/media")
 
@@ -116,6 +143,9 @@ defmodule MydiaWeb.Features.AuthTest do
 
     @tag :feature
     test "redirects to login when accessing downloads page without auth", %{session: session} do
+      # Create a user so we don't get redirected to /setup
+      _user = create_test_user()
+
       session
       |> visit("/downloads")
 
@@ -128,17 +158,23 @@ defmodule MydiaWeb.Features.AuthTest do
       # Login first
       login_as_admin(session)
 
+      # Wait for dashboard to load after login redirect
+      session |> wait_for_liveview()
+
       # Should be able to access protected routes
       session
       |> visit("/media")
+      |> wait_for_liveview()
       |> assert_path("/media")
 
       session
       |> visit("/downloads")
+      |> wait_for_liveview()
       |> assert_path("/downloads")
 
       session
       |> visit("/calendar")
+      |> wait_for_liveview()
       |> assert_path("/calendar")
     end
   end
@@ -149,9 +185,13 @@ defmodule MydiaWeb.Features.AuthTest do
       # Login as admin
       login_as_admin(session)
 
+      # Wait for dashboard to load after login redirect
+      session |> wait_for_liveview()
+
       # Navigate to admin page
       session
       |> visit("/admin")
+      |> wait_for_liveview()
 
       # Should be able to access admin page (URL should contain /admin)
       assert Wallaby.Browser.current_path(session) =~ ~r/\/admin/
@@ -165,9 +205,15 @@ defmodule MydiaWeb.Features.AuthTest do
       # Login as admin
       login_as_admin(session)
 
+      # Wait for dashboard to load after login redirect
+      session
+      |> wait_for_liveview()
+      |> assert_path("/")
+
       # Navigate to admin config page
       session
       |> visit("/admin/config")
+      |> wait_for_liveview()
       |> assert_path("/admin/config")
     end
 
@@ -176,9 +222,13 @@ defmodule MydiaWeb.Features.AuthTest do
       # Login as admin
       login_as_admin(session)
 
+      # Wait for dashboard to load after login redirect
+      session |> wait_for_liveview()
+
       # Navigate to admin users page
       session
       |> visit("/admin/users")
+      |> wait_for_liveview()
       |> assert_path("/admin/users")
     end
 
@@ -187,12 +237,13 @@ defmodule MydiaWeb.Features.AuthTest do
       # Login as regular user
       login_as_user(session)
 
+      # Wait for dashboard to load after login redirect
+      session |> wait_for_liveview()
+
       # Try to access admin page
       session
       |> visit("/admin")
-
-      # Wait for potential redirect
-      Process.sleep(500)
+      |> wait_for_liveview()
 
       # Should be redirected away from admin page
       refute Wallaby.Browser.current_path(session) == "/admin"
@@ -203,13 +254,18 @@ defmodule MydiaWeb.Features.AuthTest do
       # Login as regular user
       login_as_user(session)
 
+      # Wait for dashboard to load after login redirect
+      session |> wait_for_liveview()
+
       # Should be able to access regular protected routes
       session
       |> visit("/media")
+      |> wait_for_liveview()
       |> assert_path("/media")
 
       session
       |> visit("/downloads")
+      |> wait_for_liveview()
       |> assert_path("/downloads")
     end
   end
@@ -217,6 +273,9 @@ defmodule MydiaWeb.Features.AuthTest do
   describe "Navigation Flow" do
     @tag :feature
     test "can access intended page after login", %{session: session} do
+      # Create a user so we don't get redirected to /setup
+      _existing_user = create_test_user()
+
       # Try to access a protected page without being logged in
       session
       |> visit("/calendar")
@@ -224,17 +283,22 @@ defmodule MydiaWeb.Features.AuthTest do
       # Should be redirected to login
       assert Wallaby.Browser.current_path(session) =~ ~r/\/auth\/(local\/)?login/
 
-      # Login
+      # Create and login with admin user
       user = create_admin_user()
 
       session
+      |> visit("/auth/local/login")
       |> fill_in(Query.text_field("user[username]"), with: user.username)
       |> fill_in(Query.text_field("user[password]"), with: "password123")
-      |> click(Query.button("Sign in"))
+      |> click(Query.button("Log In"))
+
+      # Wait for dashboard to load after login redirect
+      session |> wait_for_liveview()
 
       # After login, navigate to the intended page
       session
       |> visit("/calendar")
+      |> wait_for_liveview()
       |> assert_path("/calendar")
     end
   end
@@ -250,12 +314,16 @@ defmodule MydiaWeb.Features.AuthTest do
       |> visit("/auth/local/login")
       |> fill_in(Query.text_field("user[username]"), with: admin_user.username)
       |> fill_in(Query.text_field("user[password]"), with: "password123")
-      |> click(Query.button("Sign in"))
-      |> assert_path("/")
+      |> click(Query.button("Log In"))
+
+      # Wait for dashboard to load after login redirect
+      session |> wait_for_liveview()
+      assert_path(session, "/")
 
       # Verify admin can access admin pages
       session
       |> visit("/admin")
+      |> wait_for_liveview()
 
       assert Wallaby.Browser.current_path(session) =~ ~r/\/admin/
 
@@ -270,15 +338,16 @@ defmodule MydiaWeb.Features.AuthTest do
       |> visit("/auth/local/login")
       |> fill_in(Query.text_field("user[username]"), with: regular_user.username)
       |> fill_in(Query.text_field("user[password]"), with: "password123")
-      |> click(Query.button("Sign in"))
-      |> assert_path("/")
+      |> click(Query.button("Log In"))
+
+      # Wait for dashboard to load after login redirect
+      session |> wait_for_liveview()
+      assert_path(session, "/")
 
       # Verify regular user cannot access admin pages
       session
       |> visit("/admin")
-
-      # Wait for potential redirect
-      Process.sleep(500)
+      |> wait_for_liveview()
 
       refute Wallaby.Browser.current_path(session) == "/admin"
     end

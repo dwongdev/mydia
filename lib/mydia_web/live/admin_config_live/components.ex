@@ -2151,6 +2151,7 @@ defmodule MydiaWeb.AdminConfigLive.Components do
               options={[
                 {"qBittorrent", "qbittorrent"},
                 {"Transmission", "transmission"},
+                {"rTorrent", "rtorrent"},
                 {"SABnzbd", "sabnzbd"},
                 {"NZBGet", "nzbget"},
                 {"HTTP", "http"}

@@ -241,6 +241,7 @@ defmodule Mydia.Downloads.ClientHealth do
 
   defp get_adapter(:qbittorrent), do: Mydia.Downloads.Client.QBittorrent
   defp get_adapter(:transmission), do: Mydia.Downloads.Client.Transmission
+  defp get_adapter(:rtorrent), do: Mydia.Downloads.Client.Rtorrent
   defp get_adapter(:sabnzbd), do: Mydia.Downloads.Client.Sabnzbd
   defp get_adapter(:nzbget), do: Mydia.Downloads.Client.Nzbget
   defp get_adapter(:http), do: Mydia.Downloads.Client.HTTP

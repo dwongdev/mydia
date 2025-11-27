@@ -310,7 +310,7 @@ defmodule Mydia.Jobs.LibraryScanner do
 
             media_file ->
               {:ok, _} =
-                Library.update_media_file(media_file, %{
+                Library.update_media_file_scan(media_file, %{
                   size: file_info.size,
                   verified_at: DateTime.utc_now()
                 })

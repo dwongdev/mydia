@@ -110,6 +110,18 @@ defmodule Mydia.Library do
   end
 
   @doc """
+  Updates a media file during library scanning.
+
+  Uses scan_changeset which allows orphaned files (files not yet matched to
+  a media_item or episode) to be updated without validation errors.
+  """
+  def update_media_file_scan(%MediaFile{} = media_file, attrs) do
+    media_file
+    |> MediaFile.scan_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
   Marks a media file as verified.
   """
   def verify_media_file(%MediaFile{} = media_file) do

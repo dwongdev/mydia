@@ -28,6 +28,7 @@ defmodule MydiaWeb.ImportMediaLive.Index do
       movies: [],
       ungrouped: [],
       type_filtered: [],
+      sample_filtered: [],
       simple: []
     })
     |> assign(:selected_files, MapSet.new())
@@ -37,7 +38,8 @@ defmodule MydiaWeb.ImportMediaLive.Index do
       unmatched: 0,
       skipped: 0,
       orphaned: 0,
-      type_filtered: 0
+      type_filtered: 0,
+      sample_filtered: 0
     })
     |> assign(:library_paths, Settings.list_library_paths())
     |> assign(:metadata_config, Metadata.default_relay_config())
@@ -51,6 +53,7 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     |> assign(:path_suggestions, [])
     |> assign(:show_path_suggestions, false)
     |> assign(:show_type_filtered, false)
+    |> assign(:show_sample_filtered, false)
   end
 
   @impl true
@@ -245,6 +248,10 @@ defmodule MydiaWeb.ImportMediaLive.Index do
 
   def handle_event("toggle_type_filtered", _params, socket) do
     {:noreply, assign(socket, :show_type_filtered, !socket.assigns.show_type_filtered)}
+  end
+
+  def handle_event("toggle_sample_filtered", _params, socket) do
+    {:noreply, assign(socket, :show_sample_filtered, !socket.assigns.show_sample_filtered)}
   end
 
   def handle_event("edit_file", %{"index" => index_str}, socket) do
@@ -825,20 +832,26 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     {compatible_files, type_filtered_files} =
       filter_by_library_type(matched_files, library_path)
 
-    # Calculate stats
-    matched_count = Enum.count(compatible_files, &(&1.match_result != nil))
-    unmatched_count = length(compatible_files) - matched_count
-    type_filtered_count = length(type_filtered_files)
+    # Filter out sample files, trailers, and extras
+    {regular_files, sample_filtered_files} =
+      filter_samples_and_extras(compatible_files)
 
-    # Group files hierarchically (only compatible files)
+    # Calculate stats
+    matched_count = Enum.count(regular_files, &(&1.match_result != nil))
+    unmatched_count = length(regular_files) - matched_count
+    type_filtered_count = length(type_filtered_files)
+    sample_filtered_count = length(sample_filtered_files)
+
+    # Group files hierarchically (only regular files)
     grouped_files =
-      compatible_files
+      regular_files
       |> FileGrouper.group_files()
       |> Map.put(:type_filtered, type_filtered_files)
+      |> Map.put(:sample_filtered, sample_filtered_files)
 
-    # Auto-select files with high confidence matches (using indices in matched_files for consistency)
+    # Auto-select files with high confidence matches (using indices in regular_files)
     auto_selected =
-      compatible_files
+      regular_files
       |> Enum.with_index()
       |> Enum.filter(fn {file, _idx} ->
         file.match_result != nil && file.match_result.match_confidence >= 0.8
@@ -850,7 +863,7 @@ defmodule MydiaWeb.ImportMediaLive.Index do
       socket
       |> assign(:matching, false)
       |> assign(:step, :review)
-      |> assign(:matched_files, compatible_files)
+      |> assign(:matched_files, regular_files)
       |> assign(:grouped_files, grouped_files)
       |> assign(:selected_files, auto_selected)
       |> assign(:scan_stats, %{
@@ -858,11 +871,28 @@ defmodule MydiaWeb.ImportMediaLive.Index do
         matched: matched_count,
         unmatched: unmatched_count,
         skipped: socket.assigns.scan_stats.skipped,
-        type_filtered: type_filtered_count
+        type_filtered: type_filtered_count,
+        sample_filtered: sample_filtered_count
       })
       |> persist_session()
 
     {:noreply, socket}
+  end
+
+  # Filters out sample files, trailers, and extras based on parsed_info detection
+  defp filter_samples_and_extras(matched_files) do
+    Enum.split_with(matched_files, fn matched_file ->
+      case matched_file.match_result do
+        nil ->
+          # No match result - can't determine if it's a sample, keep it
+          true
+
+        match ->
+          parsed_info = match.parsed_info
+          # Keep if NOT a sample, trailer, or extra
+          not (parsed_info.is_sample or parsed_info.is_trailer or parsed_info.is_extra)
+      end
+    end)
   end
 
   ## Library Type Filtering

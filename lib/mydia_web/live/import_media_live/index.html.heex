@@ -239,6 +239,46 @@
               <% end %>
             </div>
           <% end %>
+
+          <%!-- Sample/Trailer/Extra Filtered Files (Collapsed by default) --%>
+          <%= if @grouped_files[:sample_filtered] && @grouped_files.sample_filtered != [] do %>
+            <div class="bg-base-100 rounded-lg shadow border border-base-300">
+              <div class="bg-warning/10 px-4 py-2 border-b border-base-300">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <h3 class="font-bold text-base text-warning">
+                      <.icon name="hero-film" class="w-4 h-4 inline" />
+                      Filtered (Samples & Extras)
+                    </h3>
+                    <span class="badge badge-warning badge-sm">
+                      {length(@grouped_files.sample_filtered)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    class="btn btn-xs btn-ghost"
+                    phx-click="toggle_sample_filtered"
+                  >
+                    <%= if @show_sample_filtered do %>
+                      <.icon name="hero-chevron-up" class="w-4 h-4" /> Hide
+                    <% else %>
+                      <.icon name="hero-chevron-down" class="w-4 h-4" /> Show
+                    <% end %>
+                  </button>
+                </div>
+                <p class="text-xs text-base-content/60 mt-1">
+                  These files were detected as samples, trailers, or bonus content based on filename patterns or folder structure.
+                </p>
+              </div>
+              <%= if @show_sample_filtered do %>
+                <ul class="divide-y divide-base-300">
+                  <%= for file <- @grouped_files.sample_filtered do %>
+                    <Components.sample_filtered_list_item file={file} />
+                  <% end %>
+                </ul>
+              <% end %>
+            </div>
+          <% end %>
         </div>
       </div>
     <% end %>

@@ -308,7 +308,7 @@ defmodule MydiaWeb.ImportMediaLive.Components do
   Renders the stats cards for the review screen.
 
   ## Attributes
-    * `:scan_stats` - Map with `:total`, `:matched`, `:unmatched`, `:skipped`, `:orphaned`, `:type_filtered`
+    * `:scan_stats` - Map with `:total`, `:matched`, `:unmatched`, `:skipped`, `:orphaned`, `:type_filtered`, `:sample_filtered`
   """
   attr :scan_stats, :map, required: true
 
@@ -340,6 +340,14 @@ defmodule MydiaWeb.ImportMediaLive.Components do
           <div class="stat-title text-xs">Filtered</div>
           <div class="stat-value text-lg text-info">{@scan_stats.type_filtered}</div>
           <div class="stat-desc text-[10px]">type mismatch</div>
+        </div>
+      <% end %>
+
+      <%= if @scan_stats[:sample_filtered] && @scan_stats.sample_filtered > 0 do %>
+        <div class="stat py-2 px-4">
+          <div class="stat-title text-xs">Extras</div>
+          <div class="stat-value text-lg text-warning">{@scan_stats.sample_filtered}</div>
+          <div class="stat-desc text-[10px]">samples/trailers</div>
         </div>
       <% end %>
     </div>
@@ -967,6 +975,106 @@ defmodule MydiaWeb.ImportMediaLive.Components do
       </div>
     </li>
     """
+  end
+
+  @doc """
+  Renders a list item for sample/trailer/extra filtered files.
+  Displays why the file was filtered with detection reason.
+
+  ## Attributes
+    * `:file` - File data with match_result containing parsed_info with detection info
+  """
+  attr :file, :map, required: true
+
+  def sample_filtered_list_item(assigns) do
+    ~H"""
+    <li class="flex items-center gap-3 py-2 px-3 hover:bg-base-200/50 rounded-lg opacity-60">
+      <div class="text-warning mt-1">
+        <.icon name="hero-film" class="w-4 h-4" />
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex-1 min-w-0">
+            <p class="font-medium text-sm truncate">
+              {Path.basename(@file.file.path)}
+            </p>
+            <p class="text-xs text-base-content/60 truncate">
+              {sample_detection_reason(@file)}
+            </p>
+            <p class="text-xs text-base-content/50">
+              {format_file_size(@file.file.size)}
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class={sample_type_badge_class(@file)}>
+              {sample_type_label(@file)}
+            </div>
+            <div class="badge badge-xs badge-warning">Filtered</div>
+          </div>
+        </div>
+      </div>
+    </li>
+    """
+  end
+
+  defp sample_detection_reason(%{match_result: nil} = file) do
+    "Unknown (no match result): #{file.file.path}"
+  end
+
+  defp sample_detection_reason(%{match_result: match}) do
+    parsed_info = match.parsed_info
+
+    cond do
+      parsed_info.is_sample ->
+        case parsed_info.detection_method do
+          :folder -> "Sample file detected in #{parsed_info.detected_folder} folder"
+          :filename -> "Sample file detected from filename pattern"
+          _ -> "Sample file"
+        end
+
+      parsed_info.is_trailer ->
+        case parsed_info.detection_method do
+          :folder -> "Trailer detected in #{parsed_info.detected_folder} folder"
+          :filename -> "Trailer detected from filename pattern"
+          _ -> "Trailer"
+        end
+
+      parsed_info.is_extra ->
+        case parsed_info.detection_method do
+          :folder -> "Extra content in #{parsed_info.detected_folder} folder"
+          :filename -> "Extra content detected from filename pattern"
+          _ -> "Extra content"
+        end
+
+      true ->
+        "Unknown filter reason"
+    end
+  end
+
+  defp sample_type_badge_class(%{match_result: nil}), do: "badge badge-xs badge-ghost"
+
+  defp sample_type_badge_class(%{match_result: match}) do
+    parsed_info = match.parsed_info
+
+    cond do
+      parsed_info.is_sample -> "badge badge-xs badge-warning"
+      parsed_info.is_trailer -> "badge badge-xs badge-info"
+      parsed_info.is_extra -> "badge badge-xs badge-secondary"
+      true -> "badge badge-xs badge-ghost"
+    end
+  end
+
+  defp sample_type_label(%{match_result: nil}), do: "Unknown"
+
+  defp sample_type_label(%{match_result: match}) do
+    parsed_info = match.parsed_info
+
+    cond do
+      parsed_info.is_sample -> "Sample"
+      parsed_info.is_trailer -> "Trailer"
+      parsed_info.is_extra -> "Extra"
+      true -> "Unknown"
+    end
   end
 
   @doc """

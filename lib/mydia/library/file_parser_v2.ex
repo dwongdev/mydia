@@ -38,6 +38,7 @@ defmodule Mydia.Library.FileParser.V2 do
 
   require Logger
 
+  alias Mydia.Library.SampleDetector
   alias Mydia.Library.Structs.ParsedFileInfo
   alias Mydia.Library.Structs.Quality
 
@@ -299,6 +300,7 @@ defmodule Mydia.Library.FileParser.V2 do
           external_id: external_id,
           external_provider: external_provider
         }
+        |> SampleDetector.apply_detection(file_path)
 
       nil ->
         # No TV folder structure found - check for movie folder structure
@@ -333,10 +335,11 @@ defmodule Mydia.Library.FileParser.V2 do
               external_id: movie_info.external_id,
               external_provider: movie_info.external_provider
             }
+            |> SampleDetector.apply_detection(file_path)
 
           nil ->
-            # No folder structure found - return filename-based result as-is
-            filename_result
+            # No folder structure found - return filename-based result with sample detection
+            SampleDetector.apply_detection(filename_result, file_path)
         end
     end
   end

@@ -25,12 +25,24 @@ defmodule Mydia.Library.Structs.ParsedFileInfo do
     :release_group,
     # External provider ID (extracted from folder name like [tmdb-664])
     :external_id,
-    :external_provider
+    :external_provider,
+    # Sample/trailer/extras detection
+    # Indicates the file is a sample, trailer, or extra/bonus content
+    is_sample: false,
+    is_trailer: false,
+    is_extra: false,
+    # The method that detected this file as sample/trailer/extra
+    # :filename | :folder | :duration | nil
+    detection_method: nil,
+    # The folder type if detected via folder (e.g., "Trailers", "Extras")
+    detected_folder: nil
   ]
 
   @type media_type :: :movie | :tv_show | :unknown
 
   @type external_provider :: :tmdb | :tvdb | :imdb | nil
+
+  @type detection_method :: :filename | :folder | :duration | nil
 
   @type t :: %__MODULE__{
           type: media_type(),
@@ -43,7 +55,12 @@ defmodule Mydia.Library.Structs.ParsedFileInfo do
           confidence: float(),
           original_filename: String.t(),
           external_id: String.t() | nil,
-          external_provider: external_provider()
+          external_provider: external_provider(),
+          is_sample: boolean(),
+          is_trailer: boolean(),
+          is_extra: boolean(),
+          detection_method: detection_method(),
+          detected_folder: String.t() | nil
         }
 
   @doc """
@@ -66,7 +83,12 @@ defmodule Mydia.Library.Structs.ParsedFileInfo do
       confidence: confidence,
       original_filename: original_filename,
       external_id: metadata[:external_id],
-      external_provider: metadata[:external_provider]
+      external_provider: metadata[:external_provider],
+      is_sample: metadata[:is_sample] || false,
+      is_trailer: metadata[:is_trailer] || false,
+      is_extra: metadata[:is_extra] || false,
+      detection_method: metadata[:detection_method],
+      detected_folder: metadata[:detected_folder]
     }
   end
 

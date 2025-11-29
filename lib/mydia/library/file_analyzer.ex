@@ -120,10 +120,30 @@ defmodule Mydia.Library.FileAnalyzer do
         audio_codec: extract_audio_codec(audio_stream),
         bitrate: extract_bitrate(video_stream, format),
         hdr_format: extract_hdr_format(video_stream),
+        duration: extract_duration(format),
         size: nil
       })
 
     {:ok, metadata}
+  end
+
+  defp extract_duration(format) do
+    case format["duration"] do
+      nil ->
+        nil
+
+      duration when is_binary(duration) ->
+        case Float.parse(duration) do
+          {value, _} -> value
+          :error -> nil
+        end
+
+      duration when is_number(duration) ->
+        duration / 1.0
+
+      _ ->
+        nil
+    end
   end
 
   defp extract_resolution(nil), do: nil

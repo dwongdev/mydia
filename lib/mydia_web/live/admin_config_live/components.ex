@@ -1201,7 +1201,10 @@ defmodule MydiaWeb.AdminConfigLive.Components do
                 <%!-- Status Badges + Actions row --%>
                 <div class="flex flex-wrap items-center gap-2">
                   <%!-- Status Badges --%>
-                  <span class="badge badge-sm badge-outline">{path.type}</span>
+                  <span class={["badge badge-sm", library_type_badge_class(path.type)]}>
+                    <.icon name={library_type_icon(path.type)} class="w-3 h-3 mr-1" />
+                    {library_type_display(path.type)}
+                  </span>
                   <span class={[
                     "badge badge-sm",
                     if(path.monitored, do: "badge-success", else: "badge-ghost")
@@ -2233,6 +2236,7 @@ defmodule MydiaWeb.AdminConfigLive.Components do
               options={[
                 {"Prowlarr", "prowlarr"},
                 {"Jackett", "jackett"},
+                {"NZBHydra2", "nzbhydra2"},
                 {"Public", "public"}
               ]}
               required
@@ -2291,7 +2295,14 @@ defmodule MydiaWeb.AdminConfigLive.Components do
               field={@library_path_form[:type]}
               type="select"
               label="Type"
-              options={[{"Movies", "movies"}, {"TV Shows", "series"}, {"Mixed", "mixed"}]}
+              options={[
+                {"Movies", "movies"},
+                {"TV Shows", "series"},
+                {"Mixed", "mixed"},
+                {"Music", "music"},
+                {"Books", "books"},
+                {"Adult", "adult"}
+              ]}
               required
             />
             <.input
@@ -2614,4 +2625,29 @@ defmodule MydiaWeb.AdminConfigLive.Components do
   end
 
   defp format_indexer_type(type), do: to_string(type)
+
+  # Library type helpers
+  defp library_type_icon(:series), do: "hero-tv"
+  defp library_type_icon(:movies), do: "hero-film"
+  defp library_type_icon(:mixed), do: "hero-square-3-stack-3d"
+  defp library_type_icon(:music), do: "hero-musical-note"
+  defp library_type_icon(:books), do: "hero-book-open"
+  defp library_type_icon(:adult), do: "hero-eye-slash"
+  defp library_type_icon(_), do: "hero-folder"
+
+  defp library_type_badge_class(:series), do: "badge-info"
+  defp library_type_badge_class(:movies), do: "badge-accent"
+  defp library_type_badge_class(:mixed), do: "badge-secondary"
+  defp library_type_badge_class(:music), do: "badge-success"
+  defp library_type_badge_class(:books), do: "badge-warning"
+  defp library_type_badge_class(:adult), do: "badge-error"
+  defp library_type_badge_class(_), do: "badge-ghost"
+
+  defp library_type_display(:series), do: "TV Series"
+  defp library_type_display(:movies), do: "Movies"
+  defp library_type_display(:mixed), do: "Mixed"
+  defp library_type_display(:music), do: "Music"
+  defp library_type_display(:books), do: "Books"
+  defp library_type_display(:adult), do: "Adult"
+  defp library_type_display(type), do: to_string(type)
 end

@@ -86,6 +86,8 @@ defmodule MydiaWeb do
       import Phoenix.HTML
       # Core UI components
       import MydiaWeb.CoreComponents
+      # Library components for media/music/books views
+      import MydiaWeb.LibraryComponents
       # Metadata search components
       import MydiaWeb.Live.Components.MetadataSearchForm
 

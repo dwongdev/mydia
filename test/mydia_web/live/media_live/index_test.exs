@@ -230,7 +230,7 @@ defmodule MydiaWeb.MediaLive.IndexTest do
 
       # Should show empty state with helpful message
       assert has_element?(view, ".flex.flex-col.items-center", "No media found")
-      assert has_element?(view, ".text-base-content\\/50", "Try adjusting your search or filters")
+      assert has_element?(view, ".text-base-content\\/50", "No results for")
     end
 
     test "search is debounced to avoid excessive filtering", %{conn: conn} do

@@ -1446,6 +1446,170 @@ defmodule Mydia.Library.FileParser.V2Test do
       assert result.season == 1
       assert result.episodes == [8]
     end
+
+    test "uses movie folder name with TMDB ID" do
+      result =
+        FileParser.parse_with_path(
+          "/media/library/movies/MOVIES/Twister (1996) [tmdb-664]/Twister.1996.German.TrueHD.Atmos.1080p.BluRay.x264.mkv"
+        )
+
+      assert result.type == :movie
+      assert result.title == "Twister"
+      assert result.year == 1996
+      assert result.external_id == "664"
+      assert result.external_provider == :tmdb
+      assert result.quality.resolution == "1080p"
+      assert result.quality.source == "BluRay"
+      assert result.confidence >= 0.90
+    end
+
+    test "uses movie folder name without TMDB ID" do
+      result =
+        FileParser.parse_with_path(
+          "/media/movies/The Matrix (1999)/The.Matrix.1999.1080p.BluRay.mkv"
+        )
+
+      assert result.type == :movie
+      assert result.title == "The Matrix"
+      assert result.year == 1999
+      assert result.external_id == nil
+      assert result.external_provider == nil
+      assert result.quality.resolution == "1080p"
+    end
+
+    test "uses movie folder name when filename title differs" do
+      # Sometimes files have different names than the folder
+      result =
+        FileParser.parse_with_path(
+          "/media/movies/Inception (2010) [tmdb-27205]/inception_2010_bluray.mkv"
+        )
+
+      assert result.type == :movie
+      # Title should come from folder, not filename
+      assert result.title == "Inception"
+      assert result.year == 2010
+      assert result.external_id == "27205"
+      assert result.external_provider == :tmdb
+    end
+
+    test "higher confidence when movie folder has external ID" do
+      result_with_id =
+        FileParser.parse_with_path("/media/movies/Movie (2020) [tmdb-123]/movie.mkv")
+
+      result_without_id =
+        FileParser.parse_with_path("/media/movies/Movie (2020)/movie.mkv")
+
+      assert result_with_id.confidence > result_without_id.confidence
+      assert result_with_id.confidence >= 0.90
+    end
+
+    test "falls back to filename for movie not in structured folder" do
+      result = FileParser.parse_with_path("/downloads/Inception.2010.1080p.BluRay.mkv")
+
+      assert result.type == :movie
+      assert result.title == "Inception"
+      assert result.year == 2010
+      assert result.external_id == nil
+      assert result.external_provider == nil
+    end
+
+    test "uses TV show folder name with TVDB ID" do
+      result =
+        FileParser.parse_with_path(
+          "/media/tv/Breaking Bad [tvdb-81189]/Season 01/Breaking.Bad.S01E01.1080p.mkv"
+        )
+
+      assert result.type == :tv_show
+      assert result.title == "Breaking Bad"
+      assert result.season == 1
+      assert result.episodes == [1]
+      assert result.external_id == "81189"
+      assert result.external_provider == :tvdb
+      # High confidence when external ID is present
+      assert result.confidence >= 0.90
+    end
+
+    test "uses TV show folder name with TMDB ID and year" do
+      result =
+        FileParser.parse_with_path(
+          "/media/tv/The Office (2005) [tmdb-2316]/Season 02/The.Office.S02E05.1080p.mkv"
+        )
+
+      assert result.type == :tv_show
+      assert result.title == "The Office"
+      assert result.year == 2005
+      assert result.season == 2
+      assert result.episodes == [5]
+      assert result.external_id == "2316"
+      assert result.external_provider == :tmdb
+      assert result.confidence >= 0.95
+    end
+
+    test "TV show folder without external ID still works" do
+      result =
+        FileParser.parse_with_path("/media/tv/Bluey/Season 03/Bluey.S03E01.1080p.mkv")
+
+      assert result.type == :tv_show
+      assert result.title == "Bluey"
+      assert result.season == 3
+      assert result.episodes == [1]
+      assert result.external_id == nil
+      assert result.external_provider == nil
+    end
+
+    test "TV show folder with year only (no external ID)" do
+      result =
+        FileParser.parse_with_path("/media/tv/Bluey (2018)/Season 03/Bluey.S03E01.1080p.mkv")
+
+      assert result.type == :tv_show
+      assert result.title == "Bluey"
+      assert result.year == 2018
+      assert result.season == 3
+      assert result.episodes == [1]
+      assert result.external_id == nil
+      assert result.external_provider == nil
+    end
+
+    test "TV show folder year takes precedence over filename year" do
+      result =
+        FileParser.parse_with_path(
+          "/media/tv/Show Name (2020) [tmdb-123]/Season 01/Show.Name.2019.S01E01.mkv"
+        )
+
+      assert result.type == :tv_show
+      assert result.title == "Show Name"
+      # Folder year should take precedence
+      assert result.year == 2020
+      assert result.external_id == "123"
+      assert result.external_provider == :tmdb
+    end
+
+    test "handles TV show folder with special characters" do
+      result =
+        FileParser.parse_with_path(
+          "/media/tv/Marvel's Agents of S.H.I.E.L.D. (2013) [tmdb-1403]/Season 01/episode.S01E01.mkv"
+        )
+
+      assert result.type == :tv_show
+      assert result.title == "Marvel's Agents of S.H.I.E.L.D."
+      assert result.year == 2013
+      assert result.external_id == "1403"
+      assert result.external_provider == :tmdb
+    end
+
+    test "handles Specials folder with external ID" do
+      result =
+        FileParser.parse_with_path(
+          "/media/tv/Doctor Who (2005) [tvdb-78804]/Specials/special.S00E01.mkv"
+        )
+
+      assert result.type == :tv_show
+      assert result.title == "Doctor Who"
+      assert result.year == 2005
+      assert result.season == 0
+      assert result.external_id == "78804"
+      assert result.external_provider == :tvdb
+    end
   end
 
   describe "Problematic filenames from task-250" do

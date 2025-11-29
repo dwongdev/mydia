@@ -244,41 +244,140 @@ defmodule Mydia.Library.FileParser.V2 do
     # Try to extract folder structure info
     alias Mydia.Library.PathParser
 
+    # First, check for TV show folder structure
     case PathParser.extract_from_path(file_path) do
       %{show_name: show_name, season: folder_season} ->
-        # Folder structure found - use it but calculate confidence based on agreement
-        Logger.debug("Using folder structure for parsing",
+        # TV folder structure found (show/season folders detected)
+        # Now try to get enhanced metadata (year, external IDs) from the show folder
+        tv_folder_info = PathParser.extract_tv_show_from_path(file_path)
+
+        # Use enhanced folder info if available, otherwise just use basic show_name
+        folder_title = if tv_folder_info, do: tv_folder_info.title, else: show_name
+        folder_year = if tv_folder_info, do: tv_folder_info.year, else: nil
+        external_id = if tv_folder_info, do: tv_folder_info.external_id, else: nil
+        external_provider = if tv_folder_info, do: tv_folder_info.external_provider, else: nil
+
+        Logger.debug("Using TV folder structure for parsing",
           path: file_path,
-          folder_show_name: show_name,
+          folder_show_name: folder_title,
           folder_season: folder_season,
+          folder_year: folder_year,
+          folder_external_id: external_id,
+          folder_external_provider: external_provider,
           filename_title: filename_result.title,
           filename_season: filename_result.season,
           filename_type: filename_result.type
         )
 
         # Calculate confidence based on how well filename agrees with folder interpretation
+        # Boost confidence if we have an external ID (very reliable)
+        base_confidence =
+          calculate_folder_enhanced_confidence(filename_result, folder_title, folder_season)
+
         confidence =
-          calculate_folder_enhanced_confidence(filename_result, show_name, folder_season)
+          if external_id != nil do
+            # External ID provides very high confidence
+            min(base_confidence + 0.20, 1.0)
+          else
+            base_confidence
+          end
 
         # The folder structure indicates this is a TV show
         # Use folder's show name (authoritative) but keep episode info from filename
         %ParsedFileInfo{
           type: :tv_show,
-          title: show_name,
-          year: filename_result.year,
+          title: folder_title,
+          # Prefer folder year, then filename year
+          year: folder_year || filename_result.year,
           # Prefer folder season, but fall back to filename season if folder doesn't specify
           season: folder_season || filename_result.season,
           episodes: filename_result.episodes || [],
           quality: filename_result.quality,
           release_group: filename_result.release_group,
           confidence: confidence,
-          original_filename: filename
+          original_filename: filename,
+          external_id: external_id,
+          external_provider: external_provider
         }
 
       nil ->
-        # No folder structure found - return filename-based result as-is
-        filename_result
+        # No TV folder structure found - check for movie folder structure
+        case PathParser.extract_movie_from_path(file_path) do
+          %{title: folder_title} = movie_info ->
+            # Movie folder structure found - prioritize folder metadata over filename
+            Logger.debug("Using movie folder structure for parsing",
+              path: file_path,
+              folder_title: folder_title,
+              folder_year: movie_info.year,
+              folder_external_id: movie_info.external_id,
+              folder_external_provider: movie_info.external_provider,
+              filename_title: filename_result.title,
+              filename_year: filename_result.year
+            )
+
+            # Calculate confidence based on folder metadata quality
+            confidence = calculate_movie_folder_confidence(movie_info, filename_result)
+
+            %ParsedFileInfo{
+              type: :movie,
+              # Prefer folder title as authoritative
+              title: folder_title,
+              # Prefer folder year, fall back to filename year
+              year: movie_info.year || filename_result.year,
+              season: nil,
+              episodes: nil,
+              quality: filename_result.quality,
+              release_group: filename_result.release_group,
+              confidence: confidence,
+              original_filename: filename,
+              external_id: movie_info.external_id,
+              external_provider: movie_info.external_provider
+            }
+
+          nil ->
+            # No folder structure found - return filename-based result as-is
+            filename_result
+        end
     end
+  end
+
+  # Calculate confidence for movie folder-based parsing
+  # Higher confidence when folder has external ID (very reliable)
+  # Lower when only title/year extracted
+  defp calculate_movie_folder_confidence(movie_info, filename_result) do
+    base = 0.60
+
+    # External ID is very reliable indicator
+    external_id_bonus =
+      if movie_info.external_id != nil do
+        0.30
+      else
+        0.0
+      end
+
+    # Year in folder adds confidence
+    year_bonus =
+      if movie_info.year != nil do
+        0.05
+      else
+        0.0
+      end
+
+    # Filename agreeing with folder adds small bonus
+    title_agreement_bonus =
+      if filename_result.title != nil do
+        title_sim = simple_title_similarity(movie_info.title, filename_result.title)
+
+        if title_sim >= 0.7 do
+          0.05
+        else
+          0.0
+        end
+      else
+        0.0
+      end
+
+    min(base + external_id_bonus + year_bonus + title_agreement_bonus, 1.0)
   end
 
   # Calculate confidence when folder structure is used.

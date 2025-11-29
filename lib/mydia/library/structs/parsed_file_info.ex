@@ -22,10 +22,15 @@ defmodule Mydia.Library.Structs.ParsedFileInfo do
     :season,
     :episodes,
     :quality,
-    :release_group
+    :release_group,
+    # External provider ID (extracted from folder name like [tmdb-664])
+    :external_id,
+    :external_provider
   ]
 
   @type media_type :: :movie | :tv_show | :unknown
+
+  @type external_provider :: :tmdb | :tvdb | :imdb | nil
 
   @type t :: %__MODULE__{
           type: media_type(),
@@ -36,7 +41,9 @@ defmodule Mydia.Library.Structs.ParsedFileInfo do
           quality: Quality.t(),
           release_group: String.t() | nil,
           confidence: float(),
-          original_filename: String.t()
+          original_filename: String.t(),
+          external_id: String.t() | nil,
+          external_provider: external_provider()
         }
 
   @doc """
@@ -57,7 +64,9 @@ defmodule Mydia.Library.Structs.ParsedFileInfo do
       quality: metadata[:quality] || Quality.empty(),
       release_group: metadata[:release_group],
       confidence: confidence,
-      original_filename: original_filename
+      original_filename: original_filename,
+      external_id: metadata[:external_id],
+      external_provider: metadata[:external_provider]
     }
   end
 

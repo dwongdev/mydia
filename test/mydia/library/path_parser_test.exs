@@ -209,4 +209,368 @@ defmodule Mydia.Library.PathParserTest do
       assert result == %{show_name: "One-Punch Man", season: 3}
     end
   end
+
+  describe "parse_movie_folder/1" do
+    test "parses movie folder with year and TMDB ID" do
+      result = PathParser.parse_movie_folder("Twister (1996) [tmdb-664]")
+
+      assert result == %{
+               title: "Twister",
+               year: 1996,
+               external_id: "664",
+               external_provider: :tmdb
+             }
+    end
+
+    test "parses movie folder with year only" do
+      result = PathParser.parse_movie_folder("The Matrix (1999)")
+
+      assert result == %{
+               title: "The Matrix",
+               year: 1999,
+               external_id: nil,
+               external_provider: nil
+             }
+    end
+
+    test "parses movie folder with TMDB ID only (no year)" do
+      result = PathParser.parse_movie_folder("Inception [tmdb-27205]")
+
+      assert result == %{
+               title: "Inception",
+               year: nil,
+               external_id: "27205",
+               external_provider: :tmdb
+             }
+    end
+
+    test "parses movie folder with TVDB ID" do
+      result = PathParser.parse_movie_folder("Some Movie (2020) [tvdb-12345]")
+
+      assert result == %{
+               title: "Some Movie",
+               year: 2020,
+               external_id: "12345",
+               external_provider: :tvdb
+             }
+    end
+
+    test "parses movie folder with IMDB ID" do
+      result = PathParser.parse_movie_folder("Dark Knight (2008) [imdb-tt0468569]")
+
+      assert result == %{
+               title: "Dark Knight",
+               year: 2008,
+               external_id: "tt0468569",
+               external_provider: :imdb
+             }
+    end
+
+    test "handles case-insensitive provider names" do
+      result = PathParser.parse_movie_folder("Movie (2020) [TMDB-123]")
+
+      assert result == %{
+               title: "Movie",
+               year: 2020,
+               external_id: "123",
+               external_provider: :tmdb
+             }
+    end
+
+    test "returns nil for folder without year or external ID" do
+      result = PathParser.parse_movie_folder("Just A Folder Name")
+
+      assert result == nil
+    end
+
+    test "returns nil for empty string" do
+      assert PathParser.parse_movie_folder("") == nil
+    end
+
+    test "returns nil for nil input" do
+      assert PathParser.parse_movie_folder(nil) == nil
+    end
+
+    test "handles title with special characters" do
+      result = PathParser.parse_movie_folder("Mission: Impossible (1996) [tmdb-954]")
+
+      assert result == %{
+               title: "Mission: Impossible",
+               year: 1996,
+               external_id: "954",
+               external_provider: :tmdb
+             }
+    end
+
+    test "handles title with numbers" do
+      result = PathParser.parse_movie_folder("2001 A Space Odyssey (1968) [tmdb-62]")
+
+      assert result == %{
+               title: "2001 A Space Odyssey",
+               year: 1968,
+               external_id: "62",
+               external_provider: :tmdb
+             }
+    end
+
+    test "handles real-world folder name with quality info in filename" do
+      # The folder name should be parsed, not the filename
+      result = PathParser.parse_movie_folder("Twister (1996) [tmdb-664]")
+
+      assert result == %{
+               title: "Twister",
+               year: 1996,
+               external_id: "664",
+               external_provider: :tmdb
+             }
+    end
+  end
+
+  describe "extract_movie_from_path/1" do
+    test "extracts movie metadata from full path" do
+      result =
+        PathParser.extract_movie_from_path(
+          "/media/library/movies/MOVIES/Twister (1996) [tmdb-664]/Twister.1996.German.TrueHD.Atmos.1080p.BluRay.x264.mkv"
+        )
+
+      assert result == %{
+               title: "Twister",
+               year: 1996,
+               external_id: "664",
+               external_provider: :tmdb
+             }
+    end
+
+    test "extracts movie from path without TMDB ID" do
+      result =
+        PathParser.extract_movie_from_path(
+          "/media/movies/The Shawshank Redemption (1994)/movie.mkv"
+        )
+
+      assert result == %{
+               title: "The Shawshank Redemption",
+               year: 1994,
+               external_id: nil,
+               external_provider: nil
+             }
+    end
+
+    test "returns nil for file not in movie folder structure" do
+      result = PathParser.extract_movie_from_path("/downloads/random_movie.mkv")
+
+      assert result == nil
+    end
+
+    test "returns nil for TV show structure" do
+      result =
+        PathParser.extract_movie_from_path("/media/tv/The Office/Season 01/episode.mkv")
+
+      assert result == nil
+    end
+
+    test "returns nil for non-binary input" do
+      assert PathParser.extract_movie_from_path(nil) == nil
+    end
+  end
+
+  describe "parse_tv_show_folder/1" do
+    test "parses TV show folder with TVDB ID" do
+      result = PathParser.parse_tv_show_folder("Breaking Bad [tvdb-81189]")
+
+      assert result == %{
+               title: "Breaking Bad",
+               year: nil,
+               external_id: "81189",
+               external_provider: :tvdb
+             }
+    end
+
+    test "parses TV show folder with year and TMDB ID" do
+      result = PathParser.parse_tv_show_folder("The Office (2005) [tmdb-2316]")
+
+      assert result == %{
+               title: "The Office",
+               year: 2005,
+               external_id: "2316",
+               external_provider: :tmdb
+             }
+    end
+
+    test "parses TV show folder with year only" do
+      result = PathParser.parse_tv_show_folder("Bluey (2018)")
+
+      assert result == %{
+               title: "Bluey",
+               year: 2018,
+               external_id: nil,
+               external_provider: nil
+             }
+    end
+
+    test "parses TV show folder with title only (no year or ID)" do
+      result = PathParser.parse_tv_show_folder("One-Punch Man")
+
+      assert result == %{
+               title: "One-Punch Man",
+               year: nil,
+               external_id: nil,
+               external_provider: nil
+             }
+    end
+
+    test "parses TV show folder with IMDB ID" do
+      result = PathParser.parse_tv_show_folder("Game of Thrones (2011) [imdb-tt0944947]")
+
+      assert result == %{
+               title: "Game of Thrones",
+               year: 2011,
+               external_id: "tt0944947",
+               external_provider: :imdb
+             }
+    end
+
+    test "handles case-insensitive provider names" do
+      result = PathParser.parse_tv_show_folder("Show Name [TVDB-12345]")
+
+      assert result == %{
+               title: "Show Name",
+               year: nil,
+               external_id: "12345",
+               external_provider: :tvdb
+             }
+    end
+
+    test "parses folder with special characters in title" do
+      result =
+        PathParser.parse_tv_show_folder("Marvel's Agents of S.H.I.E.L.D. (2013) [tmdb-1403]")
+
+      assert result == %{
+               title: "Marvel's Agents of S.H.I.E.L.D.",
+               year: 2013,
+               external_id: "1403",
+               external_provider: :tmdb
+             }
+    end
+
+    test "returns nil for nil input" do
+      assert PathParser.parse_tv_show_folder(nil) == nil
+    end
+  end
+
+  describe "extract_tv_show_from_path/1" do
+    test "extracts TV show metadata with TVDB ID from full path" do
+      result =
+        PathParser.extract_tv_show_from_path(
+          "/media/tv/Breaking Bad [tvdb-81189]/Season 01/episode.mkv"
+        )
+
+      assert result == %{
+               title: "Breaking Bad",
+               year: nil,
+               external_id: "81189",
+               external_provider: :tvdb
+             }
+    end
+
+    test "extracts TV show metadata with year and TMDB ID from full path" do
+      result =
+        PathParser.extract_tv_show_from_path(
+          "/media/tv/The Office (2005) [tmdb-2316]/Season 02/episode.mkv"
+        )
+
+      assert result == %{
+               title: "The Office",
+               year: 2005,
+               external_id: "2316",
+               external_provider: :tmdb
+             }
+    end
+
+    test "extracts TV show metadata with just title from full path" do
+      result =
+        PathParser.extract_tv_show_from_path("/media/tv/Bluey/Season 03/episode.mkv")
+
+      assert result == %{
+               title: "Bluey",
+               year: nil,
+               external_id: nil,
+               external_provider: nil
+             }
+    end
+
+    test "extracts TV show metadata with year from full path" do
+      result =
+        PathParser.extract_tv_show_from_path("/media/tv/Bluey (2018)/Season 03/episode.mkv")
+
+      assert result == %{
+               title: "Bluey",
+               year: 2018,
+               external_id: nil,
+               external_provider: nil
+             }
+    end
+
+    test "handles deep path structure with TV show metadata" do
+      result =
+        PathParser.extract_tv_show_from_path(
+          "/home/user/media/library/tv/Severance (2022) [tmdb-95396]/Season 01/episode.mkv"
+        )
+
+      assert result == %{
+               title: "Severance",
+               year: 2022,
+               external_id: "95396",
+               external_provider: :tmdb
+             }
+    end
+
+    test "handles Specials folder" do
+      result =
+        PathParser.extract_tv_show_from_path(
+          "/media/tv/Doctor Who (2005) [tvdb-78804]/Specials/special.mkv"
+        )
+
+      assert result == %{
+               title: "Doctor Who",
+               year: 2005,
+               external_id: "78804",
+               external_provider: :tvdb
+             }
+    end
+
+    test "handles S01 folder format" do
+      result =
+        PathParser.extract_tv_show_from_path("/media/tv/Show Name [tmdb-123]/S01/episode.mkv")
+
+      assert result == %{
+               title: "Show Name",
+               year: nil,
+               external_id: "123",
+               external_provider: :tmdb
+             }
+    end
+
+    test "returns nil for file not in TV folder structure" do
+      result = PathParser.extract_tv_show_from_path("/downloads/random_file.mkv")
+
+      assert result == nil
+    end
+
+    test "returns nil for movie folder structure" do
+      result =
+        PathParser.extract_tv_show_from_path("/media/movies/Twister (1996) [tmdb-664]/movie.mkv")
+
+      assert result == nil
+    end
+
+    test "returns nil for too short path" do
+      result = PathParser.extract_tv_show_from_path("/file.mkv")
+
+      assert result == nil
+    end
+
+    test "returns nil for non-binary input" do
+      assert PathParser.extract_tv_show_from_path(nil) == nil
+    end
+  end
 end

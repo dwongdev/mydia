@@ -63,9 +63,99 @@ defmodule Mydia.Library.MetadataMatcher do
   Matches parsed movie information to TMDB.
 
   Returns the best match or error if no suitable match found.
+
+  When parsed info contains an external_id (e.g., from folder name like [tmdb-664]),
+  it will perform a direct lookup instead of searching by title.
   """
   @spec match_movie(map(), map(), keyword()) :: {:ok, match_result()} | {:error, term()}
   def match_movie(%{type: :movie} = parsed, config, opts \\ []) do
+    # First, check if we have an external provider ID for direct lookup
+    case lookup_by_external_id(parsed, config, opts) do
+      {:ok, _match_result} = success ->
+        success
+
+      {:error, :no_external_id} ->
+        # No external ID, proceed with normal matching
+        match_movie_by_title(parsed, config, opts)
+
+      {:error, reason} ->
+        # External ID lookup failed, fall back to title-based matching
+        Logger.warning("External ID lookup failed, falling back to title search",
+          external_id: parsed.external_id,
+          external_provider: parsed.external_provider,
+          reason: reason
+        )
+
+        match_movie_by_title(parsed, config, opts)
+    end
+  end
+
+  # Lookup movie directly by external provider ID (from folder name like [tmdb-664])
+  defp lookup_by_external_id(parsed, config, opts) do
+    # Check if we have external ID and provider
+    external_id = Map.get(parsed, :external_id)
+    external_provider = Map.get(parsed, :external_provider)
+
+    case {external_id, external_provider} do
+      {nil, _} ->
+        {:error, :no_external_id}
+
+      {_, nil} ->
+        {:error, :no_external_id}
+
+      {id, :tmdb} ->
+        Logger.info("Performing direct TMDB lookup by ID from folder name",
+          tmdb_id: id,
+          title: parsed.title
+        )
+
+        fetch_opts = Keyword.merge(opts, media_type: :movie)
+
+        case Metadata.fetch_by_id(config, id, fetch_opts) do
+          {:ok, result} ->
+            Logger.info("Direct TMDB lookup successful",
+              tmdb_id: id,
+              title: result.title,
+              year: result.year
+            )
+
+            movie_metadata =
+              MediaMetadata.from_api_response(
+                Map.from_struct(result),
+                :movie,
+                id
+              )
+
+            {:ok,
+             MatchResult.new(
+               provider_id: id,
+               provider_type: :tmdb,
+               title: result.title,
+               year: result.year,
+               # Direct ID lookup is very high confidence
+               match_confidence: 0.99,
+               match_type: :direct_id_lookup,
+               metadata: movie_metadata,
+               parsed_info: parsed
+             )}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {id, provider} ->
+        # Other providers (tvdb, imdb) - not yet supported for direct lookup
+        Logger.warning("Direct lookup not supported for provider",
+          provider: provider,
+          id: id
+        )
+
+        {:error, :unsupported_provider}
+    end
+  end
+
+  # Match movie by title (original behavior)
+  defp match_movie_by_title(parsed, config, opts) do
     if parsed.title do
       # First, try to match against existing media items in the local database
       case find_local_movie(parsed) do
@@ -126,9 +216,140 @@ defmodule Mydia.Library.MetadataMatcher do
   Matches parsed TV show information to TVDB/TMDB.
 
   Returns the best match or error if no suitable match found.
+
+  When parsed info contains an external_id (e.g., from folder name like [tvdb-81189]),
+  it will perform a direct lookup instead of searching by title.
   """
   @spec match_tv_show(map(), map(), keyword()) :: {:ok, match_result()} | {:error, term()}
   def match_tv_show(%{type: :tv_show} = parsed, config, opts \\ []) do
+    # First, check if we have an external provider ID for direct lookup
+    case lookup_tv_show_by_external_id(parsed, config, opts) do
+      {:ok, _match_result} = success ->
+        success
+
+      {:error, :no_external_id} ->
+        # No external ID, proceed with normal matching
+        match_tv_show_by_title(parsed, config, opts)
+
+      {:error, reason} ->
+        # External ID lookup failed, fall back to title-based matching
+        Logger.warning("TV show external ID lookup failed, falling back to title search",
+          external_id: Map.get(parsed, :external_id),
+          external_provider: Map.get(parsed, :external_provider),
+          reason: reason
+        )
+
+        match_tv_show_by_title(parsed, config, opts)
+    end
+  end
+
+  # Lookup TV show directly by external provider ID (from folder name like [tvdb-81189])
+  defp lookup_tv_show_by_external_id(parsed, config, opts) do
+    # Check if we have external ID and provider
+    external_id = Map.get(parsed, :external_id)
+    external_provider = Map.get(parsed, :external_provider)
+
+    case {external_id, external_provider} do
+      {nil, _} ->
+        {:error, :no_external_id}
+
+      {_, nil} ->
+        {:error, :no_external_id}
+
+      {id, :tmdb} ->
+        Logger.info("Performing direct TMDB lookup for TV show by ID from folder name",
+          tmdb_id: id,
+          title: parsed.title
+        )
+
+        fetch_opts = Keyword.merge(opts, media_type: :tv_show)
+
+        case Metadata.fetch_by_id(config, id, fetch_opts) do
+          {:ok, result} ->
+            Logger.info("Direct TMDB TV show lookup successful",
+              tmdb_id: id,
+              title: result.title,
+              year: result.year
+            )
+
+            tv_metadata =
+              MediaMetadata.from_api_response(
+                Map.from_struct(result),
+                :tv_show,
+                id
+              )
+
+            {:ok,
+             MatchResult.new(
+               provider_id: id,
+               provider_type: :tmdb,
+               title: result.title,
+               year: result.year,
+               # Direct ID lookup is very high confidence
+               match_confidence: 0.99,
+               match_type: :direct_id_lookup,
+               metadata: tv_metadata,
+               parsed_info: parsed
+             )}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {id, :tvdb} ->
+        Logger.info("Performing direct TVDB lookup for TV show by ID from folder name",
+          tvdb_id: id,
+          title: parsed.title
+        )
+
+        # For TVDB, we need to use the TVDB-specific fetch
+        fetch_opts = Keyword.merge(opts, media_type: :tv_show, provider: :tvdb)
+
+        case Metadata.fetch_by_id(config, id, fetch_opts) do
+          {:ok, result} ->
+            Logger.info("Direct TVDB TV show lookup successful",
+              tvdb_id: id,
+              title: result.title,
+              year: result.year
+            )
+
+            tv_metadata =
+              MediaMetadata.from_api_response(
+                Map.from_struct(result),
+                :tv_show,
+                id
+              )
+
+            {:ok,
+             MatchResult.new(
+               provider_id: id,
+               provider_type: :tvdb,
+               title: result.title,
+               year: result.year,
+               # Direct ID lookup is very high confidence
+               match_confidence: 0.99,
+               match_type: :direct_id_lookup,
+               metadata: tv_metadata,
+               parsed_info: parsed
+             )}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {id, provider} ->
+        # Other providers (imdb) - not yet supported for direct lookup
+        Logger.warning("Direct TV show lookup not supported for provider",
+          provider: provider,
+          id: id
+        )
+
+        {:error, :unsupported_provider}
+    end
+  end
+
+  # Match TV show by title (original behavior)
+  defp match_tv_show_by_title(parsed, config, opts) do
     if parsed.title do
       # First, try to match against existing media items in the local database
       case find_local_tv_show(parsed) do

@@ -74,3 +74,9 @@ compose.override.yml
 # Generated media (covers, sprites, VTT files)
 /priv/generated/
 
+# MkDocs build output
+/site/
+
+# Python virtual environment
+.venv/
+

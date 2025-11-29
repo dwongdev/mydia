@@ -697,7 +697,12 @@ defmodule MydiaWeb.AdminConfigLive.Components do
                   </div>
                   <div class="text-xs opacity-60 mt-1 truncate">
                     <span class="font-mono">
-                      {if client.use_ssl, do: "https://", else: "http://"}{client.host}:{client.port}
+                      <%= if client.type == :blackhole do %>
+                        {get_in(client.connection_settings || %{}, ["watch_folder"]) ||
+                          "No watch folder"}
+                      <% else %>
+                        {if client.use_ssl, do: "https://", else: "http://"}{client.host}:{client.port}
+                      <% end %>
                     </span>
                     <%= if client.category do %>
                       <span class="ml-2">Category: {client.category}</span>
@@ -2181,6 +2186,16 @@ defmodule MydiaWeb.AdminConfigLive.Components do
   attr :testing_download_client_connection, :boolean, default: false
 
   def download_client_modal(assigns) do
+    # Get the currently selected type to conditionally show fields
+    selected_type =
+      case Phoenix.HTML.Form.input_value(assigns.download_client_form, :type) do
+        type when is_binary(type) -> type
+        type when is_atom(type) -> Atom.to_string(type)
+        _ -> "qbittorrent"
+      end
+
+    assigns = assign(assigns, :selected_type, selected_type)
+
     ~H"""
     <div class="modal modal-open">
       <div class="modal-box max-w-2xl">
@@ -2206,25 +2221,89 @@ defmodule MydiaWeb.AdminConfigLive.Components do
                 {"qBittorrent", "qbittorrent"},
                 {"Transmission", "transmission"},
                 {"rTorrent", "rtorrent"},
+                {"Blackhole", "blackhole"},
                 {"SABnzbd", "sabnzbd"},
                 {"NZBGet", "nzbget"},
                 {"HTTP", "http"}
               ]}
               required
             />
-            <.input field={@download_client_form[:host]} type="text" label="Host" required />
-            <.input field={@download_client_form[:port]} type="number" label="Port" required />
-            <.input field={@download_client_form[:username]} type="text" label="Username" />
-            <.input field={@download_client_form[:password]} type="password" label="Password" />
-            <.input field={@download_client_form[:api_key]} type="password" label="API Key" />
-            <.input field={@download_client_form[:url_base]} type="text" label="URL Base" />
-            <.input field={@download_client_form[:category]} type="text" label="Category" />
-            <.input
-              field={@download_client_form[:download_directory]}
-              type="text"
-              label="Download Directory"
-            />
-            <.input field={@download_client_form[:use_ssl]} type="checkbox" label="Use SSL" />
+
+            <%= if @selected_type == "blackhole" do %>
+              <%!-- Blackhole-specific fields --%>
+              <div class="alert alert-info text-sm">
+                <.icon name="hero-information-circle" class="w-5 h-5" />
+                <span>
+                  Blackhole writes .torrent files to a watch folder. An external process
+                  (seedbox, script, etc.) handles the actual downloading.
+                </span>
+              </div>
+
+              <.input
+                name="download_client_config[connection_settings][watch_folder]"
+                type="text"
+                label="Watch Folder"
+                placeholder="/path/to/watch"
+                value={
+                  get_in(
+                    Phoenix.HTML.Form.input_value(@download_client_form, :connection_settings) || %{},
+                    ["watch_folder"]
+                  ) || ""
+                }
+                required
+              />
+              <p class="text-xs text-base-content/60 -mt-2">
+                Mydia will drop .torrent files here for your external process to pick up.
+              </p>
+
+              <.input
+                name="download_client_config[connection_settings][completed_folder]"
+                type="text"
+                label="Completed Folder"
+                placeholder="/path/to/completed"
+                value={
+                  get_in(
+                    Phoenix.HTML.Form.input_value(@download_client_form, :connection_settings) || %{},
+                    ["completed_folder"]
+                  ) || ""
+                }
+                required
+              />
+              <p class="text-xs text-base-content/60 -mt-2">
+                Mydia will look here for completed downloads to import.
+              </p>
+
+              <.input
+                name="download_client_config[connection_settings][use_category_subfolders]"
+                type="checkbox"
+                label="Use Category Subfolders"
+                checked={
+                  get_in(
+                    Phoenix.HTML.Form.input_value(@download_client_form, :connection_settings) || %{},
+                    ["use_category_subfolders"]
+                  ) == true
+                }
+              />
+              <p class="text-xs text-base-content/60 -mt-2">
+                Create movies/tv subfolders in the watch folder.
+              </p>
+            <% else %>
+              <%!-- Network client fields --%>
+              <.input field={@download_client_form[:host]} type="text" label="Host" required />
+              <.input field={@download_client_form[:port]} type="number" label="Port" required />
+              <.input field={@download_client_form[:username]} type="text" label="Username" />
+              <.input field={@download_client_form[:password]} type="password" label="Password" />
+              <.input field={@download_client_form[:api_key]} type="password" label="API Key" />
+              <.input field={@download_client_form[:url_base]} type="text" label="URL Base" />
+              <.input field={@download_client_form[:category]} type="text" label="Category" />
+              <.input
+                field={@download_client_form[:download_directory]}
+                type="text"
+                label="Download Directory"
+              />
+              <.input field={@download_client_form[:use_ssl]} type="checkbox" label="Use SSL" />
+            <% end %>
+
             <.input
               field={@download_client_form[:enabled]}
               type="checkbox"

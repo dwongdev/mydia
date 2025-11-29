@@ -1,6 +1,6 @@
 defmodule Mydia.Settings.DownloadClientConfig do
   @moduledoc """
-  Schema for download client configurations (qBittorrent, Transmission, HTTP).
+  Schema for download client configurations (qBittorrent, Transmission, rTorrent, HTTP).
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -8,7 +8,7 @@ defmodule Mydia.Settings.DownloadClientConfig do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @client_types [:qbittorrent, :transmission, :http, :sabnzbd, :nzbget]
+  @client_types [:qbittorrent, :transmission, :rtorrent, :http, :sabnzbd, :nzbget]
 
   schema "download_client_configs" do
     field :name, :string

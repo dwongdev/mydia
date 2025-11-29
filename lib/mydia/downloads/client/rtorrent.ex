@@ -80,19 +80,15 @@ defmodule Mydia.Downloads.Client.Rtorrent do
 
   @impl true
   def add_torrent(config, torrent, opts \\ []) do
-    case build_load_command(torrent, opts) do
-      {:ok, {method, args}} ->
-        case xmlrpc_call(config, method, args) do
-          {:ok, 0} ->
-            # rTorrent returns 0 on success, we need to extract the hash
-            extract_torrent_hash(torrent)
+    {:ok, {method, args}} = build_load_command(torrent, opts)
 
-          {:ok, _} ->
-            {:error, Error.api_error("Failed to add torrent to rTorrent")}
+    case xmlrpc_call(config, method, args) do
+      {:ok, 0} ->
+        # rTorrent returns 0 on success, we need to extract the hash
+        extract_torrent_hash(torrent)
 
-          {:error, _} = error ->
-            error
-        end
+      {:ok, _} ->
+        {:error, Error.api_error("Failed to add torrent to rTorrent")}
 
       {:error, _} = error ->
         error
@@ -609,7 +605,7 @@ defmodule Mydia.Downloads.Client.Rtorrent do
     end
   end
 
-  defp extract_single_array_element(body, element) do
+  defp extract_single_array_element(_body, element) do
     import SweetXml
 
     # Each element could be a simple value or another array (for d.multicall results)

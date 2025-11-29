@@ -23,17 +23,30 @@ defmodule MydiaWeb.RequestMediaLive.Index do
     {:noreply, apply_action(socket, socket.assigns.live_action, params)}
   end
 
-  defp apply_action(socket, :request_movie, _params) do
+  defp apply_action(socket, :request_movie, params) do
     socket
     |> assign(:page_title, "Request Movie")
     |> assign(:media_type, :movie)
+    |> maybe_trigger_search(params)
   end
 
-  defp apply_action(socket, :request_series, _params) do
+  defp apply_action(socket, :request_series, params) do
     socket
     |> assign(:page_title, "Request Series")
     |> assign(:media_type, :tv_show)
+    |> maybe_trigger_search(params)
   end
+
+  # Auto-trigger search if a query parameter is provided
+  defp maybe_trigger_search(socket, %{"q" => query}) when is_binary(query) and query != "" do
+    send(self(), {:perform_search, query})
+
+    socket
+    |> assign(:search_query, query)
+    |> assign(:searching, true)
+  end
+
+  defp maybe_trigger_search(socket, _params), do: socket
 
   ## Event Handlers
 
@@ -208,7 +221,7 @@ defmodule MydiaWeb.RequestMediaLive.Index do
 
   defp get_poster_url(result) do
     case result.poster_path do
-      nil -> "/images/no-poster.jpg"
+      nil -> "/images/no-poster.svg"
       path -> "https://image.tmdb.org/t/p/w500#{path}"
     end
   end

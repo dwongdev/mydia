@@ -93,14 +93,52 @@ defmodule MydiaWeb.Live.UserAuth do
           0
       end
 
+    # Get configured library types (for showing/hiding sidebar links)
+    configured_library_types = get_configured_library_types()
+
+    # Get adult content count only if adult library is configured
+    adult_count =
+      if MapSet.member?(configured_library_types, :adult) do
+        Mydia.Media.count_by_library_path_type(:adult)
+      else
+        0
+      end
+
+    # Get music album count only if music library is configured
+    music_count =
+      if MapSet.member?(configured_library_types, :music) do
+        Mydia.Music.count_albums()
+      else
+        0
+      end
+
+    # Get books count only if books library is configured
+    books_count =
+      if MapSet.member?(configured_library_types, :books) do
+        Mydia.Books.count_books()
+      else
+        0
+      end
+
     socket =
       socket
       |> assign(:movie_count, Mydia.Media.count_movies())
       |> assign(:tv_show_count, Mydia.Media.count_tv_shows())
       |> assign(:downloads_count, Mydia.Downloads.count_active_downloads())
       |> assign(:pending_requests_count, pending_requests_count)
+      |> assign(:configured_library_types, configured_library_types)
+      |> assign(:adult_count, adult_count)
+      |> assign(:music_count, music_count)
+      |> assign(:books_count, books_count)
 
     {:cont, socket}
+  end
+
+  # Get a MapSet of library types that have at least one library path configured
+  defp get_configured_library_types do
+    Mydia.Settings.list_library_paths()
+    |> Enum.map(& &1.type)
+    |> MapSet.new()
   end
 
   # Mount the current user from the session

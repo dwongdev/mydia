@@ -44,6 +44,7 @@ defmodule Mydia.Indexers do
   Currently supported adapters:
     - `:prowlarr` - Prowlarr indexer aggregator
     - `:jackett` - Jackett indexer proxy
+    - `:nzbhydra2` - NZBHydra2 Usenet NZB aggregator
     - `:cardigann` - Native Cardigann definition support
   """
   def register_adapters do
@@ -52,6 +53,7 @@ defmodule Mydia.Indexers do
     # Register adapters
     Adapter.Registry.register(:prowlarr, Mydia.Indexers.Adapter.Prowlarr)
     Adapter.Registry.register(:jackett, Mydia.Indexers.Adapter.Jackett)
+    Adapter.Registry.register(:nzbhydra2, Mydia.Indexers.Adapter.NzbHydra2)
     Adapter.Registry.register(:cardigann, Mydia.Indexers.Adapter.Cardigann)
 
     Logger.info("Indexer adapter registration complete")
@@ -124,6 +126,8 @@ defmodule Mydia.Indexers do
       - `:categories` - List of Torznab category IDs to filter by (default: [])
         Use `Mydia.Indexers.CategoryMapping.categories_for_type/1` to get categories
         for a library type (e.g., `:movies`, `:series`, `:music`, `:books`, `:adult`)
+      - `:indexer_ids` - List of indexer config IDs to search (default: all enabled)
+        When provided, only the specified indexers will be searched.
 
   ## Examples
 
@@ -137,11 +141,15 @@ defmodule Mydia.Indexers do
       iex> categories = CategoryMapping.categories_for_type(:music)
       iex> Mydia.Indexers.search_all("Beatles", categories: categories)
       {:ok, [%SearchResult{}, ...]}
+
+      iex> Mydia.Indexers.search_all("Ubuntu", indexer_ids: ["abc-123", "def-456"])
+      {:ok, [%SearchResult{}, ...]}
   """
   def search_all(query, opts \\ []) do
     min_seeders = Keyword.get(opts, :min_seeders, 0)
     max_results = Keyword.get(opts, :max_results, 100)
     should_deduplicate = Keyword.get(opts, :deduplicate, true)
+    indexer_ids = Keyword.get(opts, :indexer_ids)
 
     # Get traditional indexers (Prowlarr, Jackett)
     indexers = Settings.list_indexer_configs()
@@ -149,6 +157,26 @@ defmodule Mydia.Indexers do
 
     # Get enabled Cardigann definitions if feature is enabled
     cardigann_configs = get_enabled_cardigann_configs()
+
+    # Filter by specific indexer IDs if provided
+    {enabled_indexers, cardigann_configs} =
+      if indexer_ids do
+        indexer_id_set = MapSet.new(indexer_ids)
+
+        filtered_indexers =
+          Enum.filter(enabled_indexers, fn indexer ->
+            MapSet.member?(indexer_id_set, indexer.id)
+          end)
+
+        filtered_cardigann =
+          Enum.filter(cardigann_configs, fn config ->
+            MapSet.member?(indexer_id_set, config.id)
+          end)
+
+        {filtered_indexers, filtered_cardigann}
+      else
+        {enabled_indexers, cardigann_configs}
+      end
 
     all_indexers = enabled_indexers ++ cardigann_configs
 
@@ -249,6 +277,7 @@ defmodule Mydia.Indexers do
   # Converts a CardigannDefinition to the config map expected by the Cardigann adapter
   defp cardigann_definition_to_config(%CardigannDefinition{} = definition) do
     %{
+      id: definition.id,
       type: :cardigann,
       name: definition.name,
       indexer_id: definition.indexer_id,

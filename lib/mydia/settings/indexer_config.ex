@@ -8,7 +8,7 @@ defmodule Mydia.Settings.IndexerConfig do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @indexer_types [:prowlarr, :jackett, :public]
+  @indexer_types [:prowlarr, :jackett, :nzbhydra2, :public]
 
   schema "indexer_configs" do
     field :name, :string

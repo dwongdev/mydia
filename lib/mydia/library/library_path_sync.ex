@@ -227,6 +227,8 @@ defmodule Mydia.Library.LibraryPathSync do
 
   # Finds the library path that best matches the given file path.
   # Uses longest prefix matching - prefers the most specific path.
+  defp find_matching_library_path(nil, _library_paths), do: nil
+
   defp find_matching_library_path(file_path, library_paths) do
     library_paths
     |> Enum.filter(fn library_path ->

@@ -248,14 +248,34 @@ defmodule Mydia.Library.MetadataEnricher do
   defp associate_media_file(media_item, media_file_id) do
     # Update the media file to associate it with this media item
     media_file = Mydia.Library.get_media_file!(media_file_id)
-    Mydia.Library.update_media_file(media_file, %{media_item_id: media_item.id})
 
-    Logger.debug("Associated media file with media item",
-      media_file_id: media_file_id,
-      media_item_id: media_item.id
-    )
+    case Mydia.Library.update_media_file(media_file, %{media_item_id: media_item.id}) do
+      {:ok, _updated_file} ->
+        Logger.debug("Associated media file with media item",
+          media_file_id: media_file_id,
+          media_item_id: media_item.id
+        )
+
+        :ok
+
+      {:error, changeset} ->
+        Logger.error("Failed to associate media file with media item",
+          media_file_id: media_file_id,
+          media_item_id: media_item.id,
+          errors: inspect(changeset.errors)
+        )
+
+        {:error, changeset}
+    end
   rescue
-    _ -> :ok
+    error ->
+      Logger.error("Exception while associating media file with media item",
+        media_file_id: media_file_id,
+        media_item_id: media_item.id,
+        error: Exception.message(error)
+      )
+
+      {:error, error}
   end
 
   defp enrich_episodes(media_item, provider_id, config, match_result) do

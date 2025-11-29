@@ -1279,7 +1279,8 @@ defmodule Mydia.Jobs.LibraryScanner do
       hdr_format: file_metadata.hdr_format || filename_metadata.quality.hdr_format
     }
 
-    case Library.update_media_file(media_file, update_attrs) do
+    # Use scan changeset to allow updates on orphaned files (files without media_item_id/episode_id)
+    case Library.update_media_file_scan(media_file, update_attrs) do
       {:ok, updated_file} ->
         Logger.debug("Updated file with technical metadata",
           path: file_info.path,

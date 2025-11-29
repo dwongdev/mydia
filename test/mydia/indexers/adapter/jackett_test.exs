@@ -174,4 +174,39 @@ defmodule Mydia.Indexers.Adapter.JackettTest do
       assert Code.ensure_loaded?(Jackett)
     end
   end
+
+  describe "use_ssl defaults (GitHub issue #28)" do
+    test "test_connection works without use_ssl key - fails gracefully" do
+      # Config WITHOUT use_ssl key - simulates web UI config
+      config = %{
+        type: :jackett,
+        name: "Test Jackett",
+        host: "localhost",
+        port: 9117,
+        api_key: "test-api-key",
+        options: %{}
+      }
+
+      # This should not crash with KeyError but return a connection error
+      # (since there's no Jackett server running)
+      assert {:error, %Error{type: :connection_failed}} = Jackett.test_connection(config)
+    end
+
+    test "search works without use_ssl key - fails gracefully" do
+      # Config WITHOUT use_ssl key - simulates web UI config
+      config = %{
+        type: :jackett,
+        name: "Test Jackett",
+        host: "localhost",
+        port: 9117,
+        api_key: "test-api-key",
+        options: %{}
+      }
+
+      # This should not crash with KeyError but return a connection/search error
+      # (since there's no Jackett server running)
+      assert {:error, %Error{type: error_type}} = Jackett.search(config, "test")
+      assert error_type in [:connection_failed, :search_failed]
+    end
+  end
 end

@@ -181,4 +181,24 @@ defmodule Mydia.Indexers.Adapter.ProwlarrTest do
       assert function_exported?(Prowlarr, :get_capabilities, 1)
     end
   end
+
+  describe "use_ssl defaults (GitHub issue #28)" do
+    test "get_capabilities works without use_ssl key in config" do
+      # Config WITHOUT use_ssl key - simulates web UI config
+      config = %{
+        type: :prowlarr,
+        name: "Test Prowlarr",
+        host: "localhost",
+        port: 9696,
+        api_key: "test-api-key",
+        options: %{}
+      }
+
+      # get_capabilities returns static data and doesn't make HTTP calls,
+      # so we can test that it doesn't crash when use_ssl is missing
+      assert {:ok, capabilities} = Prowlarr.get_capabilities(config)
+      assert is_map(capabilities.searching)
+      assert is_list(capabilities.categories)
+    end
+  end
 end

@@ -126,7 +126,7 @@ defmodule Mydia.Indexers.Adapter.Jackett do
   ## Private Functions
 
   defp build_url(config, path) do
-    scheme = if config.use_ssl, do: "https", else: "http"
+    scheme = if Map.get(config, :use_ssl, false), do: "https", else: "http"
     base_path = get_in(config, [:options, :base_path]) || ""
     "#{scheme}://#{config.host}:#{config.port}#{base_path}#{path}"
   end

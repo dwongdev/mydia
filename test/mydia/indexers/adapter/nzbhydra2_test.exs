@@ -416,4 +416,52 @@ defmodule Mydia.Indexers.Adapter.NzbHydra2Test do
       assert result.quality.resolution == "2160p"
     end
   end
+
+  describe "use_ssl defaults (GitHub issue #28)" do
+    test "test_connection works without use_ssl key in config" do
+      bypass = Bypass.open()
+
+      Bypass.expect_once(bypass, "GET", "/api", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/xml")
+        |> Plug.Conn.resp(200, @sample_caps_xml)
+      end)
+
+      # Config WITHOUT use_ssl key - simulates web UI config
+      config = %{
+        type: :nzbhydra2,
+        name: "Test NZBHydra2",
+        host: "localhost",
+        port: bypass.port,
+        api_key: "test-api-key",
+        options: %{}
+      }
+
+      assert {:ok, info} = NzbHydra2.test_connection(config)
+      assert info.name == "NZBHydra2"
+    end
+
+    test "search works without use_ssl key in config" do
+      bypass = Bypass.open()
+
+      Bypass.expect_once(bypass, "GET", "/api", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/xml")
+        |> Plug.Conn.resp(200, @sample_search_xml)
+      end)
+
+      # Config WITHOUT use_ssl key - simulates web UI config
+      config = %{
+        type: :nzbhydra2,
+        name: "Test NZBHydra2",
+        host: "localhost",
+        port: bypass.port,
+        api_key: "test-api-key",
+        options: %{}
+      }
+
+      assert {:ok, results} = NzbHydra2.search(config, "test")
+      assert length(results) == 2
+    end
+  end
 end

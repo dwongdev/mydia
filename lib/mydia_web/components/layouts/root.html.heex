@@ -7,6 +7,13 @@
     <.live_title default="Mydia" suffix=" · Mydia">
       {assigns[:page_title]}
     </.live_title>
+    <%!-- PWA Support --%>
+    <link rel="manifest" href={~p"/manifest.json"} />
+    <meta name="theme-color" content="#FD4F00" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Mydia" />
+    <link rel="apple-touch-icon" href={~p"/images/icons/icon-192.png"} />
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
     <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>
     </script>

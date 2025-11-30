@@ -340,28 +340,35 @@ defmodule MydiaWeb.DownloadsLive.Index do
   end
 
   def handle_event("clear_completed", _params, socket) do
-    # Get all completed downloads from clients
-    completed_downloads = Downloads.list_downloads_with_status(filter: :completed)
+    with :ok <- Authorization.authorize_manage_downloads(socket) do
+      {:ok, count} = Downloads.clear_all_completed()
 
-    results =
-      Enum.map(completed_downloads, fn download_map ->
-        try do
-          download = Downloads.get_download!(download_map.id)
-          # Try to remove from client (ignore errors as may already be removed)
-          _ = Downloads.cancel_download(download, delete_files: false)
-          # Delete from database
-          Downloads.delete_download(download)
-        rescue
-          _ -> {:error, :failed}
-        end
-      end)
+      {:noreply,
+       socket
+       |> put_flash(:info, "#{count} completed download(s) cleared")
+       |> load_downloads()}
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
+    end
+  end
 
-    success_count = Enum.count(results, fn {status, _} -> status == :ok end)
+  def handle_event("clear_single_completed", %{"id" => id}, socket) do
+    with :ok <- Authorization.authorize_manage_downloads(socket) do
+      download = Downloads.get_download!(id)
 
-    {:noreply,
-     socket
-     |> put_flash(:info, "#{success_count} completed download(s) cleared")
-     |> load_downloads()}
+      case Downloads.clear_completed(download) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Download cleared from history")
+           |> load_downloads()}
+
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to clear download: #{inspect(reason)}")}
+      end
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
+    end
   end
 
   def handle_event("load_more", _params, socket) do
@@ -396,6 +403,7 @@ defmodule MydiaWeb.DownloadsLive.Index do
     filter =
       case socket.assigns.active_tab do
         :queue -> :active
+        :completed -> :imported
         :issues -> :failed
       end
 
@@ -421,6 +429,7 @@ defmodule MydiaWeb.DownloadsLive.Index do
     filter =
       case socket.assigns.active_tab do
         :queue -> :active
+        :completed -> :imported
         :issues -> :failed
       end
 
@@ -531,6 +540,7 @@ defmodule MydiaWeb.DownloadsLive.Index do
     case status do
       "completed" -> "badge-success"
       "seeding" -> "badge-success"
+      "imported" -> "badge-success"
       "failed" -> "badge-error"
       "missing" -> "badge-error"
       "cancelled" -> "badge-warning"
@@ -538,6 +548,25 @@ defmodule MydiaWeb.DownloadsLive.Index do
       "checking" -> "badge-info"
       "paused" -> "badge-warning"
       _ -> "badge-ghost"
+    end
+  end
+
+  defp format_ratio(nil), do: "0.00"
+  defp format_ratio(ratio) when is_float(ratio), do: Float.round(ratio, 2) |> to_string()
+  defp format_ratio(ratio) when is_integer(ratio), do: "#{ratio}.00"
+
+  defp format_relative_time(nil), do: "—"
+
+  defp format_relative_time(%DateTime{} = dt) do
+    now = DateTime.utc_now()
+    diff = DateTime.diff(now, dt, :second)
+
+    cond do
+      diff < 60 -> "just now"
+      diff < 3600 -> "#{div(diff, 60)}m ago"
+      diff < 86400 -> "#{div(diff, 3600)}h ago"
+      diff < 604_800 -> "#{div(diff, 86400)}d ago"
+      true -> Calendar.strftime(dt, "%b %d")
     end
   end
 

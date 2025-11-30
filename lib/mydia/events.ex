@@ -604,6 +604,53 @@ defmodule Mydia.Events do
   end
 
   @doc """
+  Records a download.cleared event.
+
+  This event is recorded when a user explicitly clears a completed download
+  from the Completed tab.
+
+  ## Parameters
+    - `download` - The Download struct
+    - `actor_type` - :user or :system
+    - `actor_id` - The ID of the actor
+    - `opts` - Additional options (e.g., media_item for context)
+
+  ## Examples
+
+      iex> download_cleared(download, :user, user_id)
+      :ok
+  """
+  def download_cleared(download, actor_type, actor_id, opts \\ []) do
+    media_item = opts[:media_item]
+
+    # Use media_item as resource if available, otherwise use download
+    {resource_type, resource_id} =
+      if media_item do
+        {"media_item", media_item.id}
+      else
+        {"download", download.id}
+      end
+
+    metadata =
+      %{
+        "title" => download.title,
+        "download_client" => download.download_client,
+        "download_id" => download.id
+      }
+      |> maybe_add_media_context(media_item)
+
+    create_event_async(%{
+      category: "downloads",
+      type: "download.cleared",
+      actor_type: actor_type,
+      actor_id: actor_id,
+      resource_type: resource_type,
+      resource_id: resource_id,
+      metadata: metadata
+    })
+  end
+
+  @doc """
   Records a download.paused event.
 
   ## Parameters

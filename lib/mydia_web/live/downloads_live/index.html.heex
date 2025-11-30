@@ -50,6 +50,14 @@
       </button>
       <button
         role="tab"
+        class={["tab", @active_tab == :completed && "tab-active"]}
+        phx-click="switch_tab"
+        phx-value-tab="completed"
+      >
+        <.icon name="hero-check-circle" class="w-4 h-4 mr-1" /> Completed
+      </button>
+      <button
+        role="tab"
         class={["tab", @active_tab == :issues && "tab-active"]}
         phx-click="switch_tab"
         phx-value-tab="issues"
@@ -94,6 +102,14 @@
               <.icon name="hero-arrow-down-tray" class="w-16 h-16 text-base-content/30 mb-4" />
               <h3 class="text-xl font-semibold text-base-content/70 mb-2">Queue is empty</h3>
               <p class="text-base-content/50">No downloads currently in progress</p>
+            <% @active_tab == :completed -> %>
+              <.icon name="hero-check-circle" class="w-16 h-16 text-base-content/30 mb-4" />
+              <h3 class="text-xl font-semibold text-base-content/70 mb-2">
+                No completed downloads
+              </h3>
+              <p class="text-base-content/50">
+                Imported downloads that are still seeding will appear here
+              </p>
             <% @active_tab == :issues -> %>
               <.icon name="hero-check-circle" class="w-16 h-16 text-base-content/30 mb-4" />
               <h3 class="text-xl font-semibold text-base-content/70 mb-2">No issues</h3>
@@ -178,6 +194,20 @@
                 <span>{get_metadata_value(download, "seeders")} seeds</span>
               <% end %>
             <% end %>
+            <%= if @active_tab == :completed do %>
+              <span>•</span>
+              <span>Ratio: {format_ratio(download.ratio)}</span>
+              <span>•</span>
+              <span>↑ {format_speed(download.upload_speed)}</span>
+              <span>•</span>
+              <span>Uploaded: {format_size(download.uploaded)}</span>
+              <span>•</span>
+              <span>{format_size(download.size)}</span>
+              <%= if download.imported_at do %>
+                <span>•</span>
+                <span>Imported: {format_relative_time(download.imported_at)}</span>
+              <% end %>
+            <% end %>
             <%= if @active_tab == :issues do %>
               <%= cond do %>
                 <% download.import_last_error -> %>
@@ -244,6 +274,19 @@
                   title="Cancel download"
                 >
                   <.icon name="hero-x-mark" class="size-4" />
+                </button>
+              </div>
+            <% @active_tab == :completed -> %>
+              <div class="flex gap-1">
+                <button
+                  type="button"
+                  class="btn btn-square btn-ghost btn-sm"
+                  phx-click="clear_single_completed"
+                  phx-value-id={download.id}
+                  data-confirm="Remove from client and clear from history?"
+                  title="Clear completed download"
+                >
+                  <.icon name="hero-trash" class="size-4" />
                 </button>
               </div>
             <% @active_tab == :issues -> %>

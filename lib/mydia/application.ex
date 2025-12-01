@@ -35,6 +35,7 @@ defmodule Mydia.Application do
         client_health_children() ++
         indexer_health_children() ++
         oban_children() ++
+        oidc_children() ++
         [
           # Start a worker by calling: Mydia.Worker.start_link(arg)
           # {Mydia.Worker, arg},
@@ -105,6 +106,34 @@ defmodule Mydia.Application do
       []
     else
       [{Oban, oban_config}]
+    end
+  end
+
+  defp oidc_children do
+    # Start OIDC provider configuration workers if configured in runtime.exs
+    # This is needed because UeberauthOidcc.Application starts before runtime.exs runs,
+    # so the issuers config is not available when it starts. We need to start the
+    # provider workers ourselves after runtime.exs has set the configuration.
+    case Application.get_env(:ueberauth_oidcc, :issuers) do
+      nil ->
+        []
+
+      [] ->
+        []
+
+      issuers when is_list(issuers) ->
+        require Logger
+
+        Logger.info(
+          "Starting OIDC provider configuration workers for #{length(issuers)} issuer(s)"
+        )
+
+        for child_opts <- issuers do
+          name = Map.fetch!(child_opts, :name)
+          child_opts = Map.put_new(child_opts, :backoff_type, :random)
+          Logger.info("  - Starting OIDC provider: #{inspect(name)}")
+          Supervisor.child_spec({Oidcc.ProviderConfiguration.Worker, child_opts}, id: name)
+        end
     end
   end
 

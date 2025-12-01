@@ -6,8 +6,10 @@ defmodule MydiaWeb.AuthController do
   """
   use MydiaWeb, :controller
 
-  # Always load Ueberauth plug (configuration is checked at runtime)
-  plug Ueberauth
+  # Use RuntimeUeberauth to read OIDC config at runtime instead of compile time
+  # This is necessary because OIDC providers are configured via environment
+  # variables in runtime.exs, which aren't available during compilation
+  plug MydiaWeb.Plugs.RuntimeUeberauth
 
   alias Mydia.Accounts
   alias Mydia.Auth.Guardian

@@ -280,12 +280,20 @@
           '';
         };
 
+        # Extract version from mix.exs
+        version = let
+          content = builtins.readFile ./mix.exs;
+          # Replace newlines with spaces to enable single-line regex matching
+          singleLine = builtins.replaceStrings ["\n"] [" "] content;
+          matched = builtins.match ''.*version: "([^"]+)".*'' singleLine;
+        in builtins.head matched;
+
       in
       {
         # Production package
         packages.default = beamPackages.mixRelease {
           pname = "mydia";
-          version = "0.6.0";
+          inherit version;
           src = ./.;
 
           mixNixDeps = mixNixDeps;

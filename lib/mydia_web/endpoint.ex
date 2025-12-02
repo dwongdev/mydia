@@ -16,6 +16,11 @@ defmodule MydiaWeb.Endpoint do
   # The plug only activates when sandbox metadata is present in the request
   plug Phoenix.Ecto.SQL.Sandbox
 
+  # Trust X-Forwarded-* headers from reverse proxy (Caddy)
+  # This ensures conn.scheme reflects the original HTTPS request
+  # Required for OIDC redirect URI validation when behind a proxy
+  plug Plug.RewriteOn, [:x_forwarded_host, :x_forwarded_port, :x_forwarded_proto]
+
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]

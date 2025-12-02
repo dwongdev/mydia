@@ -319,10 +319,14 @@ if oidc_issuer && oidc_client_id && oidc_client_secret do
     response_mode: "query"
   ]
 
-  # Add redirect_uri if configured (required by ueberauth_oidcc)
+  # Add redirect_uri and callback_url if configured
+  # redirect_uri is used by ueberauth_oidcc for the OIDC flow
+  # callback_url is used by Ueberauth's helpers to generate URLs (important for reverse proxy setups)
   oidc_opts =
     if oidc_redirect_uri do
-      Keyword.put(oidc_opts, :redirect_uri, oidc_redirect_uri)
+      oidc_opts
+      |> Keyword.put(:redirect_uri, oidc_redirect_uri)
+      |> Keyword.put(:callback_url, oidc_redirect_uri)
     else
       oidc_opts
     end

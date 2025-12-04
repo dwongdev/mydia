@@ -42,6 +42,7 @@ defmodule MydiaWeb.MediaLive.Show.Loaders do
 
     # Format each event for timeline display
     events
+    |> Enum.reject(&metadata_enriched_event?/1)
     |> Enum.map(fn event ->
       formatted = Events.format_for_timeline(event)
 
@@ -52,6 +53,12 @@ defmodule MydiaWeb.MediaLive.Show.Loaders do
       })
     end)
   end
+
+  defp metadata_enriched_event?(%{type: "media_item.updated", metadata: %{"reason" => reason}}) do
+    String.contains?(reason, "Metadata enriched")
+  end
+
+  defp metadata_enriched_event?(_event), do: false
 
   # Load next episode to watch for TV shows
   def load_next_episode(media_item, socket) do

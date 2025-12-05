@@ -19,7 +19,9 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     |> assign(:scan_path, "")
     |> assign(:selected_library_path, nil)
     |> assign(:scanning, false)
+    |> assign(:scan_progress, %{files_found: 0})
     |> assign(:matching, false)
+    |> assign(:match_progress, %{matched: 0, total: 0})
     |> assign(:importing, false)
     |> assign(:discovered_files, [])
     |> assign(:matched_files, [])
@@ -622,77 +624,99 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     library_path = socket.assigns.selected_library_path
     # Use library-type-specific file extensions
     extensions = Scanner.extensions_for_library_type(library_path && library_path.type)
+    liveview_pid = self()
 
-    case Scanner.scan(path, video_extensions: extensions) do
-      {:ok, scan_result} ->
-        # Get existing files from database (preload library_path for absolute_path resolution)
-        # Only skip files that have valid parent associations (not orphaned)
-        existing_files = Library.list_media_files(preload: [:library_path])
+    # Spawn async task for scanning - keeps LiveView responsive to heartbeats
+    Task.Supervisor.start_child(Mydia.TaskSupervisor, fn ->
+      # Progress callback sends updates to the LiveView
+      progress_callback = fn file_count ->
+        send(liveview_pid, {:scan_progress, file_count})
+      end
 
-        existing_valid_paths =
-          existing_files
-          |> Enum.reject(&Library.orphaned_media_file?/1)
-          |> Enum.map(&MediaFile.absolute_path/1)
-          |> Enum.reject(&is_nil/1)
-          |> MapSet.new()
+      result =
+        Scanner.scan(path, video_extensions: extensions, progress_callback: progress_callback)
 
-        # Build map of orphaned files for re-matching
-        orphaned_files_map =
-          existing_files
-          |> Enum.filter(&Library.orphaned_media_file?/1)
-          |> Enum.map(fn file ->
-            case MediaFile.absolute_path(file) do
-              nil -> nil
-              abs_path -> {abs_path, file}
-            end
-          end)
-          |> Enum.reject(&is_nil/1)
-          |> Map.new()
+      send(liveview_pid, {:scan_complete, result})
+    end)
 
-        # Filter out files that already have valid associations
-        # Include orphaned files for re-matching
-        new_files =
-          Enum.reject(scan_result.files, fn file ->
-            MapSet.member?(existing_valid_paths, file.path)
-          end)
+    {:noreply, socket}
+  end
 
-        # Track which files are orphaned (for re-matching)
-        files_to_match =
-          Enum.map(new_files, fn file ->
-            orphaned_file = Map.get(orphaned_files_map, file.path)
+  def handle_info({:scan_progress, file_count}, socket) do
+    {:noreply, assign(socket, :scan_progress, %{files_found: file_count})}
+  end
 
-            Map.put(file, :orphaned_media_file_id, orphaned_file && orphaned_file.id)
-          end)
+  def handle_info({:scan_complete, {:ok, scan_result}}, socket) do
+    # Get existing files from database (preload library_path for absolute_path resolution)
+    # Only skip files that have valid parent associations (not orphaned)
+    existing_files = Library.list_media_files(preload: [:library_path])
 
-        skipped_count = length(scan_result.files) - length(new_files)
-        orphaned_count = map_size(orphaned_files_map)
+    existing_valid_paths =
+      existing_files
+      |> Enum.reject(&Library.orphaned_media_file?/1)
+      |> Enum.map(&MediaFile.absolute_path/1)
+      |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
 
-        # Start matching files
-        send(self(), {:match_files, files_to_match})
+    # Build map of orphaned files for re-matching
+    orphaned_files_map =
+      existing_files
+      |> Enum.filter(&Library.orphaned_media_file?/1)
+      |> Enum.map(fn file ->
+        case MediaFile.absolute_path(file) do
+          nil -> nil
+          abs_path -> {abs_path, file}
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+      |> Map.new()
 
-        {:noreply,
-         socket
-         |> assign(:scanning, false)
-         |> assign(:matching, true)
-         |> assign(:discovered_files, scan_result.files)
-         |> assign(
-           :scan_stats,
-           %{
-             total: length(files_to_match),
-             matched: 0,
-             unmatched: 0,
-             skipped: skipped_count,
-             orphaned: orphaned_count
-           }
-         )}
+    # Filter out files that already have valid associations
+    # Include orphaned files for re-matching
+    new_files =
+      Enum.reject(scan_result.files, fn file ->
+        MapSet.member?(existing_valid_paths, file.path)
+      end)
 
-      {:error, reason} ->
-        {:noreply,
-         socket
-         |> assign(:scanning, false)
-         |> assign(:step, :select_path)
-         |> put_flash(:error, "Scan failed: #{format_error(reason)}")}
-    end
+    # Track which files are orphaned (for re-matching)
+    files_to_match =
+      Enum.map(new_files, fn file ->
+        orphaned_file = Map.get(orphaned_files_map, file.path)
+
+        Map.put(file, :orphaned_media_file_id, orphaned_file && orphaned_file.id)
+      end)
+
+    skipped_count = length(scan_result.files) - length(new_files)
+    orphaned_count = map_size(orphaned_files_map)
+
+    # Start matching files
+    send(self(), {:match_files, files_to_match})
+
+    {:noreply,
+     socket
+     |> assign(:scanning, false)
+     |> assign(:scan_progress, %{files_found: 0})
+     |> assign(:matching, true)
+     |> assign(:discovered_files, scan_result.files)
+     |> assign(
+       :scan_stats,
+       %{
+         total: length(files_to_match),
+         matched: 0,
+         unmatched: 0,
+         skipped: skipped_count,
+         orphaned: orphaned_count
+       }
+     )}
+  end
+
+  def handle_info({:scan_complete, {:error, reason}}, socket) do
+    {:noreply,
+     socket
+     |> assign(:scanning, false)
+     |> assign(:scan_progress, %{files_found: 0})
+     |> assign(:step, :select_path)
+     |> put_flash(:error, "Scan failed: #{format_error(reason)}")}
   end
 
   def handle_info({:match_files, files}, socket) do
@@ -702,8 +726,106 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     if specialized_library?(library_path) do
       handle_specialized_library_files(files, socket)
     else
-      handle_standard_library_files(files, socket)
+      # Spawn async task for metadata matching - keeps LiveView responsive
+      liveview_pid = self()
+      metadata_config = socket.assigns.metadata_config
+      total_files = length(files)
+
+      Task.Supervisor.start_child(Mydia.TaskSupervisor, fn ->
+        # Use Task.async_stream for concurrent matching with back-pressure
+        # max_concurrency: 10 limits concurrent HTTP requests to avoid overwhelming metadata-relay
+        # timeout: :infinity prevents Task.async_stream from timing out on slow requests
+        matched_results =
+          files
+          |> Task.async_stream(
+            fn file ->
+              match_result =
+                case MetadataMatcher.match_file(file.path, config: metadata_config) do
+                  {:ok, match} -> match
+                  {:error, _reason} -> nil
+                end
+
+              # Send progress update back to LiveView
+              send(liveview_pid, :match_progress_tick)
+
+              %{
+                file: file,
+                match_result: match_result,
+                import_status: :pending
+              }
+            end,
+            max_concurrency: 10,
+            timeout: :infinity,
+            ordered: true
+          )
+          |> Enum.map(fn {:ok, result} -> result end)
+
+        send(liveview_pid, {:match_complete, matched_results, library_path})
+      end)
+
+      # Initialize match progress tracking
+      {:noreply, assign(socket, :match_progress, %{matched: 0, total: total_files})}
     end
+  end
+
+  def handle_info(:match_progress_tick, socket) do
+    current = socket.assigns.match_progress.matched + 1
+
+    {:noreply,
+     assign(socket, :match_progress, %{socket.assigns.match_progress | matched: current})}
+  end
+
+  def handle_info({:match_complete, matched_files, library_path}, socket) do
+    # Filter out files whose media type doesn't match the library type
+    {compatible_files, type_filtered_files} =
+      filter_by_library_type(matched_files, library_path)
+
+    # Filter out sample files, trailers, and extras
+    {regular_files, sample_filtered_files} =
+      filter_samples_and_extras(compatible_files)
+
+    # Calculate stats
+    matched_count = Enum.count(regular_files, &(&1.match_result != nil))
+    unmatched_count = length(regular_files) - matched_count
+    type_filtered_count = length(type_filtered_files)
+    sample_filtered_count = length(sample_filtered_files)
+
+    # Group files hierarchically (only regular files)
+    grouped_files =
+      regular_files
+      |> FileGrouper.group_files()
+      |> Map.put(:type_filtered, type_filtered_files)
+      |> Map.put(:sample_filtered, sample_filtered_files)
+
+    # Auto-select files with high confidence matches (using indices in regular_files)
+    auto_selected =
+      regular_files
+      |> Enum.with_index()
+      |> Enum.filter(fn {file, _idx} ->
+        file.match_result != nil && file.match_result.match_confidence >= 0.8
+      end)
+      |> Enum.map(fn {_file, idx} -> idx end)
+      |> MapSet.new()
+
+    socket =
+      socket
+      |> assign(:matching, false)
+      |> assign(:match_progress, %{matched: 0, total: 0})
+      |> assign(:step, :review)
+      |> assign(:matched_files, regular_files)
+      |> assign(:grouped_files, grouped_files)
+      |> assign(:selected_files, auto_selected)
+      |> assign(:scan_stats, %{
+        total: length(matched_files),
+        matched: matched_count,
+        unmatched: unmatched_count,
+        skipped: socket.assigns.scan_stats.skipped,
+        type_filtered: type_filtered_count,
+        sample_filtered: sample_filtered_count
+      })
+      |> persist_session()
+
+    {:noreply, socket}
   end
 
   def handle_info(:perform_import, socket) do
@@ -801,78 +923,6 @@ defmodule MydiaWeb.ImportMediaLive.Index do
         unmatched: 0,
         skipped: socket.assigns.scan_stats.skipped,
         type_filtered: 0
-      })
-      |> persist_session()
-
-    {:noreply, socket}
-  end
-
-  # Handle files for standard libraries (movies, series, mixed)
-  # These use metadata matching to identify content
-  defp handle_standard_library_files(files, socket) do
-    library_path = socket.assigns.selected_library_path
-
-    # Match files with TMDB in batches for better UX
-    matched_files =
-      Enum.map(files, fn file ->
-        match_result =
-          case MetadataMatcher.match_file(file.path, config: socket.assigns.metadata_config) do
-            {:ok, match} -> match
-            {:error, _reason} -> nil
-          end
-
-        %{
-          file: file,
-          match_result: match_result,
-          import_status: :pending
-        }
-      end)
-
-    # Filter out files whose media type doesn't match the library type
-    {compatible_files, type_filtered_files} =
-      filter_by_library_type(matched_files, library_path)
-
-    # Filter out sample files, trailers, and extras
-    {regular_files, sample_filtered_files} =
-      filter_samples_and_extras(compatible_files)
-
-    # Calculate stats
-    matched_count = Enum.count(regular_files, &(&1.match_result != nil))
-    unmatched_count = length(regular_files) - matched_count
-    type_filtered_count = length(type_filtered_files)
-    sample_filtered_count = length(sample_filtered_files)
-
-    # Group files hierarchically (only regular files)
-    grouped_files =
-      regular_files
-      |> FileGrouper.group_files()
-      |> Map.put(:type_filtered, type_filtered_files)
-      |> Map.put(:sample_filtered, sample_filtered_files)
-
-    # Auto-select files with high confidence matches (using indices in regular_files)
-    auto_selected =
-      regular_files
-      |> Enum.with_index()
-      |> Enum.filter(fn {file, _idx} ->
-        file.match_result != nil && file.match_result.match_confidence >= 0.8
-      end)
-      |> Enum.map(fn {_file, idx} -> idx end)
-      |> MapSet.new()
-
-    socket =
-      socket
-      |> assign(:matching, false)
-      |> assign(:step, :review)
-      |> assign(:matched_files, regular_files)
-      |> assign(:grouped_files, grouped_files)
-      |> assign(:selected_files, auto_selected)
-      |> assign(:scan_stats, %{
-        total: length(files),
-        matched: matched_count,
-        unmatched: unmatched_count,
-        skipped: socket.assigns.scan_stats.skipped,
-        type_filtered: type_filtered_count,
-        sample_filtered: sample_filtered_count
       })
       |> persist_session()
 

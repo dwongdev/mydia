@@ -170,12 +170,26 @@ defmodule MydiaWeb.ImportMediaLive.Components do
     * `:scanning` - Whether currently scanning
     * `:matching` - Whether currently matching files
     * `:scan_stats` - Map with stats (`:total`, `:skipped`, `:orphaned`)
+    * `:scan_progress` - Map with real-time scan progress (`:files_found`)
+    * `:match_progress` - Map with real-time match progress (`:matched`, `:total`)
   """
   attr :scanning, :boolean, required: true
   attr :matching, :boolean, required: true
   attr :scan_stats, :map, required: true
+  attr :scan_progress, :map, required: true
+  attr :match_progress, :map, required: true
 
   def scanning_progress(assigns) do
+    # Calculate match percentage for progress bar
+    match_percent =
+      if assigns.match_progress.total > 0 do
+        round(assigns.match_progress.matched / assigns.match_progress.total * 100)
+      else
+        0
+      end
+
+    assigns = assign(assigns, :match_percent, match_percent)
+
     ~H"""
     <div class="flex flex-col items-center py-8">
       <%!-- Animated Icon Container --%>
@@ -210,16 +224,38 @@ defmodule MydiaWeb.ImportMediaLive.Components do
         )}
       </p>
 
-      <%!-- Progress indicator --%>
-      <div class="flex items-center gap-2 text-base-content/50 mb-8">
-        <span class="loading loading-dots loading-sm"></span>
-        <span class="text-sm">
-          {if(@scanning, do: "Scanning in progress", else: "Matching in progress")}
-        </span>
-      </div>
+      <%!-- Progress indicator with file count during scanning --%>
+      <%= if @scanning do %>
+        <div class="flex items-center gap-2 text-base-content/50 mb-8">
+          <span class="loading loading-dots loading-sm"></span>
+          <%= if @scan_progress.files_found > 0 do %>
+            <span class="text-sm">
+              Found <span class="font-bold text-primary">{@scan_progress.files_found}</span> files...
+            </span>
+          <% else %>
+            <span class="text-sm">Scanning in progress</span>
+          <% end %>
+        </div>
+      <% end %>
 
-      <%!-- Stats cards during matching phase --%>
+      <%!-- Progress during matching phase --%>
       <%= if @matching do %>
+        <%!-- Progress bar and count --%>
+        <div class="w-full max-w-md mb-6">
+          <div class="flex justify-between text-sm mb-2">
+            <span class="text-base-content/60">
+              Matching file {@match_progress.matched} of {@match_progress.total}
+            </span>
+            <span class="font-bold text-secondary">{@match_percent}%</span>
+          </div>
+          <progress
+            class="progress progress-secondary w-full"
+            value={@match_progress.matched}
+            max={@match_progress.total}
+          >
+          </progress>
+        </div>
+
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md">
           <%!-- New Files Card --%>
           <div class="card bg-base-100 border border-base-300 shadow-sm">
@@ -258,7 +294,7 @@ defmodule MydiaWeb.ImportMediaLive.Components do
 
         <%!-- Subtle hint --%>
         <p class="text-xs text-base-content/40 mt-6 text-center">
-          This may take a moment depending on the number of files
+          Fetching metadata concurrently to speed up matching
         </p>
       <% end %>
     </div>

@@ -175,7 +175,8 @@ defmodule Mydia.Downloads.Client.Sabnzbd do
     stat = File.stat!(tmp_file)
 
     multipart_body = [
-      {"nzbfile", {stream, [filename: "upload.nzb", content_type: MIME.from_path(tmp_file), size: stat.size]}}
+      {"nzbfile",
+       {stream, [filename: "upload.nzb", content_type: MIME.from_path(tmp_file), size: stat.size]}}
     ]
 
     # Perform the request and ensure the temp file is removed afterwards

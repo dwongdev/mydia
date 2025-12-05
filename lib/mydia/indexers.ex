@@ -206,7 +206,7 @@ defmodule Mydia.Indexers do
         |> then(fn results ->
           if should_deduplicate, do: deduplicate_results(results), else: results
         end)
-        |> rank_results(min_seeders)
+        |> rank_results(query, min_seeders)
         |> Enum.take(max_results)
 
       total_time = System.monotonic_time(:millisecond) - start_time
@@ -373,10 +373,12 @@ defmodule Mydia.Indexers do
     quality != nil && quality.resolution != nil && quality.source != nil
   end
 
-  defp rank_results(results, min_seeders) do
+  defp rank_results(results, search_query, min_seeders) do
     # Use the unified ReleaseRanker for consistent scoring across manual and automated searches
-    # This provides sophisticated ranking with size scoring, age scoring, and seeder ratio multipliers
-    ranked_results = ReleaseRanker.rank_all(results, min_seeders: min_seeders)
+    # This provides sophisticated ranking with size scoring, age scoring, seeder ratio multipliers,
+    # and title relevance scoring
+    ranked_results =
+      ReleaseRanker.rank_all(results, min_seeders: min_seeders, search_query: search_query)
 
     # Extract the SearchResult from each RankedResult to maintain the expected return type
     Enum.map(ranked_results, fn ranked -> ranked.result end)

@@ -12,18 +12,20 @@ defmodule Mydia.Indexers.Structs.ScoreBreakdown do
   - `:seeders` - Score from seeder count (logarithmic scale)
   - `:size` - Score from file size (bell curve preference)
   - `:age` - Score from release age (slight preference for newer)
+  - `:title_match` - Score from title matching relevance to search query
   - `:tag_bonus` - Bonus points from preferred tags
   - `:total` - Final total score (sum of all components)
   """
 
-  @enforce_keys [:quality, :seeders, :size, :age, :tag_bonus, :total]
-  defstruct [:quality, :seeders, :size, :age, :tag_bonus, :total]
+  @enforce_keys [:quality, :seeders, :size, :age, :title_match, :tag_bonus, :total]
+  defstruct [:quality, :seeders, :size, :age, :title_match, :tag_bonus, :total]
 
   @type t :: %__MODULE__{
           quality: float(),
           seeders: float(),
           size: float(),
           age: float(),
+          title_match: float(),
           tag_bonus: float(),
           total: float()
         }
@@ -33,8 +35,8 @@ defmodule Mydia.Indexers.Structs.ScoreBreakdown do
 
   ## Examples
 
-      iex> new(quality: 480.0, seeders: 200.0, size: 50.0, age: 25.0, tag_bonus: 0.0, total: 755.0)
-      %ScoreBreakdown{quality: 480.0, seeders: 200.0, size: 50.0, age: 25.0, tag_bonus: 0.0, total: 755.0}
+      iex> new(quality: 480.0, seeders: 200.0, size: 50.0, age: 25.0, title_match: 100.0, tag_bonus: 0.0, total: 855.0)
+      %ScoreBreakdown{quality: 480.0, seeders: 200.0, size: 50.0, age: 25.0, title_match: 100.0, tag_bonus: 0.0, total: 855.0}
   """
   def new(attrs) when is_map(attrs) or is_list(attrs) do
     struct!(__MODULE__, attrs)

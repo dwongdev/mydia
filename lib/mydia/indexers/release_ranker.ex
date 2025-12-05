@@ -19,10 +19,11 @@ defmodule Mydia.Indexers.ReleaseRanker do
 
   ## Scoring Factors
 
-  - **Quality** (60% weight): Resolution, source, codec via `QualityParser`
-  - **Seeders** (25% weight): Logarithmic scale with ratio multiplier
+  - **Quality** (50% weight): Resolution, source, codec via `QualityParser`
+  - **Seeders** (20% weight): Logarithmic scale with ratio multiplier
   - **Size** (10% weight): Bell curve favoring reasonable sizes
   - **Age** (5% weight): Slight preference for newer releases
+  - **Title Match** (15% weight): How well the result title matches the search query
 
   The seeder scoring now incorporates seeder/leecher ratio to favor healthy swarms:
   - Ratio < 15%: 0.1x multiplier (oversaturated)
@@ -39,6 +40,7 @@ defmodule Mydia.Indexers.ReleaseRanker do
   - `:preferred_qualities` - List of resolutions in preference order
   - `:blocked_tags` - List of strings to filter out from titles
   - `:preferred_tags` - List of strings that boost scores
+  - `:search_query` - Original search query to score title relevance (default: nil)
   """
 
   require Logger
@@ -55,7 +57,8 @@ defmodule Mydia.Indexers.ReleaseRanker do
           size_range: {non_neg_integer(), non_neg_integer()},
           preferred_qualities: [String.t()],
           blocked_tags: [String.t()],
-          preferred_tags: [String.t()]
+          preferred_tags: [String.t()],
+          search_query: String.t() | nil
         ]
 
   @default_min_seeders 5
@@ -235,16 +238,20 @@ defmodule Mydia.Indexers.ReleaseRanker do
     seeder_score = score_seeders_and_peers(result)
     size_score = score_size(result.size)
     age_score = score_age(result.published_at)
+    title_match_score = score_title_match(result.title, opts)
     tag_bonus = score_tags(result.title, opts)
 
     # Weighted scoring
-    # Quality: 60%, Seeders: 25%, Size: 10%, Age: 5%
-    weighted_quality = quality_score * 0.6
-    weighted_seeders = seeder_score * 0.25
+    # Quality: 50%, Seeders: 20%, Title Match: 15%, Size: 10%, Age: 5%
+    weighted_quality = quality_score * 0.5
+    weighted_seeders = seeder_score * 0.2
+    weighted_title = title_match_score * 0.15
     weighted_size = size_score * 0.1
     weighted_age = age_score * 0.05
 
-    total = weighted_quality + weighted_seeders + weighted_size + weighted_age + tag_bonus
+    total =
+      weighted_quality + weighted_seeders + weighted_title + weighted_size + weighted_age +
+        tag_bonus
 
     size_mb = bytes_to_mb(result.size)
     total_peers = result.seeders + result.leechers
@@ -258,8 +265,9 @@ defmodule Mydia.Indexers.ReleaseRanker do
         - Seeder ratio: #{Float.round(seeder_ratio * 100, 1)}%
         - Quality: #{inspect(result.quality)}
       Component scores (raw -> weighted):
-        - Quality:  #{Float.round(quality_score, 2)} -> #{Float.round(weighted_quality, 2)} (60%)
-        - Seeders:  #{Float.round(seeder_score, 2)} -> #{Float.round(weighted_seeders, 2)} (25%)
+        - Quality:  #{Float.round(quality_score, 2)} -> #{Float.round(weighted_quality, 2)} (50%)
+        - Seeders:  #{Float.round(seeder_score, 2)} -> #{Float.round(weighted_seeders, 2)} (20%)
+        - Title:    #{Float.round(title_match_score, 2)} -> #{Float.round(weighted_title, 2)} (15%)
         - Size:     #{Float.round(size_score, 2)} -> #{Float.round(weighted_size, 2)} (10%)
         - Age:      #{Float.round(age_score, 2)} -> #{Float.round(weighted_age, 2)} (5%)
         - Tag bonus: #{Float.round(tag_bonus, 2)}
@@ -271,6 +279,7 @@ defmodule Mydia.Indexers.ReleaseRanker do
       seeders: round_score(seeder_score),
       size: round_score(size_score),
       age: round_score(age_score),
+      title_match: round_score(title_match_score),
       tag_bonus: round_score(tag_bonus),
       total: round_score(total)
     })
@@ -420,6 +429,117 @@ defmodule Mydia.Indexers.ReleaseRanker do
       end)
       |> Kernel.*(25.0)
     end
+  end
+
+  # Title matching scoring - how well does the result title match the search query?
+  # Returns 0-1000 score (scaled like other components)
+  defp score_title_match(result_title, opts) do
+    case Keyword.get(opts, :search_query) do
+      nil ->
+        # No search query provided, return neutral score
+        500.0
+
+      "" ->
+        500.0
+
+      search_query ->
+        calculate_title_match_score(search_query, result_title)
+    end
+  end
+
+  defp calculate_title_match_score(search_query, result_title) do
+    # Normalize both strings for comparison
+    query_words = normalize_to_words(search_query)
+    title_words = normalize_to_words(result_title)
+
+    if query_words == [] do
+      500.0
+    else
+      # Calculate word match ratio (how many query words appear in the title)
+      matched_words =
+        Enum.count(query_words, fn query_word ->
+          Enum.any?(title_words, fn title_word ->
+            # Exact match or singular/plural match (studio vs studios)
+            title_word == query_word or
+              String.starts_with?(title_word, query_word) or
+              String.starts_with?(query_word, title_word)
+          end)
+        end)
+
+      match_ratio = matched_words / length(query_words)
+
+      # Bonus for title starting with the show name (first significant word match)
+      # Filter out common words like "the" for this check
+      significant_query_words = filter_common_words(query_words)
+      significant_title_words = filter_common_words(title_words)
+
+      starts_with_bonus =
+        case {significant_query_words, significant_title_words} do
+          {[first_query | _], [first_title | _]} when first_query == first_title -> 100.0
+          _ -> 0.0
+        end
+
+      # Penalty for extra unrelated words in title (reduces false matches)
+      # Don't penalize quality indicators, years, or episode markers
+      extra_words =
+        Enum.reject(title_words, fn word ->
+          Enum.member?(query_words, word) or
+            is_quality_indicator?(word) or
+            is_year?(word) or
+            is_episode_marker?(word)
+        end)
+
+      extra_penalty = min(length(extra_words) * 20.0, 200.0)
+
+      # Base score: 0-800 based on match ratio, plus bonuses/penalties
+      base_score = match_ratio * 800.0
+      final_score = base_score + starts_with_bonus - extra_penalty
+
+      # Clamp to 0-1000 range
+      max(0.0, min(1000.0, final_score))
+    end
+  end
+
+  # Extract words from a title/query, normalizing for comparison
+  defp normalize_to_words(text) do
+    text
+    |> String.downcase()
+    # Replace common separators with spaces
+    |> String.replace(~r/[._\-]/, " ")
+    # Remove quality indicators and other noise for word extraction
+    |> String.split(~r/\s+/, trim: true)
+    # Filter out empty strings
+    |> Enum.filter(&(&1 != ""))
+  end
+
+  defp filter_common_words(words) do
+    common = ~w(the a an of and or in on at to for)
+    Enum.reject(words, &Enum.member?(common, &1))
+  end
+
+  defp is_quality_indicator?(word) do
+    quality_words = ~w(
+      2160p 1080p 720p 480p 4k uhd hd sd
+      x264 x265 h264 h265 hevc avc av1
+      bluray bdrip brrip webrip webdl web hdtv hdrip dvdrip
+      remux proper repack
+      dts atmos truehd dolby aac ac3 flac
+      hdr hdr10 hdr10+ dolbyvision dv
+    )
+
+    Enum.member?(quality_words, word)
+  end
+
+  defp is_year?(word) do
+    case Integer.parse(word) do
+      {year, ""} when year >= 1900 and year <= 2100 -> true
+      _ -> false
+    end
+  end
+
+  defp is_episode_marker?(word) do
+    # Match patterns like s01, e01, s01e01, etc.
+    String.match?(word, ~r/^(s\d+e?\d*|e\d+)$/i)
   end
 
   ## Private Functions - Sorting

@@ -26,6 +26,8 @@ defmodule Mydia.Library do
   ## Options
     - `:media_item_id` - Filter by media item
     - `:episode_id` - Filter by episode
+    - `:library_path_id` - Filter by library path ID
+    - `:library_path_type` - Filter by library path type (e.g., :adult, :music, :books)
     - `:preload` - List of associations to preload
   """
   def list_media_files(opts \\ []) do
@@ -929,6 +931,13 @@ defmodule Mydia.Library do
       {:library_path_id, library_path_id}, query ->
         # Filter files by library_path_id (for relative path scans)
         where(query, [f], f.library_path_id == ^library_path_id)
+
+      {:library_path_type, library_type}, query ->
+        # Filter files by their library path type (e.g., :adult, :music, :books)
+        from(f in query,
+          join: lp in assoc(f, :library_path),
+          where: lp.type == ^library_type
+        )
 
       {:path_prefix, _prefix}, query ->
         # Legacy option - no longer supported

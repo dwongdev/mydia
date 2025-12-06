@@ -192,6 +192,39 @@ defmodule MydiaWeb.Api.PlaybackController do
       |> json(%{error: "Episode not found"})
   end
 
+  @doc """
+  Gets playback progress for a media file (stub for adult content).
+
+  GET /api/v1/playback/file/:id
+
+  Returns:
+    - 200: Default empty progress (progress tracking not implemented for files)
+  """
+  def show_file(conn, %{"id" => _media_file_id}) do
+    # For adult content files, we don't track playback progress
+    # Just return default empty progress
+    json(conn, serialize_progress(nil))
+  end
+
+  @doc """
+  Saves playback progress for a media file (stub for adult content).
+
+  POST /api/v1/playback/file/:id
+
+  Returns:
+    - 200: Acknowledgment (progress is not actually saved)
+  """
+  def update_file(conn, %{"id" => _media_file_id} = params) do
+    # For adult content files, we acknowledge the progress but don't persist it
+    # This prevents errors in the video player but doesn't clutter the database
+    json(conn, %{
+      position_seconds: params["position_seconds"] || 0,
+      duration_seconds: params["duration_seconds"],
+      completion_percentage: 0,
+      watched: false
+    })
+  end
+
   ## Private Functions
 
   defp serialize_progress(nil) do

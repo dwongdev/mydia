@@ -95,6 +95,7 @@ defmodule MydiaWeb.Router do
       live "/books/:id", BooksLive.Show, :show
       live "/books/authors/:id", BooksLive.AuthorShow, :show
       live "/adult", AdultLive.Index, :index
+      live "/adult/:id", AdultLive.Show, :show
       live "/add/movie", AddMediaLive.Index, :add_movie
       live "/add/series", AddMediaLive.Index, :add_series
       live "/import", ImportMediaLive.Index, :index
@@ -169,13 +170,16 @@ defmodule MydiaWeb.Router do
     # Streaming
     get "/stream/movie/:id", StreamController, :stream_movie
     get "/stream/episode/:id", StreamController, :stream_episode
+    get "/stream/file/:id", StreamController, :stream
     get "/stream/:id", StreamController, :stream
 
     # Playback progress
     get "/playback/movie/:id", PlaybackController, :show_movie
     get "/playback/episode/:id", PlaybackController, :show_episode
+    get "/playback/file/:id", PlaybackController, :show_file
     post "/playback/movie/:id", PlaybackController, :update_movie
     post "/playback/episode/:id", PlaybackController, :update_episode
+    post "/playback/file/:id", PlaybackController, :update_file
 
     # HLS streaming
     post "/hls/start", HlsController, :start_session

@@ -5,7 +5,7 @@ defmodule Mydia.Library do
 
   import Ecto.Query, warn: false
   alias Mydia.Repo
-  alias Mydia.Library.{MediaFile, FileAnalyzer}
+  alias Mydia.Library.{MediaFile, FileAnalyzer, PhashGenerator}
   alias Mydia.Library.FileParser.V2, as: FileParser
 
   require Logger
@@ -880,6 +880,188 @@ defmodule Mydia.Library do
   """
   def orphaned_media_file?(%MediaFile{} = media_file) do
     is_nil(media_file.media_item_id) and is_nil(media_file.episode_id)
+  end
+
+  @doc """
+  Finds media files similar to the given file based on perceptual hash.
+
+  Uses the dHash algorithm to compare video content. Files with a Hamming distance
+  less than or equal to the threshold are considered similar.
+
+  ## Parameters
+    - `media_file` - The MediaFile to find similar files for (must have phash set)
+    - `opts` - Options:
+      - `:threshold` - Maximum Hamming distance to consider similar (default: 10)
+      - `:library_path_type` - Filter results to specific library type (e.g., :adult)
+      - `:exclude_self` - Whether to exclude the input file from results (default: true)
+      - `:preload` - Associations to preload on returned files
+
+  ## Returns
+    - `{:ok, similar_files}` - List of similar MediaFile structs with :distance key added
+    - `{:error, :no_phash}` - The input file has no perceptual hash
+
+  ## Examples
+
+      {:ok, similar} = Library.find_similar_files(media_file)
+      {:ok, similar} = Library.find_similar_files(media_file, threshold: 5)
+  """
+  @spec find_similar_files(MediaFile.t(), keyword()) ::
+          {:ok, list(map())} | {:error, :no_phash}
+  def find_similar_files(%MediaFile{phash: nil}, _opts) do
+    {:error, :no_phash}
+  end
+
+  def find_similar_files(%MediaFile{phash: phash, id: file_id}, opts) do
+    threshold = Keyword.get(opts, :threshold, 10)
+    exclude_self = Keyword.get(opts, :exclude_self, true)
+
+    # Get all files with phash values
+    query =
+      MediaFile
+      |> where([f], not is_nil(f.phash))
+      |> apply_media_file_filters(opts)
+
+    query =
+      if exclude_self do
+        where(query, [f], f.id != ^file_id)
+      else
+        query
+      end
+
+    files =
+      query
+      |> maybe_preload(opts[:preload])
+      |> Repo.all()
+
+    # Calculate Hamming distance for each file and filter by threshold
+    similar_files =
+      files
+      |> Enum.map(fn file ->
+        distance = PhashGenerator.hamming_distance(phash, file.phash)
+        {file, distance}
+      end)
+      |> Enum.filter(fn {_file, distance} -> distance <= threshold end)
+      |> Enum.sort_by(fn {_file, distance} -> distance end)
+      |> Enum.map(fn {file, distance} ->
+        Map.put(file, :distance, distance)
+      end)
+
+    {:ok, similar_files}
+  end
+
+  @doc """
+  Lists potential duplicate files across the library based on perceptual hashing.
+
+  Groups files that are likely duplicates (same or very similar content) based
+  on their perceptual hash similarity.
+
+  ## Parameters
+    - `opts` - Options:
+      - `:threshold` - Maximum Hamming distance for duplicates (default: 5)
+      - `:library_path_type` - Filter to specific library type
+      - `:min_group_size` - Minimum files in a group to include (default: 2)
+      - `:preload` - Associations to preload
+
+  ## Returns
+    A list of duplicate groups, where each group is a list of similar files.
+
+  ## Examples
+
+      groups = Library.find_duplicate_files(library_path_type: :adult)
+      # Returns: [[file1, file2], [file3, file4, file5], ...]
+  """
+  @spec find_duplicate_files(keyword()) :: list(list(MediaFile.t()))
+  def find_duplicate_files(opts \\ []) do
+    threshold = Keyword.get(opts, :threshold, 5)
+    min_group_size = Keyword.get(opts, :min_group_size, 2)
+
+    # Get all files with phash values
+    files =
+      MediaFile
+      |> where([f], not is_nil(f.phash))
+      |> apply_media_file_filters(opts)
+      |> maybe_preload(opts[:preload])
+      |> Repo.all()
+
+    # Group files by similarity using union-find approach
+    groups = group_similar_files(files, threshold)
+
+    # Filter to groups with at least min_group_size files
+    groups
+    |> Enum.filter(fn group -> length(group) >= min_group_size end)
+    |> Enum.sort_by(fn group -> -length(group) end)
+  end
+
+  # Groups files by similarity using a simple clustering approach
+  defp group_similar_files(files, threshold) do
+    # Build a map of file_id -> file for quick lookup
+    file_map = Map.new(files, fn f -> {f.id, f} end)
+
+    # Build adjacency list of similar files
+    adjacencies =
+      files
+      |> Enum.reduce(%{}, fn file, acc ->
+        similar_ids =
+          files
+          |> Enum.filter(fn other ->
+            other.id != file.id and
+              PhashGenerator.hamming_distance(file.phash, other.phash) <= threshold
+          end)
+          |> Enum.map(& &1.id)
+
+        Map.put(acc, file.id, similar_ids)
+      end)
+
+    # Find connected components
+    find_connected_components(files, adjacencies, file_map)
+  end
+
+  # Finds connected components in the similarity graph
+  defp find_connected_components(files, adjacencies, file_map) do
+    # Start with all files unvisited
+    all_ids = Enum.map(files, & &1.id) |> MapSet.new()
+
+    {components, _visited} =
+      Enum.reduce(all_ids, {[], MapSet.new()}, fn id, {components, visited} ->
+        if MapSet.member?(visited, id) do
+          {components, visited}
+        else
+          {component, new_visited} = bfs_component(id, adjacencies, visited)
+
+          if length(component) > 0 do
+            component_files = Enum.map(component, &Map.get(file_map, &1))
+            {[component_files | components], new_visited}
+          else
+            {components, new_visited}
+          end
+        end
+      end)
+
+    components
+  end
+
+  # BFS to find all nodes in a connected component
+  defp bfs_component(start_id, adjacencies, visited) do
+    do_bfs([start_id], adjacencies, visited, [])
+  end
+
+  defp do_bfs([], _adjacencies, visited, component), do: {component, visited}
+
+  defp do_bfs([id | rest], adjacencies, visited, component) do
+    if MapSet.member?(visited, id) do
+      do_bfs(rest, adjacencies, visited, component)
+    else
+      new_visited = MapSet.put(visited, id)
+      neighbors = Map.get(adjacencies, id, [])
+      unvisited_neighbors = Enum.reject(neighbors, &MapSet.member?(new_visited, &1))
+
+      do_bfs(
+        rest ++ unvisited_neighbors,
+        adjacencies,
+        new_visited,
+        [id | component]
+      )
+    end
   end
 
   ## Private Functions

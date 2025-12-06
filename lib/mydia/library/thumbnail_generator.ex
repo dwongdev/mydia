@@ -161,7 +161,8 @@ defmodule Mydia.Library.ThumbnailGenerator do
     quality = Keyword.get(opts, :quality, @default_quality)
     width = Keyword.get(opts, :width, @default_width)
 
-    with {:ok, seek_time} <- calculate_seek_time(input_path, position),
+    with :ok <- validate_video_stream(input_path),
+         {:ok, seek_time} <- calculate_seek_time(input_path, position),
          {:ok, temp_path} <- create_temp_file(".jpg"),
          :ok <- run_ffmpeg_thumbnail(input_path, temp_path, seek_time, quality, width),
          {:ok, checksum} <- GeneratedMedia.store_file(:cover, temp_path) do
@@ -169,9 +170,109 @@ defmodule Mydia.Library.ThumbnailGenerator do
       File.rm(temp_path)
       {:ok, checksum}
     else
+      {:error, :no_video_stream} = error ->
+        Logger.warning("Cannot generate cover for #{input_path}: file has no valid video stream")
+        error
+
+      {:error, :corrupted_video} = error ->
+        Logger.warning(
+          "Cannot generate cover for #{input_path}: video stream is corrupted or undecodable"
+        )
+
+        error
+
+      {:error, {:ffmpeg_error, _code, output}} = error ->
+        cond do
+          String.contains?(output, "Cannot determine format of input stream") ->
+            Logger.warning(
+              "Cannot generate cover for #{input_path}: video stream has no decodable frames"
+            )
+
+            {:error, :corrupted_video}
+
+          String.contains?(output, "does not contain any stream") ->
+            Logger.warning(
+              "Cannot generate cover for #{input_path}: file has no video stream (audio only)"
+            )
+
+            {:error, :no_video_stream}
+
+          true ->
+            Logger.error("Failed to generate cover for #{input_path}: #{inspect(error)}")
+            error
+        end
+
       {:error, reason} = error ->
         Logger.error("Failed to generate cover: #{inspect(reason)}")
         error
+    end
+  end
+
+  # Check if the file has a valid video stream before attempting to extract frames
+  defp validate_video_stream(input_path) do
+    # First check if ANY video stream exists
+    check_args = [
+      "-v",
+      "error",
+      "-show_entries",
+      "stream=codec_type",
+      "-of",
+      "csv=p=0",
+      input_path
+    ]
+
+    case run_ffprobe(check_args) do
+      {:ok, output} ->
+        streams = String.trim(output)
+
+        if String.contains?(streams, "video") do
+          # Video stream exists, check its properties
+          validate_video_properties(input_path)
+        else
+          # No video stream - audio only file
+          {:error, :no_video_stream}
+        end
+
+      {:error, _reason} ->
+        # If ffprobe fails entirely, still try to generate
+        :ok
+    end
+  end
+
+  defp validate_video_properties(input_path) do
+    args = [
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=pix_fmt",
+      "-of",
+      "csv=p=0",
+      input_path
+    ]
+
+    case run_ffprobe(args) do
+      {:ok, output} ->
+        output = String.trim(output)
+
+        cond do
+          # No output means no valid video properties
+          output == "" ->
+            :ok
+
+          # Video stream exists but has missing/invalid pixel format (common in corrupted files)
+          String.contains?(output, "N/A") or String.contains?(output, "none") ->
+            # Still try - some files with missing metadata can still be decoded
+            :ok
+
+          true ->
+            :ok
+        end
+
+      {:error, _reason} ->
+        # If ffprobe fails, still try to generate - FFmpeg might succeed
+        :ok
     end
   end
 
@@ -194,7 +295,25 @@ defmodule Mydia.Library.ThumbnailGenerator do
   end
 
   defp run_ffmpeg_thumbnail(input_path, output_path, seek_time, quality, width) do
+    # Try input seeking first (fast), fall back to output seeking (reliable) if it fails
+    case try_input_seeking(input_path, output_path, seek_time, quality, width) do
+      :ok ->
+        :ok
+
+      {:error, _reason} ->
+        # Fallback: use output seeking which is slower but handles problematic files better
+        try_output_seeking(input_path, output_path, seek_time, quality, width)
+    end
+  end
+
+  # Input seeking (-ss before -i) is fast but can fail with some files
+  defp try_input_seeking(input_path, output_path, seek_time, quality, width) do
     args = [
+      # Increase probe size and analysis duration for problematic files
+      "-probesize",
+      "50M",
+      "-analyzeduration",
+      "100M",
       "-ss",
       format_time(seek_time),
       "-i",
@@ -209,6 +328,114 @@ defmodule Mydia.Library.ThumbnailGenerator do
       output_path
     ]
 
+    run_and_verify(args, output_path)
+  end
+
+  # Output seeking (-ss after -i) is slower but more reliable for problematic files
+  defp try_output_seeking(input_path, output_path, seek_time, quality, width) do
+    # For output seeking, if seek_time is very small or problematic,
+    # just grab the first frame
+    effective_seek = if seek_time < 0.5, do: 0, else: seek_time
+
+    args = [
+      "-probesize",
+      "50M",
+      "-analyzeduration",
+      "100M",
+      "-i",
+      input_path,
+      "-ss",
+      format_time(effective_seek),
+      "-vframes",
+      "1",
+      "-q:v",
+      to_string(quality),
+      "-vf",
+      "scale=#{width}:-1",
+      "-y",
+      output_path
+    ]
+
+    case run_and_verify(args, output_path) do
+      :ok ->
+        :ok
+
+      {:error, _} when effective_seek > 0 ->
+        # Last resort: try grabbing the very first frame
+        try_first_frame(input_path, output_path, quality, width)
+
+      error ->
+        error
+    end
+  end
+
+  # Last resort: grab the first available frame with aggressive error handling
+  defp try_first_frame(input_path, output_path, quality, width) do
+    # Try with error ignore options for corrupted files
+    args = [
+      "-probesize",
+      "50M",
+      "-analyzeduration",
+      "100M",
+      # Generate PTS if missing
+      "-fflags",
+      "+genpts+igndts",
+      # Ignore errors during decoding
+      "-err_detect",
+      "ignore_err",
+      "-i",
+      input_path,
+      "-vframes",
+      "1",
+      "-q:v",
+      to_string(quality),
+      "-vf",
+      "scale=#{width}:-1",
+      "-y",
+      output_path
+    ]
+
+    case run_and_verify(args, output_path) do
+      :ok ->
+        :ok
+
+      {:error, _} ->
+        # Ultra last resort: try with forced pixel format assumption
+        try_with_forced_format(input_path, output_path, quality, width)
+    end
+  end
+
+  # Some broken files have valid video data but missing pixel format metadata
+  # Try forcing common MPEG4 pixel format (yuv420p)
+  defp try_with_forced_format(input_path, output_path, quality, width) do
+    args = [
+      "-probesize",
+      "50M",
+      "-analyzeduration",
+      "100M",
+      "-fflags",
+      "+genpts+igndts",
+      "-err_detect",
+      "ignore_err",
+      "-i",
+      input_path,
+      "-vframes",
+      "1",
+      "-q:v",
+      to_string(quality),
+      # Force pixel format conversion which may help with missing format
+      "-pix_fmt",
+      "yuvj420p",
+      "-vf",
+      "scale=#{width}:-1,format=yuvj420p",
+      "-y",
+      output_path
+    ]
+
+    run_and_verify(args, output_path)
+  end
+
+  defp run_and_verify(args, output_path) do
     case run_ffmpeg(args) do
       {:ok, _output} ->
         if File.exists?(output_path) do

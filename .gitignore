@@ -71,3 +71,6 @@ compose.override.yml
 # Backlog.md task management (managed via MCP)
 /backlog/
 
+# Generated media (covers, sprites, VTT files)
+/priv/generated/
+

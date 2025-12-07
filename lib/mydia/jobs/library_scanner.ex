@@ -1271,12 +1271,21 @@ defmodule Mydia.Jobs.LibraryScanner do
       end
 
     # Merge metadata: prefer actual file metadata, fall back to filename parsing
+    # Build metadata map with duration if available
+    metadata_update =
+      if Map.get(file_metadata, :duration) do
+        %{"duration" => file_metadata.duration}
+      else
+        nil
+      end
+
     update_attrs = %{
       resolution: file_metadata.resolution || filename_metadata.quality.resolution,
       codec: file_metadata.codec || filename_metadata.quality.codec,
       audio_codec: file_metadata.audio_codec || filename_metadata.quality.audio,
       bitrate: file_metadata.bitrate,
-      hdr_format: file_metadata.hdr_format || filename_metadata.quality.hdr_format
+      hdr_format: file_metadata.hdr_format || filename_metadata.quality.hdr_format,
+      metadata: metadata_update
     }
 
     # Use scan changeset to allow updates on orphaned files (files without media_item_id/episode_id)

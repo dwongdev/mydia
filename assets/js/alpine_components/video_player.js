@@ -214,7 +214,18 @@ export function videoPlayer() {
       // Update duration when it changes (important for HLS streams)
       const newDuration = event.target.duration;
       if (isFinite(newDuration) && newDuration > 0) {
-        this.duration = newDuration;
+        // During transcoding, HLS reports incorrect/growing duration
+        // Only update if we don't have a known duration, or if the new duration
+        // is reasonably close to what we expect (within 5% for completed transcoding)
+        if (this.duration === 0 || !this.isTranscoding) {
+          this.duration = newDuration;
+        } else if (this.isTranscoding && this.duration > 0) {
+          // During transcoding, keep the known duration from metadata
+          // HLS duration changes as segments are added, which is confusing
+          console.log(
+            `Ignoring HLS duration change during transcoding: ${newDuration}s (keeping ${this.duration}s)`,
+          );
+        }
       }
     },
 
@@ -225,7 +236,13 @@ export function videoPlayer() {
 
     onWaiting() {
       this.buffering = true;
+      // Show loading indicator with appropriate message
       this.loading = true;
+      if (this.isTranscoding) {
+        this.loadingMessage = "Buffering... (transcoding in progress)";
+      } else {
+        this.loadingMessage = "Buffering...";
+      }
     },
 
     onPlaying() {

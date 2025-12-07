@@ -13,6 +13,9 @@ defmodule MydiaWeb.PlaybackLive.Show do
     # Get intro/credits timestamps from metadata
     {intro_start, intro_end, credits_start} = get_skip_timestamps(type, content)
 
+    # Get known duration from media file metadata (for HLS streams)
+    known_duration = get_known_duration(content)
+
     {:ok,
      socket
      |> assign(:content_type, type)
@@ -22,6 +25,7 @@ defmodule MydiaWeb.PlaybackLive.Show do
      |> assign(:intro_start, intro_start)
      |> assign(:intro_end, intro_end)
      |> assign(:credits_start, credits_start)
+     |> assign(:known_duration, known_duration)
      |> assign(:page_title, "Playing: #{title}")}
   end
 
@@ -135,5 +139,22 @@ defmodule MydiaWeb.PlaybackLive.Show do
       _ ->
         {nil, nil, nil}
     end
+  end
+
+  # Extract known duration from media file metadata (populated by FFprobe during scanning)
+  # This is used to display the correct duration immediately for HLS streams
+  defp get_known_duration(content) do
+    media_files = Map.get(content, :media_files, [])
+
+    # Try to get duration from the first available media file
+    Enum.find_value(media_files, fn media_file ->
+      case media_file.metadata do
+        %{"duration" => duration} when is_number(duration) and duration > 0 ->
+          duration
+
+        _ ->
+          nil
+      end
+    end)
   end
 end

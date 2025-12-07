@@ -70,6 +70,9 @@ const VideoPlayer = {
     this.creditsStart = this.el.dataset.creditsStart
       ? parseFloat(this.el.dataset.creditsStart)
       : null;
+    this.knownDuration = this.el.dataset.knownDuration
+      ? parseFloat(this.el.dataset.knownDuration)
+      : null;
 
     if (!this.video || !this.contentType || !this.contentId) {
       console.error(
@@ -159,6 +162,14 @@ const VideoPlayer = {
       // Show generic loading initially
       this.alpine.showLoading();
 
+      // If we have a known duration from FFprobe metadata, set it immediately
+      // This ensures correct duration display for HLS streams during transcoding
+      if (this.knownDuration && this.knownDuration > 0) {
+        console.log("Using known duration from metadata:", this.knownDuration);
+        this.alpine.duration = this.knownDuration;
+        this.alpine.hasMetadata = true;
+      }
+
       // Fetch playback progress
       const progress = await this.fetchProgress();
       console.log("Fetched progress:", progress);
@@ -233,29 +244,44 @@ const VideoPlayer = {
   },
 
   async waitForPlaylist(playlistUrl, options = {}) {
-    const maxRetries = options.maxRetries || 10;
+    const maxRetries = options.maxRetries || 15;
     const retryDelay = options.retryDelay || 500;
     const maxDelay = options.maxDelay || 3000;
+    const minSegments = options.minSegments || 3; // Wait for at least 3 segments (~18 seconds of content)
 
     for (let i = 0; i < maxRetries; i++) {
       try {
-        const response = await fetch(playlistUrl, { method: "HEAD" });
+        const response = await fetch(playlistUrl, { method: "GET" });
 
         if (response.ok) {
-          // Playlist ready
-          if (i > 0) {
-            console.log(`Playlist ready after ${i + 1} attempt(s)`);
-          }
-          return;
-        }
+          // Playlist exists, now check if it has enough segments
+          const playlistText = await response.text();
+          const segmentCount = (playlistText.match(/\.ts/g) || []).length;
 
-        // Update transcoding progress in UI
-        this.alpine.updateTranscodingProgress(i + 1, maxRetries);
+          if (segmentCount >= minSegments) {
+            // Playlist ready with enough segments
+            if (i > 0) {
+              console.log(
+                `Playlist ready after ${i + 1} attempt(s) with ${segmentCount} segments`,
+              );
+            }
+            return;
+          }
+
+          // Playlist exists but not enough segments yet
+          console.log(
+            `Playlist has ${segmentCount}/${minSegments} segments, waiting for more...`,
+          );
+          this.alpine.updateTranscodingProgress(i + 1, maxRetries);
+        } else {
+          // Update transcoding progress in UI
+          this.alpine.updateTranscodingProgress(i + 1, maxRetries);
+        }
 
         // Calculate exponential backoff delay
         const delay = Math.min(retryDelay * Math.pow(1.5, i), maxDelay);
         console.log(
-          `Playlist not ready (attempt ${i + 1}/${maxRetries}), retrying in ${delay}ms...`,
+          `Waiting for transcoding (attempt ${i + 1}/${maxRetries}), retrying in ${delay}ms...`,
         );
 
         await new Promise((resolve) => setTimeout(resolve, delay));
@@ -333,6 +359,15 @@ const VideoPlayer = {
           bitrate: level.bitrate,
         }));
         this.alpine.updateHlsLevels(levels);
+
+        // Keep track that this is an HLS/transcoding stream for buffering messages
+        // The isTranscoding flag helps show appropriate messages during buffering
+      });
+
+      // Track when we have enough buffer - this indicates transcoding is keeping up
+      this.hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        // Once we're buffering fragments successfully, the initial wait is over
+        // but we keep isTranscoding true for buffering messages since transcoding continues
       });
 
       this.hls.on(Hls.Events.LEVEL_SWITCHED, () => {

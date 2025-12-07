@@ -526,6 +526,10 @@ defmodule MydiaWeb.CoreComponents do
   attr :intro_end, :any, default: nil, doc: "Intro end timestamp in seconds"
   attr :credits_start, :any, default: nil, doc: "Credits start timestamp in seconds"
 
+  attr :known_duration, :any,
+    default: nil,
+    doc: "Known duration in seconds (from FFprobe metadata)"
+
   def video_player(assigns) do
     ~H"""
     <div
@@ -538,6 +542,7 @@ defmodule MydiaWeb.CoreComponents do
       data-intro-start={@intro_start}
       data-intro-end={@intro_end}
       data-credits-start={@credits_start}
+      data-known-duration={@known_duration}
       class={["relative bg-black rounded-lg overflow-hidden flex items-center justify-center", @class]}
       x-bind:class="{ 'cursor-none': !controlsVisible }"
     >

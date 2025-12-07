@@ -30,6 +30,7 @@ export function videoPlayer() {
     settingsOpen: false,
     speedMenuOpen: false,
     qualityMenuOpen: false,
+    isFullscreen: false,
 
     // TV show features visibility
     skipIntroVisible: false,
@@ -118,6 +119,20 @@ export function videoPlayer() {
         });
       } else {
         document.exitFullscreen();
+      }
+    },
+
+    skipForward(seconds = 10) {
+      const video = this.$refs.video;
+      if (video && this.hasMetadata) {
+        video.currentTime = Math.min(video.currentTime + seconds, this.duration);
+      }
+    },
+
+    skipBackward(seconds = 10) {
+      const video = this.$refs.video;
+      if (video) {
+        video.currentTime = Math.max(video.currentTime - seconds, 0);
       }
     },
 
@@ -241,7 +256,7 @@ export function videoPlayer() {
     },
 
     onFullscreenChange() {
-      // Just trigger reactivity, template uses document.fullscreenElement
+      this.isFullscreen = !!document.fullscreenElement;
     },
 
     // === TV Show Features ===

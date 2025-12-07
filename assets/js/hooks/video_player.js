@@ -886,8 +886,10 @@ const VideoPlayer = {
   },
 
   handleFullscreenChange() {
-    // Trigger Alpine reactivity
-    this.alpine.$nextTick();
+    // Update Alpine's fullscreen state
+    if (this.alpine) {
+      this.alpine.onFullscreenChange();
+    }
   },
 
   setupTouchState() {

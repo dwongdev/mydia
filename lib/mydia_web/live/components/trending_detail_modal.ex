@@ -83,6 +83,12 @@ defmodule MydiaWeb.Live.Components.TrendingDetailModal do
                     <%= if runtime(@metadata) do %>
                       <span class="badge badge-ghost">{format_runtime(runtime(@metadata))}</span>
                     <% end %>
+                    <%= if genres(@metadata) != [] do %>
+                      <span class="text-white/40">•</span>
+                    <% end %>
+                    <%= for genre <- genres(@metadata) do %>
+                      <span class="badge badge-outline">{genre}</span>
+                    <% end %>
                   </div>
                 </div>
               </div>
@@ -98,12 +104,20 @@ defmodule MydiaWeb.Live.Components.TrendingDetailModal do
               </div>
             <% else %>
               <div class="space-y-6">
-                <%!-- Genres --%>
-                <%= if genres(@metadata) != [] do %>
-                  <div class="flex flex-wrap gap-2">
-                    <%= for genre <- genres(@metadata) do %>
-                      <span class="badge badge-outline">{genre}</span>
-                    <% end %>
+                <%!-- Trailer --%>
+                <%= if first_trailer(@metadata) do %>
+                  <div>
+                    <h3 class="text-lg font-semibold mb-3">Trailer</h3>
+                    <div class="aspect-video rounded-lg overflow-hidden bg-base-300">
+                      <iframe
+                        src={Video.youtube_embed_url(first_trailer(@metadata)) <> "?rel=0&modestbranding=1"}
+                        title="Trailer"
+                        class="w-full h-full"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowfullscreen
+                      >
+                      </iframe>
+                    </div>
                   </div>
                 <% end %>
 
@@ -141,23 +155,6 @@ defmodule MydiaWeb.Live.Components.TrendingDetailModal do
                           <% end %>
                         </div>
                       <% end %>
-                    </div>
-                  </div>
-                <% end %>
-
-                <%!-- Trailer --%>
-                <%= if first_trailer(@metadata) do %>
-                  <div>
-                    <h3 class="text-lg font-semibold mb-3">Trailer</h3>
-                    <div class="aspect-video rounded-lg overflow-hidden bg-base-300">
-                      <iframe
-                        src={Video.youtube_embed_url(first_trailer(@metadata)) <> "?rel=0&modestbranding=1"}
-                        title="Trailer"
-                        class="w-full h-full"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                        allowfullscreen
-                      >
-                      </iframe>
                     </div>
                   </div>
                 <% end %>

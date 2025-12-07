@@ -16,6 +16,7 @@ defmodule Mydia.Metadata.Structs.Video do
       https://www.youtube.com/embed/abc123
   """
 
+  @derive Jason.Encoder
   @enforce_keys [:key, :site]
 
   defstruct [

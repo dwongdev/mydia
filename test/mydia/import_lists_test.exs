@@ -91,7 +91,7 @@ defmodule Mydia.ImportListsTest do
     test "create_import_list/1 enforces unique constraint on type + media_type" do
       {:ok, _} = ImportLists.create_import_list(@valid_attrs)
       assert {:error, changeset} = ImportLists.create_import_list(@valid_attrs)
-      assert "has already been taken" in errors_on(changeset).type
+      assert "already exists for this media type" in errors_on(changeset).type
     end
 
     test "update_import_list/2 with valid data updates the import list" do

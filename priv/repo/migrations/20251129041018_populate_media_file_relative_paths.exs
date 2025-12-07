@@ -79,10 +79,14 @@ defmodule Mydia.Repo.Migrations.PopulateMediaFileRelativePaths do
     # Get media files that need updating (missing library_path_id or relative_path)
     # Only select columns that exist at this migration point
     media_files =
-      from("media_files",
-        where: [library_path_id: nil],
-        or_where: [relative_path: nil],
-        select: [:id, :path, :relative_path, :library_path_id]
+      from(mf in "media_files",
+        where: is_nil(mf.library_path_id) or is_nil(mf.relative_path),
+        select: %{
+          id: mf.id,
+          path: mf.path,
+          relative_path: mf.relative_path,
+          library_path_id: mf.library_path_id
+        }
       )
       |> repo().all()
 

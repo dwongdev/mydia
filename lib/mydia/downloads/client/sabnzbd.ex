@@ -65,10 +65,10 @@ defmodule Mydia.Downloads.Client.Sabnzbd do
   def test_connection(config) do
     config = normalize_config(config)
 
-    unless config[:api_key] do
-      {:error, Error.invalid_config("API key is required for SABnzbd")}
-    else
+    if config[:api_key] do
       do_test_connection(config)
+    else
+      {:error, Error.invalid_config("API key is required for SABnzbd")}
     end
   end
 
@@ -100,10 +100,10 @@ defmodule Mydia.Downloads.Client.Sabnzbd do
   def add_torrent(config, torrent, opts \\ []) do
     config = normalize_config(config)
 
-    unless config[:api_key] do
-      {:error, Error.invalid_config("API key is required for SABnzbd")}
-    else
+    if config[:api_key] do
       do_add_nzb(config, torrent, opts)
+    else
+      {:error, Error.invalid_config("API key is required for SABnzbd")}
     end
   end
 
@@ -278,10 +278,10 @@ defmodule Mydia.Downloads.Client.Sabnzbd do
   def remove_torrent(config, client_id, opts \\ []) do
     config = normalize_config(config)
 
-    unless config[:api_key] do
-      {:error, Error.invalid_config("API key is required for SABnzbd")}
-    else
+    if config[:api_key] do
       do_remove(config, client_id, opts)
+    else
+      {:error, Error.invalid_config("API key is required for SABnzbd")}
     end
   end
 
@@ -352,10 +352,10 @@ defmodule Mydia.Downloads.Client.Sabnzbd do
   def pause_torrent(config, client_id) do
     config = normalize_config(config)
 
-    unless config[:api_key] do
-      {:error, Error.invalid_config("API key is required for SABnzbd")}
-    else
+    if config[:api_key] do
       do_pause(config, client_id)
+    else
+      {:error, Error.invalid_config("API key is required for SABnzbd")}
     end
   end
 
@@ -392,10 +392,10 @@ defmodule Mydia.Downloads.Client.Sabnzbd do
   def resume_torrent(config, client_id) do
     config = normalize_config(config)
 
-    unless config[:api_key] do
-      {:error, Error.invalid_config("API key is required for SABnzbd")}
-    else
+    if config[:api_key] do
       do_resume(config, client_id)
+    else
+      {:error, Error.invalid_config("API key is required for SABnzbd")}
     end
   end
 

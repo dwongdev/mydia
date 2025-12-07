@@ -8,7 +8,7 @@ defmodule Mydia.Metadata.Structs.MediaMetadata do
   Supports both movies and TV shows with shared and type-specific fields.
   """
 
-  alias Mydia.Metadata.Structs.{CastMember, CrewMember, SeasonInfo}
+  alias Mydia.Metadata.Structs.{CastMember, CrewMember, SeasonInfo, Video}
 
   @enforce_keys [:provider_id, :provider, :media_type]
   defstruct [
@@ -40,6 +40,7 @@ defmodule Mydia.Metadata.Structs.MediaMetadata do
     :cast,
     :crew,
     :alternative_titles,
+    :videos,
     # TV show specific fields
     :number_of_seasons,
     :number_of_episodes,
@@ -77,6 +78,7 @@ defmodule Mydia.Metadata.Structs.MediaMetadata do
           cast: [CastMember.t()] | nil,
           crew: [CrewMember.t()] | nil,
           alternative_titles: [String.t()] | nil,
+          videos: [Video.t()] | nil,
           number_of_seasons: integer() | nil,
           number_of_episodes: integer() | nil,
           episode_run_time: [integer()] | nil,
@@ -125,7 +127,8 @@ defmodule Mydia.Metadata.Structs.MediaMetadata do
       homepage: data["homepage"],
       cast: parse_cast(data["credits"]["cast"]),
       crew: parse_crew(data["credits"]["crew"]),
-      alternative_titles: parse_alternative_titles(data["alternative_titles"])
+      alternative_titles: parse_alternative_titles(data["alternative_titles"]),
+      videos: parse_videos(data["videos"])
     }
 
     case media_type do
@@ -277,4 +280,25 @@ defmodule Mydia.Metadata.Structs.MediaMetadata do
   end
 
   defp parse_alternative_titles(_), do: []
+
+  defp parse_videos(nil), do: []
+
+  defp parse_videos(%{"results" => videos}) when is_list(videos) do
+    # Filter to only YouTube trailers for initial implementation
+    videos
+    |> Enum.filter(fn video ->
+      video["site"] == "YouTube" && video["type"] == "Trailer"
+    end)
+    |> Enum.sort_by(
+      fn video ->
+        # Prioritize official trailers, then by most recent
+        {!video["official"], video["published_at"]}
+      end,
+      :desc
+    )
+    |> Enum.take(5)
+    |> Enum.map(&Video.from_api_response/1)
+  end
+
+  defp parse_videos(_), do: []
 end

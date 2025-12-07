@@ -211,7 +211,12 @@
                   <% end %>
                 </div>
               <% end %>
-              <figure class="aspect-[2/3] bg-base-300">
+              <figure
+                class="aspect-[2/3] bg-base-300 cursor-pointer"
+                phx-click="show_details"
+                phx-value-id={movie.provider_id}
+                phx-value-type="movie"
+              >
                 <%= if movie.poster_path do %>
                   <img
                     src={"https://image.tmdb.org/t/p/w500#{movie.poster_path}"}
@@ -306,7 +311,12 @@
                   <% end %>
                 </div>
               <% end %>
-              <figure class="aspect-[2/3] bg-base-300">
+              <figure
+                class="aspect-[2/3] bg-base-300 cursor-pointer"
+                phx-click="show_details"
+                phx-value-id={show.provider_id}
+                phx-value-type="tv_show"
+              >
                 <%= if show.poster_path do %>
                   <img
                     src={"https://image.tmdb.org/t/p/w500#{show.poster_path}"}
@@ -451,5 +461,17 @@
         </p>
       </div>
     </div>
+  <% end %>
+
+  <%!-- Trending Detail Modal --%>
+  <%= if @selected_item do %>
+    <.live_component
+      module={MydiaWeb.Live.Components.TrendingDetailModal}
+      id="trending-detail-modal"
+      item={@selected_item}
+      metadata={@selected_metadata}
+      loading={@detail_loading}
+      current_user={@current_user}
+    />
   <% end %>
 </Layouts.app>

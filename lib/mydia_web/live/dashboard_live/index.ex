@@ -20,6 +20,9 @@ defmodule MydiaWeb.DashboardLive.Index do
         |> assign(:trending_tv, [])
         |> assign(:library_status_map, %{})
         |> assign(:adding_item_id, nil)
+        |> assign(:selected_item, nil)
+        |> assign(:selected_metadata, nil)
+        |> assign(:detail_loading, false)
         |> load_dashboard_data()
       else
         socket
@@ -36,6 +39,9 @@ defmodule MydiaWeb.DashboardLive.Index do
         |> assign(:library_status_map, %{})
         |> assign(:adding_item_id, nil)
         |> assign(:pending_requests_count, 0)
+        |> assign(:selected_item, nil)
+        |> assign(:selected_metadata, nil)
+        |> assign(:detail_loading, false)
       end
 
     {:ok, socket}
@@ -102,6 +108,43 @@ defmodule MydiaWeb.DashboardLive.Index do
     {:noreply, socket}
   end
 
+  def handle_event("show_details", %{"id" => id, "type" => type}, socket) do
+    # Find the item from trending lists
+    media_type = String.to_existing_atom(type)
+
+    item =
+      case media_type do
+        :movie ->
+          Enum.find(socket.assigns.trending_movies, &(&1.provider_id == id))
+
+        :tv_show ->
+          Enum.find(socket.assigns.trending_tv, &(&1.provider_id == id))
+      end
+
+    case item do
+      nil ->
+        {:noreply, socket}
+
+      item ->
+        # Show modal with loading state and trigger metadata fetch
+        send(self(), {:fetch_detail_metadata, id, media_type})
+
+        {:noreply,
+         socket
+         |> assign(:selected_item, item)
+         |> assign(:selected_metadata, nil)
+         |> assign(:detail_loading, true)}
+    end
+  end
+
+  def handle_event("close_details", _, socket) do
+    {:noreply,
+     socket
+     |> assign(:selected_item, nil)
+     |> assign(:selected_metadata, nil)
+     |> assign(:detail_loading, false)}
+  end
+
   @impl true
   def handle_info(:load_trending_movies, socket) do
     case Metadata.trending_movies() do
@@ -149,6 +192,22 @@ defmodule MydiaWeb.DashboardLive.Index do
     # Just trigger a re-render to update the downloads counter in the sidebar
     # The counter will be recalculated when the layout renders
     {:noreply, socket}
+  end
+
+  def handle_info({:fetch_detail_metadata, tmdb_id, media_type}, socket) do
+    config = Metadata.default_relay_config()
+
+    case Metadata.fetch_by_id(config, tmdb_id, media_type: media_type) do
+      {:ok, metadata} ->
+        {:noreply,
+         socket
+         |> assign(:selected_metadata, metadata)
+         |> assign(:detail_loading, false)}
+
+      {:error, _reason} ->
+        # Even on error, stop loading and show what we have from SearchResult
+        {:noreply, assign(socket, :detail_loading, false)}
+    end
   end
 
   def handle_info({:add_media_to_library, tmdb_id, media_type}, socket) do

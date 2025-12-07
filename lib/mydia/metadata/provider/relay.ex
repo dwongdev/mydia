@@ -131,7 +131,7 @@ defmodule Mydia.Metadata.Provider.Relay do
   def fetch_by_id(config, provider_id, opts \\ []) do
     media_type = Keyword.get(opts, :media_type, :movie)
     language = Keyword.get(opts, :language, @default_language)
-    append = Keyword.get(opts, :append_to_response, ["credits", "alternative_titles"])
+    append = Keyword.get(opts, :append_to_response, ["credits", "alternative_titles", "videos"])
 
     endpoint = build_details_endpoint(media_type, provider_id)
 

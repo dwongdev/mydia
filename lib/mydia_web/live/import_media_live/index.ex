@@ -707,19 +707,20 @@ defmodule MydiaWeb.ImportMediaLive.Index do
   def handle_info({:scan_complete, {:ok, scan_result}}, socket) do
     # Get existing files from database (preload library_path for absolute_path resolution)
     # Only skip files that have valid parent associations (not orphaned)
+    # Exception: specialized library files (adult, music, books) don't have parent associations
     existing_files = Library.list_media_files(preload: [:library_path])
 
     existing_valid_paths =
       existing_files
-      |> Enum.reject(&Library.orphaned_media_file?/1)
+      |> Enum.reject(&orphaned_non_specialized_file?/1)
       |> Enum.map(&MediaFile.absolute_path/1)
       |> Enum.reject(&is_nil/1)
       |> MapSet.new()
 
-    # Build map of orphaned files for re-matching
+    # Build map of orphaned files for re-matching (only non-specialized libraries)
     orphaned_files_map =
       existing_files
-      |> Enum.filter(&Library.orphaned_media_file?/1)
+      |> Enum.filter(&orphaned_non_specialized_file?/1)
       |> Enum.map(fn file ->
         case MediaFile.absolute_path(file) do
           nil -> nil
@@ -938,6 +939,15 @@ defmodule MydiaWeb.ImportMediaLive.Index do
 
   defp specialized_library?(nil), do: false
   defp specialized_library?(%{type: type}), do: type in [:music, :books, :adult]
+
+  # Checks if a media file is orphaned AND belongs to a non-specialized library.
+  # Files in specialized libraries (adult, music, books) are expected to not have
+  # parent associations (media_item_id/episode_id), so they should not be considered
+  # orphaned for re-matching purposes.
+  defp orphaned_non_specialized_file?(%MediaFile{} = media_file) do
+    Library.orphaned_media_file?(media_file) and
+      not specialized_library?(media_file.library_path)
+  end
 
   # Handle files for specialized libraries (music, books, adult)
   # These don't need metadata matching - just create a simple file listing

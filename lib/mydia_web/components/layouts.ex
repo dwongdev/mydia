@@ -184,6 +184,13 @@ defmodule MydiaWeb.Layouts do
                     <.icon name="hero-cog-6-tooth" class="w-5 h-5" /> Configuration
                   </a>
                 </li>
+                <%= if Mydia.ImportLists.FeatureFlags.enabled?() do %>
+                  <li>
+                    <a href="/admin/import-lists">
+                      <.icon name="hero-arrow-down-on-square-stack" class="w-5 h-5" /> Import Lists
+                    </a>
+                  </li>
+                <% end %>
                 <li>
                   <a href="/admin/jobs">
                     <.icon name="hero-queue-list" class="w-5 h-5" /> Background Jobs

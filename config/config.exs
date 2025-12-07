@@ -245,7 +245,8 @@ config :mydia, Oban,
     media: 3,
     search: 2,
     notifications: 1,
-    maintenance: 1
+    maintenance: 1,
+    import_lists: 2
   ],
   plugins: [
     # Keep completed jobs for 7 days
@@ -266,7 +267,9 @@ config :mydia, Oban,
        # Check Cardigann indexer health every hour
        {"0 * * * *", Mydia.Jobs.CardigannHealthCheck},
        # Clean up old import sessions daily at 4 AM
-       {"0 4 * * *", Mydia.Jobs.ImportSessionCleanup}
+       {"0 4 * * *", Mydia.Jobs.ImportSessionCleanup},
+       # Check for import lists due for sync every 15 minutes
+       {"*/15 * * * *", Mydia.Jobs.ImportListScheduler}
      ]}
   ]
 
@@ -325,7 +328,11 @@ config :mydia, :features,
   # When enabled, provides access to hundreds of torrent indexers without external Prowlarr/Jackett
   # Set to false to disable Cardigann indexers
   # Can be overridden via ENABLE_CARDIGANN environment variable
-  cardigann_enabled: true
+  cardigann_enabled: true,
+  # Enable/disable Import Lists feature
+  # When enabled, shows the Import Lists UI for syncing external lists (TMDB watchlists, etc.)
+  # Can be overridden via ENABLE_IMPORT_LISTS environment variable
+  import_lists_enabled: false
 
 # Configure Ueberauth with empty providers by default
 # This is overridden in dev.exs if OIDC is configured

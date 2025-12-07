@@ -203,9 +203,17 @@ if config_env() == :prod do
       _ -> Application.get_env(:mydia, :features)[:cardigann_enabled] || false
     end
 
+  import_lists_enabled =
+    case System.get_env("ENABLE_IMPORT_LISTS") do
+      "true" -> true
+      "false" -> false
+      _ -> Application.get_env(:mydia, :features)[:import_lists_enabled] || false
+    end
+
   config :mydia, :features,
     playback_enabled: playback_enabled,
-    cardigann_enabled: cardigann_enabled
+    cardigann_enabled: cardigann_enabled,
+    import_lists_enabled: import_lists_enabled
 end
 
 # FlareSolverr configuration (all environments)
@@ -255,9 +263,17 @@ if config_env() in [:dev, :test] do
       _ -> Application.get_env(:mydia, :features)[:cardigann_enabled] || false
     end
 
+  import_lists_enabled =
+    case System.get_env("ENABLE_IMPORT_LISTS") do
+      "true" -> true
+      "false" -> false
+      _ -> Application.get_env(:mydia, :features)[:import_lists_enabled] || false
+    end
+
   config :mydia, :features,
     playback_enabled: playback_enabled,
-    cardigann_enabled: cardigann_enabled
+    cardigann_enabled: cardigann_enabled,
+    import_lists_enabled: import_lists_enabled
 end
 
 # Ueberauth OIDC configuration (all environments)

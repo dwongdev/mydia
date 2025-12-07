@@ -1,0 +1,70 @@
+defmodule Mydia.ImportLists.ImportListItem do
+  @moduledoc """
+  Schema for import list items.
+
+  An import list item represents a single media item discovered from an import list.
+  Items are tracked from discovery through being added to the library or skipped.
+  """
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
+
+  @status_values ~w(pending added skipped failed)
+
+  schema "import_list_items" do
+    field :tmdb_id, :integer
+    field :title, :string
+    field :year, :integer
+    field :poster_path, :string
+    field :status, :string, default: "pending"
+    field :skip_reason, :string
+    field :discovered_at, :utc_datetime
+
+    # Virtual field: true if the media_item still exists in the library
+    field :in_library, :boolean, virtual: true, default: false
+
+    belongs_to :import_list, Mydia.ImportLists.ImportList
+    belongs_to :media_item, Mydia.Media.MediaItem
+
+    timestamps(type: :utc_datetime)
+  end
+
+  @doc """
+  Changeset for creating or updating an import list item.
+  """
+  def changeset(item, attrs) do
+    item
+    |> cast(attrs, [
+      :tmdb_id,
+      :title,
+      :year,
+      :poster_path,
+      :status,
+      :skip_reason,
+      :discovered_at,
+      :import_list_id,
+      :media_item_id
+    ])
+    |> validate_required([:tmdb_id, :title, :discovered_at, :import_list_id])
+    |> validate_inclusion(:status, @status_values)
+    |> unique_constraint([:import_list_id, :tmdb_id], name: :import_list_items_list_tmdb_unique)
+    |> foreign_key_constraint(:import_list_id)
+    |> foreign_key_constraint(:media_item_id)
+  end
+
+  @doc """
+  Returns the list of valid status values.
+  """
+  def valid_statuses, do: @status_values
+
+  @doc """
+  Returns a human-readable label for a status.
+  """
+  def status_label("pending"), do: "Pending"
+  def status_label("added"), do: "Added"
+  def status_label("skipped"), do: "Skipped"
+  def status_label("failed"), do: "Failed"
+  def status_label(_), do: "Unknown"
+end

@@ -57,15 +57,6 @@ export function videoPlayer() {
 
     init() {
       // Alpine's init runs when component is mounted
-      console.log("Alpine video player component initialized");
-      console.log("Initial state:", {
-        skipIntroVisible: this.skipIntroVisible,
-        skipCreditsVisible: this.skipCreditsVisible,
-        nextEpisodeVisible: this.nextEpisodeVisible,
-        loading: this.loading,
-        error: this.error,
-      });
-
       // The Phoenix hook will handle the actual video setup and call
       // methods on this Alpine component to update state
     },
@@ -104,7 +95,6 @@ export function videoPlayer() {
 
       // Unmute on first user interaction if video was auto-muted
       if (this.muted && !video.paused) {
-        console.log("Unmuting video on first user interaction");
         video.muted = false;
         this.muted = false;
       }
@@ -219,13 +209,9 @@ export function videoPlayer() {
         // is reasonably close to what we expect (within 5% for completed transcoding)
         if (this.duration === 0 || !this.isTranscoding) {
           this.duration = newDuration;
-        } else if (this.isTranscoding && this.duration > 0) {
-          // During transcoding, keep the known duration from metadata
-          // HLS duration changes as segments are added, which is confusing
-          console.log(
-            `Ignoring HLS duration change during transcoding: ${newDuration}s (keeping ${this.duration}s)`,
-          );
         }
+        // During transcoding, keep the known duration from metadata
+        // HLS duration changes as segments are added, which would be confusing
       }
     },
 

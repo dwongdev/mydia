@@ -322,6 +322,14 @@ const liveSocket = new LiveSocket("/live", Socket, {
     StickyToolbar,
     SpritePreview,
   },
+  // Preserve Alpine.js state across LiveView DOM patches
+  dom: {
+    onBeforeElUpdated(from, to) {
+      if (from._x_dataStack) {
+        window.Alpine.clone(from, to);
+      }
+    },
+  },
 });
 
 // Show progress bar on live navigation and form submits

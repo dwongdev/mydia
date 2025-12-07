@@ -412,9 +412,7 @@ defmodule MydiaWeb.CoreComponents do
   """
   attr :name, :string, required: true
   attr :class, :string, default: "size-4"
-  attr :"x-show", :string, default: nil
-  attr :"x-cloak", :boolean, default: false
-  attr :rest, :global
+  attr :rest, :global, include: ~w(x-show x-cloak)
 
   def icon(%{name: "hero-" <> _} = assigns) do
     ~H"""
@@ -667,7 +665,7 @@ defmodule MydiaWeb.CoreComponents do
             <div
               x-show="settingsOpen"
               x-transition
-              style="display: none"
+              x-cloak
               @click.outside="closeSettings"
               class="absolute bottom-full right-0 mb-2 bg-base-100 rounded-lg shadow-2xl min-w-[200px] overflow-hidden border border-base-300"
             >
@@ -689,7 +687,7 @@ defmodule MydiaWeb.CoreComponents do
                 <div
                   x-show="speedMenuOpen"
                   x-transition
-                  style="display: none"
+                  x-cloak
                   class="absolute bottom-0 right-full mr-1 bg-base-100 rounded-lg shadow-2xl min-w-[140px] overflow-hidden border border-base-300"
                 >
                   <button
@@ -729,7 +727,7 @@ defmodule MydiaWeb.CoreComponents do
                 <div
                   x-show="qualityMenuOpen"
                   x-transition
-                  style="display: none"
+                  x-cloak
                   class="absolute bottom-0 right-full mr-1 bg-base-100 rounded-lg shadow-2xl min-w-[140px] overflow-hidden border border-base-300"
                 >
                   <button
@@ -789,7 +787,7 @@ defmodule MydiaWeb.CoreComponents do
       <div
         x-show="loading"
         x-transition
-        style="display: none"
+        x-cloak
         class="absolute inset-0 flex items-center justify-center bg-black/90 pointer-events-none z-10"
       >
         <div class="flex flex-col items-center gap-4 animate-pulse">
@@ -802,7 +800,7 @@ defmodule MydiaWeb.CoreComponents do
       <div
         x-show="error"
         x-transition
-        style="display: none"
+        x-cloak
         class="absolute inset-0 flex items-center justify-center bg-black/90 z-10"
       >
         <div class="flex flex-col items-center gap-4 text-center px-4">
@@ -824,7 +822,7 @@ defmodule MydiaWeb.CoreComponents do
       <div
         x-show="skipIntroVisible"
         x-transition
-        style="display: none"
+        x-cloak
         class="absolute top-20 right-6 z-20"
       >
         <button
@@ -840,7 +838,7 @@ defmodule MydiaWeb.CoreComponents do
       <div
         x-show="skipCreditsVisible"
         x-transition
-        style="display: none"
+        x-cloak
         class="absolute top-20 right-6 z-20"
       >
         <button
@@ -856,7 +854,7 @@ defmodule MydiaWeb.CoreComponents do
       <div
         x-show="nextEpisodeVisible"
         x-transition
-        style="display: none"
+        x-cloak
         class="absolute bottom-20 right-6 z-20"
       >
         <div class="bg-base-100/95 rounded-lg shadow-2xl overflow-hidden border border-base-300 max-w-sm backdrop-blur-sm">
@@ -900,7 +898,7 @@ defmodule MydiaWeb.CoreComponents do
           <div
             x-show="countdownVisible"
             x-transition
-            style="display: none"
+            x-cloak
           >
             <div class="px-4 pb-3">
               <div class="flex items-center justify-between text-xs text-base-content/70 mb-2">

@@ -240,10 +240,7 @@ defmodule Mydia.Library.SpriteGenerator do
     # Create a text file listing all input frames for the montage
     list_path = Path.join(temp_dir, "frames.txt")
 
-    list_content =
-      frame_paths
-      |> Enum.map(&"file '#{&1}'")
-      |> Enum.join("\n")
+    list_content = Enum.map_join(frame_paths, "\n", &"file '#{&1}'")
 
     File.write!(list_path, list_content)
 
@@ -331,16 +328,15 @@ defmodule Mydia.Library.SpriteGenerator do
         input_refs =
           row_paths
           |> Enum.with_index()
-          |> Enum.map(fn {_, col_idx} ->
+          |> Enum.map_join("", fn {_, col_idx} ->
             global_idx = row_idx * columns + col_idx
             "[#{global_idx}:v]"
           end)
-          |> Enum.join("")
 
         "#{input_refs}hstack=inputs=#{length(row_paths)}[row#{row_idx}]"
       end)
 
-    row_labels = Enum.map(0..(rows - 1), &"[row#{&1}]") |> Enum.join("")
+    row_labels = Enum.map_join(0..(rows - 1), "", &"[row#{&1}]")
     vstack_filter = "#{row_labels}vstack=inputs=#{rows}[out]"
 
     filter_complex = Enum.join(row_filters ++ [vstack_filter], ";")

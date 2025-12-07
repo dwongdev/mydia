@@ -9,16 +9,19 @@ defmodule Mydia.Repo.Migrations.PopulateMediaFileRelativePaths do
 
   Note: A startup task (Mydia.Library.StartupSync) will handle ongoing synchronization
   and act as a safety net for edge cases.
+
+  IMPORTANT: This migration uses schema-less queries to avoid depending on columns
+  that may be added in future migrations.
   """
 
   use Ecto.Migration
+  import Ecto.Query
 
   def up do
-    # Use the shared LibraryPathSync module to populate paths
+    # Use the shared LibraryPathSync module to sync library paths (safe - uses LibraryPath schema)
     alias Mydia.Library.LibraryPathSync
 
     # 1. Sync runtime library paths to database
-    # This ensures all library paths from env vars/YAML are in the database
     {:ok, %{synced: synced_count}} = LibraryPathSync.sync_from_runtime_config()
 
     IO.puts("""
@@ -27,7 +30,8 @@ defmodule Mydia.Repo.Migrations.PopulateMediaFileRelativePaths do
     """)
 
     # 2. Populate relative_path and library_path_id for all media files
-    {:ok, stats} = LibraryPathSync.populate_all_media_files()
+    # Using schema-less queries to avoid depending on columns added in future migrations
+    stats = populate_all_media_files()
 
     IO.puts("""
     [Migration] Populated relative paths for media files:
@@ -55,9 +59,6 @@ defmodule Mydia.Repo.Migrations.PopulateMediaFileRelativePaths do
   end
 
   def down do
-    # Rollback: Clear library_path_id and relative_path for all media files
-    import Ecto.Query
-
     from("media_files")
     |> repo().update_all(set: [library_path_id: nil, relative_path: nil])
 
@@ -65,5 +66,80 @@ defmodule Mydia.Repo.Migrations.PopulateMediaFileRelativePaths do
 
     [Rollback] Cleared library_path_id and relative_path for all media files
     """)
+  end
+
+  # Schema-less implementation to avoid depending on MediaFile schema
+  defp populate_all_media_files do
+    # Get all library paths
+    library_paths =
+      from("library_paths", select: [:id, :path])
+      |> repo().all()
+      |> Enum.sort_by(fn lp -> -String.length(lp.path) end)
+
+    # Get media files that need updating (missing library_path_id or relative_path)
+    # Only select columns that exist at this migration point
+    media_files =
+      from("media_files",
+        where: [library_path_id: nil],
+        or_where: [relative_path: nil],
+        select: [:id, :path, :relative_path, :library_path_id]
+      )
+      |> repo().all()
+
+    stats = %{updated: 0, orphaned: 0, failed: 0}
+
+    Enum.reduce(media_files, stats, fn media_file, acc ->
+      case populate_media_file(media_file, library_paths) do
+        {:ok, :updated} -> %{acc | updated: acc.updated + 1}
+        {:ok, :skipped} -> acc
+        {:ok, :orphaned} -> %{acc | orphaned: acc.orphaned + 1}
+        {:error, _} -> %{acc | failed: acc.failed + 1}
+      end
+    end)
+  end
+
+  defp populate_media_file(media_file, library_paths) do
+    # Skip if already fully populated
+    if media_file.library_path_id && media_file.relative_path do
+      {:ok, :skipped}
+    else
+      file_path = media_file.path
+
+      case find_matching_library_path(file_path, library_paths) do
+        nil ->
+          {:ok, :orphaned}
+
+        library_path ->
+          relative_path =
+            media_file.relative_path || calculate_relative_path(file_path, library_path.path)
+
+          from("media_files", where: [id: ^media_file.id])
+          |> repo().update_all(
+            set: [
+              library_path_id: library_path.id,
+              relative_path: relative_path
+            ]
+          )
+
+          {:ok, :updated}
+      end
+    end
+  rescue
+    e -> {:error, e}
+  end
+
+  defp find_matching_library_path(nil, _library_paths), do: nil
+
+  defp find_matching_library_path(file_path, library_paths) do
+    # Library paths are already sorted by length descending (longest first)
+    Enum.find(library_paths, fn library_path ->
+      String.starts_with?(file_path, library_path.path)
+    end)
+  end
+
+  defp calculate_relative_path(file_path, library_path) do
+    file_path
+    |> String.replace_prefix(library_path, "")
+    |> String.trim_leading("/")
   end
 end

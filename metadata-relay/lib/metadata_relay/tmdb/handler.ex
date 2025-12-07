@@ -87,4 +87,60 @@ defmodule MetadataRelay.TMDB.Handler do
   def trending_tv(params) do
     Client.get("/trending/tv/week", params: params)
   end
+
+  @doc """
+  GET /tmdb/movies/popular
+  Get popular movies.
+  """
+  def popular_movies(params) do
+    Client.get("/movie/popular", params: params)
+  end
+
+  @doc """
+  GET /tmdb/tv/popular
+  Get popular TV shows.
+  """
+  def popular_tv(params) do
+    Client.get("/tv/popular", params: params)
+  end
+
+  @doc """
+  GET /tmdb/movies/upcoming
+  Get upcoming movies.
+  """
+  def upcoming_movies(params) do
+    Client.get("/movie/upcoming", params: params)
+  end
+
+  @doc """
+  GET /tmdb/movies/now_playing
+  Get movies currently in theatres.
+  """
+  def now_playing_movies(params) do
+    Client.get("/movie/now_playing", params: params)
+  end
+
+  @doc """
+  GET /tmdb/tv/on_the_air
+  Get TV shows currently on the air.
+  """
+  def on_the_air_tv(params) do
+    Client.get("/tv/on_the_air", params: params)
+  end
+
+  @doc """
+  GET /tmdb/tv/airing_today
+  Get TV shows airing today.
+  """
+  def airing_today_tv(params) do
+    Client.get("/tv/airing_today", params: params)
+  end
+
+  @doc """
+  GET /tmdb/list/{id}
+  Get a user-created TMDB list.
+  """
+  def get_list(id, params) do
+    Client.get("/list/#{id}", params: params)
+  end
 end

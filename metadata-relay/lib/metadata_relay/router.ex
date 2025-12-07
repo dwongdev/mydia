@@ -66,10 +66,52 @@ defmodule MetadataRelay.Router do
     handle_tmdb_request(conn, fn -> Handler.trending_movies(params) end)
   end
 
+  # TMDB Popular Movies
+  get "/tmdb/movies/popular" do
+    params = extract_query_params(conn)
+    handle_tmdb_request(conn, fn -> Handler.popular_movies(params) end)
+  end
+
+  # TMDB Upcoming Movies
+  get "/tmdb/movies/upcoming" do
+    params = extract_query_params(conn)
+    handle_tmdb_request(conn, fn -> Handler.upcoming_movies(params) end)
+  end
+
+  # TMDB Now Playing Movies
+  get "/tmdb/movies/now_playing" do
+    params = extract_query_params(conn)
+    handle_tmdb_request(conn, fn -> Handler.now_playing_movies(params) end)
+  end
+
   # TMDB Trending TV (must come before /tmdb/tv/shows/:id)
   get "/tmdb/tv/trending" do
     params = extract_query_params(conn)
     handle_tmdb_request(conn, fn -> Handler.trending_tv(params) end)
+  end
+
+  # TMDB Popular TV
+  get "/tmdb/tv/popular" do
+    params = extract_query_params(conn)
+    handle_tmdb_request(conn, fn -> Handler.popular_tv(params) end)
+  end
+
+  # TMDB On The Air TV
+  get "/tmdb/tv/on_the_air" do
+    params = extract_query_params(conn)
+    handle_tmdb_request(conn, fn -> Handler.on_the_air_tv(params) end)
+  end
+
+  # TMDB Airing Today TV
+  get "/tmdb/tv/airing_today" do
+    params = extract_query_params(conn)
+    handle_tmdb_request(conn, fn -> Handler.airing_today_tv(params) end)
+  end
+
+  # TMDB User List (must come before /tmdb/movies/:id)
+  get "/tmdb/list/:id" do
+    params = extract_query_params(conn)
+    handle_tmdb_request(conn, fn -> Handler.get_list(id, params) end)
   end
 
   # TMDB Movie Details

@@ -4,6 +4,7 @@ defmodule MydiaWeb.Api.StreamController do
   alias Mydia.Library
   alias Mydia.Library.MediaFile
   alias Mydia.Streaming.Compatibility
+  alias Mydia.Streaming.FfmpegRemuxer
   alias Mydia.Streaming.{HlsSessionSupervisor, HlsSession}
   alias MydiaWeb.Api.RangeHelper
 
@@ -93,6 +94,11 @@ defmodule MydiaWeb.Api.StreamController do
 
   # Main streaming function that handles a media file
   defp stream_media_file(conn, media_file) do
+    Logger.info(
+      "Streaming media_file id=#{media_file.id}, codec=#{inspect(media_file.codec)}, " <>
+        "audio_codec=#{inspect(media_file.audio_codec)}, container=#{inspect(media_file.metadata["container"])}"
+    )
+
     # Resolve absolute path from relative path and library_path
     case MediaFile.absolute_path(media_file) do
       nil ->
@@ -105,6 +111,8 @@ defmodule MydiaWeb.Api.StreamController do
       absolute_path ->
         # Verify file exists on disk
         if File.exists?(absolute_path) do
+          # If codec info is missing, try to extract it on-the-fly
+          media_file = maybe_extract_codec_info(media_file, absolute_path)
           route_stream(conn, media_file, absolute_path)
         else
           Logger.warning(
@@ -118,15 +126,101 @@ defmodule MydiaWeb.Api.StreamController do
     end
   end
 
+  # Extract codec info on-the-fly if missing from database
+  defp maybe_extract_codec_info(%MediaFile{codec: nil} = media_file, absolute_path) do
+    Logger.info("Codec info missing for #{media_file.id}, extracting via FFprobe...")
+
+    case Mydia.Library.FileAnalyzer.analyze(absolute_path) do
+      {:ok, analysis} ->
+        # Update the struct with extracted codec info (in-memory only for now)
+        # We use the raw codec_name from FFprobe for compatibility checks
+        updated = %{
+          media_file
+          | codec: normalize_codec_for_compat(analysis.codec),
+            audio_codec: normalize_audio_codec_for_compat(analysis.audio_codec)
+        }
+
+        Logger.info(
+          "Extracted codec info: video=#{inspect(updated.codec)}, audio=#{inspect(updated.audio_codec)}"
+        )
+
+        # Also update in database for future requests
+        spawn(fn ->
+          Library.update_media_file_scan(media_file, %{
+            codec: updated.codec,
+            audio_codec: updated.audio_codec,
+            resolution: analysis.resolution,
+            bitrate: analysis.bitrate
+          })
+        end)
+
+        updated
+
+      {:error, reason} ->
+        Logger.warning("Failed to extract codec info for #{media_file.id}: #{inspect(reason)}")
+        media_file
+    end
+  end
+
+  defp maybe_extract_codec_info(media_file, _absolute_path), do: media_file
+
+  # Normalize codec names to raw format for compatibility checks
+  # FileAnalyzer returns "H.264 (Main)" but we need "h264" for compatibility
+  defp normalize_codec_for_compat(nil), do: nil
+
+  defp normalize_codec_for_compat(codec) do
+    normalized = String.downcase(codec)
+
+    cond do
+      String.contains?(normalized, "h.264") or String.contains?(normalized, "h264") -> "h264"
+      String.contains?(normalized, "h.265") or String.contains?(normalized, "hevc") -> "hevc"
+      String.contains?(normalized, "vp9") -> "vp9"
+      String.contains?(normalized, "av1") -> "av1"
+      String.contains?(normalized, "mpeg-4") or String.contains?(normalized, "mpeg4") -> "mpeg4"
+      String.contains?(normalized, "wmv") -> "wmv3"
+      true -> codec
+    end
+  end
+
+  defp normalize_audio_codec_for_compat(nil), do: nil
+
+  defp normalize_audio_codec_for_compat(codec) do
+    normalized = String.downcase(codec)
+
+    cond do
+      String.contains?(normalized, "aac") -> "aac"
+      String.contains?(normalized, "mp3") -> "mp3"
+      String.contains?(normalized, "opus") -> "opus"
+      String.contains?(normalized, "vorbis") -> "vorbis"
+      String.contains?(normalized, "ac3") or String.contains?(normalized, "ac-3") -> "ac3"
+      String.contains?(normalized, "dts") -> "dts"
+      String.contains?(normalized, "truehd") -> "truehd"
+      String.contains?(normalized, "flac") -> "flac"
+      true -> codec
+    end
+  end
+
   # Routes to appropriate streaming method based on file compatibility
   defp route_stream(conn, media_file, absolute_path) do
-    case Compatibility.check_compatibility(media_file) do
+    compatibility = Compatibility.check_compatibility(media_file)
+    Logger.info("Compatibility check for #{absolute_path}: #{compatibility}")
+
+    case compatibility do
       :direct_play ->
-        Logger.debug(
+        Logger.info(
           "Streaming #{absolute_path} via direct play (compatible: #{media_file.codec}/#{media_file.audio_codec})"
         )
 
         stream_file_direct(conn, media_file, absolute_path)
+
+      :needs_remux ->
+        reason = Compatibility.remux_reason(media_file)
+
+        Logger.info(
+          "Streaming #{absolute_path} via fMP4 remux: #{reason} (codec: #{media_file.codec}/#{media_file.audio_codec})"
+        )
+
+        stream_file_remux(conn, media_file, absolute_path)
 
       :needs_transcoding ->
         reason = Compatibility.transcoding_reason(media_file)
@@ -152,17 +246,16 @@ defmodule MydiaWeb.Api.StreamController do
               {:ok, session_pid} ->
                 case HlsSession.get_info(session_pid) do
                   {:ok, session_info} ->
-                    # Construct master playlist URL
-                    master_playlist_url =
-                      url(~p"/api/v1/hls/#{session_info.session_id}/index.m3u8")
+                    # Construct master playlist URL (use relative path to preserve host)
+                    master_playlist_path = ~p"/api/v1/hls/#{session_info.session_id}/index.m3u8"
 
                     Logger.info(
-                      "HLS session started, redirecting to master playlist: #{master_playlist_url}"
+                      "HLS session started, redirecting to master playlist: #{master_playlist_path}"
                     )
 
                     # Redirect to master playlist
                     conn
-                    |> put_resp_header("location", master_playlist_url)
+                    |> put_resp_header("location", master_playlist_path)
                     |> send_resp(302, "")
 
                   {:error, error} ->
@@ -270,6 +363,29 @@ defmodule MydiaWeb.Api.StreamController do
         |> put_status(:requested_range_not_satisfiable)
         |> put_resp_header("content-range", "bytes */#{file_size}")
         |> json(%{error: "Invalid range request"})
+    end
+  end
+
+  # Stream file via fMP4 remuxing (for files with compatible codecs but incompatible container)
+  defp stream_file_remux(conn, _media_file, file_path) do
+    case FfmpegRemuxer.start_remux(file_path) do
+      {:ok, port, os_pid} ->
+        # Stream the remuxed content to the client
+        FfmpegRemuxer.stream_to_conn(conn, port, os_pid)
+
+      {:error, :ffmpeg_not_found} ->
+        Logger.error("FFmpeg not found on system, cannot remux #{file_path}")
+
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{error: "Streaming not available", details: "FFmpeg is not installed"})
+
+      {:error, reason} ->
+        Logger.error("Failed to start remux for #{file_path}: #{inspect(reason)}")
+
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{error: "Failed to start streaming"})
     end
   end
 end

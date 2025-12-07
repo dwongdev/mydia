@@ -83,9 +83,64 @@ defmodule Mydia.Streaming.CompatibilityTest do
       assert Compatibility.check_compatibility(media_file) == :needs_transcoding
     end
 
-    test "returns :needs_transcoding for MKV container" do
+    test "returns :needs_remux for MKV container with compatible codecs" do
       media_file = %MediaFile{
         codec: "h264",
+        audio_codec: "aac",
+        metadata: %{"container" => "mkv"},
+        path: "/path/to/video.mkv"
+      }
+
+      assert Compatibility.check_compatibility(media_file) == :needs_remux
+    end
+
+    test "returns :needs_remux for AVI container with compatible codecs" do
+      media_file = %MediaFile{
+        codec: "h264",
+        audio_codec: "aac",
+        metadata: %{"container" => "avi"},
+        path: "/path/to/video.avi"
+      }
+
+      assert Compatibility.check_compatibility(media_file) == :needs_remux
+    end
+
+    test "returns :needs_remux for MOV container with compatible codecs" do
+      media_file = %MediaFile{
+        codec: "h264",
+        audio_codec: "aac",
+        metadata: %{"container" => "mov"},
+        path: "/path/to/video.mov"
+      }
+
+      assert Compatibility.check_compatibility(media_file) == :needs_remux
+    end
+
+    test "returns :needs_remux for TS container with compatible codecs" do
+      media_file = %MediaFile{
+        codec: "h264",
+        audio_codec: "aac",
+        metadata: %{"container" => "ts"},
+        path: "/path/to/video.ts"
+      }
+
+      assert Compatibility.check_compatibility(media_file) == :needs_remux
+    end
+
+    test "returns :needs_remux for FLV container with compatible codecs" do
+      media_file = %MediaFile{
+        codec: "h264",
+        audio_codec: "aac",
+        metadata: %{"container" => "flv"},
+        path: "/path/to/video.flv"
+      }
+
+      assert Compatibility.check_compatibility(media_file) == :needs_remux
+    end
+
+    test "returns :needs_transcoding for MKV with incompatible video codec" do
+      media_file = %MediaFile{
+        codec: "hevc",
         audio_codec: "aac",
         metadata: %{"container" => "mkv"},
         path: "/path/to/video.mkv"
@@ -94,12 +149,12 @@ defmodule Mydia.Streaming.CompatibilityTest do
       assert Compatibility.check_compatibility(media_file) == :needs_transcoding
     end
 
-    test "returns :needs_transcoding for AVI container" do
+    test "returns :needs_transcoding for MKV with incompatible audio codec" do
       media_file = %MediaFile{
         codec: "h264",
-        audio_codec: "aac",
-        metadata: %{"container" => "avi"},
-        path: "/path/to/video.avi"
+        audio_codec: "dts",
+        metadata: %{"container" => "mkv"},
+        path: "/path/to/video.mkv"
       }
 
       assert Compatibility.check_compatibility(media_file) == :needs_transcoding
@@ -181,9 +236,8 @@ defmodule Mydia.Streaming.CompatibilityTest do
         path: "/path/to/video.mov"
       }
 
-      # Should use first format (mov) but mov isn't in compatible list
-      # so it should fall back to file extension
-      assert Compatibility.check_compatibility(media_file) == :needs_transcoding
+      # Should use first format (mov) which is remuxable with compatible codecs
+      assert Compatibility.check_compatibility(media_file) == :needs_remux
     end
 
     test "handles FFprobe format_name with mp4" do
@@ -241,6 +295,77 @@ defmodule Mydia.Streaming.CompatibilityTest do
       }
 
       assert Compatibility.transcoding_reason(media_file) == "Incompatible video codec (unknown)"
+    end
+
+    test "returns video codec reason when both codec and container are incompatible" do
+      media_file = %MediaFile{
+        codec: "hevc",
+        audio_codec: "aac",
+        metadata: %{"container" => "mkv"},
+        path: "/path/to/video.mkv"
+      }
+
+      # Video codec issue takes precedence over container issue
+      assert Compatibility.transcoding_reason(media_file) == "Incompatible video codec (hevc)"
+    end
+  end
+
+  describe "remux_reason/1" do
+    test "returns container remux reason" do
+      media_file = %MediaFile{
+        codec: "h264",
+        audio_codec: "aac",
+        metadata: %{"container" => "mkv"},
+        path: "/path/to/video.mkv"
+      }
+
+      assert Compatibility.remux_reason(media_file) == "Container (mkv) requires remuxing to fMP4"
+    end
+
+    test "returns container remux reason for AVI" do
+      media_file = %MediaFile{
+        codec: "h264",
+        audio_codec: "aac",
+        metadata: %{"container" => "avi"},
+        path: "/path/to/video.avi"
+      }
+
+      assert Compatibility.remux_reason(media_file) == "Container (avi) requires remuxing to fMP4"
+    end
+  end
+
+  describe "needs_remux?/1" do
+    test "returns true for MKV with compatible codecs" do
+      media_file = %MediaFile{
+        codec: "h264",
+        audio_codec: "aac",
+        metadata: %{"container" => "mkv"},
+        path: "/path/to/video.mkv"
+      }
+
+      assert Compatibility.needs_remux?(media_file) == true
+    end
+
+    test "returns false for MP4 with compatible codecs" do
+      media_file = %MediaFile{
+        codec: "h264",
+        audio_codec: "aac",
+        metadata: %{"container" => "mp4"},
+        path: "/path/to/video.mp4"
+      }
+
+      assert Compatibility.needs_remux?(media_file) == false
+    end
+
+    test "returns false for MKV with incompatible codecs" do
+      media_file = %MediaFile{
+        codec: "hevc",
+        audio_codec: "dts",
+        metadata: %{"container" => "mkv"},
+        path: "/path/to/video.mkv"
+      }
+
+      assert Compatibility.needs_remux?(media_file) == false
     end
   end
 end

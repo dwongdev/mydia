@@ -1811,6 +1811,9 @@ defmodule MydiaWeb.AdminConfigLive.Index do
         Mydia.Config.Schema.defaults()
       end
 
+    # Ensure embedded schemas have defaults if nil (can happen with stale caches)
+    flaresolverr = config.flaresolverr || %Mydia.Config.Schema.FlareSolverr{}
+
     # Group settings by category with their sources
     %{
       "Server" => [
@@ -1941,14 +1944,14 @@ defmodule MydiaWeb.AdminConfigLive.Index do
           key: "flaresolverr.enabled",
           label: "Enabled",
           type: :boolean,
-          value: config.flaresolverr.enabled,
+          value: flaresolverr.enabled,
           source: get_source("FLARESOLVERR_ENABLED", "flaresolverr.enabled")
         },
         %{
           key: "flaresolverr.url",
           label: "FlareSolverr URL",
           type: :string,
-          value: config.flaresolverr.url || "",
+          value: flaresolverr.url || "",
           source: get_source("FLARESOLVERR_URL", "flaresolverr.url"),
           placeholder: "http://flaresolverr:8191"
         },
@@ -1956,14 +1959,14 @@ defmodule MydiaWeb.AdminConfigLive.Index do
           key: "flaresolverr.timeout",
           label: "Timeout (ms)",
           type: :integer,
-          value: config.flaresolverr.timeout,
+          value: flaresolverr.timeout,
           source: get_source("FLARESOLVERR_TIMEOUT", "flaresolverr.timeout")
         },
         %{
           key: "flaresolverr.max_timeout",
           label: "Max Timeout (ms)",
           type: :integer,
-          value: config.flaresolverr.max_timeout,
+          value: flaresolverr.max_timeout,
           source: get_source("FLARESOLVERR_MAX_TIMEOUT", "flaresolverr.max_timeout")
         }
       ]

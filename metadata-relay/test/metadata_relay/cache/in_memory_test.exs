@@ -4,13 +4,18 @@ defmodule MetadataRelay.Cache.InMemoryTest do
   alias MetadataRelay.Cache.InMemory
 
   setup do
-    # Start a fresh cache for each test
+    # Ensure cache is running - it may already be started by the application
     case GenServer.whereis(InMemory) do
-      nil -> :ok
-      pid -> GenServer.stop(pid)
+      nil ->
+        # Not running, start it for tests
+        {:ok, _pid} = start_supervised(InMemory)
+
+      _pid ->
+        # Already running (started by application), just use it
+        :ok
     end
 
-    {:ok, _pid} = start_supervised(InMemory)
+    # Clear cache for a fresh state each test
     InMemory.clear()
 
     :ok

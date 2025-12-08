@@ -119,6 +119,23 @@
             <p class="text-base-content/80">{@book.description}</p>
           </div>
         <% end %>
+
+        <%!-- Action buttons --%>
+        <div class="flex flex-wrap gap-2 mt-4">
+          <button
+            type="button"
+            id="refresh-metadata-btn"
+            phx-click="refresh_metadata"
+            disabled={assigns[:refreshing_metadata]}
+            class="btn btn-sm btn-outline gap-2"
+          >
+            <%= if assigns[:refreshing_metadata] do %>
+              <span class="loading loading-spinner loading-xs"></span> Refreshing...
+            <% else %>
+              <.icon name="hero-arrow-path" class="w-4 h-4" /> Refresh Metadata
+            <% end %>
+          </button>
+        </div>
       </div>
     </div>
 

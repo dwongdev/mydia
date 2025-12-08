@@ -73,6 +73,9 @@ defmodule Mydia.Library.BookScanner do
     # extract_metadata always returns {:ok, metadata} (falls back to filename parsing)
     {:ok, metadata} = extract_metadata(file_info.path)
 
+    # Enrich with Open Library if ISBN present
+    metadata = enrich_metadata(metadata)
+
     # Find or create author
     author = find_or_create_author(metadata)
 
@@ -177,7 +180,10 @@ defmodule Mydia.Library.BookScanner do
             description: metadata.description,
             language: metadata.language,
             series_name: metadata.series_name,
-            series_position: metadata.series_position
+            series_position: metadata.series_position,
+            cover_url: Map.get(metadata, :cover_url),
+            genres: Map.get(metadata, :genres),
+            openlibrary_id: Map.get(metadata, :openlibrary_id)
           })
 
         book
@@ -213,6 +219,9 @@ defmodule Mydia.Library.BookScanner do
       |> maybe_update(:language, book.language, metadata.language)
       |> maybe_update(:series_name, book.series_name, metadata.series_name)
       |> maybe_update(:series_position, book.series_position, metadata.series_position)
+      |> maybe_update(:cover_url, book.cover_url, Map.get(metadata, :cover_url))
+      |> maybe_update(:genres, book.genres, Map.get(metadata, :genres))
+      |> maybe_update(:openlibrary_id, book.openlibrary_id, Map.get(metadata, :openlibrary_id))
 
     if map_size(updates) > 0 do
       {:ok, updated} = Books.update_book(book, updates)
@@ -238,6 +247,45 @@ defmodule Mydia.Library.BookScanner do
       book_id: book.id
     })
   end
+
+  defp enrich_metadata(%{isbn: isbn} = metadata) when not is_nil(isbn) do
+    fetch_open_library_metadata("ISBN:#{isbn}", metadata)
+  end
+
+  defp enrich_metadata(%{isbn13: isbn} = metadata) when not is_nil(isbn) do
+    fetch_open_library_metadata("ISBN:#{isbn}", metadata)
+  end
+
+  defp enrich_metadata(metadata), do: metadata
+
+  defp fetch_open_library_metadata(query, metadata) do
+    config = Mydia.Metadata.default_book_relay_config()
+
+    case Mydia.Metadata.fetch_by_id(config, query) do
+      {:ok, ol_metadata} ->
+        merge_metadata(metadata, ol_metadata)
+
+      _ ->
+        metadata
+    end
+  end
+
+  defp merge_metadata(local, remote) do
+    local
+    |> Map.put(:title, remote.title || local.title)
+    |> Map.put(:author, List.first(remote.authors || []) || local.author)
+    |> Map.put(:publisher, remote.publisher || local.publisher)
+    |> Map.put(:description, remote.description || local.description)
+    |> Map.put(:language, remote.language || local.language)
+    |> Map.put(:publish_date, format_date(remote.publish_date) || local.publish_date)
+    |> Map.put(:cover_url, remote.cover_url)
+    |> Map.put(:genres, remote.genres)
+    |> Map.put(:openlibrary_id, remote.provider_id)
+  end
+
+  defp format_date(%Date{} = d), do: d
+  defp format_date(s) when is_binary(s), do: parse_publish_date(s)
+  defp format_date(_), do: nil
 
   # EPUB metadata extraction using the OPF file inside the EPUB
   defp extract_epub_metadata(file_path) do

@@ -187,6 +187,69 @@ defmodule Mydia.Books do
     |> Enum.group_by(& &1.series_name)
   end
 
+  @doc """
+  Refreshes book metadata from Open Library.
+  """
+  def refresh_metadata(%Book{} = book) do
+    # 1. Determine query (ISBN or OLID)
+    query =
+      cond do
+        book.openlibrary_id -> book.openlibrary_id
+        book.isbn -> "ISBN:#{book.isbn}"
+        book.isbn13 -> "ISBN:#{book.isbn13}"
+        true -> nil
+      end
+
+    if query do
+      config = Mydia.Metadata.default_book_relay_config()
+
+      case Mydia.Metadata.fetch_by_id(config, query) do
+        {:ok, metadata} ->
+          update_book(book, %{
+            title: metadata.title || book.title,
+            publisher: metadata.publisher || book.publisher,
+            publish_date: parse_publish_date(metadata.publish_date),
+            description: metadata.description || book.description,
+            language: metadata.language || book.language,
+            cover_url: metadata.cover_url || book.cover_url,
+            genres: metadata.genres || book.genres,
+            series_name: metadata.series_name || book.series_name,
+            series_position: metadata.series_position || book.series_position,
+            openlibrary_id: metadata.provider_id
+          })
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      # TODO: Implement search by title/author fallback
+      {:error, :no_identifier}
+    end
+  end
+
+  defp parse_publish_date(%Date{} = d), do: d
+
+  defp parse_publish_date(date) when is_binary(date) do
+    cond do
+      String.match?(date, ~r/^\d{4}-\d{2}-\d{2}$/) ->
+        case Date.from_iso8601(date) do
+          {:ok, d} -> d
+          _ -> nil
+        end
+
+      String.match?(date, ~r/^\d{4}$/) ->
+        case Integer.parse(date) do
+          {year, _} -> Date.new!(year, 1, 1)
+          _ -> nil
+        end
+
+      true ->
+        nil
+    end
+  end
+
+  defp parse_publish_date(_), do: nil
+
   ## Book Files
 
   @doc """

@@ -41,6 +41,46 @@ defmodule MydiaWeb.BooksLive.Show do
     end
   end
 
+  @impl true
+  def handle_event("refresh_metadata", _params, socket) do
+    book = socket.assigns.book
+
+    socket =
+      socket
+      |> assign(:refreshing_metadata, true)
+      |> put_flash(:info, "Refreshing metadata from Open Library...")
+
+    case Books.refresh_metadata(book) do
+      {:ok, updated_book} ->
+        # Reload the book with preloads
+        updated_book = Books.get_book!(updated_book.id, preload: [:author, :book_files])
+
+        {:noreply,
+         socket
+         |> assign(:book, updated_book)
+         |> assign(:refreshing_metadata, false)
+         |> put_flash(:info, "Metadata refreshed successfully")}
+
+      {:error, :no_identifier} ->
+        {:noreply,
+         socket
+         |> assign(:refreshing_metadata, false)
+         |> put_flash(:warning, "No ISBN or Open Library ID available to refresh metadata")}
+
+      {:error, %{message: message}} ->
+        {:noreply,
+         socket
+         |> assign(:refreshing_metadata, false)
+         |> put_flash(:error, "Failed to refresh metadata: #{message}")}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(:refreshing_metadata, false)
+         |> put_flash(:error, "Failed to refresh metadata from Open Library")}
+    end
+  end
+
   defp get_cover_url(book) do
     if is_binary(book.cover_url) and book.cover_url != "" do
       book.cover_url

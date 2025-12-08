@@ -7,6 +7,8 @@ defmodule MetadataRelay.Router do
 
   alias MetadataRelay.TMDB.Handler
   alias MetadataRelay.TVDB.Handler, as: TVDBHandler
+  alias MetadataRelay.Music.Handler, as: MusicHandler
+  alias MetadataRelay.OpenLibrary.Handler, as: OpenLibraryHandler
   alias MetadataRelay.OpenSubtitles.Handler, as: SubtitlesHandler
 
   plug(Plug.Logger)
@@ -212,6 +214,65 @@ defmodule MetadataRelay.Router do
   # Subtitle Download URL
   get "/api/v1/subtitles/download-url/:id" do
     handle_subtitles_request(conn, fn -> SubtitlesHandler.get_download_url(id) end)
+  end
+
+  # Music Search
+  get "/music/search" do
+    params = extract_query_params(conn)
+    handle_music_request(conn, fn -> MusicHandler.search(params) end)
+  end
+
+  # Music Artist Details
+  get "/music/artist/:id" do
+    params = extract_query_params(conn)
+    handle_music_request(conn, fn -> MusicHandler.get_artist(id, params) end)
+  end
+
+  # Music Release Details
+  get "/music/release/:id" do
+    params = extract_query_params(conn)
+    handle_music_request(conn, fn -> MusicHandler.get_release(id, params) end)
+  end
+
+  # Music Release Group Details
+  get "/music/release-group/:id" do
+    params = extract_query_params(conn)
+    handle_music_request(conn, fn -> MusicHandler.get_release_group(id, params) end)
+  end
+
+  # Music Recording Details
+  get "/music/recording/:id" do
+    params = extract_query_params(conn)
+    handle_music_request(conn, fn -> MusicHandler.get_recording(id, params) end)
+  end
+
+  # Music Cover Art
+  get "/music/cover/:id" do
+    handle_image_request(conn, fn -> MusicHandler.get_cover_art(id) end)
+  end
+
+  # OpenLibrary ISBN Lookup
+  get "/openlibrary/isbn/:isbn" do
+    params = extract_query_params(conn)
+    handle_openlibrary_request(conn, fn -> OpenLibraryHandler.get_by_isbn(isbn, params) end)
+  end
+
+  # OpenLibrary Search
+  get "/openlibrary/search" do
+    params = extract_query_params(conn)
+    handle_openlibrary_request(conn, fn -> OpenLibraryHandler.search(params) end)
+  end
+
+  # OpenLibrary Work Details
+  get "/openlibrary/works/:id" do
+    params = extract_query_params(conn)
+    handle_openlibrary_request(conn, fn -> OpenLibraryHandler.get_work(id, params) end)
+  end
+
+  # OpenLibrary Author Details
+  get "/openlibrary/authors/:id" do
+    params = extract_query_params(conn)
+    handle_openlibrary_request(conn, fn -> OpenLibraryHandler.get_author(id, params) end)
   end
 
   # 404 catch-all
@@ -491,6 +552,72 @@ defmodule MetadataRelay.Router do
         conn
         |> put_resp_content_type("application/json")
         |> send_resp(500, Jason.encode!(error_response))
+    end
+  end
+
+  defp handle_music_request(conn, handler_fn) do
+    case handler_fn.() do
+      {:ok, body} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(200, Jason.encode!(body))
+
+      {:error, {:http_error, status, body}} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(status, Jason.encode!(body))
+
+      {:error, reason} ->
+        error_response = %{
+          error: "Internal server error",
+          message: inspect(reason)
+        }
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(500, Jason.encode!(error_response))
+    end
+  end
+
+  defp handle_openlibrary_request(conn, handler_fn) do
+    case handler_fn.() do
+      {:ok, body} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(200, Jason.encode!(body))
+
+      {:error, {:http_error, status, body}} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(status, Jason.encode!(body))
+
+      {:error, reason} ->
+        error_response = %{
+          error: "Internal server error",
+          message: inspect(reason)
+        }
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(500, Jason.encode!(error_response))
+    end
+  end
+
+  defp handle_image_request(conn, handler_fn) do
+    case handler_fn.() do
+      {:ok, body} ->
+        conn
+        |> put_resp_content_type("image/jpeg")
+        |> send_resp(200, body)
+
+      {:error, :not_found} ->
+        send_resp(conn, 404, "Not found")
+
+      {:error, {:http_error, status}} ->
+        send_resp(conn, status, "Upstream error")
+
+      {:error, reason} ->
+        send_resp(conn, 500, inspect(reason))
     end
   end
 end

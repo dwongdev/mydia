@@ -118,7 +118,7 @@ defmodule MetadataRelay.Cache do
   defp auto_ttl(key) do
     cond do
       # Images never change at a given path - longest TTL
-      String.contains?(key, "/images") ->
+      String.contains?(key, "/images") or String.contains?(key, "/music/cover/") ->
         @images_ttl
 
       # Trending data changes frequently - keep fresh
@@ -131,6 +131,10 @@ defmodule MetadataRelay.Cache do
 
       # Specific movie/TV show details by ID - very stable data
       String.match?(key, ~r{/(movies|tv/shows)/\d+:(?!search)}) ->
+        @details_ttl
+
+      # Music details
+      String.match?(key, ~r{/music/(artist|release|release-group|recording)/}) ->
         @details_ttl
 
       # Season/episode data - stable once aired

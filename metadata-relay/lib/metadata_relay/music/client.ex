@@ -11,14 +11,15 @@ defmodule MetadataRelay.Music.Client do
   GET request to MusicBrainz API.
   """
   def get_mb(path, opts \\ []) do
-    client = Req.new(
-      base_url: @mb_base_url,
-      headers: [
-        {"user-agent", @user_agent},
-        {"accept", "application/json"}
-      ]
-    )
-    
+    client =
+      Req.new(
+        base_url: @mb_base_url,
+        headers: [
+          {"user-agent", @user_agent},
+          {"accept", "application/json"}
+        ]
+      )
+
     params = Keyword.get(opts, :params, []) |> Keyword.put(:fmt, "json")
 
     case Req.get(client, url: path, params: params) do
@@ -38,17 +39,18 @@ defmodule MetadataRelay.Music.Client do
   Returns the raw image binary.
   """
   def get_caa(path) do
-    client = Req.new(
-      base_url: @caa_base_url,
-      headers: [
-        {"user-agent", @user_agent}
-      ]
-    )
-    
+    client =
+      Req.new(
+        base_url: @caa_base_url,
+        headers: [
+          {"user-agent", @user_agent}
+        ]
+      )
+
     case Req.get(client, url: path) do
       {:ok, %{status: status, body: body}} when status in 200..299 ->
-         {:ok, body}
-         
+        {:ok, body}
+
       {:ok, %{status: 404}} ->
         {:error, :not_found}
 

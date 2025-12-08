@@ -88,7 +88,13 @@ defmodule MetadataRelay.OpenSubtitles.Handler do
       end
 
     case Client.post("/download", %{file_id: file_id_int}) do
-      {:ok, %{"link" => link, "file_name" => file_name, "requests" => requests, "remaining" => remaining}} ->
+      {:ok,
+       %{
+         "link" => link,
+         "file_name" => file_name,
+         "requests" => requests,
+         "remaining" => remaining
+       }} ->
         {:ok,
          %{
            "download_url" => link,

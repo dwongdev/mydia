@@ -152,7 +152,10 @@ defmodule MetadataRelay.OpenSubtitles.Auth do
         {:error, {:authentication_failed, body}}
 
       {:ok, %{status: status, body: body}} ->
-        Logger.error("OpenSubtitles authentication failed with status #{status}: #{inspect(body)}")
+        Logger.error(
+          "OpenSubtitles authentication failed with status #{status}: #{inspect(body)}"
+        )
+
         {:error, {:http_error, status, body}}
 
       {:error, reason} ->

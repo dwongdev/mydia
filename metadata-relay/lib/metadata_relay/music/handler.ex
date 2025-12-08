@@ -15,7 +15,7 @@ defmodule MetadataRelay.Music.Handler do
   def search(params) do
     query = Keyword.get(params, :query)
     type = Keyword.get(params, :type)
-    
+
     if is_nil(query) or is_nil(type) do
       {:error, {:http_error, 400, %{error: "Missing required parameters: query, type"}}}
     else
@@ -38,7 +38,9 @@ defmodule MetadataRelay.Music.Handler do
   """
   def get_release(mbid, _params) do
     # inc=recordings+artist-credits+labels+release-groups+genres
-    Client.get_mb("/release/#{mbid}", params: [inc: "recordings+artist-credits+labels+release-groups+genres"])
+    Client.get_mb("/release/#{mbid}",
+      params: [inc: "recordings+artist-credits+labels+release-groups+genres"]
+    )
   end
 
   @doc """
@@ -68,14 +70,18 @@ defmodule MetadataRelay.Music.Handler do
     # CAA paths: /release/{mbid}/front
     # /release/{mbid}/front-500
     # /release/{mbid}/front-250
-    
+
     # Let's try to get the 500px version as it's a good balance.
     case Client.get_caa("/release/#{release_mbid}/front-500") do
-      {:ok, body} -> {:ok, body}
-      {:error, :not_found} -> 
+      {:ok, body} ->
+        {:ok, body}
+
+      {:error, :not_found} ->
         # Fallback to full size if 500px not found (unlikely but possible)
         Client.get_caa("/release/#{release_mbid}/front")
-      other -> other
+
+      other ->
+        other
     end
   end
 end

@@ -401,7 +401,10 @@ defmodule MetadataRelay.Router do
       {:error, :invalid_json} ->
         conn
         |> put_resp_content_type("application/json")
-        |> send_resp(400, Jason.encode!(%{error: "Invalid JSON", message: "Request body must be valid JSON"}))
+        |> send_resp(
+          400,
+          Jason.encode!(%{error: "Invalid JSON", message: "Request body must be valid JSON"})
+        )
 
       {:error, {:validation, errors}} ->
         conn

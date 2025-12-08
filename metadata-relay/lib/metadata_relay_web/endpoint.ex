@@ -11,31 +11,33 @@ defmodule MetadataRelayWeb.Endpoint do
     same_site: "Lax"
   ]
 
-  socket "/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]]
+  socket("/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]])
 
   # Serve at "/" the static files from "priv/static" directory.
-  plug Plug.Static,
+  plug(Plug.Static,
     at: "/",
     from: :metadata_relay,
     gzip: false,
     only: ~w(css js assets fonts images favicon.ico robots.txt)
+  )
 
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.
   if code_reloading? do
-    plug Phoenix.CodeReloader
+    plug(Phoenix.CodeReloader)
   end
 
-  plug Plug.RequestId
-  plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
+  plug(Plug.RequestId)
+  plug(Plug.Telemetry, event_prefix: [:phoenix, :endpoint])
 
-  plug Plug.Parsers,
+  plug(Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
     json_decoder: Jason
+  )
 
-  plug Plug.MethodOverride
-  plug Plug.Head
-  plug Plug.Session, @session_options
-  plug MetadataRelayWeb.Router
+  plug(Plug.MethodOverride)
+  plug(Plug.Head)
+  plug(Plug.Session, @session_options)
+  plug(MetadataRelayWeb.Router)
 end

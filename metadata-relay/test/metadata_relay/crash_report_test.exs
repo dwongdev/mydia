@@ -38,13 +38,13 @@ defmodule MetadataRelay.CrashReportTest do
       conn =
         Plug.Test.conn(:post, "/crashes/report", crash_report)
         |> Plug.Conn.put_req_header("content-type", "application/json")
-        |> Plug.Parsers.call(
-          Plug.Parsers.init(parsers: [:json], json_decoder: Jason)
-        )
+        |> Plug.Parsers.call(Plug.Parsers.init(parsers: [:json], json_decoder: Jason))
         |> Router.call([])
 
       assert conn.status == 201
-      assert %{"status" => "created", "message" => "Crash report received"} = Jason.decode!(conn.resp_body)
+
+      assert %{"status" => "created", "message" => "Crash report received"} =
+               Jason.decode!(conn.resp_body)
     end
 
     test "returns 400 when required fields are missing" do
@@ -56,9 +56,7 @@ defmodule MetadataRelay.CrashReportTest do
       conn =
         Plug.Test.conn(:post, "/crashes/report", crash_report)
         |> Plug.Conn.put_req_header("content-type", "application/json")
-        |> Plug.Parsers.call(
-          Plug.Parsers.init(parsers: [:json], json_decoder: Jason)
-        )
+        |> Plug.Parsers.call(Plug.Parsers.init(parsers: [:json], json_decoder: Jason))
         |> Router.call([])
 
       assert conn.status == 400
@@ -77,9 +75,7 @@ defmodule MetadataRelay.CrashReportTest do
       conn =
         Plug.Test.conn(:post, "/crashes/report", crash_report)
         |> Plug.Conn.put_req_header("content-type", "application/json")
-        |> Plug.Parsers.call(
-          Plug.Parsers.init(parsers: [:json], json_decoder: Jason)
-        )
+        |> Plug.Parsers.call(Plug.Parsers.init(parsers: [:json], json_decoder: Jason))
         |> Router.call([])
 
       assert conn.status == 400
@@ -93,9 +89,7 @@ defmodule MetadataRelay.CrashReportTest do
       conn =
         Plug.Test.conn(:post, "/crashes/report", %{})
         |> Plug.Conn.put_req_header("content-type", "application/json")
-        |> Plug.Parsers.call(
-          Plug.Parsers.init(parsers: [:json], json_decoder: Jason)
-        )
+        |> Plug.Parsers.call(Plug.Parsers.init(parsers: [:json], json_decoder: Jason))
         |> Router.call([])
 
       # Should return 400 for missing required fields
@@ -116,17 +110,16 @@ defmodule MetadataRelay.CrashReportTest do
       }
 
       # Make 10 requests (the limit) - all should succeed
-      results = for i <- 1..10 do
-        conn =
-          Plug.Test.conn(:post, "/crashes/report", crash_report)
-          |> Plug.Conn.put_req_header("content-type", "application/json")
-          |> Plug.Parsers.call(
-            Plug.Parsers.init(parsers: [:json], json_decoder: Jason)
-          )
-          |> Router.call([])
+      results =
+        for i <- 1..10 do
+          conn =
+            Plug.Test.conn(:post, "/crashes/report", crash_report)
+            |> Plug.Conn.put_req_header("content-type", "application/json")
+            |> Plug.Parsers.call(Plug.Parsers.init(parsers: [:json], json_decoder: Jason))
+            |> Router.call([])
 
-        {i, conn.status}
-      end
+          {i, conn.status}
+        end
 
       # All 10 should succeed
       assert Enum.all?(results, fn {_i, status} -> status == 201 end),
@@ -136,9 +129,7 @@ defmodule MetadataRelay.CrashReportTest do
       conn =
         Plug.Test.conn(:post, "/crashes/report", crash_report)
         |> Plug.Conn.put_req_header("content-type", "application/json")
-        |> Plug.Parsers.call(
-          Plug.Parsers.init(parsers: [:json], json_decoder: Jason)
-        )
+        |> Plug.Parsers.call(Plug.Parsers.init(parsers: [:json], json_decoder: Jason))
         |> Router.call([])
 
       assert conn.status == 429

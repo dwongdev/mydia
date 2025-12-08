@@ -12,7 +12,7 @@ defmodule MetadataRelay.Cache.RedisTest do
       # If Redis is down, operations should fail gracefully
 
       # Try to get a non-existent key
-      result = Redis.get("nonexistent_key_#{:rand.uniform(100000)}")
+      result = Redis.get("nonexistent_key_#{:rand.uniform(100_000)}")
       assert match?({:error, _}, result)
     end
 
@@ -35,7 +35,7 @@ defmodule MetadataRelay.Cache.RedisTest do
     test "stores and retrieves values with Erlang term serialization" do
       if redis_connected?() do
         value = %{key: "value", nested: %{data: [1, 2, 3]}}
-        test_key = "test_key_#{:rand.uniform(100000)}"
+        test_key = "test_key_#{:rand.uniform(100_000)}"
 
         assert :ok = Redis.put(test_key, value, 60_000)
         assert {:ok, ^value} = Redis.get(test_key)
@@ -54,7 +54,7 @@ defmodule MetadataRelay.Cache.RedisTest do
           body: ~s({"id": 1, "name": "Test"})
         }
 
-        test_key = "complex_key_#{:rand.uniform(100000)}"
+        test_key = "complex_key_#{:rand.uniform(100_000)}"
         assert :ok = Redis.put(test_key, value, 60_000)
         assert {:ok, ^value} = Redis.get(test_key)
       end
@@ -63,7 +63,7 @@ defmodule MetadataRelay.Cache.RedisTest do
     test "respects TTL expiration" do
       if redis_connected?() do
         # Put with 1 second TTL
-        test_key = "short_ttl_#{:rand.uniform(100000)}"
+        test_key = "short_ttl_#{:rand.uniform(100_000)}"
         assert :ok = Redis.put(test_key, "value", 1_000)
         assert {:ok, "value"} = Redis.get(test_key)
 
@@ -77,7 +77,7 @@ defmodule MetadataRelay.Cache.RedisTest do
 
     test "uses proper key prefixing" do
       if redis_connected?() do
-        test_key = "prefixed_key_#{:rand.uniform(100000)}"
+        test_key = "prefixed_key_#{:rand.uniform(100_000)}"
         assert :ok = Redis.put(test_key, "value", 60_000)
 
         # Verify the key is stored and retrieved correctly
@@ -90,10 +90,10 @@ defmodule MetadataRelay.Cache.RedisTest do
         initial_stats = Redis.stats()
 
         # Generate a miss
-        Redis.get("nonexistent_#{:rand.uniform(100000)}")
+        Redis.get("nonexistent_#{:rand.uniform(100_000)}")
 
         # Generate hits
-        hit_key = "hit_key_#{:rand.uniform(100000)}"
+        hit_key = "hit_key_#{:rand.uniform(100_000)}"
         Redis.put(hit_key, "value", 60_000)
         Redis.get(hit_key)
         Redis.get(hit_key)
@@ -110,9 +110,9 @@ defmodule MetadataRelay.Cache.RedisTest do
     test "clear removes all metadata_relay entries" do
       if redis_connected?() do
         # Add multiple entries with unique keys
-        key1 = "clear_test_key1_#{:rand.uniform(100000)}"
-        key2 = "clear_test_key2_#{:rand.uniform(100000)}"
-        key3 = "clear_test_key3_#{:rand.uniform(100000)}"
+        key1 = "clear_test_key1_#{:rand.uniform(100_000)}"
+        key2 = "clear_test_key2_#{:rand.uniform(100_000)}"
+        key3 = "clear_test_key3_#{:rand.uniform(100_000)}"
 
         Redis.put(key1, "value1", 60_000)
         Redis.put(key2, "value2", 60_000)

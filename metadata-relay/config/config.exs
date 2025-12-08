@@ -17,7 +17,8 @@ config :metadata_relay, MetadataRelayWeb.Endpoint,
   ],
   pubsub_server: MetadataRelay.PubSub,
   live_view: [signing_salt: "error_tracker_lv_salt"],
-  secret_key_base: "metadata_relay_secret_key_base_placeholder_needs_to_be_at_least_64_bytes_long_for_security"
+  secret_key_base:
+    "metadata_relay_secret_key_base_placeholder_needs_to_be_at_least_64_bytes_long_for_security"
 
 # Configure ErrorTracker
 config :error_tracker,

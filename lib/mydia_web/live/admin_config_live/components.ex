@@ -3353,9 +3353,11 @@ defmodule MydiaWeb.AdminConfigLive.Components do
             <%!-- Enable Toggle --%>
             <div class="form-control">
               <label class="label cursor-pointer justify-start gap-3 bg-base-200/50 rounded-lg p-3">
+                <input type="hidden" name={@media_server_form[:enabled].name} value="false" />
                 <input
                   type="checkbox"
                   name={@media_server_form[:enabled].name}
+                  value="true"
                   checked={
                     Phoenix.HTML.Form.input_value(@media_server_form, :enabled) in [true, "true"]
                   }

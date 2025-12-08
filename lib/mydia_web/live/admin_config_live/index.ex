@@ -1962,7 +1962,8 @@ defmodule MydiaWeb.AdminConfigLive.Index do
         name: server.name,
         type: :plex,
         url: url,
-        token: token
+        token: token,
+        enabled: true
       })
 
     {:noreply,

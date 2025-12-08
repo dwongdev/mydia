@@ -8,6 +8,11 @@ defmodule Mydia.MediaServer.Client.Plex do
   require Logger
 
   @impl true
+  def test_connection(%{url: nil}), do: {:error, "URL is required"}
+  def test_connection(%{url: ""}), do: {:error, "URL is required"}
+  def test_connection(%{token: nil}), do: {:error, "Token is required"}
+  def test_connection(%{token: ""}), do: {:error, "Token is required"}
+
   def test_connection(config) do
     # Plex identity endpoint: /identity
     # Headers: X-Plex-Token

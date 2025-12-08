@@ -130,6 +130,18 @@ defmodule Mydia.Metadata.Provider.Relay do
   @impl true
   def fetch_by_id(config, provider_id, opts \\ []) do
     media_type = Keyword.get(opts, :media_type, :movie)
+    provider = Keyword.get(opts, :provider)
+
+    # Route to TVDB-specific fetch if provider is :tvdb
+    if provider == :tvdb do
+      fetch_tvdb_by_id(config, provider_id, opts)
+    else
+      fetch_tmdb_by_id(config, provider_id, media_type, opts)
+    end
+  end
+
+  # Fetch from TMDB (default behavior)
+  defp fetch_tmdb_by_id(config, provider_id, media_type, opts) do
     language = Keyword.get(opts, :language, @default_language)
     append = Keyword.get(opts, :append_to_response, ["credits", "alternative_titles", "videos"])
 
@@ -157,6 +169,163 @@ defmodule Mydia.Metadata.Provider.Relay do
         {:error, error}
     end
   end
+
+  # Fetch from TVDB
+  defp fetch_tvdb_by_id(config, provider_id, opts) do
+    media_type = Keyword.get(opts, :media_type, :tv_show)
+
+    # Use extended endpoint to get more details including seasons
+    endpoint = "/tvdb/series/#{provider_id}/extended"
+
+    req = HTTP.new_request(config)
+
+    case HTTP.get(req, endpoint, params: []) do
+      {:ok, %{status: 200, body: body}} ->
+        # TVDB wraps response in "data" key
+        data = body["data"] || body
+        # Transform TVDB response to TMDB-like format for parsing
+        transformed = transform_tvdb_to_tmdb_format(data, media_type)
+        metadata = parse_metadata(transformed, media_type, provider_id)
+        # Override provider to :tvdb
+        metadata = %{metadata | provider: :tvdb}
+        {:ok, metadata}
+
+      {:ok, %{status: 404}} ->
+        {:error, Error.not_found("TVDB series not found: #{provider_id}")}
+
+      {:ok, %{status: status, body: body}} ->
+        {:error, Error.api_error("TVDB fetch failed with status #{status}", %{body: body})}
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
+  # Transform TVDB API response to match TMDB format for consistent parsing
+  defp transform_tvdb_to_tmdb_format(data, _media_type) when is_map(data) do
+    # Extract year from firstAired date or year field
+    year = extract_tvdb_year(data)
+
+    # Transform seasons if present
+    seasons = transform_tvdb_seasons(data["seasons"])
+
+    # Transform genres
+    genres = transform_tvdb_genres(data["genres"])
+
+    # Build TMDB-like response
+    %{
+      "id" => data["id"],
+      "name" => data["name"],
+      "original_name" => data["originalName"] || data["name"],
+      "overview" => data["overview"],
+      "first_air_date" => data["firstAired"],
+      "last_air_date" => data["lastAired"],
+      "status" => get_in(data, ["status", "name"]),
+      "poster_path" => transform_tvdb_image(data["image"]),
+      "backdrop_path" => transform_tvdb_artwork(data["artworks"], "background"),
+      "genres" => genres,
+      "popularity" => data["score"],
+      "vote_average" => data["score"],
+      "number_of_seasons" => length(seasons),
+      "number_of_episodes" => data["episodes"] |> List.wrap() |> length(),
+      "in_production" => get_in(data, ["status", "name"]) == "Continuing",
+      "seasons" => seasons,
+      # Include year for compatibility
+      "year" => year
+    }
+  end
+
+  defp transform_tvdb_to_tmdb_format(data, _media_type), do: data
+
+  defp extract_tvdb_year(%{"year" => year}) when is_binary(year) do
+    case Integer.parse(year) do
+      {y, _} -> y
+      :error -> nil
+    end
+  end
+
+  defp extract_tvdb_year(%{"firstAired" => first_aired}) when is_binary(first_aired) do
+    case String.split(first_aired, "-") do
+      [year | _] ->
+        case Integer.parse(year) do
+          {y, _} -> y
+          :error -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp extract_tvdb_year(_), do: nil
+
+  defp transform_tvdb_seasons(nil), do: []
+
+  defp transform_tvdb_seasons(seasons) when is_list(seasons) do
+    seasons
+    |> Enum.filter(fn s -> s["type"]["type"] == "official" end)
+    |> Enum.map(fn s ->
+      %{
+        "id" => s["id"],
+        "season_number" => s["number"],
+        "name" => s["name"] || "Season #{s["number"]}",
+        "overview" => s["overview"],
+        "poster_path" => transform_tvdb_image(s["image"]),
+        "air_date" => nil,
+        "episode_count" => s["episodeCount"] || 0
+      }
+    end)
+  end
+
+  defp transform_tvdb_seasons(_), do: []
+
+  defp transform_tvdb_genres(nil), do: []
+
+  defp transform_tvdb_genres(genres) when is_list(genres) do
+    Enum.map(genres, fn g ->
+      %{"id" => g["id"], "name" => g["name"]}
+    end)
+  end
+
+  defp transform_tvdb_genres(_), do: []
+
+  # TVDB images are full URLs or relative paths
+  defp transform_tvdb_image(nil), do: nil
+
+  defp transform_tvdb_image(url) when is_binary(url) do
+    # If it's already a full URL, return as-is
+    # The metadata system will handle it appropriately
+    url
+  end
+
+  defp transform_tvdb_image(_), do: nil
+
+  # Extract specific artwork type from artworks list
+  defp transform_tvdb_artwork(nil, _type), do: nil
+
+  defp transform_tvdb_artwork(artworks, type) when is_list(artworks) do
+    artwork =
+      Enum.find(artworks, fn
+        # Handle artwork as a map with type info
+        %{"type" => type_info} when is_map(type_info) ->
+          type_info["name"] == type
+
+        %{"type" => artwork_type} when is_binary(artwork_type) ->
+          artwork_type == type
+
+        # Skip non-map entries (e.g., integer IDs)
+        _ ->
+          false
+      end)
+
+    case artwork do
+      %{"image" => image} -> image
+      %{"url" => url} -> url
+      _ -> nil
+    end
+  end
+
+  defp transform_tvdb_artwork(_, _), do: nil
 
   @impl true
   def fetch_images(config, provider_id, opts \\ []) do

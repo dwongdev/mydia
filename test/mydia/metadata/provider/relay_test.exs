@@ -334,4 +334,48 @@ defmodule Mydia.Metadata.Provider.RelayTest do
       # We just verify both queries succeed
     end
   end
+
+  describe "fetch_by_id/3 with TVDB provider" do
+    test "fetches TV show metadata from TVDB by ID" do
+      # Stranger Things - TVDB ID: 305288
+      assert {:ok, metadata} =
+               Relay.fetch_by_id(@config, "305288", media_type: :tv_show, provider: :tvdb)
+
+      assert metadata.provider_id == "305288"
+      assert metadata.provider == :tvdb
+      assert metadata.media_type == :tv_show
+      assert String.contains?(String.downcase(metadata.title), "stranger things")
+      assert is_binary(metadata.overview)
+      assert metadata.year == 2016
+    end
+
+    test "fetches another TV show from TVDB" do
+      # The Last Kingdom - TVDB ID: 298566
+      assert {:ok, metadata} =
+               Relay.fetch_by_id(@config, "298566", media_type: :tv_show, provider: :tvdb)
+
+      assert metadata.provider_id == "298566"
+      assert metadata.provider == :tvdb
+      assert metadata.media_type == :tv_show
+      assert String.contains?(String.downcase(metadata.title), "last kingdom")
+    end
+
+    test "returns error for non-existent TVDB ID" do
+      assert {:error, %Error{type: :not_found}} =
+               Relay.fetch_by_id(@config, "99999999", media_type: :tv_show, provider: :tvdb)
+    end
+
+    test "fetches Breaking Bad from TVDB" do
+      # Breaking Bad - TVDB ID: 81189
+      assert {:ok, metadata} =
+               Relay.fetch_by_id(@config, "81189", media_type: :tv_show, provider: :tvdb)
+
+      assert metadata.provider_id == "81189"
+      assert metadata.provider == :tvdb
+      assert metadata.media_type == :tv_show
+      assert String.contains?(String.downcase(metadata.title), "breaking bad")
+      assert is_integer(metadata.year)
+      assert is_list(metadata.genres)
+    end
+  end
 end

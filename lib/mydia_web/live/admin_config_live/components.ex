@@ -2773,6 +2773,240 @@ defmodule MydiaWeb.AdminConfigLive.Components do
     """
   end
 
+  # ============================================================================
+  # Media Servers Tab & Modal
+  # ============================================================================
+
+  @doc """
+  Renders the Media Servers tab content.
+  """
+  attr :media_servers, :list, required: true
+  attr :media_server_health, :map, required: true
+
+  def media_servers_tab(assigns) do
+    ~H"""
+    <div class="p-4 sm:p-6 space-y-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <h2 class="text-lg font-semibold flex items-center gap-2">
+          <.icon name="hero-server-stack" class="w-5 h-5 opacity-60" /> Media Servers
+          <span class="badge badge-ghost">{length(@media_servers)}</span>
+        </h2>
+        <button class="btn btn-sm btn-primary" phx-click="new_media_server">
+          <.icon name="hero-plus" class="w-4 h-4" /> New
+        </button>
+      </div>
+
+      <%= if @media_servers == [] do %>
+        <div class="alert alert-info">
+          <.icon name="hero-information-circle" class="w-5 h-5" />
+          <span>
+            No media servers configured yet. Add Plex or Jellyfin to automatically
+            notify them when new content is imported.
+          </span>
+        </div>
+      <% else %>
+        <div class="bg-base-200 rounded-box divide-y divide-base-300">
+          <%= for server <- @media_servers do %>
+            <% health = Map.get(@media_server_health, server.id, %{status: :unknown}) %>
+            <% is_runtime = Settings.runtime_config?(server) %>
+
+            <div class="p-3 sm:p-4">
+              <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                <%!-- Server Info --%>
+                <div class="flex-1 min-w-0">
+                  <div class="font-semibold flex items-center gap-2 flex-wrap">
+                    {server.name}
+                    <%= if is_runtime do %>
+                      <span
+                        class="badge badge-primary badge-xs tooltip"
+                        data-tip="Configured via environment variables (read-only)"
+                      >
+                        <.icon name="hero-lock-closed" class="w-3 h-3" /> ENV
+                      </span>
+                    <% end %>
+                  </div>
+                  <div class="text-xs opacity-60 mt-1 truncate">
+                    <span class="font-mono">{server.url}</span>
+                  </div>
+                </div>
+
+                <%!-- Status Badges + Actions row --%>
+                <div class="flex flex-wrap items-center gap-2">
+                  <%!-- Type Badge --%>
+                  <span class={[
+                    "badge badge-sm badge-outline",
+                    media_server_type_badge_class(server.type)
+                  ]}>
+                    <.icon name={media_server_type_icon(server.type)} class="w-3 h-3 mr-1" />
+                    {media_server_type_label(server.type)}
+                  </span>
+                  <%!-- Enabled Badge --%>
+                  <span class={[
+                    "badge badge-sm",
+                    if(server.enabled, do: "badge-success", else: "badge-ghost")
+                  ]}>
+                    {if server.enabled, do: "Enabled", else: "Disabled"}
+                  </span>
+                  <%!-- Health Badge --%>
+                  <span class={"badge badge-sm #{health_status_badge_class(health.status)}"}>
+                    <.icon name={health_status_icon(health.status)} class="w-3 h-3 mr-1" />
+                    {health_status_label(health.status)}
+                  </span>
+                  <%= if health.status == :unhealthy and health[:error] do %>
+                    <div class="tooltip tooltip-left" data-tip={health.error}>
+                      <.icon name="hero-information-circle" class="w-4 h-4 text-error" />
+                    </div>
+                  <% end %>
+
+                  <%!-- Actions --%>
+                  <div class="join ml-auto sm:ml-2">
+                    <button
+                      class="btn btn-sm btn-ghost join-item"
+                      phx-click="test_media_server"
+                      phx-value-id={server.id}
+                      title="Test Connection"
+                    >
+                      <.icon name="hero-signal" class="w-4 h-4" />
+                    </button>
+                    <%= if is_runtime do %>
+                      <div class="tooltip" data-tip="Cannot edit runtime-configured servers">
+                        <button class="btn btn-sm btn-ghost join-item" disabled>
+                          <.icon name="hero-pencil" class="w-4 h-4 opacity-30" />
+                        </button>
+                      </div>
+                      <div class="tooltip" data-tip="Cannot delete runtime-configured servers">
+                        <button class="btn btn-sm btn-ghost join-item" disabled>
+                          <.icon name="hero-trash" class="w-4 h-4 opacity-30" />
+                        </button>
+                      </div>
+                    <% else %>
+                      <button
+                        class="btn btn-sm btn-ghost join-item"
+                        phx-click="edit_media_server"
+                        phx-value-id={server.id}
+                        title="Edit"
+                      >
+                        <.icon name="hero-pencil" class="w-4 h-4" />
+                      </button>
+                      <button
+                        class="btn btn-sm btn-ghost join-item text-error"
+                        phx-click="delete_media_server"
+                        phx-value-id={server.id}
+                        data-confirm="Are you sure you want to delete this media server?"
+                        title="Delete"
+                      >
+                        <.icon name="hero-trash" class="w-4 h-4" />
+                      </button>
+                    <% end %>
+                  </div>
+                </div>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders the Media Server modal.
+  """
+  attr :media_server_form, :any, required: true
+  attr :media_server_mode, :atom, required: true
+  attr :testing_media_server_connection, :boolean, default: false
+
+  def media_server_modal(assigns) do
+    ~H"""
+    <div class="modal modal-open">
+      <div class="modal-box max-w-md">
+        <h3 class="font-bold text-lg mb-4">
+          {if @media_server_mode == :new,
+            do: "New Media Server",
+            else: "Edit Media Server"}
+        </h3>
+
+        <.form
+          for={@media_server_form}
+          id="media-server-form"
+          phx-change="validate_media_server"
+          phx-submit="save_media_server"
+        >
+          <div class="space-y-4">
+            <.input field={@media_server_form[:name]} type="text" label="Name" required />
+            <.input
+              field={@media_server_form[:type]}
+              type="select"
+              label="Type"
+              options={[
+                {"Plex", "plex"},
+                {"Jellyfin", "jellyfin"}
+              ]}
+              required
+            />
+            <.input
+              field={@media_server_form[:url]}
+              type="text"
+              label="URL"
+              placeholder="http://192.168.1.100:32400"
+              required
+            />
+            <p class="text-xs text-base-content/60 -mt-2">
+              The full URL to your media server (e.g., http://192.168.1.100:32400 for Plex)
+            </p>
+            <.input
+              field={@media_server_form[:token]}
+              type="password"
+              label="API Token"
+              required
+            />
+            <p class="text-xs text-base-content/60 -mt-2">
+              For Plex: X-Plex-Token. For Jellyfin: API Key from Dashboard > Advanced > API Keys
+            </p>
+            <.input field={@media_server_form[:enabled]} type="checkbox" label="Enabled" checked />
+          </div>
+
+          <div class="modal-action">
+            <button type="button" class="btn" phx-click="close_media_server_modal">
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              phx-click="test_media_server_connection"
+              disabled={@testing_media_server_connection}
+            >
+              <%= if @testing_media_server_connection do %>
+                <span class="loading loading-spinner loading-sm"></span> Testing...
+              <% else %>
+                <.icon name="hero-signal" class="w-4 h-4" /> Test Connection
+              <% end %>
+            </button>
+            <button type="submit" class="btn btn-primary">Save</button>
+          </div>
+        </.form>
+      </div>
+    </div>
+    """
+  end
+
+  # Media server type helpers
+  defp media_server_type_icon(:plex), do: "hero-play-circle"
+  defp media_server_type_icon(:jellyfin), do: "hero-tv"
+  defp media_server_type_icon(_), do: "hero-server"
+
+  defp media_server_type_badge_class(:plex), do: "badge-warning"
+  defp media_server_type_badge_class(:jellyfin), do: "badge-info"
+  defp media_server_type_badge_class(_), do: "badge-ghost"
+
+  defp media_server_type_label(:plex), do: "Plex"
+  defp media_server_type_label(:jellyfin), do: "Jellyfin"
+
+  defp media_server_type_label(type) when is_atom(type),
+    do: Atom.to_string(type) |> String.capitalize()
+
+  defp media_server_type_label(type), do: to_string(type)
+
   defp humanize_field_name(name) when is_binary(name) do
     name
     |> String.replace("_", " ")

@@ -109,6 +109,14 @@ defmodule Mydia.Config.Schema do
       field :timeout, :integer, default: 30000
     end
 
+    embeds_many :media_servers, MediaServer, on_replace: :delete, primary_key: false do
+      field :name, :string
+      field :type, Ecto.Enum, values: [:plex, :jellyfin]
+      field :enabled, :boolean, default: true
+      field :url, :string
+      field :token, :string
+    end
+
     embeds_many :library_paths, LibraryPath, on_replace: :delete, primary_key: false do
       field :path, :string
       field :type, Ecto.Enum, values: [:movies, :series, :mixed, :music, :books, :adult]
@@ -136,6 +144,7 @@ defmodule Mydia.Config.Schema do
     |> cast_embed(:flaresolverr, with: &flaresolverr_changeset/2)
     |> cast_embed(:download_clients, with: &download_client_changeset/2)
     |> cast_embed(:indexers, with: &indexer_changeset/2)
+    |> cast_embed(:media_servers, with: &media_server_changeset/2)
     |> cast_embed(:library_paths, with: &library_path_changeset/2)
     |> validate_configuration()
   end
@@ -305,6 +314,19 @@ defmodule Mydia.Config.Schema do
     |> validate_number(:timeout, greater_than: 0)
   end
 
+  defp media_server_changeset(schema, attrs) do
+    schema
+    |> cast(attrs, [
+      :name,
+      :type,
+      :enabled,
+      :url,
+      :token
+    ])
+    |> validate_required([:name, :type, :url])
+    |> validate_inclusion(:type, [:plex, :jellyfin])
+  end
+
   defp library_path_changeset(schema, attrs) do
     schema
     |> cast(attrs, [
@@ -393,6 +415,7 @@ defmodule Mydia.Config.Schema do
       flaresolverr: %__MODULE__.FlareSolverr{},
       download_clients: [],
       indexers: [],
+      media_servers: [],
       library_paths: []
     }
 

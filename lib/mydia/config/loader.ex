@@ -128,6 +128,7 @@ defmodule Mydia.Config.Loader do
       flaresolverr: load_flaresolverr_env(),
       download_clients: load_download_clients_env(),
       indexers: load_indexers_env(),
+      media_servers: load_media_servers_env(),
       library_paths: load_library_paths_env()
     }
     |> remove_empty_maps()
@@ -297,6 +298,36 @@ defmodule Mydia.Config.Loader do
     |> Enum.reject(&(&1 == %{}))
   end
 
+  defp load_media_servers_env do
+    # Support environment variables for media servers in the format:
+    # MEDIA_SERVER_<N>_NAME, MEDIA_SERVER_<N>_TYPE, etc.
+    env_vars = System.get_env()
+
+    indices =
+      env_vars
+      |> Enum.filter(fn {key, _value} ->
+        String.starts_with?(key, "MEDIA_SERVER_") and String.ends_with?(key, "_NAME")
+      end)
+      |> Enum.map(fn {key, _value} ->
+        key
+        |> String.replace_prefix("MEDIA_SERVER_", "")
+        |> String.replace_suffix("_NAME", "")
+      end)
+      |> Enum.uniq()
+
+    Enum.map(indices, fn index ->
+      prefix = "MEDIA_SERVER_#{index}_"
+
+      %{}
+      |> put_if_present(:name, System.get_env("#{prefix}NAME"))
+      |> put_if_present(:type, System.get_env("#{prefix}TYPE"), &parse_atom/1)
+      |> put_if_present(:enabled, System.get_env("#{prefix}ENABLED"), &parse_boolean/1)
+      |> put_if_present(:url, System.get_env("#{prefix}URL"))
+      |> put_if_present(:token, System.get_env("#{prefix}TOKEN"))
+    end)
+    |> Enum.reject(&(&1 == %{}))
+  end
+
   defp load_library_paths_env do
     # Support environment variables for library paths in the format:
     # LIBRARY_PATH_<N>_PATH, LIBRARY_PATH_<N>_TYPE, etc.
@@ -407,8 +438,9 @@ defmodule Mydia.Config.Loader do
   defp deep_merge(left, right) when is_map(left) and is_map(right) do
     Map.merge(left, right, fn key, left_val, right_val ->
       cond do
-        # For download_clients, indexers, and library_paths, merge lists (env entries are appended)
-        key in [:download_clients, :indexers, :library_paths] and is_list(left_val) and
+        # For download_clients, indexers, media_servers, and library_paths, merge lists (env entries are appended)
+        key in [:download_clients, :indexers, :media_servers, :library_paths] and
+          is_list(left_val) and
             is_list(right_val) ->
           left_val ++ right_val
 

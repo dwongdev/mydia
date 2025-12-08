@@ -56,6 +56,14 @@
       >
         <.icon name="hero-folder" class="w-4 h-4" /> Library
       </button>
+      <button
+        role="tab"
+        class={["tab gap-2", @active_tab == "media_servers" && "tab-active"]}
+        phx-click="change_tab"
+        phx-value-tab="media_servers"
+      >
+        <.icon name="hero-server-stack" class="w-4 h-4" /> Media Servers
+      </button>
       <div class="tab-content block bg-base-100 border-base-300">
         <%!-- System Status Tab --%>
         <%= if @active_tab == "status" do %>
@@ -114,6 +122,13 @@
         <%!-- Library Paths Tab --%>
         <%= if @active_tab == "library" do %>
           <Components.library_paths_tab library_paths={@library_paths} />
+        <% end %>
+        <%!-- Media Servers Tab --%>
+        <%= if @active_tab == "media_servers" do %>
+          <Components.media_servers_tab
+            media_servers={@media_servers}
+            media_server_health={@media_server_health}
+          />
         <% end %>
       </div>
     </div>
@@ -181,6 +196,14 @@
       <Components.library_path_modal
         library_path_form={@library_path_form}
         library_path_mode={@library_path_mode}
+      />
+    <% end %>
+    <%!-- Media Server Modal --%>
+    <%= if assigns[:show_media_server_modal] do %>
+      <Components.media_server_modal
+        media_server_form={@media_server_form}
+        media_server_mode={@media_server_mode}
+        testing_media_server_connection={assigns[:testing_media_server_connection] || false}
       />
     <% end %>
   </div>

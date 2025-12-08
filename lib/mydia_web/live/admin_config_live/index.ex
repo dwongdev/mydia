@@ -3,7 +3,16 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   alias Mydia.DB
   alias Mydia.Repo
   alias Mydia.Settings
-  alias Mydia.Settings.{QualityProfile, DownloadClientConfig, IndexerConfig, LibraryPath}
+
+  alias Mydia.Settings.{
+    QualityProfile,
+    DownloadClientConfig,
+    IndexerConfig,
+    LibraryPath,
+    MediaServerConfig
+  }
+
+  alias Mydia.MediaServer.Client, as: MediaServerClient
   alias Mydia.Downloads.ClientHealth
   alias Mydia.Indexers
   alias Mydia.Indexers.Health, as: IndexerHealth
@@ -1679,6 +1688,226 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     {:noreply, assign(socket, :show_library_path_modal, false)}
   end
 
+  ## Media Server Events
+
+  @impl true
+  def handle_event("new_media_server", _params, socket) do
+    changeset = Settings.change_media_server_config(%MediaServerConfig{})
+
+    {:noreply,
+     socket
+     |> assign(:show_media_server_modal, true)
+     |> assign(:media_server_form, to_form(changeset))
+     |> assign(:media_server_mode, :new)
+     |> assign(:testing_media_server_connection, false)}
+  end
+
+  @impl true
+  def handle_event("edit_media_server", %{"id" => id}, socket) do
+    server = Settings.get_media_server_config!(id)
+
+    # Check if this is a runtime config and prevent editing
+    if Settings.runtime_config?(server) do
+      {:noreply,
+       socket
+       |> put_flash(
+         :error,
+         "Cannot edit runtime-configured media server. This server is configured via environment variables and is read-only in the UI."
+       )}
+    else
+      changeset = Settings.change_media_server_config(server)
+
+      {:noreply,
+       socket
+       |> assign(:show_media_server_modal, true)
+       |> assign(:media_server_form, to_form(changeset))
+       |> assign(:media_server_mode, :edit)
+       |> assign(:editing_media_server, server)
+       |> assign(:testing_media_server_connection, false)}
+    end
+  end
+
+  @impl true
+  def handle_event("validate_media_server", %{"media_server_config" => params}, socket) do
+    server =
+      case socket.assigns.media_server_mode do
+        :new -> %MediaServerConfig{}
+        :edit -> socket.assigns.editing_media_server
+      end
+
+    changeset =
+      server
+      |> Settings.change_media_server_config(params)
+      |> Map.put(:action, :validate)
+
+    {:noreply, assign(socket, :media_server_form, to_form(changeset))}
+  end
+
+  @impl true
+  def handle_event("save_media_server", %{"media_server_config" => params}, socket) do
+    result =
+      case socket.assigns.media_server_mode do
+        :new ->
+          Settings.create_media_server_config(params)
+
+        :edit ->
+          Settings.update_media_server_config(socket.assigns.editing_media_server, params)
+      end
+
+    case result do
+      {:ok, _server} ->
+        {:noreply,
+         socket
+         |> assign(:show_media_server_modal, false)
+         |> put_flash(:info, "Media server saved successfully")
+         |> load_configuration_data()}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:noreply, assign(socket, :media_server_form, to_form(changeset))}
+    end
+  end
+
+  @impl true
+  def handle_event("delete_media_server", %{"id" => id}, socket) do
+    server = Settings.get_media_server_config!(id)
+
+    # Check if this is a runtime config and prevent deletion
+    if Settings.runtime_config?(server) do
+      {:noreply,
+       socket
+       |> put_flash(
+         :error,
+         "Cannot delete runtime-configured media server. This server is configured via environment variables and is read-only in the UI."
+       )}
+    else
+      case Settings.delete_media_server_config(server) do
+        {:ok, _server} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Media server deleted successfully")
+           |> load_configuration_data()}
+
+        {:error, error} ->
+          MydiaLogger.log_error(:liveview, "Failed to delete media server",
+            error: error,
+            operation: :delete_media_server,
+            server_id: id,
+            server_name: server.name,
+            user_id: socket.assigns.current_user.id
+          )
+
+          error_msg = MydiaLogger.user_error_message(:delete_media_server, error)
+
+          {:noreply,
+           socket
+           |> put_flash(:error, error_msg)}
+      end
+    end
+  end
+
+  @impl true
+  def handle_event("close_media_server_modal", _params, socket) do
+    {:noreply, assign(socket, :show_media_server_modal, false)}
+  end
+
+  @impl true
+  def handle_event("test_media_server", %{"id" => id}, socket) do
+    server = Settings.get_media_server_config!(id)
+    adapter = MediaServerClient.adapter_for(server)
+
+    case adapter.test_connection(server) do
+      :ok ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Connection to #{server.name} successful!")
+         |> load_configuration_data()}
+
+      {:error, reason} ->
+        MydiaLogger.log_warning(:liveview, "Media server connection test failed",
+          operation: :test_media_server,
+          server_id: id,
+          server_type: server.type,
+          error: reason,
+          user_id: socket.assigns.current_user.id
+        )
+
+        {:noreply,
+         socket
+         |> put_flash(:error, "Connection failed: #{reason}")
+         |> load_configuration_data()}
+    end
+  end
+
+  @impl true
+  def handle_event("test_media_server_connection", _params, socket) do
+    # Extract form params from the current changeset
+    changeset = socket.assigns.media_server_form.source
+
+    # Get the changeset data (which includes user input)
+    params = Ecto.Changeset.apply_changes(changeset)
+
+    # Convert string type to atom if needed
+    type =
+      case params.type do
+        type when is_atom(type) -> type
+        type when is_binary(type) -> String.to_existing_atom(type)
+        _ -> :plex
+      end
+
+    # Build a temporary config struct for testing
+    test_config = %MediaServerConfig{
+      type: type,
+      url: params.url,
+      token: params.token,
+      name: params.name || "Test"
+    }
+
+    # Set loading state
+    socket = assign(socket, :testing_media_server_connection, true)
+
+    # Test the connection with a timeout
+    adapter = MediaServerClient.adapter_for(test_config)
+
+    task =
+      Task.async(fn ->
+        adapter.test_connection(test_config)
+      end)
+
+    case Task.yield(task, 10_000) || Task.shutdown(task) do
+      {:ok, :ok} ->
+        {:noreply,
+         socket
+         |> assign(:testing_media_server_connection, false)
+         |> put_flash(:info, "Connection successful!")}
+
+      {:ok, {:error, reason}} ->
+        MydiaLogger.log_warning(:liveview, "Media server connection test failed",
+          operation: :test_media_server_connection,
+          server_type: type,
+          error: reason,
+          user_id: socket.assigns.current_user.id
+        )
+
+        {:noreply,
+         socket
+         |> assign(:testing_media_server_connection, false)
+         |> put_flash(:error, "Connection failed: #{reason}")}
+
+      nil ->
+        # Task timed out
+        MydiaLogger.log_warning(:liveview, "Media server connection test timed out",
+          operation: :test_media_server_connection,
+          server_type: type,
+          user_id: socket.assigns.current_user.id
+        )
+
+        {:noreply,
+         socket
+         |> assign(:testing_media_server_connection, false)
+         |> put_flash(:error, "Connection test timed out after 10 seconds")}
+    end
+  end
+
   ## Private Functions
 
   defp test_client_connection(client_config) do
@@ -1720,6 +1949,10 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     indexers = Settings.list_indexer_configs()
     indexer_health = get_indexer_health_status(indexers)
 
+    # Load media servers
+    media_servers = Settings.list_media_server_configs()
+    media_server_health = get_media_server_health_status(media_servers)
+
     # Load enabled library indexers if Cardigann feature is enabled
     cardigann_enabled = CardigannFeatureFlags.enabled?()
 
@@ -1749,6 +1982,8 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     |> assign(:library_indexers, library_indexers)
     |> assign(:library_indexer_stats, library_indexer_stats)
     |> assign(:library_paths, Settings.list_library_paths())
+    |> assign(:media_servers, media_servers)
+    |> assign(:media_server_health, media_server_health)
     |> assign(:crash_report_stats, Mydia.CrashReporter.stats())
     |> assign(:queued_crash_reports, Mydia.CrashReporter.list_queued_reports())
     |> assign(:show_quality_profile_modal, false)
@@ -1758,6 +1993,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     |> assign(:show_download_client_modal, false)
     |> assign(:show_indexer_modal, false)
     |> assign(:show_library_path_modal, false)
+    |> assign(:show_media_server_modal, false)
     |> assign(:show_manual_report_modal, false)
     |> assign(:show_import_modal, false)
     |> assign(:show_indexer_library_modal, false)
@@ -1792,6 +2028,14 @@ defmodule MydiaWeb.AdminConfigLive.Index do
           {indexer.id, %{status: :unknown, error: "Unable to check health"}}
       end
     end)
+    |> Map.new()
+  end
+
+  defp get_media_server_health_status(media_servers) do
+    # For now, we don't track health status actively (would require background polling)
+    # Return unknown status for all servers - test connection is done on demand
+    media_servers
+    |> Enum.map(fn server -> {server.id, %{status: :unknown}} end)
     |> Map.new()
   end
 

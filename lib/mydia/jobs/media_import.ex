@@ -27,6 +27,7 @@ defmodule Mydia.Jobs.MediaImport do
   alias Mydia.Library.{FileAnalyzer, FileNamer}
   alias Mydia.Library.FileParser.V2, as: FileParser
   alias Mydia.Indexers.QualityParser
+  alias Mydia.MediaServer.Notifier, as: MediaServerNotifier
 
   # Exponential backoff schedule in seconds
   # 1 min, 5 min, 15 min, 1 hour, 4 hours, 12 hours, 24 hours, then 24 hours indefinitely
@@ -177,6 +178,10 @@ defmodule Mydia.Jobs.MediaImport do
                 errors: inspect(changeset.errors)
               )
           end
+
+          # Notify media servers (Plex, Jellyfin) to scan for new content
+          # This is fire-and-forget (async) - errors won't affect import success
+          MediaServerNotifier.notify_all()
 
           {:ok, :imported}
 

@@ -47,6 +47,7 @@ defmodule Mydia.Settings do
     ConfigSetting,
     DownloadClientConfig,
     IndexerConfig,
+    MediaServerConfig,
     LibraryPath,
     DefaultQualityProfiles,
     DefaultMetadataPreferences
@@ -1064,6 +1065,116 @@ defmodule Mydia.Settings do
     Repo.delete(config)
   end
 
+  ## Media Server Configs
+
+  @doc """
+  Lists all media server configurations.
+
+  Returns media servers from both the database and runtime configuration
+  (environment variables). Runtime config servers are returned as structs
+  compatible with MediaServerConfig but without database IDs.
+  """
+  def list_media_server_configs(opts \\ []) do
+    # Get database configs
+    db_configs =
+      MediaServerConfig
+      |> maybe_preload(opts[:preload])
+      |> order_by([m], desc: m.enabled, asc: m.name)
+      |> Repo.all()
+
+    # Merge with runtime config (database takes precedence by name)
+    merge_with_runtime_config(db_configs, &get_runtime_media_servers/0, :name, opts)
+  end
+
+  @doc """
+  Gets a media server configuration by ID.
+
+  Accepts both database IDs (integers) and runtime identifiers (strings starting
+  with "runtime::media_server::"). Runtime identifiers are resolved by looking
+  up the server in the runtime configuration.
+
+  Raises `Ecto.NoResultsError` if a database ID is not found, or
+  `RuntimeError` if a runtime identifier cannot be resolved.
+  """
+  def get_media_server_config!(id, opts \\ [])
+
+  def get_media_server_config!(id, opts) when is_binary(id) do
+    if runtime_id?(id) do
+      case parse_runtime_id(id) do
+        {:ok, {:media_server, name}} ->
+          # Find the runtime media server by matching the name
+          runtime_servers = get_runtime_media_servers()
+
+          case Enum.find(runtime_servers, &(&1.name == name)) do
+            nil ->
+              raise "Runtime media server not found: #{name}"
+
+            server ->
+              server
+          end
+
+        _ ->
+          raise "Invalid runtime media server ID: #{id}"
+      end
+    else
+      # Try to parse as integer ID for database lookup
+      case Integer.parse(id) do
+        {int_id, ""} ->
+          get_media_server_config!(int_id, opts)
+
+        _ ->
+          # Try as UUID for database lookup
+          case Ecto.UUID.cast(id) do
+            {:ok, uuid} ->
+              MediaServerConfig
+              |> maybe_preload(opts[:preload])
+              |> Repo.get!(uuid)
+
+            :error ->
+              raise "Invalid media server ID: #{id}"
+          end
+      end
+    end
+  end
+
+  def get_media_server_config!(id, opts) when is_integer(id) do
+    MediaServerConfig
+    |> maybe_preload(opts[:preload])
+    |> Repo.get!(id)
+  end
+
+  @doc """
+  Creates a media server configuration.
+  """
+  def create_media_server_config(attrs) do
+    %MediaServerConfig{}
+    |> MediaServerConfig.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Updates a media server configuration.
+  """
+  def update_media_server_config(%MediaServerConfig{} = config, attrs) do
+    config
+    |> MediaServerConfig.changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Deletes a media server configuration.
+  """
+  def delete_media_server_config(%MediaServerConfig{} = config) do
+    Repo.delete(config)
+  end
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for tracking media server config changes.
+  """
+  def change_media_server_config(%MediaServerConfig{} = config, attrs \\ %{}) do
+    MediaServerConfig.changeset(config, attrs)
+  end
+
   ## Library Paths
 
   @doc """
@@ -1388,6 +1499,41 @@ defmodule Mydia.Settings do
       indexer_ids: Map.get(map, :indexer_ids, []),
       categories: Map.get(map, :categories, []),
       rate_limit: Map.get(map, :rate_limit),
+      connection_settings: Map.get(map, :connection_settings, %{}),
+      updated_by_id: nil,
+      inserted_at: nil,
+      updated_at: nil
+    }
+  end
+
+  @doc """
+  Gets media servers from the runtime configuration.
+
+  Converts runtime config media server maps to MediaServerConfig structs
+  for compatibility with the rest of the application. These structs have stable
+  runtime identifiers instead of database IDs (format: "runtime::media_server::name").
+  """
+  def get_runtime_media_servers do
+    runtime_config = get_runtime_config()
+
+    if is_struct(runtime_config) and Map.has_key?(runtime_config, :media_servers) do
+      runtime_config.media_servers
+      |> Enum.map(&map_to_media_server_config/1)
+    else
+      []
+    end
+  end
+
+  defp map_to_media_server_config(map) when is_map(map) do
+    name = Map.get(map, :name)
+
+    %MediaServerConfig{
+      id: build_runtime_id(:media_server, name),
+      name: name,
+      type: Map.get(map, :type),
+      enabled: Map.get(map, :enabled, true),
+      url: Map.get(map, :url),
+      token: Map.get(map, :token),
       connection_settings: Map.get(map, :connection_settings, %{}),
       updated_by_id: nil,
       inserted_at: nil,

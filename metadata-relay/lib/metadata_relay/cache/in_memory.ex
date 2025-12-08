@@ -60,6 +60,9 @@ defmodule MetadataRelay.Cache.InMemory do
   @impl MetadataRelay.Cache.Adapter
   def clear do
     :ets.delete_all_objects(@table_name)
+    # Also reset stats counters
+    :ets.insert(@stats_table, {:hits, 0})
+    :ets.insert(@stats_table, {:misses, 0})
     :ok
   end
 

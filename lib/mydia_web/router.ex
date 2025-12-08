@@ -110,7 +110,8 @@ defmodule MydiaWeb.Router do
       live "/play/:type/:id", PlaybackLive.Show, :show
       get "/covers/:id", CoverController, :show
 
-      # Guest request routes      live "/request/movie", RequestMediaLive.Index, :request_movie
+      # Guest request routes
+      live "/request/movie", RequestMediaLive.Index, :request_movie
       live "/request/series", RequestMediaLive.Index, :request_series
       live "/requests", MyRequestsLive.Index, :index
     end

@@ -9,6 +9,15 @@ defmodule MetadataRelay.TVDB.Auth do
   - Graceful error handling for authentication failures
 
   The GenServer is supervised and will automatically restart on failure.
+
+  ## Testing
+
+  For testing, you can configure a custom HTTP adapter via application config:
+
+      config :metadata_relay, :tvdb_http_adapter, fn request ->
+        {request, Req.Response.new(status: 200, body: %{"data" => %{"token" => "test_token"}})}
+      end
+
   """
 
   use GenServer
@@ -22,9 +31,13 @@ defmodule MetadataRelay.TVDB.Auth do
 
   @doc """
   Starts the TVDB Auth GenServer.
+
+  Options:
+    - `:name` - The name to register the GenServer under (default: `__MODULE__`)
   """
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   @doc """
@@ -103,7 +116,13 @@ defmodule MetadataRelay.TVDB.Auth do
 
     body = %{apikey: api_key}
 
-    case Req.post(@auth_url, json: body) do
+    req_opts =
+      case Application.get_env(:metadata_relay, :tvdb_http_adapter) do
+        nil -> [json: body]
+        adapter -> [json: body, adapter: adapter]
+      end
+
+    case Req.post(@auth_url, req_opts) do
       {:ok, %{status: 200, body: %{"data" => %{"token" => token}}}} ->
         # Parse JWT to get expiration time
         expires_at = parse_token_expiry(token)

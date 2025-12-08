@@ -46,6 +46,17 @@
           <span class="badge badge-secondary">{get_album_type_label(@album.album_type)}</span>
         </div>
         <h1 class="text-3xl font-bold mb-2">{@album.title}</h1>
+
+        <div class="flex gap-2 mb-4">
+          <button class="btn btn-primary gap-2" phx-click="play_album">
+            <.icon name="hero-play" class="w-5 h-5" /> Play Album
+          </button>
+          <.add_to_playlist_dropdown
+            playlists={@playlists}
+            album_id={@album.id}
+          />
+        </div>
+
         <%= if @album.artist do %>
           <.link
             navigate={~p"/music/artists/#{@album.artist.id}"}
@@ -136,4 +147,46 @@
       </div>
     </div>
   </div>
+
+  <%!-- Create Playlist Modal --%>
+  <%= if @show_create_playlist_modal do %>
+    <div class="modal modal-open">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg mb-4">Create New Playlist</h3>
+        <.form
+          for={@form}
+          phx-submit="create_playlist"
+          phx-change="validate_playlist"
+          id="create-playlist-form"
+        >
+          <div class="form-control mb-4">
+            <.input
+              field={@form[:name]}
+              type="text"
+              label="Name"
+              placeholder="My Playlist"
+              required
+            />
+          </div>
+          <div class="form-control mb-4">
+            <.input
+              field={@form[:description]}
+              type="textarea"
+              label="Description (optional)"
+              placeholder="Add a description..."
+            />
+          </div>
+          <div class="modal-action">
+            <button type="button" phx-click="close_create_playlist_modal" class="btn btn-ghost">
+              Cancel
+            </button>
+            <button type="submit" class="btn btn-primary">
+              Create
+            </button>
+          </div>
+        </.form>
+      </div>
+      <div class="modal-backdrop" phx-click="close_create_playlist_modal"></div>
+    </div>
+  <% end %>
 </Layouts.app>

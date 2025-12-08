@@ -3,6 +3,8 @@ defmodule MydiaWeb.MusicLive.Show do
 
   alias Mydia.Music
 
+  import MydiaWeb.PlaylistComponents
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok, socket}
@@ -15,10 +17,18 @@ defmodule MydiaWeb.MusicLive.Show do
         preload: [:artist, tracks: [:artist, :music_files]]
       )
 
+    user = socket.assigns.current_scope.user
+    playlists = Music.list_user_playlists(user.id)
+
     {:noreply,
      socket
      |> assign(:page_title, album.title)
-     |> assign(:album, album)}
+     |> assign(:album, album)
+     |> assign(:playlists, playlists)
+     |> assign(:show_create_playlist_modal, false)
+     |> assign(:pending_track_id, nil)
+     |> assign(:pending_album_id, nil)
+     |> assign(:form, to_form(Music.change_playlist(%Music.Playlist{})))}
   end
 
   @impl true
@@ -38,6 +48,160 @@ defmodule MydiaWeb.MusicLive.Show do
 
       {:error, _changeset} ->
         {:noreply, put_flash(socket, :error, "Failed to update monitoring status")}
+    end
+  end
+
+  def handle_event("play_album", _params, socket) do
+    album = socket.assigns.album
+    tracks = prepare_tracks_for_player(album.tracks, album)
+
+    if tracks != [] do
+      Phoenix.PubSub.broadcast(Mydia.PubSub, "music_player", {:play_tracks, tracks, 0})
+      {:noreply, put_flash(socket, :info, "Starting playback")}
+    else
+      {:noreply, put_flash(socket, :error, "No playable tracks found")}
+    end
+  end
+
+  # Playlist events
+  def handle_event(
+        "add_to_playlist",
+        %{"playlist-id" => playlist_id, "album-id" => album_id},
+        socket
+      )
+      when is_binary(album_id) and album_id != "" do
+    playlist = Music.get_playlist!(playlist_id)
+    album = socket.assigns.album
+    tracks = Enum.sort_by(album.tracks, &{&1.disc_number, &1.track_number})
+
+    case Music.add_tracks_to_playlist(playlist, tracks) do
+      {:ok, _} ->
+        {:noreply, put_flash(socket, :info, "Album added to #{playlist.name}")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to add album to playlist")}
+    end
+  end
+
+  def handle_event(
+        "add_to_playlist",
+        %{"playlist-id" => playlist_id, "track-id" => track_id},
+        socket
+      )
+      when is_binary(track_id) and track_id != "" do
+    playlist = Music.get_playlist!(playlist_id)
+    track = Music.get_track!(track_id)
+
+    case Music.add_track_to_playlist(playlist, track) do
+      {:ok, _} ->
+        {:noreply, put_flash(socket, :info, "Track added to #{playlist.name}")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to add track to playlist")}
+    end
+  end
+
+  def handle_event("create_playlist_for_track", %{"album-id" => album_id}, socket)
+      when is_binary(album_id) and album_id != "" do
+    {:noreply,
+     socket
+     |> assign(:show_create_playlist_modal, true)
+     |> assign(:pending_album_id, album_id)
+     |> assign(:pending_track_id, nil)}
+  end
+
+  def handle_event("create_playlist_for_track", %{"track-id" => track_id}, socket)
+      when is_binary(track_id) and track_id != "" do
+    {:noreply,
+     socket
+     |> assign(:show_create_playlist_modal, true)
+     |> assign(:pending_track_id, track_id)
+     |> assign(:pending_album_id, nil)}
+  end
+
+  def handle_event("create_playlist_for_track", _params, socket) do
+    {:noreply, assign(socket, :show_create_playlist_modal, true)}
+  end
+
+  def handle_event("close_create_playlist_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_create_playlist_modal, false)
+     |> assign(:pending_track_id, nil)
+     |> assign(:pending_album_id, nil)
+     |> assign(:form, to_form(Music.change_playlist(%Music.Playlist{})))}
+  end
+
+  def handle_event("validate_playlist", %{"playlist" => params}, socket) do
+    form =
+      %Music.Playlist{}
+      |> Music.change_playlist(params)
+      |> Map.put(:action, :validate)
+      |> to_form()
+
+    {:noreply, assign(socket, :form, form)}
+  end
+
+  def handle_event("create_playlist", %{"playlist" => params}, socket) do
+    user = socket.assigns.current_scope.user
+
+    case Music.create_playlist(user, params) do
+      {:ok, playlist} ->
+        # Add the pending track/album if any
+        socket =
+          cond do
+            socket.assigns.pending_album_id ->
+              album = socket.assigns.album
+              tracks = Enum.sort_by(album.tracks, &{&1.disc_number, &1.track_number})
+              Music.add_tracks_to_playlist(playlist, tracks)
+              put_flash(socket, :info, "Playlist created and album added")
+
+            socket.assigns.pending_track_id ->
+              track = Music.get_track!(socket.assigns.pending_track_id)
+              Music.add_track_to_playlist(playlist, track)
+              put_flash(socket, :info, "Playlist created and track added")
+
+            true ->
+              put_flash(socket, :info, "Playlist created")
+          end
+
+        playlists = Music.list_user_playlists(user.id)
+
+        {:noreply,
+         socket
+         |> assign(:playlists, playlists)
+         |> assign(:show_create_playlist_modal, false)
+         |> assign(:pending_track_id, nil)
+         |> assign(:pending_album_id, nil)
+         |> assign(:form, to_form(Music.change_playlist(%Music.Playlist{})))}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :form, to_form(changeset))}
+    end
+  end
+
+  defp prepare_tracks_for_player(tracks, album) do
+    sorted_tracks = Enum.sort_by(tracks, &{&1.disc_number, &1.track_number})
+
+    Enum.map(sorted_tracks, fn track ->
+      file_id = get_file_id(track)
+
+      %{
+        "title" => track.title,
+        "artist_name" => (track.artist && track.artist.name) || album.artist.name,
+        "cover_url" => get_cover_url(album),
+        "file_id" => file_id,
+        "duration" => track.duration,
+        "url" => if(file_id, do: "/api/v1/stream/file/#{file_id}", else: nil)
+      }
+    end)
+    |> Enum.filter(&(&1["file_id"] != nil))
+  end
+
+  defp get_file_id(track) do
+    case track.music_files do
+      [file | _] -> file.id
+      _ -> nil
     end
   end
 

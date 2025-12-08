@@ -5,7 +5,7 @@ defmodule Mydia.Music do
 
   import Ecto.Query, warn: false
   alias Mydia.Repo
-  alias Mydia.Music.{Artist, Album, Track, MusicFile}
+  alias Mydia.Music.{Artist, Album, Track, MusicFile, Playlist, PlaylistTrack}
 
   ## Artists
 
@@ -323,4 +323,231 @@ defmodule Mydia.Music do
 
   defp maybe_preload(query, nil), do: query
   defp maybe_preload(query, preloads), do: preload(query, ^preloads)
+
+  ## Playlists
+
+  @doc """
+  Returns the list of playlists for a user.
+
+  ## Options
+    - `:preload` - List of associations to preload
+  """
+  def list_user_playlists(user_id, opts \\ []) do
+    Playlist
+    |> where([p], p.user_id == ^user_id)
+    |> order_by([p], desc: p.updated_at)
+    |> maybe_preload(opts[:preload])
+    |> Repo.all()
+  end
+
+  @doc """
+  Gets a single playlist.
+
+  Raises `Ecto.NoResultsError` if the Playlist does not exist.
+
+  ## Options
+    - `:preload` - List of associations to preload
+  """
+  def get_playlist!(id, opts \\ []) do
+    Playlist
+    |> maybe_preload(opts[:preload])
+    |> Repo.get!(id)
+  end
+
+  @doc """
+  Gets a playlist with its tracks preloaded in order.
+  """
+  def get_playlist_with_tracks!(id) do
+    playlist = Repo.get!(Playlist, id)
+
+    tracks_query =
+      from pt in PlaylistTrack,
+        where: pt.playlist_id == ^id,
+        order_by: [asc: pt.position],
+        preload: [track: [:artist, :album, :music_files]]
+
+    playlist_tracks = Repo.all(tracks_query)
+
+    %{playlist | playlist_tracks: playlist_tracks}
+  end
+
+  @doc """
+  Creates a playlist for a user.
+  """
+  def create_playlist(user, attrs \\ %{}) do
+    %Playlist{}
+    |> Playlist.changeset(attrs)
+    |> Ecto.Changeset.put_assoc(:user, user)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Updates a playlist.
+  """
+  def update_playlist(%Playlist{} = playlist, attrs) do
+    playlist
+    |> Playlist.changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Deletes a playlist.
+  """
+  def delete_playlist(%Playlist{} = playlist) do
+    Repo.delete(playlist)
+  end
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for tracking playlist changes.
+  """
+  def change_playlist(%Playlist{} = playlist, attrs \\ %{}) do
+    Playlist.changeset(playlist, attrs)
+  end
+
+  ## Playlist Track Management
+
+  @doc """
+  Adds a track to a playlist at the end.
+  """
+  def add_track_to_playlist(%Playlist{} = playlist, %Track{} = track) do
+    # Get the next position
+    max_position =
+      from(pt in PlaylistTrack,
+        where: pt.playlist_id == ^playlist.id,
+        select: max(pt.position)
+      )
+      |> Repo.one() || -1
+
+    next_position = max_position + 1
+
+    %PlaylistTrack{}
+    |> PlaylistTrack.changeset(%{position: next_position, added_at: DateTime.utc_now()})
+    |> Ecto.Changeset.put_assoc(:playlist, playlist)
+    |> Ecto.Changeset.put_assoc(:track, track)
+    |> Repo.insert()
+    |> case do
+      {:ok, playlist_track} ->
+        update_playlist_stats(playlist)
+        {:ok, playlist_track}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Adds multiple tracks to a playlist at the end.
+  """
+  def add_tracks_to_playlist(%Playlist{} = playlist, tracks) when is_list(tracks) do
+    max_position =
+      from(pt in PlaylistTrack,
+        where: pt.playlist_id == ^playlist.id,
+        select: max(pt.position)
+      )
+      |> Repo.one() || -1
+
+    now = DateTime.utc_now()
+
+    {_count, _} =
+      tracks
+      |> Enum.with_index(max_position + 1)
+      |> Enum.map(fn {track, position} ->
+        %{
+          id: Ecto.UUID.generate(),
+          playlist_id: playlist.id,
+          track_id: track.id,
+          position: position,
+          added_at: now,
+          inserted_at: now,
+          updated_at: now
+        }
+      end)
+      |> then(&Repo.insert_all(PlaylistTrack, &1))
+
+    update_playlist_stats(playlist)
+    {:ok, playlist}
+  end
+
+  @doc """
+  Removes a playlist track from a playlist.
+  """
+  def remove_track_from_playlist(%PlaylistTrack{} = playlist_track) do
+    playlist_id = playlist_track.playlist_id
+
+    case Repo.delete(playlist_track) do
+      {:ok, _} ->
+        # Reorder remaining tracks
+        reorder_after_removal(playlist_id, playlist_track.position)
+        playlist = get_playlist!(playlist_id)
+        update_playlist_stats(playlist)
+        {:ok, playlist_track}
+
+      error ->
+        error
+    end
+  end
+
+  defp reorder_after_removal(playlist_id, removed_position) do
+    from(pt in PlaylistTrack,
+      where: pt.playlist_id == ^playlist_id and pt.position > ^removed_position
+    )
+    |> Repo.update_all(inc: [position: -1])
+  end
+
+  @doc """
+  Reorders tracks in a playlist. Takes a list of playlist_track IDs in the new order.
+  """
+  def reorder_playlist_tracks(%Playlist{} = playlist, playlist_track_ids)
+      when is_list(playlist_track_ids) do
+    Repo.transaction(fn ->
+      playlist_track_ids
+      |> Enum.with_index()
+      |> Enum.each(fn {playlist_track_id, new_position} ->
+        from(pt in PlaylistTrack,
+          where: pt.id == ^playlist_track_id and pt.playlist_id == ^playlist.id
+        )
+        |> Repo.update_all(set: [position: new_position, updated_at: DateTime.utc_now()])
+      end)
+    end)
+
+    {:ok, get_playlist_with_tracks!(playlist.id)}
+  end
+
+  @doc """
+  Clears all tracks from a playlist.
+  """
+  def clear_playlist(%Playlist{} = playlist) do
+    from(pt in PlaylistTrack, where: pt.playlist_id == ^playlist.id)
+    |> Repo.delete_all()
+
+    update_playlist_stats(playlist)
+    {:ok, playlist}
+  end
+
+  @doc """
+  Updates playlist track count and total duration statistics.
+  """
+  def update_playlist_stats(%Playlist{} = playlist) do
+    stats =
+      from(pt in PlaylistTrack,
+        where: pt.playlist_id == ^playlist.id,
+        join: t in assoc(pt, :track),
+        select: %{
+          track_count: count(pt.id),
+          total_duration: coalesce(sum(t.duration), 0)
+        }
+      )
+      |> Repo.one()
+
+    playlist
+    |> Playlist.stats_changeset(stats)
+    |> Repo.update()
+  end
+
+  @doc """
+  Gets a playlist track by ID.
+  """
+  def get_playlist_track!(id) do
+    Repo.get!(PlaylistTrack, id)
+  end
 end

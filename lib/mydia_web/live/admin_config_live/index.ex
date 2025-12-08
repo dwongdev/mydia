@@ -13,6 +13,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   }
 
   alias Mydia.MediaServer.Client, as: MediaServerClient
+  alias Mydia.MediaServer.PlexOAuth
   alias Mydia.Downloads.ClientHealth
   alias Mydia.Indexers
   alias Mydia.Indexers.Health, as: IndexerHealth
@@ -134,6 +135,19 @@ defmodule MydiaWeb.AdminConfigLive.Index do
      socket
      |> assign(:library_config_testing, false)
      |> assign(:library_config_test_result, test_result)}
+  end
+
+  @impl true
+  def handle_info({:plex_connection_tested, uri, result}, socket) do
+    # Only update if we're still in connection selection state
+    if socket.assigns[:plex_oauth_state] == :selecting_connection do
+      statuses = socket.assigns[:plex_connection_statuses] || %{}
+      updated_statuses = Map.put(statuses, uri, result)
+
+      {:noreply, assign(socket, :plex_connection_statuses, updated_statuses)}
+    else
+      {:noreply, socket}
+    end
   end
 
   @impl true
@@ -1692,14 +1706,20 @@ defmodule MydiaWeb.AdminConfigLive.Index do
 
   @impl true
   def handle_event("new_media_server", _params, socket) do
-    changeset = Settings.change_media_server_config(%MediaServerConfig{})
+    # Set default type to :plex so the OAuth UI shows immediately
+    changeset = Settings.change_media_server_config(%MediaServerConfig{}, %{type: :plex})
 
     {:noreply,
      socket
      |> assign(:show_media_server_modal, true)
      |> assign(:media_server_form, to_form(changeset))
      |> assign(:media_server_mode, :new)
-     |> assign(:testing_media_server_connection, false)}
+     |> assign(:testing_media_server_connection, false)
+     |> assign(:plex_oauth_state, :idle)
+     |> assign(:plex_oauth_pin_id, nil)
+     |> assign(:plex_oauth_servers, [])
+     |> assign(:plex_oauth_token, nil)
+     |> assign(:plex_manual_entry, false)}
   end
 
   @impl true
@@ -1723,7 +1743,12 @@ defmodule MydiaWeb.AdminConfigLive.Index do
        |> assign(:media_server_form, to_form(changeset))
        |> assign(:media_server_mode, :edit)
        |> assign(:editing_media_server, server)
-       |> assign(:testing_media_server_connection, false)}
+       |> assign(:testing_media_server_connection, false)
+       |> assign(:plex_oauth_state, :idle)
+       |> assign(:plex_oauth_pin_id, nil)
+       |> assign(:plex_oauth_servers, [])
+       |> assign(:plex_oauth_token, nil)
+       |> assign(:plex_manual_entry, true)}
     end
   end
 
@@ -1808,6 +1833,173 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   @impl true
   def handle_event("close_media_server_modal", _params, socket) do
     {:noreply, assign(socket, :show_media_server_modal, false)}
+  end
+
+  ## Plex OAuth Events
+
+  @impl true
+  def handle_event("start_plex_oauth", _params, socket) do
+    case PlexOAuth.create_pin() do
+      {:ok, %{id: pin_id, code: code}} ->
+        auth_url = PlexOAuth.get_auth_url(code)
+
+        {:noreply,
+         socket
+         |> assign(:plex_oauth_state, :authorizing)
+         |> assign(:plex_oauth_pin_id, pin_id)
+         |> push_event("open_plex_auth", %{url: auth_url, pin_id: pin_id})}
+
+      {:error, reason} ->
+        Logger.error("Failed to start Plex OAuth: #{inspect(reason)}")
+
+        {:noreply,
+         socket
+         |> put_flash(:error, "Failed to start Plex authentication: #{reason}")}
+    end
+  end
+
+  @impl true
+  def handle_event("check_plex_pin", %{"pin_id" => pin_id}, socket) do
+    case PlexOAuth.check_pin(pin_id) do
+      {:ok, %{auth_token: token}} ->
+        # PIN has been authorized! Fetch servers
+        case PlexOAuth.list_servers(token) do
+          {:ok, servers} ->
+            {:noreply,
+             socket
+             |> assign(:plex_oauth_state, :selecting_server)
+             |> assign(:plex_oauth_token, token)
+             |> assign(:plex_oauth_servers, servers)
+             |> push_event("plex_auth_complete", %{})}
+
+          {:error, reason} ->
+            Logger.error("Failed to fetch Plex servers: #{inspect(reason)}")
+
+            {:noreply,
+             socket
+             |> assign(:plex_oauth_state, :error)
+             |> put_flash(:error, "Failed to fetch Plex servers: #{reason}")
+             |> push_event("plex_auth_failed", %{})}
+        end
+
+      :pending ->
+        # User hasn't authorized yet, keep polling
+        {:noreply, socket}
+
+      {:error, reason} ->
+        Logger.error("Plex PIN check failed: #{inspect(reason)}")
+
+        {:noreply,
+         socket
+         |> assign(:plex_oauth_state, :error)
+         |> put_flash(:error, "Authentication failed: #{reason}")
+         |> push_event("plex_auth_failed", %{})}
+    end
+  end
+
+  @impl true
+  def handle_event("plex_popup_closed", _params, socket) do
+    # User closed the popup before completing auth
+    if socket.assigns.plex_oauth_state == :authorizing do
+      {:noreply,
+       socket
+       |> assign(:plex_oauth_state, :idle)
+       |> assign(:plex_oauth_pin_id, nil)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("select_plex_server", %{"server_id" => server_id}, socket) do
+    servers = socket.assigns.plex_oauth_servers
+    token = socket.assigns.plex_oauth_token
+
+    case Enum.find(servers, &(&1.client_identifier == server_id)) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Server not found")}
+
+      server ->
+        if server.connections == [] do
+          {:noreply, put_flash(socket, :error, "No available connections for this server")}
+        else
+          # Initialize connection statuses as :testing
+          initial_statuses =
+            Map.new(server.connections, fn conn -> {conn.uri, :testing} end)
+
+          # Start testing each connection asynchronously
+          parent = self()
+
+          for conn <- server.connections do
+            Task.start(fn ->
+              result = test_plex_connection(conn, token)
+              send(parent, {:plex_connection_tested, conn.uri, result})
+            end)
+          end
+
+          {:noreply,
+           socket
+           |> assign(:plex_oauth_state, :selecting_connection)
+           |> assign(:plex_selected_server, server)
+           |> assign(:plex_connection_statuses, initial_statuses)}
+        end
+    end
+  end
+
+  @impl true
+  def handle_event("select_plex_connection", %{"url" => url}, socket) do
+    server = socket.assigns.plex_selected_server
+    token = socket.assigns.plex_oauth_token
+
+    server_base =
+      case socket.assigns.media_server_mode do
+        :new -> %MediaServerConfig{}
+        :edit -> socket.assigns.editing_media_server
+      end
+
+    changeset =
+      Settings.change_media_server_config(server_base, %{
+        name: server.name,
+        type: :plex,
+        url: url,
+        token: token
+      })
+
+    {:noreply,
+     socket
+     |> assign(:plex_oauth_state, :complete)
+     |> assign(:media_server_form, to_form(changeset))}
+  end
+
+  @impl true
+  def handle_event("cancel_plex_oauth", _params, socket) do
+    # If we're selecting a connection, go back to server list instead of starting over
+    if socket.assigns.plex_oauth_state == :selecting_connection do
+      {:noreply,
+       socket
+       |> assign(:plex_oauth_state, :selecting_server)
+       |> assign(:plex_selected_server, nil)}
+    else
+      {:noreply,
+       socket
+       |> assign(:plex_oauth_state, :idle)
+       |> assign(:plex_oauth_pin_id, nil)
+       |> assign(:plex_oauth_servers, [])
+       |> assign(:plex_oauth_token, nil)
+       |> assign(:plex_selected_server, nil)
+       |> push_event("plex_auth_cancelled", %{})}
+    end
+  end
+
+  @impl true
+  def handle_event("toggle_plex_manual_entry", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:plex_manual_entry, !socket.assigns.plex_manual_entry)
+     |> assign(:plex_oauth_state, :idle)
+     |> assign(:plex_oauth_pin_id, nil)
+     |> assign(:plex_oauth_servers, [])
+     |> assign(:plex_oauth_token, nil)}
   end
 
   @impl true
@@ -1909,6 +2101,54 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   end
 
   ## Private Functions
+
+  defp test_plex_connection(conn, token) do
+    # Build URL directly from address/port to avoid plex.direct DNS issues in Docker
+    protocol = conn.protocol || "https"
+    address = conn.address
+    port = conn.port
+
+    # Use direct IP URL for testing
+    test_url = "#{protocol}://#{address}:#{port}/identity"
+
+    headers = [
+      {"X-Plex-Token", token},
+      {"Accept", "application/json"}
+    ]
+
+    Logger.info("Testing Plex connection: #{test_url}")
+
+    # Req options for connection testing
+    # Disable SSL verification since plex.direct certs don't match direct IPs
+    opts = [
+      headers: headers,
+      receive_timeout: 5_000,
+      pool_timeout: 5_000,
+      retry: false,
+      connect_options: [
+        timeout: 3_000,
+        transport_opts: [verify: :verify_none]
+      ]
+    ]
+
+    case Req.get(test_url, opts) do
+      {:ok, %{status: 200}} ->
+        Logger.info("Plex connection OK: #{conn.uri}")
+        :ok
+
+      {:ok, %{status: status}} ->
+        Logger.info("Plex connection failed HTTP #{status}: #{conn.uri}")
+        :error
+
+      {:error, error} ->
+        Logger.info("Plex connection error: #{conn.uri} - #{inspect(error)}")
+        :error
+    end
+  rescue
+    e ->
+      Logger.info("Plex connection exception: #{conn.uri} - #{inspect(e)}")
+      :error
+  end
 
   defp test_client_connection(client_config) do
     alias Mydia.Downloads.Client.Registry

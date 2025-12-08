@@ -2785,120 +2785,165 @@ defmodule MydiaWeb.AdminConfigLive.Components do
 
   def media_servers_tab(assigns) do
     ~H"""
-    <div class="p-4 sm:p-6 space-y-4">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <h2 class="text-lg font-semibold flex items-center gap-2">
-          <.icon name="hero-server-stack" class="w-5 h-5 opacity-60" /> Media Servers
-          <span class="badge badge-ghost">{length(@media_servers)}</span>
-        </h2>
-        <button class="btn btn-sm btn-primary" phx-click="new_media_server">
-          <.icon name="hero-plus" class="w-4 h-4" /> New
+    <div class="p-4 sm:p-6 space-y-6">
+      <%!-- Header --%>
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-xl font-bold flex items-center gap-3">
+            <div class="bg-primary/10 p-2 rounded-lg">
+              <.icon name="hero-server-stack" class="w-6 h-6 text-primary" />
+            </div>
+            Media Servers
+            <span class="badge badge-lg badge-ghost font-normal">{length(@media_servers)}</span>
+          </h2>
+          <p class="text-sm text-base-content/60 mt-1 ml-14">
+            Connect to Plex or Jellyfin for automatic library updates
+          </p>
+        </div>
+        <button class="btn btn-primary gap-2" phx-click="new_media_server">
+          <.icon name="hero-plus" class="w-5 h-5" /> Add Server
         </button>
       </div>
 
       <%= if @media_servers == [] do %>
-        <div class="alert alert-info">
-          <.icon name="hero-information-circle" class="w-5 h-5" />
-          <span>
-            No media servers configured yet. Add Plex or Jellyfin to automatically
-            notify them when new content is imported.
-          </span>
+        <%!-- Empty State --%>
+        <div class="card bg-base-200 border border-base-300">
+          <div class="card-body items-center text-center py-12">
+            <div class="bg-base-300 p-4 rounded-full mb-4">
+              <.icon name="hero-server-stack" class="w-12 h-12 text-base-content/40" />
+            </div>
+            <h3 class="card-title text-base-content/80">No Media Servers Configured</h3>
+            <p class="text-base-content/60 max-w-md">
+              Connect your Plex or Jellyfin server to automatically update libraries when new content is imported.
+            </p>
+            <div class="card-actions mt-4">
+              <button class="btn btn-primary gap-2" phx-click="new_media_server">
+                <.icon name="hero-plus" class="w-5 h-5" /> Add Your First Server
+              </button>
+            </div>
+          </div>
         </div>
       <% else %>
-        <div class="bg-base-200 rounded-box divide-y divide-base-300">
+        <%!-- Server Cards Grid --%>
+        <div class="grid gap-4 md:grid-cols-2">
           <%= for server <- @media_servers do %>
             <% health = Map.get(@media_server_health, server.id, %{status: :unknown}) %>
             <% is_runtime = Settings.runtime_config?(server) %>
 
-            <div class="p-3 sm:p-4">
-              <div class="flex flex-col sm:flex-row sm:items-center gap-3">
-                <%!-- Server Info --%>
-                <div class="flex-1 min-w-0">
-                  <div class="font-semibold flex items-center gap-2 flex-wrap">
-                    {server.name}
-                    <%= if is_runtime do %>
-                      <span
-                        class="badge badge-primary badge-xs tooltip"
-                        data-tip="Configured via environment variables (read-only)"
-                      >
-                        <.icon name="hero-lock-closed" class="w-3 h-3" /> ENV
-                      </span>
-                    <% end %>
+            <div class={[
+              "card bg-base-100 border transition-all duration-200 hover:shadow-lg",
+              if(server.enabled,
+                do: "border-base-300 hover:border-primary/30",
+                else: "border-base-300/50 opacity-75"
+              )
+            ]}>
+              <div class="card-body p-4 gap-4">
+                <%!-- Top Row: Icon + Name + Status --%>
+                <div class="flex items-start gap-3">
+                  <%!-- Server Type Icon --%>
+                  <div class={[
+                    "p-3 rounded-xl shrink-0",
+                    media_server_type_bg_class(server.type)
+                  ]}>
+                    <.icon
+                      name={media_server_type_icon(server.type)}
+                      class={"w-6 h-6 #{media_server_type_icon_class(server.type)}"}
+                    />
                   </div>
-                  <div class="text-xs opacity-60 mt-1 truncate">
-                    <span class="font-mono">{server.url}</span>
+
+                  <%!-- Server Info --%>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <h3 class="font-semibold text-base truncate">{server.name}</h3>
+                      <%= if is_runtime do %>
+                        <span
+                          class="badge badge-primary badge-xs gap-1 tooltip cursor-help"
+                          data-tip="Configured via environment variables (read-only)"
+                        >
+                          <.icon name="hero-lock-closed" class="w-3 h-3" /> ENV
+                        </span>
+                      <% end %>
+                    </div>
+                    <div class="text-xs text-base-content/50 mt-0.5 font-mono truncate">
+                      {server.url}
+                    </div>
+                  </div>
+
+                  <%!-- Health Status Indicator --%>
+                  <div
+                    class={[
+                      "tooltip tooltip-left",
+                      health.status == :unhealthy && health[:error] && "cursor-help"
+                    ]}
+                    data-tip={
+                      if health.status == :unhealthy and health[:error],
+                        do: health.error,
+                        else: health_status_label(health.status)
+                    }
+                  >
+                    <div class={[
+                      "w-3 h-3 rounded-full",
+                      health_status_dot_class(health.status)
+                    ]}>
+                    </div>
                   </div>
                 </div>
 
-                <%!-- Status Badges + Actions row --%>
+                <%!-- Middle Row: Badges --%>
                 <div class="flex flex-wrap items-center gap-2">
-                  <%!-- Type Badge --%>
                   <span class={[
-                    "badge badge-sm badge-outline",
+                    "badge badge-sm gap-1",
                     media_server_type_badge_class(server.type)
                   ]}>
-                    <.icon name={media_server_type_icon(server.type)} class="w-3 h-3 mr-1" />
                     {media_server_type_label(server.type)}
                   </span>
-                  <%!-- Enabled Badge --%>
                   <span class={[
                     "badge badge-sm",
-                    if(server.enabled, do: "badge-success", else: "badge-ghost")
+                    if(server.enabled, do: "badge-success badge-outline", else: "badge-ghost")
                   ]}>
-                    {if server.enabled, do: "Enabled", else: "Disabled"}
+                    {if server.enabled, do: "Active", else: "Inactive"}
                   </span>
-                  <%!-- Health Badge --%>
-                  <span class={"badge badge-sm #{health_status_badge_class(health.status)}"}>
-                    <.icon name={health_status_icon(health.status)} class="w-3 h-3 mr-1" />
+                  <span class={[
+                    "badge badge-sm gap-1",
+                    health_status_badge_class(health.status)
+                  ]}>
+                    <.icon name={health_status_icon(health.status)} class="w-3 h-3" />
                     {health_status_label(health.status)}
                   </span>
-                  <%= if health.status == :unhealthy and health[:error] do %>
-                    <div class="tooltip tooltip-left" data-tip={health.error}>
-                      <.icon name="hero-information-circle" class="w-4 h-4 text-error" />
-                    </div>
-                  <% end %>
+                </div>
 
-                  <%!-- Actions --%>
-                  <div class="join ml-auto sm:ml-2">
+                <%!-- Bottom Row: Actions --%>
+                <div class="flex items-center justify-end gap-1 pt-2 border-t border-base-200">
+                  <button
+                    class="btn btn-sm btn-ghost gap-1"
+                    phx-click="test_media_server"
+                    phx-value-id={server.id}
+                  >
+                    <.icon name="hero-signal" class="w-4 h-4" /> Test
+                  </button>
+                  <%= if is_runtime do %>
+                    <div class="tooltip" data-tip="Cannot modify runtime-configured servers">
+                      <button class="btn btn-sm btn-ghost" disabled>
+                        <.icon name="hero-pencil" class="w-4 h-4 opacity-30" />
+                      </button>
+                    </div>
+                  <% else %>
                     <button
-                      class="btn btn-sm btn-ghost join-item"
-                      phx-click="test_media_server"
+                      class="btn btn-sm btn-ghost"
+                      phx-click="edit_media_server"
                       phx-value-id={server.id}
-                      title="Test Connection"
                     >
-                      <.icon name="hero-signal" class="w-4 h-4" />
+                      <.icon name="hero-pencil" class="w-4 h-4" />
                     </button>
-                    <%= if is_runtime do %>
-                      <div class="tooltip" data-tip="Cannot edit runtime-configured servers">
-                        <button class="btn btn-sm btn-ghost join-item" disabled>
-                          <.icon name="hero-pencil" class="w-4 h-4 opacity-30" />
-                        </button>
-                      </div>
-                      <div class="tooltip" data-tip="Cannot delete runtime-configured servers">
-                        <button class="btn btn-sm btn-ghost join-item" disabled>
-                          <.icon name="hero-trash" class="w-4 h-4 opacity-30" />
-                        </button>
-                      </div>
-                    <% else %>
-                      <button
-                        class="btn btn-sm btn-ghost join-item"
-                        phx-click="edit_media_server"
-                        phx-value-id={server.id}
-                        title="Edit"
-                      >
-                        <.icon name="hero-pencil" class="w-4 h-4" />
-                      </button>
-                      <button
-                        class="btn btn-sm btn-ghost join-item text-error"
-                        phx-click="delete_media_server"
-                        phx-value-id={server.id}
-                        data-confirm="Are you sure you want to delete this media server?"
-                        title="Delete"
-                      >
-                        <.icon name="hero-trash" class="w-4 h-4" />
-                      </button>
-                    <% end %>
-                  </div>
+                    <button
+                      class="btn btn-sm btn-ghost text-error hover:bg-error/10"
+                      phx-click="delete_media_server"
+                      phx-value-id={server.id}
+                      data-confirm="Are you sure you want to delete this media server?"
+                    >
+                      <.icon name="hero-trash" class="w-4 h-4" />
+                    </button>
+                  <% end %>
                 </div>
               </div>
             </div>
@@ -2915,16 +2960,58 @@ defmodule MydiaWeb.AdminConfigLive.Components do
   attr :media_server_form, :any, required: true
   attr :media_server_mode, :atom, required: true
   attr :testing_media_server_connection, :boolean, default: false
+  attr :plex_oauth_state, :atom, default: :idle
+  attr :plex_oauth_servers, :list, default: []
+  attr :plex_manual_entry, :boolean, default: false
+  attr :plex_selected_server, :map, default: nil
+  attr :plex_connection_statuses, :map, default: %{}
 
   def media_server_modal(assigns) do
+    # Get the current type from the form
+    current_type =
+      case Phoenix.HTML.Form.input_value(assigns.media_server_form, :type) do
+        nil -> nil
+        "" -> nil
+        type when is_atom(type) -> type
+        type when is_binary(type) -> String.to_existing_atom(type)
+      end
+
+    assigns = assign(assigns, :current_type, current_type)
+
     ~H"""
-    <div class="modal modal-open">
-      <div class="modal-box max-w-md">
-        <h3 class="font-bold text-lg mb-4">
-          {if @media_server_mode == :new,
-            do: "New Media Server",
-            else: "Edit Media Server"}
-        </h3>
+    <div class="modal modal-open" id="media-server-modal" phx-hook="PlexOAuth">
+      <div class="modal-box max-w-xl">
+        <%!-- Modal Header --%>
+        <div class="flex items-center gap-3 mb-6">
+          <div class={[
+            "p-2 rounded-lg",
+            if(@current_type, do: media_server_type_bg_class(@current_type), else: "bg-primary/10")
+          ]}>
+            <.icon
+              name={
+                if @current_type, do: media_server_type_icon(@current_type), else: "hero-server-stack"
+              }
+              class={"w-6 h-6 #{if @current_type, do: media_server_type_icon_class(@current_type), else: "text-primary"}"}
+            />
+          </div>
+          <div class="flex-1">
+            <h3 class="font-bold text-lg">
+              {if @media_server_mode == :new, do: "Add Media Server", else: "Edit Media Server"}
+            </h3>
+            <p class="text-sm text-base-content/60">
+              {if @media_server_mode == :new,
+                do: "Connect to Plex or Jellyfin",
+                else: "Update server configuration"}
+            </p>
+          </div>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm btn-circle"
+            phx-click="close_media_server_modal"
+          >
+            <.icon name="hero-x-mark" class="w-5 h-5" />
+          </button>
+        </div>
 
         <.form
           for={@media_server_form}
@@ -2932,60 +3019,384 @@ defmodule MydiaWeb.AdminConfigLive.Components do
           phx-change="validate_media_server"
           phx-submit="save_media_server"
         >
-          <div class="space-y-4">
-            <.input field={@media_server_form[:name]} type="text" label="Name" required />
-            <.input
-              field={@media_server_form[:type]}
-              type="select"
-              label="Type"
-              options={[
-                {"Plex", "plex"},
-                {"Jellyfin", "jellyfin"}
-              ]}
-              required
-            />
-            <.input
-              field={@media_server_form[:url]}
-              type="text"
-              label="URL"
-              placeholder="http://192.168.1.100:32400"
-              required
-            />
-            <p class="text-xs text-base-content/60 -mt-2">
-              The full URL to your media server (e.g., http://192.168.1.100:32400 for Plex)
-            </p>
-            <.input
-              field={@media_server_form[:token]}
-              type="password"
-              label="API Token"
-              required
-            />
-            <p class="text-xs text-base-content/60 -mt-2">
-              For Plex: X-Plex-Token. For Jellyfin: API Key from Dashboard > Advanced > API Keys
-            </p>
-            <.input field={@media_server_form[:enabled]} type="checkbox" label="Enabled" checked />
+          <div class="space-y-5">
+            <%!-- Basic Info Section --%>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <.input field={@media_server_form[:name]} type="text" label="Name" required />
+              <.input
+                field={@media_server_form[:type]}
+                type="select"
+                label="Type"
+                options={[
+                  {"Plex", "plex"},
+                  {"Jellyfin", "jellyfin"}
+                ]}
+                required
+              />
+            </div>
+
+            <%!-- Plex OAuth Section - only shown when Plex is selected and not in manual mode --%>
+            <%= if @current_type == :plex and not @plex_manual_entry do %>
+              <div class="card bg-gradient-to-br from-warning/5 to-warning/10 border border-warning/20">
+                <div class="card-body p-4">
+                  <%!-- OAuth Progress Steps --%>
+                  <ul class="steps steps-horizontal w-full text-xs mb-4">
+                    <li class={[
+                      "step",
+                      @plex_oauth_state in [
+                        :idle,
+                        :authorizing,
+                        :selecting_server,
+                        :selecting_connection,
+                        :complete,
+                        :error
+                      ] && "step-warning"
+                    ]}>
+                      Sign In
+                    </li>
+                    <li class={[
+                      "step",
+                      @plex_oauth_state in [:selecting_server, :selecting_connection, :complete] &&
+                        "step-warning"
+                    ]}>
+                      Server
+                    </li>
+                    <li class={[
+                      "step",
+                      @plex_oauth_state in [:selecting_connection, :complete] && "step-warning"
+                    ]}>
+                      Connection
+                    </li>
+                    <li class={["step", @plex_oauth_state == :complete && "step-warning"]}>Done</li>
+                  </ul>
+
+                  <%= case @plex_oauth_state do %>
+                    <% :idle -> %>
+                      <div class="text-center space-y-4 py-2">
+                        <div class="bg-warning/10 inline-flex p-3 rounded-full">
+                          <.icon name="hero-play-circle" class="w-8 h-8 text-warning" />
+                        </div>
+                        <div>
+                          <p class="font-medium">Sign in with Plex</p>
+                          <p class="text-sm text-base-content/60">
+                            Automatically discover and configure your server
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          class="btn btn-warning gap-2"
+                          phx-click="start_plex_oauth"
+                        >
+                          <.icon name="hero-arrow-right-end-on-rectangle" class="w-5 h-5" />
+                          Connect Plex Account
+                        </button>
+                        <div class="divider text-xs text-base-content/40 my-2">or enter manually</div>
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-sm gap-1"
+                          phx-click="toggle_plex_manual_entry"
+                        >
+                          <.icon name="hero-pencil-square" class="w-4 h-4" /> Enter token manually
+                        </button>
+                      </div>
+                    <% :authorizing -> %>
+                      <div class="text-center space-y-4 py-4">
+                        <span class="loading loading-ring loading-lg text-warning"></span>
+                        <div>
+                          <p class="font-medium">Waiting for authorization...</p>
+                          <p class="text-sm text-base-content/60">
+                            Complete the sign-in in the popup window
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-sm"
+                          phx-click="cancel_plex_oauth"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    <% :selecting_server -> %>
+                      <div class="space-y-3">
+                        <div class="flex items-center gap-2 text-success">
+                          <.icon name="hero-check-circle" class="w-5 h-5" />
+                          <span class="font-medium text-sm">Authenticated successfully</span>
+                        </div>
+                        <p class="text-sm text-base-content/70">Select your Plex server:</p>
+                        <div class="space-y-2 max-h-48 overflow-y-auto">
+                          <%= for server <- @plex_oauth_servers do %>
+                            <button
+                              type="button"
+                              class="card card-compact bg-base-100 border border-base-300 hover:border-warning/50 hover:shadow-md transition-all w-full cursor-pointer"
+                              phx-click="select_plex_server"
+                              phx-value-server_id={server.client_identifier}
+                            >
+                              <div class="card-body flex-row items-center gap-3 p-3">
+                                <div class={[
+                                  "p-2 rounded-lg",
+                                  if(server.presence, do: "bg-success/10", else: "bg-base-200")
+                                ]}>
+                                  <.icon
+                                    name="hero-server"
+                                    class={"w-5 h-5 #{if server.presence, do: "text-success", else: "text-base-content/40"}"}
+                                  />
+                                </div>
+                                <div class="flex-1 text-left">
+                                  <p class="font-medium">{server.name}</p>
+                                  <div class="flex gap-1 mt-0.5">
+                                    <%= if server.owned do %>
+                                      <span class="badge badge-xs badge-primary">owner</span>
+                                    <% end %>
+                                    <%= unless server.presence do %>
+                                      <span class="badge badge-xs badge-ghost">offline</span>
+                                    <% end %>
+                                  </div>
+                                </div>
+                                <.icon name="hero-chevron-right" class="w-5 h-5 text-base-content/40" />
+                              </div>
+                            </button>
+                          <% end %>
+                          <%= if @plex_oauth_servers == [] do %>
+                            <div class="alert alert-warning">
+                              <.icon name="hero-exclamation-triangle" class="w-5 h-5" />
+                              <span>No Plex servers found for this account.</span>
+                            </div>
+                          <% end %>
+                        </div>
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-sm gap-1"
+                          phx-click="cancel_plex_oauth"
+                        >
+                          <.icon name="hero-arrow-left" class="w-4 h-4" /> Start over
+                        </button>
+                      </div>
+                    <% :selecting_connection -> %>
+                      <div class="space-y-3">
+                        <div class="flex items-center gap-2 bg-base-100 rounded-lg p-2">
+                          <div class="bg-primary/10 p-2 rounded-lg">
+                            <.icon name="hero-server" class="w-5 h-5 text-primary" />
+                          </div>
+                          <span class="font-medium">{@plex_selected_server.name}</span>
+                        </div>
+                        <p class="text-sm text-base-content/70">Choose a connection:</p>
+                        <div class="space-y-2 max-h-48 overflow-y-auto">
+                          <% sorted_connections =
+                            Enum.sort_by(@plex_selected_server.connections, fn conn ->
+                              case Map.get(@plex_connection_statuses, conn.uri, :testing) do
+                                :ok -> 0
+                                :testing -> 1
+                                _ -> 2
+                              end
+                            end) %>
+                          <%= for conn <- sorted_connections do %>
+                            <% status = Map.get(@plex_connection_statuses, conn.uri, :testing) %>
+                            <button
+                              type="button"
+                              class={[
+                                "card card-compact bg-base-100 border w-full cursor-pointer transition-all",
+                                cond do
+                                  status == :ok ->
+                                    "border-success/50 hover:border-success hover:shadow-md"
+
+                                  status == :error ->
+                                    "border-error/30 opacity-50 cursor-not-allowed"
+
+                                  true ->
+                                    "border-base-300 hover:border-warning/50"
+                                end
+                              ]}
+                              phx-click="select_plex_connection"
+                              phx-value-url={conn.uri}
+                              disabled={status == :error}
+                            >
+                              <div class="card-body flex-row items-center gap-3 p-3">
+                                <%= case status do %>
+                                  <% :testing -> %>
+                                    <span class="loading loading-spinner loading-sm text-warning">
+                                    </span>
+                                  <% :ok -> %>
+                                    <div class="bg-success/10 p-1.5 rounded-lg">
+                                      <.icon name="hero-check-circle" class="w-4 h-4 text-success" />
+                                    </div>
+                                  <% _ -> %>
+                                    <div class="bg-error/10 p-1.5 rounded-lg">
+                                      <.icon name="hero-x-circle" class="w-4 h-4 text-error" />
+                                    </div>
+                                <% end %>
+                                <div class="flex-1 text-left min-w-0">
+                                  <p class="font-mono text-xs truncate">
+                                    {simplify_plex_url(conn.uri)}
+                                  </p>
+                                  <div class="flex gap-1 mt-1">
+                                    <%= if conn.local do %>
+                                      <span class="badge badge-xs badge-info gap-1">
+                                        <.icon name="hero-home" class="w-3 h-3" /> local
+                                      </span>
+                                    <% end %>
+                                    <%= if conn.relay do %>
+                                      <span class="badge badge-xs badge-warning gap-1">
+                                        <.icon name="hero-cloud" class="w-3 h-3" /> relay
+                                      </span>
+                                    <% end %>
+                                  </div>
+                                </div>
+                              </div>
+                            </button>
+                          <% end %>
+                        </div>
+                        <p class="text-xs text-base-content/50">
+                          <.icon name="hero-check-circle" class="w-3 h-3 inline text-success" />
+                          connections are reachable. Choose "local" if on same network.
+                        </p>
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-sm gap-1"
+                          phx-click="cancel_plex_oauth"
+                        >
+                          <.icon name="hero-arrow-left" class="w-4 h-4" /> Back to servers
+                        </button>
+                      </div>
+                    <% :complete -> %>
+                      <div class="text-center py-2">
+                        <div class="bg-success/10 inline-flex p-3 rounded-full mb-3">
+                          <.icon name="hero-check-circle" class="w-8 h-8 text-success" />
+                        </div>
+                        <p class="font-medium text-success">Configuration complete!</p>
+                        <p class="text-sm text-base-content/60">
+                          Review the details below and save.
+                        </p>
+                      </div>
+                    <% :error -> %>
+                      <div class="text-center space-y-4 py-2">
+                        <div class="bg-error/10 inline-flex p-3 rounded-full">
+                          <.icon name="hero-x-circle" class="w-8 h-8 text-error" />
+                        </div>
+                        <div>
+                          <p class="font-medium text-error">Authentication failed</p>
+                          <p class="text-sm text-base-content/60">Please try again</p>
+                        </div>
+                        <button
+                          type="button"
+                          class="btn btn-warning gap-2"
+                          phx-click="start_plex_oauth"
+                        >
+                          <.icon name="hero-arrow-path" class="w-4 h-4" /> Try Again
+                        </button>
+                      </div>
+                    <% _ -> %>
+                  <% end %>
+                </div>
+              </div>
+            <% end %>
+
+            <%!-- Manual entry fields - shown for Jellyfin, or Plex in manual mode, or after OAuth complete --%>
+            <%= if @current_type != :plex or @plex_manual_entry or @plex_oauth_state == :complete do %>
+              <div class="card bg-base-200/50 border border-base-300">
+                <div class="card-body p-4 gap-4">
+                  <div class="flex items-center gap-2 text-sm font-medium text-base-content/70">
+                    <.icon name="hero-link" class="w-4 h-4" /> Connection Details
+                  </div>
+
+                  <div class="space-y-4">
+                    <div>
+                      <.input
+                        field={@media_server_form[:url]}
+                        type="text"
+                        label="Server URL"
+                        placeholder={
+                          if @current_type == :plex,
+                            do: "http://192.168.1.100:32400",
+                            else: "http://192.168.1.100:8096"
+                        }
+                        required
+                      />
+                      <p class="text-xs text-base-content/50 mt-1 ml-1">
+                        <%= if @current_type == :plex do %>
+                          Full URL including port (default: 32400)
+                        <% else %>
+                          Full URL including port (default: 8096)
+                        <% end %>
+                      </p>
+                    </div>
+
+                    <div>
+                      <.input
+                        field={@media_server_form[:token]}
+                        type="password"
+                        label="API Token"
+                        required
+                      />
+                      <p class="text-xs text-base-content/50 mt-1 ml-1">
+                        <%= if @current_type == :plex do %>
+                          X-Plex-Token from your Plex account settings
+                        <% else %>
+                          API Key from Dashboard → Advanced → API Keys
+                        <% end %>
+                      </p>
+                    </div>
+                  </div>
+
+                  <%= if @current_type == :plex and @plex_manual_entry do %>
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-sm gap-1 self-start"
+                      phx-click="toggle_plex_manual_entry"
+                    >
+                      <.icon name="hero-arrow-left" class="w-4 h-4" /> Use Sign in with Plex instead
+                    </button>
+                  <% end %>
+                </div>
+              </div>
+            <% end %>
+
+            <%!-- Enable Toggle --%>
+            <div class="form-control">
+              <label class="label cursor-pointer justify-start gap-3 bg-base-200/50 rounded-lg p-3">
+                <input
+                  type="checkbox"
+                  name={@media_server_form[:enabled].name}
+                  checked={
+                    Phoenix.HTML.Form.input_value(@media_server_form, :enabled) in [true, "true"]
+                  }
+                  class="toggle toggle-success"
+                />
+                <div>
+                  <span class="label-text font-medium">Enable Server</span>
+                  <p class="text-xs text-base-content/60">
+                    Automatically notify server when new content is imported
+                  </p>
+                </div>
+              </label>
+            </div>
           </div>
 
-          <div class="modal-action">
-            <button type="button" class="btn" phx-click="close_media_server_modal">
+          <%!-- Modal Actions --%>
+          <div class="modal-action border-t border-base-200 pt-4 mt-6">
+            <button type="button" class="btn btn-ghost" phx-click="close_media_server_modal">
               Cancel
             </button>
+            <div class="flex-1"></div>
             <button
               type="button"
-              class="btn btn-secondary"
+              class="btn btn-outline gap-2"
               phx-click="test_media_server_connection"
               disabled={@testing_media_server_connection}
             >
               <%= if @testing_media_server_connection do %>
                 <span class="loading loading-spinner loading-sm"></span> Testing...
               <% else %>
-                <.icon name="hero-signal" class="w-4 h-4" /> Test Connection
+                <.icon name="hero-signal" class="w-4 h-4" /> Test
               <% end %>
             </button>
-            <button type="submit" class="btn btn-primary">Save</button>
+            <button type="submit" class="btn btn-primary gap-2">
+              <.icon name="hero-check" class="w-4 h-4" />
+              {if @media_server_mode == :new, do: "Add Server", else: "Save Changes"}
+            </button>
           </div>
         </.form>
       </div>
+      <div class="modal-backdrop bg-black/50" phx-click="close_media_server_modal"></div>
     </div>
     """
   end
@@ -2999,6 +3410,14 @@ defmodule MydiaWeb.AdminConfigLive.Components do
   defp media_server_type_badge_class(:jellyfin), do: "badge-info"
   defp media_server_type_badge_class(_), do: "badge-ghost"
 
+  defp media_server_type_bg_class(:plex), do: "bg-warning/10"
+  defp media_server_type_bg_class(:jellyfin), do: "bg-info/10"
+  defp media_server_type_bg_class(_), do: "bg-base-300"
+
+  defp media_server_type_icon_class(:plex), do: "text-warning"
+  defp media_server_type_icon_class(:jellyfin), do: "text-info"
+  defp media_server_type_icon_class(_), do: "text-base-content/60"
+
   defp media_server_type_label(:plex), do: "Plex"
   defp media_server_type_label(:jellyfin), do: "Jellyfin"
 
@@ -3006,6 +3425,11 @@ defmodule MydiaWeb.AdminConfigLive.Components do
     do: Atom.to_string(type) |> String.capitalize()
 
   defp media_server_type_label(type), do: to_string(type)
+
+  defp health_status_dot_class(:healthy), do: "bg-success animate-pulse"
+  defp health_status_dot_class(:unhealthy), do: "bg-error"
+  defp health_status_dot_class(:unknown), do: "bg-warning"
+  defp health_status_dot_class(_), do: "bg-base-content/30"
 
   defp humanize_field_name(name) when is_binary(name) do
     name
@@ -3084,4 +3508,37 @@ defmodule MydiaWeb.AdminConfigLive.Components do
   defp library_type_display(:books), do: "Books"
   defp library_type_display(:adult), do: "Adult"
   defp library_type_display(type), do: to_string(type)
+
+  # Simplify plex.direct URLs to show just the IP/host and port
+  # e.g., "https://10-1-1-5.abc123.plex.direct:32400" -> "(ssl) 10.1.1.5:32400"
+  defp simplify_plex_url(url) when is_binary(url) do
+    uri = URI.parse(url)
+
+    host =
+      case uri.host do
+        nil ->
+          url
+
+        host ->
+          if String.ends_with?(host, ".plex.direct") do
+            # Extract IP from plex.direct subdomain (e.g., "10-1-1-5.abc123.plex.direct")
+            case String.split(host, ".") do
+              [ip_part | _] ->
+                # Convert dashes to dots for IP addresses
+                String.replace(ip_part, "-", ".")
+
+              _ ->
+                host
+            end
+          else
+            host
+          end
+      end
+
+    port = uri.port || if uri.scheme == "https", do: 443, else: 80
+
+    "#{host}:#{port}"
+  end
+
+  defp simplify_plex_url(url), do: inspect(url)
 end

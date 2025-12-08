@@ -26,6 +26,7 @@ import { hooks as colocatedHooks } from "phoenix-colocated/mydia";
 import topbar from "../vendor/topbar";
 import VideoPlayer from "./hooks/video_player";
 import MusicPlayer from "./hooks/music_player";
+import PlexOAuth from "./hooks/plex_oauth";
 // Alpine.js for reactive UI components
 import Alpine from "alpinejs";
 import { videoPlayer } from "./alpine_components/video_player";
@@ -323,6 +324,7 @@ const liveSocket = new LiveSocket("/live", Socket, {
     DownloadFile,
     StickyToolbar,
     SpritePreview,
+    PlexOAuth,
   },
   // Preserve Alpine.js state across LiveView DOM patches
   dom: {

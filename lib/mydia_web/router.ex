@@ -91,6 +91,8 @@ defmodule MydiaWeb.Router do
       live "/music", MusicLive.Index, :index
       live "/music/albums/:id", MusicLive.Show, :show
       live "/music/artists/:id", MusicLive.ArtistShow, :show
+      live "/music/playlists", MusicLive.PlaylistIndex, :index
+      live "/music/playlists/:id", MusicLive.PlaylistShow, :show
       live "/books", BooksLive.Index, :index
       live "/books/:id", BooksLive.Show, :show
       live "/books/authors/:id", BooksLive.AuthorShow, :show
@@ -106,9 +108,9 @@ defmodule MydiaWeb.Router do
 
       # Playback routes
       live "/play/:type/:id", PlaybackLive.Show, :show
+      get "/covers/:id", CoverController, :show
 
-      # Guest request routes
-      live "/request/movie", RequestMediaLive.Index, :request_movie
+      # Guest request routes      live "/request/movie", RequestMediaLive.Index, :request_movie
       live "/request/series", RequestMediaLive.Index, :request_series
       live "/requests", MyRequestsLive.Index, :index
     end

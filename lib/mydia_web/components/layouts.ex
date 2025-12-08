@@ -102,44 +102,44 @@ defmodule MydiaWeb.Layouts do
           <nav class="flex-1 overflow-y-auto">
             <ul class="menu w-full space-y-1 px-2 py-4">
               <li>
-                <a href="/" class="active">
+                <.link navigate="/" class="active">
                   <.icon name="hero-home" class="w-5 h-5" /> Dashboard
-                </a>
+                </.link>
               </li>
               <li>
-                <a href="/movies">
+                <.link navigate="/movies">
                   <.icon name="hero-film" class="w-5 h-5" /> Movies
                   <span class="badge badge-sm">{@movie_count}</span>
-                </a>
+                </.link>
               </li>
               <li>
-                <a href="/tv">
+                <.link navigate="/tv">
                   <.icon name="hero-tv" class="w-5 h-5" /> TV Shows
                   <span class="badge badge-sm">{@tv_show_count}</span>
-                </a>
+                </.link>
               </li>
               <%= if MapSet.member?(@configured_library_types, :music) do %>
                 <li>
-                  <a href="/music">
+                  <.link navigate="/music">
                     <.icon name="hero-musical-note" class="w-5 h-5" /> Music
                     <span class="badge badge-sm">{@music_count}</span>
-                  </a>
+                  </.link>
                 </li>
               <% end %>
               <%= if MapSet.member?(@configured_library_types, :books) do %>
                 <li>
-                  <a href="/books">
+                  <.link navigate="/books">
                     <.icon name="hero-book-open" class="w-5 h-5" /> Books
                     <span class="badge badge-sm">{@books_count}</span>
-                  </a>
+                  </.link>
                 </li>
               <% end %>
               <%= if MapSet.member?(@configured_library_types, :adult) do %>
                 <li>
-                  <a href="/adult">
+                  <.link navigate="/adult">
                     <.icon name="hero-eye-slash" class="w-5 h-5" /> Adult
                     <span class="badge badge-sm">{@adult_count}</span>
-                  </a>
+                  </.link>
                 </li>
               <% end %>
 
@@ -148,25 +148,25 @@ defmodule MydiaWeb.Layouts do
               </li>
 
               <li>
-                <a href="/downloads">
+                <.link navigate="/downloads">
                   <.icon name="hero-arrow-down-tray" class="w-5 h-5" /> Downloads
                   <span class="badge badge-primary badge-sm">{@downloads_count}</span>
-                </a>
+                </.link>
               </li>
               <li>
-                <a href="/calendar">
+                <.link navigate="/calendar">
                   <.icon name="hero-calendar" class="w-5 h-5" /> Calendar
-                </a>
+                </.link>
               </li>
               <li>
-                <a href="/search">
+                <.link navigate="/search">
                   <.icon name="hero-magnifying-glass" class="w-5 h-5" /> Search
-                </a>
+                </.link>
               </li>
               <li>
-                <a href="/activity">
+                <.link navigate="/activity">
                   <.icon name="hero-clock" class="w-5 h-5" /> Activity
-                </a>
+                </.link>
               </li>
 
               <%= if @current_user && @current_user.role == "admin" do %>

@@ -13,7 +13,7 @@ defmodule Mydia.Library.MusicScanner do
 
   alias Mydia.{Music, Repo}
   alias Mydia.Music.{Artist, Album, Track}
-  alias Mydia.Library.Scanner
+  alias Mydia.Library.{Scanner, MusicMetadataEnricher}
   alias Mydia.Settings.LibraryPath
 
   @doc """
@@ -178,19 +178,38 @@ defmodule Mydia.Library.MusicScanner do
   defp find_or_create_artist(metadata) do
     artist_name = metadata.artist || "Unknown Artist"
 
-    # Try to find existing artist by name
-    case find_artist_by_name(artist_name) do
+    # Try to find existing artist by MBID first, then by name
+    artist =
+      if metadata.musicbrainz_artist_id do
+        Music.get_artist_by_musicbrainz(metadata.musicbrainz_artist_id)
+      end || find_artist_by_name(artist_name)
+
+    case artist do
       nil ->
         {:ok, artist} =
           Music.create_artist(%{
             name: artist_name,
-            sort_name: generate_sort_name(artist_name)
+            sort_name: generate_sort_name(artist_name),
+            musicbrainz_id: metadata.musicbrainz_artist_id
           })
+
+        # Trigger enrichment for new artist
+        Task.start(fn -> MusicMetadataEnricher.enrich_artist(artist) end)
 
         artist
 
       artist ->
-        artist
+        # If we found by name but have MBID now, update it
+        if is_nil(artist.musicbrainz_id) and metadata.musicbrainz_artist_id do
+          {:ok, updated} =
+            Music.update_artist(artist, %{musicbrainz_id: metadata.musicbrainz_artist_id})
+
+          # Trigger enrichment
+          Task.start(fn -> MusicMetadataEnricher.enrich_artist(updated) end)
+          updated
+        else
+          artist
+        end
     end
   end
 
@@ -205,8 +224,13 @@ defmodule Mydia.Library.MusicScanner do
   defp find_or_create_album(metadata, artist) do
     album_title = metadata.album || "Unknown Album"
 
-    # Try to find existing album by title and artist
-    case find_album_by_title_and_artist(album_title, artist.id) do
+    # Try to find existing album by MBID first, then by title and artist
+    album =
+      if metadata.musicbrainz_album_id do
+        Music.get_album_by_musicbrainz(metadata.musicbrainz_album_id)
+      end || find_album_by_title_and_artist(album_title, artist.id)
+
+    case album do
       nil ->
         {:ok, album} =
           Music.create_album(%{
@@ -214,13 +238,26 @@ defmodule Mydia.Library.MusicScanner do
             artist_id: artist.id,
             release_date: parse_release_date(metadata.date),
             genres: parse_genres(metadata.genre),
-            total_tracks: metadata.track_total
+            total_tracks: metadata.track_total,
+            musicbrainz_id: metadata.musicbrainz_album_id
           })
+
+        # Trigger enrichment for new album
+        Task.start(fn -> MusicMetadataEnricher.enrich_album(album, artist) end)
 
         album
 
       album ->
-        album
+        # Update MBID if missing
+        if is_nil(album.musicbrainz_id) and metadata.musicbrainz_album_id do
+          {:ok, updated} =
+            Music.update_album(album, %{musicbrainz_id: metadata.musicbrainz_album_id})
+
+          Task.start(fn -> MusicMetadataEnricher.enrich_album(updated, artist) end)
+          updated
+        else
+          album
+        end
     end
   end
 
@@ -250,15 +287,25 @@ defmodule Mydia.Library.MusicScanner do
             artist_id: artist.id,
             track_number: track_number,
             disc_number: disc_number,
-            duration: metadata.duration
+            duration: metadata.duration,
+            musicbrainz_id: metadata.musicbrainz_track_id
           })
 
         track
 
       track ->
-        # Update title if we now have better metadata
-        if track.title != track_title do
-          {:ok, updated} = Music.update_track(track, %{title: track_title})
+        updates = %{}
+
+        updates =
+          if track.title != track_title, do: Map.put(updates, :title, track_title), else: updates
+
+        updates =
+          if is_nil(track.musicbrainz_id) and metadata.musicbrainz_track_id,
+            do: Map.put(updates, :musicbrainz_id, metadata.musicbrainz_track_id),
+            else: updates
+
+        if map_size(updates) > 0 do
+          {:ok, updated} = Music.update_track(track, updates)
           updated
         else
           track
@@ -329,6 +376,12 @@ defmodule Mydia.Library.MusicScanner do
       sample_rate: audio_stream && parse_int(audio_stream["sample_rate"]),
       channels: audio_stream && audio_stream["channels"],
       codec: extract_audio_codec(audio_stream),
+
+      # MusicBrainz IDs
+      musicbrainz_artist_id: normalized_tags["musicbrainz_artistid"],
+      musicbrainz_album_id: normalized_tags["musicbrainz_albumid"],
+      musicbrainz_release_group_id: normalized_tags["musicbrainz_releasegroupid"],
+      musicbrainz_track_id: normalized_tags["musicbrainz_trackid"],
 
       # File info
       filename: Path.basename(file_path)

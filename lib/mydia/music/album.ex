@@ -16,6 +16,8 @@ defmodule Mydia.Music.Album do
     field :album_type, :string, default: "album"
     field :musicbrainz_id, :string
     field :cover_url, :string
+    field :cover_blob, :string
+    field :cover_source, :string
     field :genres, {:array, :string}, default: []
     field :total_tracks, :integer
     field :total_duration, :integer
@@ -39,6 +41,8 @@ defmodule Mydia.Music.Album do
       :album_type,
       :musicbrainz_id,
       :cover_url,
+      :cover_blob,
+      :cover_source,
       :genres,
       :total_tracks,
       :total_duration,

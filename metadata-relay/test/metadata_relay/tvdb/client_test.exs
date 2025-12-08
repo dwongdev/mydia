@@ -85,7 +85,8 @@ defmodule MetadataRelay.TVDB.ClientTest do
 
     test "passes query parameters correctly", %{auth_pid: auth_pid} do
       # The mock adapter handles any URL containing /v4/search
-      assert {:ok, _body} = Client.get("/search", auth_server: auth_pid, params: [query: "test", year: "2024"])
+      assert {:ok, _body} =
+               Client.get("/search", auth_server: auth_pid, params: [query: "test", year: "2024"])
     end
   end
 

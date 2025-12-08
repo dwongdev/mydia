@@ -44,27 +44,31 @@ defmodule MetadataRelay.TVDB.HandlerTest do
     test "searches for series by query" do
       auth_pid =
         setup_handler_test(%{
-          "/v4/search" => {200, %{"data" => [%{"id" => 123, "name" => "Breaking Bad", "type" => "series"}]}}
+          "/v4/search" =>
+            {200, %{"data" => [%{"id" => 123, "name" => "Breaking Bad", "type" => "series"}]}}
         })
 
       result = Handler.search(query: "Breaking Bad")
 
       GenServer.stop(auth_pid)
 
-      assert {:ok, %{"data" => [%{"id" => 123, "name" => "Breaking Bad", "type" => "series"}]}} = result
+      assert {:ok, %{"data" => [%{"id" => 123, "name" => "Breaking Bad", "type" => "series"}]}} =
+               result
     end
 
     test "searches with type filter" do
       auth_pid =
         setup_handler_test(%{
-          "/v4/search" => {200, %{"data" => [%{"id" => 456, "name" => "The Matrix", "type" => "movie"}]}}
+          "/v4/search" =>
+            {200, %{"data" => [%{"id" => 456, "name" => "The Matrix", "type" => "movie"}]}}
         })
 
       result = Handler.search(query: "Matrix", type: "movie")
 
       GenServer.stop(auth_pid)
 
-      assert {:ok, %{"data" => [%{"id" => 456, "name" => "The Matrix", "type" => "movie"}]}} = result
+      assert {:ok, %{"data" => [%{"id" => 456, "name" => "The Matrix", "type" => "movie"}]}} =
+               result
     end
 
     test "searches with year filter" do
@@ -98,14 +102,16 @@ defmodule MetadataRelay.TVDB.HandlerTest do
     test "retrieves series by ID" do
       auth_pid =
         setup_handler_test(%{
-          "/v4/series/81189" => {200, %{"data" => %{"id" => 81189, "name" => "Breaking Bad", "status" => "Ended"}}}
+          "/v4/series/81189" =>
+            {200, %{"data" => %{"id" => 81189, "name" => "Breaking Bad", "status" => "Ended"}}}
         })
 
       result = Handler.get_series("81189")
 
       GenServer.stop(auth_pid)
 
-      assert {:ok, %{"data" => %{"id" => 81189, "name" => "Breaking Bad", "status" => "Ended"}}} = result
+      assert {:ok, %{"data" => %{"id" => 81189, "name" => "Breaking Bad", "status" => "Ended"}}} =
+               result
     end
 
     test "handles series not found" do
@@ -263,7 +269,7 @@ defmodule MetadataRelay.TVDB.HandlerTest do
             {200,
              %{
                "data" => %{
-                 "id" => 123456,
+                 "id" => 123_456,
                  "name" => "Pilot",
                  "seasonNumber" => 1,
                  "episodeNumber" => 1
@@ -275,7 +281,7 @@ defmodule MetadataRelay.TVDB.HandlerTest do
 
       GenServer.stop(auth_pid)
 
-      assert {:ok, %{"data" => %{"id" => 123456, "name" => "Pilot"}}} = result
+      assert {:ok, %{"data" => %{"id" => 123_456, "name" => "Pilot"}}} = result
     end
   end
 
@@ -287,7 +293,7 @@ defmodule MetadataRelay.TVDB.HandlerTest do
             {200,
              %{
                "data" => %{
-                 "id" => 123456,
+                 "id" => 123_456,
                  "name" => "Pilot",
                  "characters" => [],
                  "translations" => []
@@ -299,7 +305,7 @@ defmodule MetadataRelay.TVDB.HandlerTest do
 
       GenServer.stop(auth_pid)
 
-      assert {:ok, %{"data" => %{"id" => 123456}}} = result
+      assert {:ok, %{"data" => %{"id" => 123_456}}} = result
     end
   end
 
@@ -311,7 +317,7 @@ defmodule MetadataRelay.TVDB.HandlerTest do
             {200,
              %{
                "data" => %{
-                 "id" => 789012,
+                 "id" => 789_012,
                  "type" => 1,
                  "thumbnail" => "https://artworks.thetvdb.com/banners/posters/81189-1.jpg"
                }
@@ -322,7 +328,7 @@ defmodule MetadataRelay.TVDB.HandlerTest do
 
       GenServer.stop(auth_pid)
 
-      assert {:ok, %{"data" => %{"id" => 789012, "type" => 1}}} = result
+      assert {:ok, %{"data" => %{"id" => 789_012, "type" => 1}}} = result
     end
 
     test "handles artwork not found" do

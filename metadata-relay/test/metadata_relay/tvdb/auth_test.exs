@@ -40,7 +40,9 @@ defmodule MetadataRelay.TVDB.AuthTest do
       # Using start (not start_link) to avoid exit propagation
       result = GenServer.start(Auth, [], name: :test_auth_fail)
 
-      assert {:error, {:authentication_failed, {:http_error, 401, %{"error" => "Invalid API key"}}}} = result
+      assert {:error,
+              {:authentication_failed, {:http_error, 401, %{"error" => "Invalid API key"}}}} =
+               result
     end
 
     test "fails to start with network error" do
@@ -192,7 +194,8 @@ defmodule MetadataRelay.TVDB.AuthTest do
       # Using start (not start_link) to avoid exit propagation
       result = GenServer.start(Auth, [], name: :test_403)
 
-      assert {:error, {:authentication_failed, {:http_error, 403, %{"error" => "Forbidden"}}}} = result
+      assert {:error, {:authentication_failed, {:http_error, 403, %{"error" => "Forbidden"}}}} =
+               result
     end
 
     test "handles 500 server error response" do
@@ -201,7 +204,9 @@ defmodule MetadataRelay.TVDB.AuthTest do
       # Using start (not start_link) to avoid exit propagation
       result = GenServer.start(Auth, [], name: :test_500)
 
-      assert {:error, {:authentication_failed, {:http_error, 500, %{"error" => "Internal Server Error"}}}} = result
+      assert {:error,
+              {:authentication_failed, {:http_error, 500, %{"error" => "Internal Server Error"}}}} =
+               result
     end
 
     test "handles unexpected response format" do
@@ -215,7 +220,8 @@ defmodule MetadataRelay.TVDB.AuthTest do
       result = GenServer.start(Auth, [], name: :test_unexpected_format)
 
       # Should fail because token is missing from response
-      assert {:error, {:authentication_failed, {:http_error, 200, %{"unexpected" => "format"}}}} = result
+      assert {:error, {:authentication_failed, {:http_error, 200, %{"unexpected" => "format"}}}} =
+               result
     end
   end
 end

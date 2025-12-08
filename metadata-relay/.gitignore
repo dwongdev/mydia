@@ -31,3 +31,7 @@ metadata_relay-*.tar
 
 # Docker volumes
 /data/
+
+# Nix artifacts
+.nix-hex/
+.nix-mix/

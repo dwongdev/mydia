@@ -74,13 +74,8 @@ defmodule MydiaWeb.MusicLive.Show do
     album = socket.assigns.album
     tracks = Enum.sort_by(album.tracks, &{&1.disc_number, &1.track_number})
 
-    case Music.add_tracks_to_playlist(playlist, tracks) do
-      {:ok, _} ->
-        {:noreply, put_flash(socket, :info, "Album added to #{playlist.name}")}
-
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to add album to playlist")}
-    end
+    {:ok, _} = Music.add_tracks_to_playlist(playlist, tracks)
+    {:noreply, put_flash(socket, :info, "Album added to #{playlist.name}")}
   end
 
   def handle_event(

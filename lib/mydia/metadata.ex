@@ -56,6 +56,8 @@ defmodule Mydia.Metadata do
 
     # Register metadata-relay as the primary provider
     Provider.Registry.register(:metadata_relay, Mydia.Metadata.Provider.Relay)
+    Provider.Registry.register(:music_relay, Mydia.Metadata.Provider.MusicRelay)
+    Provider.Registry.register(:open_library, Mydia.Metadata.Provider.OpenLibrary)
 
     # Additional providers will be registered as they are implemented
     # Provider.Registry.register(:tmdb, Mydia.Metadata.Provider.TMDB)
@@ -315,5 +317,75 @@ defmodule Mydia.Metadata do
     Cache.fetch("trending_tv_shows", fn ->
       fetch_trending(default_relay_config(), media_type: :tv_show)
     end)
+  end
+
+  @doc """
+  Gets the default music relay configuration.
+  """
+  def default_music_relay_config do
+    %{
+      type: :music_relay,
+      base_url: metadata_relay_url(),
+      options: %{
+        timeout: 30_000
+      }
+    }
+  end
+
+  @doc """
+  Gets the default book relay configuration.
+  """
+  def default_book_relay_config do
+    %{
+      type: :open_library,
+      base_url: metadata_relay_url(),
+      options: %{
+        timeout: 30_000
+      }
+    }
+  end
+
+  # Music Metadata Functions
+
+  def search_artist(%{type: type} = config, query, opts \\ []) when is_atom(type) do
+    with {:ok, provider} <- Provider.Registry.get_provider(type) do
+      provider.search_artist(config, query, opts)
+    end
+  end
+
+  def search_release(%{type: type} = config, query, opts \\ []) when is_atom(type) do
+    with {:ok, provider} <- Provider.Registry.get_provider(type) do
+      provider.search_release(config, query, opts)
+    end
+  end
+
+  def get_artist(%{type: type} = config, mbid) when is_atom(type) do
+    with {:ok, provider} <- Provider.Registry.get_provider(type) do
+      provider.get_artist(config, mbid)
+    end
+  end
+
+  def get_release(%{type: type} = config, mbid) when is_atom(type) do
+    with {:ok, provider} <- Provider.Registry.get_provider(type) do
+      provider.get_release(config, mbid)
+    end
+  end
+
+  def get_release_group(%{type: type} = config, mbid) when is_atom(type) do
+    with {:ok, provider} <- Provider.Registry.get_provider(type) do
+      provider.get_release_group(config, mbid)
+    end
+  end
+
+  def get_recording(%{type: type} = config, mbid) when is_atom(type) do
+    with {:ok, provider} <- Provider.Registry.get_provider(type) do
+      provider.get_recording(config, mbid)
+    end
+  end
+
+  def get_cover_art(%{type: type} = config, mbid) when is_atom(type) do
+    with {:ok, provider} <- Provider.Registry.get_provider(type) do
+      provider.get_cover_art(config, mbid)
+    end
   end
 end

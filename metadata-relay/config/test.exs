@@ -8,7 +8,8 @@ config :metadata_relay, MetadataRelayWeb.Endpoint,
   http: [port: 4002],
   server: false
 
-# Use in-memory database for tests
+# Use file-based SQLite database for tests
+# In-memory databases don't persist across connections, breaking mix ecto.migrate
 config :metadata_relay, MetadataRelay.Repo,
-  database: ":memory:",
-  pool_size: 1
+  database: Path.expand("../metadata_relay_test.db", __DIR__),
+  pool_size: 5

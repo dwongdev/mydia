@@ -35,3 +35,4 @@ metadata_relay-*.tar
 # Nix artifacts
 .nix-hex/
 .nix-mix/
+metadata_relay_test.db

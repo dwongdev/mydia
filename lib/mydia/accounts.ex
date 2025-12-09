@@ -125,9 +125,12 @@ defmodule Mydia.Accounts do
         |> Repo.insert()
 
       user ->
-        # Existing user - update with OIDC claims (never auto-promote existing users)
+        # Existing user - update with OIDC claims but preserve their role
+        # Role should only be changed via admin action, not OIDC login
+        attrs_without_role = Map.delete(attrs, :role)
+
         user
-        |> User.oidc_changeset(attrs)
+        |> User.oidc_changeset(attrs_without_role)
         |> Repo.update()
     end
   end

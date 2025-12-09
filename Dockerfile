@@ -84,8 +84,9 @@ LABEL org.opencontainers.image.title="Mydia" \
 
 # Install runtime dependencies including LSIO-compatible tools
 # libpq is needed for PostgreSQL connections at runtime
+# sqlite provides the sqlite3 CLI for database inspection
 RUN apk add --no-cache \
-    sqlite-libs \
+    sqlite \
     libpq \
     curl \
     ca-certificates \
@@ -112,6 +113,10 @@ COPY --from=builder --chown=mydia:mydia /app/_build/prod/rel/mydia ./
 # Copy entrypoint script
 COPY docker-entrypoint-prod.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
+
+# Copy CLI wrapper script
+COPY scripts/mydia-cli.sh /usr/local/bin/mydia-cli
+RUN chmod +x /usr/local/bin/mydia-cli
 
 # Set environment variables
 # DATABASE_TYPE is set to the value used at build time for proper adapter selection

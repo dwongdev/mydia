@@ -650,6 +650,45 @@ Configuration is loaded in this order (highest to lowest priority):
 3. **YAML File** - From `config/config.yml`
 4. **Schema Defaults** - Built-in defaults
 
+## 🔧 User Management
+
+Mydia provides CLI tools for managing users from the command line.
+
+### Production Container
+
+```bash
+# Enter the container
+docker exec -it mydia sh
+
+# List all users
+mydia-cli user list
+
+# List admins only
+mydia-cli user list --role=admin
+
+# Create a user
+mydia-cli user add user@example.com myuser --password=secret123 --role=admin
+
+# Delete a user
+mydia-cli user delete user@example.com
+
+# Reset password
+mydia-cli user reset-password admin --password=newpassword
+
+# Access SQLite database directly
+sqlite3 /config/mydia.db
+```
+
+### Development
+
+```bash
+# Same commands via ./dev wrapper
+./dev mix mydia.user list
+./dev mix mydia.user add user@example.com myuser --password=secret --role=admin
+./dev mix mydia.user delete user@example.com
+./dev mix mydia.user reset-password admin --password=newpass
+```
+
 ## 🔧 Development
 
 ### Local Setup

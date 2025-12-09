@@ -59,6 +59,11 @@ The `./dev` script automatically starts services if they're not running and prov
 - `./dev shell` - Open interactive shell in app container
 - `./dev logs -f` - Follow application logs
 
+### User management
+
+- **Development**: `./dev mix mydia.user <command>` (list, add, delete, reset-password)
+- **Production container**: `mydia-cli user <command>` (wraps the mix task via release eval)
+
 ### Git Guidelines
 
 **Working with uncommitted changes:**

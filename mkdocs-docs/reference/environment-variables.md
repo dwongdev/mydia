@@ -77,6 +77,7 @@ Configure additional libraries using numbered variables (`<N>` = 1, 2, 3, etc.):
 | `ENABLE_PLAYBACK` | Enable media playback controls and HLS streaming | `false` |
 | `ENABLE_CARDIGANN` | Enable native Cardigann indexer support | `true` |
 | `ENABLE_SUBTITLES` | Enable subtitle download and management | `false` |
+| `ENABLE_IMPORT_LISTS` | Enable import lists for syncing external lists (TMDB watchlists, popular, etc.) | `true` |
 
 ## Download Clients
 

@@ -98,6 +98,32 @@ mix phx.server
 
 Access at [http://localhost:4000](http://localhost:4000).
 
+## Nix Development Environment
+
+For users with [Nix](https://nixos.org/) installed:
+
+```bash
+# Enter development shell
+nix develop
+
+# First-time setup
+mix deps.get
+mix ecto.setup
+
+# Start server
+mix phx.server
+```
+
+The Nix development shell provides:
+
+- Elixir and Erlang
+- Node.js
+- SQLite
+- FFmpeg
+- All required build tools
+
+See [docs/nix.md](https://github.com/getmydia/mydia/blob/master/docs/nix.md) for full Nix development and NixOS deployment documentation.
+
 ## Configuration
 
 ### Custom Docker Compose

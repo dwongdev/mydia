@@ -17,6 +17,7 @@ A modern, self-hosted media management platform for tracking, organizing, and mo
 - **Multi-User System** - Built-in admin/guest roles with request approval workflow
 - **SSO Support** - Local authentication plus OIDC/OpenID Connect integration
 - **Release Calendar** - Track upcoming releases and monitor episodes
+- **Import Lists** - Sync external lists from TMDB (watchlists, popular, trending) to auto-add content (experimental)
 - **Modern Real-Time UI** - Phoenix LiveView with instant updates and responsive design
 
 ## Quick Start
@@ -94,6 +95,7 @@ For detailed setup instructions, see the [Getting Started Guide](getting-started
 | **Custom Formats** | Planned | Yes | Yes |
 | **Automatic Upgrades** | Planned | Yes | Yes |
 | **Media Server Integration** | Planned | Plex/Kodi/Jellyfin | Plex/Kodi/Jellyfin |
+| **List Import** | Experimental | Yes | Yes |
 | **Native Playback** | Experimental | No | No |
 | **Technology** | Elixir/Phoenix LiveView | .NET/React | .NET/React |
 | **Maturity** | Early development | Production-ready | Production-ready |

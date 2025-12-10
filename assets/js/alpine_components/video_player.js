@@ -57,6 +57,9 @@ export function videoPlayer() {
     hlsLevels: [],
     currentHlsLevel: -1, // -1 = auto
 
+    // Streaming mode: 'direct', 'remux', or 'transcode'
+    streamingMode: null,
+
     // === Initialization ===
 
     init() {
@@ -90,6 +93,21 @@ export function videoPlayer() {
         return `${this.hlsLevels[this.currentHlsLevel].height}p`;
       }
       return "Auto";
+    },
+
+    get streamingModeDisplay() {
+      switch (this.streamingMode) {
+        case "direct":
+          return "Direct";
+        case "remux":
+          return "Direct (Remux)";
+        case "hls_copy":
+          return "Direct (HLS)";
+        case "transcode":
+          return "Transcoding";
+        default:
+          return null;
+      }
     },
 
     // === UI Event Handlers ===
@@ -357,6 +375,10 @@ export function videoPlayer() {
       this.currentHlsLevel = level;
     },
 
+    setStreamingMode(mode) {
+      this.streamingMode = mode;
+    },
+
     showSkipIntro() {
       this.skipIntroVisible = true;
     },
@@ -410,11 +432,7 @@ export function videoPlayer() {
     updateTranscodingProgress(attempt, maxAttempts) {
       this.retryAttempt = attempt;
       this.maxRetries = maxAttempts;
-      if (attempt > 1) {
-        this.loadingMessage = `Preparing video... (attempt ${attempt} of ${maxAttempts})`;
-      } else {
-        this.loadingMessage = "Preparing video for playback...";
-      }
+      this.loadingMessage = "Preparing video for playback...";
     },
 
     showDirectPlayLoading() {

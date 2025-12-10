@@ -169,71 +169,212 @@ const VideoPlayer = {
       // Show generic loading initially
       this.alpine.showLoading();
 
-      // If we have a known duration from FFprobe metadata, set it immediately
-      // This ensures correct duration display for:
-      // - HLS streams during transcoding (duration grows as segments are added)
-      // - fMP4 remuxing (fragmented MP4 with empty_moov reports progressive duration)
-      console.log("[VideoPlayer] knownDuration from dataset:", this.knownDuration);
-      console.log("[VideoPlayer] alpine component:", this.alpine);
-      if (this.knownDuration && this.knownDuration > 0) {
-        console.log("[VideoPlayer] Setting known duration:", this.knownDuration);
-        this.alpine.duration = this.knownDuration;
-        this.alpine.hasKnownDuration = true;
-        this.alpine.hasMetadata = true;
-        console.log("[VideoPlayer] Alpine state after setting - duration:", this.alpine.duration, "hasKnownDuration:", this.alpine.hasKnownDuration);
-      } else {
-        console.log("[VideoPlayer] No known duration available, will use browser-reported duration");
-      }
-
-      // Fetch playback progress
+      // Fetch playback progress for saved position
       const progress = await this.fetchProgress();
       console.log("Fetched progress:", progress);
-
-      // Set video source
-      const streamUrl = `/api/v1/stream/${this.contentType}/${this.contentId}`;
-      console.log("Stream URL:", streamUrl);
-
-      // Setup video event listeners
-      this.setupVideoEventListeners();
 
       // Store saved position before we start loading
       this.savedPosition = progress.position_seconds || 0;
 
-      // Check if the stream URL redirects to HLS
-      // Make a HEAD request to detect HLS - allow redirect to follow
-      const response = await fetch(streamUrl, {
-        method: "HEAD",
-        credentials: "same-origin", // Include cookies for authentication
-      });
+      // Fetch streaming candidates from server
+      const candidatesResponse = await this.fetchCandidates();
+      console.log("[VideoPlayer] Candidates response:", candidatesResponse);
 
-      // Check the final URL after any redirects
-      const finalUrl = response.url;
-      console.log("Final stream URL:", finalUrl);
-
-      if (finalUrl && finalUrl.includes(".m3u8")) {
-        // This is an HLS stream (transcoding), use HLS.js
-        console.log("Detected HLS stream, using HLS.js");
-
-        // Show transcoding-specific loading message
-        this.alpine.showTranscodingLoading();
-
-        // Wait for playlist to be ready (handles race condition with FFmpeg)
-        await this.waitForPlaylist(finalUrl);
-
-        this.setupHLS(finalUrl);
-      } else if (response.ok) {
-        // Direct play (no transcoding)
-        console.log("Using direct play");
-        this.alpine.showDirectPlayLoading();
-        this.video.src = streamUrl;
+      // Set known duration from server metadata if available
+      if (candidatesResponse.metadata && candidatesResponse.metadata.duration > 0) {
+        const duration = candidatesResponse.metadata.duration;
+        console.log("[VideoPlayer] Setting known duration from candidates:", duration);
+        this.alpine.duration = duration;
+        this.alpine.hasKnownDuration = true;
+        this.alpine.hasMetadata = true;
+      } else if (this.knownDuration && this.knownDuration > 0) {
+        // Fallback to data attribute if candidates didn't provide duration
+        console.log("[VideoPlayer] Setting known duration from dataset:", this.knownDuration);
+        this.alpine.duration = this.knownDuration;
+        this.alpine.hasKnownDuration = true;
+        this.alpine.hasMetadata = true;
       } else {
-        // Error response
-        console.error("Stream endpoint returned error:", response.status);
-        this.alpine.showError(`Failed to load stream (${response.status})`);
+        console.log("[VideoPlayer] No known duration available, will use browser-reported duration");
       }
+
+      // Find the best candidate that this browser can play
+      const selectedCandidate = await this.selectBestCandidate(candidatesResponse.candidates);
+      console.log("[VideoPlayer] Selected candidate:", selectedCandidate);
+
+      if (!selectedCandidate) {
+        console.error("No compatible streaming candidate found");
+        this.alpine.showError("This video format is not supported by your browser.");
+        return;
+      }
+
+      // Setup video event listeners
+      this.setupVideoEventListeners();
+
+      // Build stream URL with selected strategy
+      const streamUrl = `/api/v1/stream/${this.contentType}/${this.contentId}?strategy=${selectedCandidate.strategy}`;
+      console.log("Stream URL with strategy:", streamUrl);
+
+      // Route to appropriate streaming method based on strategy
+      await this.startStreamWithStrategy(selectedCandidate, streamUrl);
     } catch (error) {
       console.error("Failed to initialize video player:", error);
       this.alpine.showError("Failed to load video. Please try again.");
+    }
+  },
+
+  // Fetch streaming candidates from the server
+  async fetchCandidates() {
+    const url = `/api/v1/stream/${this.contentType}/${this.contentId}/candidates`;
+    const response = await fetch(url, {
+      headers: { Accept: "application/json" },
+      credentials: "same-origin",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch candidates: ${response.status}`);
+    }
+
+    return await response.json();
+  },
+
+  // Select the best candidate that the browser can play
+  // Uses MediaCapabilities API with fallbacks to canPlayType
+  async selectBestCandidate(candidates) {
+    if (!candidates || candidates.length === 0) {
+      return null;
+    }
+
+    for (const candidate of candidates) {
+      console.log(`[VideoPlayer] Testing candidate: ${candidate.strategy} - ${candidate.mime}`);
+
+      // TRANSCODE always works (H.264 + AAC is universally supported)
+      if (candidate.strategy === "TRANSCODE") {
+        console.log("[VideoPlayer] Selecting TRANSCODE fallback");
+        return candidate;
+      }
+
+      // Test browser support using MediaCapabilities API (preferred) with canPlayType fallback
+      const isSupported = await this.checkBrowserSupport(candidate);
+      if (isSupported) {
+        console.log(`[VideoPlayer] Candidate supported: ${candidate.strategy}`);
+        return candidate;
+      }
+    }
+
+    // No supported candidate found - shouldn't happen if TRANSCODE is in the list
+    return null;
+  },
+
+  // Check if browser supports a streaming candidate
+  async checkBrowserSupport(candidate) {
+    const mime = candidate.mime;
+
+    // Try MediaCapabilities API first (most accurate, async)
+    if ('mediaCapabilities' in navigator) {
+      try {
+        const config = {
+          type: 'media-source', // For MSE-based playback
+          video: {
+            contentType: mime,
+            width: 1920, // Reasonable defaults
+            height: 1080,
+            bitrate: 10000000,
+            framerate: 30,
+          }
+        };
+
+        const result = await navigator.mediaCapabilities.decodingInfo(config);
+        console.log(`[VideoPlayer] MediaCapabilities for "${mime}":`, result);
+        if (result.supported) {
+          return true;
+        }
+      } catch (error) {
+        console.log(`[VideoPlayer] MediaCapabilities error for "${mime}":`, error);
+        // Fall through to other methods
+      }
+    }
+
+    // Try MediaSource.isTypeSupported (good for MSE playback)
+    if (typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported) {
+      const supported = MediaSource.isTypeSupported(mime);
+      console.log(`[VideoPlayer] MediaSource.isTypeSupported("${mime}") = ${supported}`);
+      if (supported) {
+        return true;
+      }
+    }
+
+    // Fallback to canPlayType (always available, less accurate)
+    const video = document.createElement("video");
+    if (video.canPlayType) {
+      const result = video.canPlayType(mime);
+      console.log(`[VideoPlayer] canPlayType("${mime}") = "${result}"`);
+      if (result === "probably" || result === "maybe") {
+        return true;
+      }
+    }
+
+    return false;
+  },
+
+  // Start streaming with the selected strategy
+  async startStreamWithStrategy(candidate, streamUrl) {
+    const strategy = candidate.strategy;
+
+    switch (strategy) {
+      case "DIRECT_PLAY":
+        console.log("Using direct play");
+        this.alpine.setStreamingMode("direct");
+        this.alpine.showDirectPlayLoading();
+        this.video.src = streamUrl;
+        break;
+
+      case "REMUX":
+        console.log("Using remux streaming");
+        this.alpine.setStreamingMode("remux");
+        this.alpine.showDirectPlayLoading();
+        this.video.src = streamUrl;
+        break;
+
+      case "HLS_COPY":
+      case "TRANSCODE":
+        // These strategies redirect to HLS
+        const streamingMode = strategy === "HLS_COPY" ? "hls_copy" : "transcode";
+        console.log(`Using ${streamingMode} via HLS`);
+        this.alpine.setStreamingMode(streamingMode);
+        this.alpine.showTranscodingLoading();
+
+        // Make a HEAD request to get the HLS playlist URL
+        const response = await fetch(streamUrl, {
+          method: "HEAD",
+          credentials: "same-origin",
+        });
+
+        const finalUrl = response.url;
+        console.log("Final HLS URL:", finalUrl);
+
+        if (finalUrl && finalUrl.includes(".m3u8")) {
+          // Wait for playlist to be ready (handles race condition with FFmpeg)
+          await this.waitForPlaylist(finalUrl);
+          this.setupHLS(finalUrl);
+        } else if (response.ok) {
+          // Server didn't redirect to HLS - might be direct/remux
+          const serverMode = response.headers.get("x-streaming-mode");
+          if (serverMode === "remux") {
+            this.alpine.setStreamingMode("remux");
+          } else {
+            this.alpine.setStreamingMode("direct");
+          }
+          this.alpine.showDirectPlayLoading();
+          this.video.src = streamUrl;
+        } else {
+          console.error("Stream endpoint returned error:", response.status);
+          this.alpine.showError(`Failed to load stream (${response.status})`);
+        }
+        break;
+
+      default:
+        console.error("Unknown streaming strategy:", strategy);
+        this.alpine.showError("Unknown streaming strategy");
     }
   },
 

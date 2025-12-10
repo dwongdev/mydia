@@ -199,11 +199,21 @@ defmodule MydiaWeb.Api.PlaybackController do
 
   Returns:
     - 200: Default empty progress (progress tracking not implemented for files)
+    - 404: Media file not found
   """
-  def show_file(conn, %{"id" => _media_file_id}) do
-    # For adult content files, we don't track playback progress
-    # Just return default empty progress
+  def show_file(conn, %{"id" => media_file_id}) do
+    alias Mydia.Library
+
+    # Verify the media file exists
+    _media_file = Library.get_media_file!(media_file_id)
+
+    # Return default progress (codec info is now provided by candidates API)
     json(conn, serialize_progress(nil))
+  rescue
+    Ecto.NoResultsError ->
+      conn
+      |> put_status(:not_found)
+      |> json(%{error: "Media file not found"})
   end
 
   @doc """

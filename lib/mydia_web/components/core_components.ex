@@ -687,6 +687,23 @@ defmodule MydiaWeb.CoreComponents do
             <span x-text="formattedDuration" class="text-white/60">0:00</span>
           </div>
 
+          <%!-- Streaming mode badge --%>
+          <div
+            x-show="streamingMode"
+            x-cloak
+            class="hidden sm:flex items-center ml-3"
+          >
+            <span
+              x-text="streamingModeDisplay"
+              x-bind:class="{
+                'bg-green-500/20 text-green-400 border-green-500/30': streamingMode !== 'transcode',
+                'bg-orange-500/20 text-orange-400 border-orange-500/30': streamingMode === 'transcode'
+              }"
+              class="px-2 py-0.5 text-xs font-medium rounded border"
+            >
+            </span>
+          </div>
+
           <div class="flex-1"></div>
 
           <%!-- Settings button --%>

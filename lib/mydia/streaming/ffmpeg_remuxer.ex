@@ -110,6 +110,7 @@ defmodule Mydia.Streaming.FfmpegRemuxer do
     conn =
       conn
       |> Plug.Conn.put_resp_content_type("video/mp4")
+      |> Plug.Conn.put_resp_header("x-streaming-mode", "remux")
       |> Plug.Conn.send_chunked(200)
 
     # Stream data from FFmpeg to the connection

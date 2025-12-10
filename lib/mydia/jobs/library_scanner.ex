@@ -15,7 +15,16 @@ defmodule Mydia.Jobs.LibraryScanner do
 
   require Logger
   alias Mydia.{Library, Settings, Repo, Metadata}
-  alias Mydia.Library.{MetadataMatcher, MetadataEnricher, FileAnalyzer, MusicScanner, BookScanner}
+
+  alias Mydia.Library.{
+    MetadataMatcher,
+    MetadataEnricher,
+    FileAnalyzer,
+    MusicScanner,
+    BookScanner,
+    AdultScanner
+  }
+
   alias Mydia.Library.FileParser.V2, as: FileParser
 
   @impl Oban.Worker
@@ -199,8 +208,11 @@ defmodule Mydia.Jobs.LibraryScanner do
       :books ->
         process_books_scan_result(library_path, scan_result)
 
+      :adult ->
+        process_adult_scan_result(library_path, scan_result)
+
       # Video-based library types use the standard video processing
-      type when type in [:movies, :series, :mixed, :adult] ->
+      type when type in [:movies, :series, :mixed] ->
         process_scan_result(library_path, scan_result)
 
       # Default to video processing for unknown types
@@ -286,6 +298,46 @@ defmodule Mydia.Jobs.LibraryScanner do
     error ->
       error_message = Exception.format(:error, error, __STACKTRACE__)
       Logger.error("Books library scan raised exception", error: error_message)
+      handle_scan_error(library_path, error_message)
+  end
+
+  defp process_adult_scan_result(library_path, scan_result) do
+    Logger.info("Processing adult library scan",
+      library_path_id: library_path.id,
+      files_found: length(scan_result.files)
+    )
+
+    result = AdultScanner.process_scan_result(library_path, scan_result)
+
+    # Update library path with success status
+    if updatable_library_path?(library_path) do
+      {:ok, _} =
+        Settings.update_library_path(library_path, %{
+          last_scan_at: DateTime.utc_now(),
+          last_scan_status: :success,
+          last_scan_error: nil
+        })
+    end
+
+    # Broadcast scan completed
+    Phoenix.PubSub.broadcast(
+      Mydia.PubSub,
+      "library_scanner",
+      {:library_scan_completed,
+       %{
+         library_path_id: library_path.id,
+         type: library_path.type,
+         new_files: result.new_files,
+         modified_files: result.modified_files,
+         deleted_files: result.deleted_files
+       }}
+    )
+
+    {:ok, result}
+  rescue
+    error ->
+      error_message = Exception.format(:error, error, __STACKTRACE__)
+      Logger.error("Adult library scan raised exception", error: error_message)
       handle_scan_error(library_path, error_message)
   end
 

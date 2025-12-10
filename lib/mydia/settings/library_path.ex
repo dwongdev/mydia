@@ -29,6 +29,8 @@ defmodule Mydia.Settings.LibraryPath do
     field :category_paths, :map, default: %{}
     # Enable/disable auto-organization for this library
     field :auto_organize, :boolean, default: false
+    # Enable/disable automatic record creation from discovered files
+    field :auto_import, :boolean, default: false
 
     belongs_to :quality_profile, Mydia.Settings.QualityProfile
     belongs_to :updated_by, Mydia.Accounts.User
@@ -54,7 +56,8 @@ defmodule Mydia.Settings.LibraryPath do
       :from_env,
       :disabled,
       :category_paths,
-      :auto_organize
+      :auto_organize,
+      :auto_import
     ])
     |> validate_required([:path, :type])
     |> validate_inclusion(:type, @path_types)

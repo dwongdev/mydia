@@ -92,30 +92,26 @@ defmodule MydiaWeb.MediaLive.Show.Components do
                 tabindex="0"
                 role="button"
                 class={[
-                  "btn btn-sm md:btn-md w-full justify-between",
+                  "btn btn-sm md:btn-md w-full",
                   @media_item.monitored && "btn-success",
                   !@media_item.monitored && "btn-ghost"
                 ]}
                 disabled={@applying_monitoring_preset}
               >
-                <div class="flex items-center gap-1">
-                  <%= if @applying_monitoring_preset do %>
-                    <span class="loading loading-spinner loading-xs"></span>
-                  <% else %>
-                    <.icon
-                      name={
-                        if @media_item.monitored, do: "hero-bookmark-solid", else: "hero-bookmark"
-                      }
-                      class="w-4 h-4 md:w-5 md:h-5"
-                    />
-                  <% end %>
-                  <span class="hidden sm:inline">
-                    {monitoring_preset_label(@media_item.monitoring_preset)}
-                  </span>
-                  <span class="sm:hidden">
-                    {short_monitoring_label(@media_item.monitoring_preset)}
-                  </span>
-                </div>
+                <%= if @applying_monitoring_preset do %>
+                  <span class="loading loading-spinner loading-xs"></span>
+                <% else %>
+                  <.monitoring_icon
+                    preset={@media_item.monitoring_preset}
+                    class="w-4 h-4 md:w-5 md:h-5"
+                  />
+                <% end %>
+                <span class="hidden sm:inline">
+                  {monitoring_preset_label(@media_item.monitoring_preset)}
+                </span>
+                <span class="sm:hidden">
+                  {short_monitoring_label(@media_item.monitoring_preset)}
+                </span>
                 <.icon name="hero-chevron-down" class="w-3 h-3 opacity-70" />
               </div>
               <ul
@@ -316,7 +312,7 @@ defmodule MydiaWeb.MediaLive.Show.Components do
         <button
           type="button"
           phx-click="show_delete_confirm"
-          class="btn btn-error btn-ghost btn-sm md:btn-md w-full justify-start"
+          class="btn btn-error btn-ghost btn-sm md:btn-md w-full"
         >
           <.icon name="hero-trash" class="w-4 h-4 md:w-5 md:h-5" />
           <span>Delete</span>
@@ -1037,4 +1033,37 @@ defmodule MydiaWeb.MediaLive.Show.Components do
   defp short_monitoring_label(:first_season), do: "S1"
   defp short_monitoring_label(:latest_season), do: "Latest"
   defp short_monitoring_label(:none), do: "None"
+
+  @doc """
+  Monitoring icon that shows different states:
+  - All: solid bookmark (fully monitored)
+  - None: outline bookmark (not monitored)
+  - Partial presets: half-filled bookmark effect
+  """
+  attr :preset, :atom, required: true
+  attr :class, :string, default: "w-5 h-5"
+
+  def monitoring_icon(%{preset: preset} = assigns) when preset in [nil, :all] do
+    ~H"""
+    <.icon name="hero-bookmark-solid" class={@class} />
+    """
+  end
+
+  def monitoring_icon(%{preset: :none} = assigns) do
+    ~H"""
+    <.icon name="hero-bookmark" class={@class} />
+    """
+  end
+
+  def monitoring_icon(assigns) do
+    # Partial monitoring: show a half-filled effect using stacked icons
+    ~H"""
+    <span class="relative inline-flex">
+      <.icon name="hero-bookmark" class={@class} />
+      <span class="absolute inset-0 overflow-hidden" style="clip-path: inset(50% 0 0 0);">
+        <.icon name="hero-bookmark-solid" class={@class} />
+      </span>
+    </span>
+    """
+  end
 end

@@ -74,6 +74,13 @@ const VideoPlayer = {
       ? parseFloat(this.el.dataset.knownDuration)
       : null;
 
+    console.log("[VideoPlayer] Hook mounted - dataset:", {
+      contentType: this.contentType,
+      contentId: this.contentId,
+      knownDuration: this.el.dataset.knownDuration,
+      parsedKnownDuration: this.knownDuration
+    });
+
     if (!this.video || !this.contentType || !this.contentId) {
       console.error(
         "VideoPlayer: Missing required elements or data attributes",
@@ -163,11 +170,19 @@ const VideoPlayer = {
       this.alpine.showLoading();
 
       // If we have a known duration from FFprobe metadata, set it immediately
-      // This ensures correct duration display for HLS streams during transcoding
+      // This ensures correct duration display for:
+      // - HLS streams during transcoding (duration grows as segments are added)
+      // - fMP4 remuxing (fragmented MP4 with empty_moov reports progressive duration)
+      console.log("[VideoPlayer] knownDuration from dataset:", this.knownDuration);
+      console.log("[VideoPlayer] alpine component:", this.alpine);
       if (this.knownDuration && this.knownDuration > 0) {
-        console.log("Using known duration from metadata:", this.knownDuration);
+        console.log("[VideoPlayer] Setting known duration:", this.knownDuration);
         this.alpine.duration = this.knownDuration;
+        this.alpine.hasKnownDuration = true;
         this.alpine.hasMetadata = true;
+        console.log("[VideoPlayer] Alpine state after setting - duration:", this.alpine.duration, "hasKnownDuration:", this.alpine.hasKnownDuration);
+      } else {
+        console.log("[VideoPlayer] No known duration available, will use browser-reported duration");
       }
 
       // Fetch playback progress

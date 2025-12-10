@@ -50,6 +50,9 @@ export function videoPlayer() {
     retryAttempt: 0,
     maxRetries: 0,
 
+    // Known duration from FFprobe (prevents browser from overriding with progressive duration)
+    hasKnownDuration: false,
+
     // HLS quality levels (populated by hook)
     hlsLevels: [],
     currentHlsLevel: -1, // -1 = auto
@@ -211,22 +214,50 @@ export function videoPlayer() {
 
     onLoadedMetadata(event) {
       this.hasMetadata = true;
-      this.duration = event.target.duration;
+      const browserDuration = event.target.duration;
+      console.log("[Alpine] onLoadedMetadata - browser duration:", browserDuration, "hasKnownDuration:", this.hasKnownDuration, "current duration:", this.duration);
+      // Only update duration from browser if we don't have a known duration from FFprobe
+      // AND the browser duration is valid (not Infinity, which happens with fMP4 streaming)
+      if (!this.hasKnownDuration && isFinite(browserDuration) && browserDuration > 0) {
+        console.log("[Alpine] onLoadedMetadata - updating duration to browser value:", browserDuration);
+        this.duration = browserDuration;
+      } else if (!this.hasKnownDuration) {
+        console.log("[Alpine] onLoadedMetadata - invalid browser duration, keeping current:", this.duration);
+      } else {
+        console.log("[Alpine] onLoadedMetadata - keeping known duration, ignoring browser value");
+      }
       this.loading = false;
     },
 
     onDurationChange(event) {
       // Update duration when it changes (important for HLS streams)
       const newDuration = event.target.duration;
+      console.log("[Alpine] onDurationChange - browser duration:", newDuration, "hasKnownDuration:", this.hasKnownDuration, "current duration:", this.duration);
       if (isFinite(newDuration) && newDuration > 0) {
-        // During transcoding, HLS reports incorrect/growing duration
-        // Only update if we don't have a known duration, or if the new duration
-        // is reasonably close to what we expect (within 5% for completed transcoding)
-        if (this.duration === 0 || !this.isTranscoding) {
+        // If we have a known duration from FFprobe metadata, don't let the browser
+        // override it. This is critical for:
+        // - HLS transcoding (duration grows as segments are added)
+        // - fMP4 remuxing (fragmented MP4 with empty_moov reports progressive duration)
+        if (this.hasKnownDuration) {
+          // Only update if the new duration is very close to known (within 1%)
+          // This allows for minor corrections while preventing confusing updates
+          const diff = Math.abs(newDuration - this.duration) / this.duration;
+          console.log("[Alpine] onDurationChange - hasKnownDuration=true, diff:", diff);
+          if (diff < 0.01) {
+            console.log("[Alpine] onDurationChange - diff < 1%, updating to:", newDuration);
+            this.duration = newDuration;
+          } else {
+            console.log("[Alpine] onDurationChange - diff >= 1%, keeping known duration:", this.duration);
+          }
+        } else {
+          // No known duration - accept browser updates
+          // For fMP4 remuxing without known duration, this will progressively update
+          // (not ideal, but better than showing 0 or Infinity)
+          console.log("[Alpine] onDurationChange - no known duration, updating to:", newDuration);
           this.duration = newDuration;
         }
-        // During transcoding, keep the known duration from metadata
-        // HLS duration changes as segments are added, which would be confusing
+      } else {
+        console.log("[Alpine] onDurationChange - invalid duration, ignoring:", newDuration);
       }
     },
 

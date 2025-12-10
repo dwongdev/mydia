@@ -243,6 +243,79 @@ const SpritePreview = {
   }
 };
 
+// Video preview hook - plays video preview on hover
+const VideoPreview = {
+  mounted() {
+    this.previewUrl = this.el.dataset.previewUrl;
+    this.video = this.el.querySelector("[data-preview-video]");
+    this.thumbnail = this.el.querySelector("[data-preview-thumbnail]");
+    this.progressBar = this.el.querySelector("[data-preview-progress]");
+
+    if (!this.video || !this.previewUrl) return;
+
+    // Set video source
+    this.video.src = this.previewUrl;
+    this.video.muted = true;
+    this.video.loop = true;
+    this.video.playsInline = true;
+    this.video.preload = "metadata";
+
+    // Update progress bar during playback
+    this.video.addEventListener("timeupdate", () => {
+      if (this.progressBar && this.video.duration) {
+        const progress = (this.video.currentTime / this.video.duration) * 100;
+        this.progressBar.style.width = `${progress}%`;
+      }
+    });
+
+    // Event listeners for hover
+    this.el.addEventListener("mouseenter", () => this.startPreview());
+    this.el.addEventListener("mouseleave", () => this.stopPreview());
+  },
+
+  startPreview() {
+    if (!this.video) return;
+
+    // Show video, hide thumbnail
+    if (this.thumbnail) {
+      this.thumbnail.style.opacity = "0";
+    }
+    this.video.style.opacity = "1";
+
+    // Reset and play
+    this.video.currentTime = 0;
+    this.video.play().catch(() => {
+      // Autoplay might be blocked, ignore errors
+    });
+  },
+
+  stopPreview() {
+    if (!this.video) return;
+
+    // Pause and reset
+    this.video.pause();
+    this.video.currentTime = 0;
+
+    // Hide video, show thumbnail
+    this.video.style.opacity = "0";
+    if (this.thumbnail) {
+      this.thumbnail.style.opacity = "1";
+    }
+
+    // Reset progress bar
+    if (this.progressBar) {
+      this.progressBar.style.width = "0%";
+    }
+  },
+
+  destroyed() {
+    if (this.video) {
+      this.video.pause();
+      this.video.src = "";
+    }
+  }
+};
+
 // Sticky toolbar hook - shows fixed toolbar when original scrolls out of view
 const StickyToolbar = {
   mounted() {
@@ -324,6 +397,7 @@ const liveSocket = new LiveSocket("/live", Socket, {
     DownloadFile,
     StickyToolbar,
     SpritePreview,
+    VideoPreview,
     PlexOAuth,
   },
   // Preserve Alpine.js state across LiveView DOM patches

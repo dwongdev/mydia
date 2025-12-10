@@ -193,7 +193,8 @@ defmodule Mydia.Streaming.CompatibilityTest do
       assert Compatibility.check_compatibility(media_file) == :needs_transcoding
     end
 
-    test "returns :needs_transcoding when audio_codec is nil" do
+    test "returns :direct_play when audio_codec is nil (video-only files are allowed)" do
+      # Videos without audio should still be playable if video codec is compatible
       media_file = %MediaFile{
         codec: "h264",
         audio_codec: nil,
@@ -201,7 +202,7 @@ defmodule Mydia.Streaming.CompatibilityTest do
         path: "/path/to/video.mp4"
       }
 
-      assert Compatibility.check_compatibility(media_file) == :needs_transcoding
+      assert Compatibility.check_compatibility(media_file) == :direct_play
     end
 
     test "returns :needs_transcoding when container is nil and path has no extension" do

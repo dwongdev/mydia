@@ -58,20 +58,26 @@ defmodule Mydia.Streaming.Compatibility do
   end
 
   # Determines if the given combination of container, video codec, and audio codec
-  # is compatible with modern browsers
+  # is compatible with modern browsers.
+  # Note: Videos without audio (nil audio_codec) are allowed if video is compatible.
   defp browser_compatible?(container, video_codec, audio_codec) do
     compatible_container?(container) and
       compatible_video_codec?(video_codec) and
-      compatible_audio_codec?(audio_codec)
+      audio_compatible_or_absent?(audio_codec)
   end
 
   # Determines if a file can be remuxed to fMP4 without transcoding.
   # This is possible when the codecs are browser-compatible but the container isn't.
+  # Note: Videos without audio (nil audio_codec) are allowed if video is compatible.
   defp remux_eligible?(container, video_codec, audio_codec) do
     remuxable_container?(container) and
       compatible_video_codec?(video_codec) and
-      compatible_audio_codec?(audio_codec)
+      audio_compatible_or_absent?(audio_codec)
   end
+
+  # Audio is considered compatible if it's a known compatible codec or if there's no audio track
+  defp audio_compatible_or_absent?(nil), do: true
+  defp audio_compatible_or_absent?(audio_codec), do: compatible_audio_codec?(audio_codec)
 
   # Containers that browsers can play directly
   defp compatible_container?(nil), do: false
@@ -209,7 +215,7 @@ defmodule Mydia.Streaming.Compatibility do
       not compatible_video_codec?(video_codec) ->
         "Incompatible video codec (#{video_codec || "unknown"})"
 
-      not compatible_audio_codec?(audio_codec) ->
+      not audio_compatible_or_absent?(audio_codec) ->
         "Incompatible audio codec (#{audio_codec || "unknown"})"
 
       not compatible_container?(container) ->

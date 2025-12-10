@@ -45,7 +45,8 @@ defmodule Mydia.Streaming.FfmpegRemuxer do
   require Logger
 
   @type remux_opts :: [
-          seek_seconds: number() | nil
+          seek_seconds: number() | nil,
+          duration: number() | nil
         ]
 
   @doc """
@@ -58,18 +59,24 @@ defmodule Mydia.Streaming.FfmpegRemuxer do
   ## Options
 
   - `:seek_seconds` - (optional) Start position in seconds for seeking
+  - `:duration` - (optional) Total duration in seconds. When provided, FFmpeg writes
+    the correct duration to the moov atom, preventing the browser from showing
+    progressively increasing duration during playback.
 
   ## Examples
 
       {:ok, port, os_pid} = FfmpegRemuxer.start_remux("/path/to/video.mkv")
 
       {:ok, port, os_pid} = FfmpegRemuxer.start_remux("/path/to/video.mkv", seek_seconds: 120)
+
+      {:ok, port, os_pid} = FfmpegRemuxer.start_remux("/path/to/video.mkv", duration: 7200.5)
   """
   @spec start_remux(String.t(), remux_opts()) :: {:ok, port(), integer()} | {:error, term()}
   def start_remux(input_path, opts \\ []) do
     seek_seconds = Keyword.get(opts, :seek_seconds)
+    duration = Keyword.get(opts, :duration)
 
-    args = build_ffmpeg_args(input_path, seek_seconds)
+    args = build_ffmpeg_args(input_path, seek_seconds, duration)
 
     Logger.info(
       "Starting fMP4 remux: #{input_path}" <>
@@ -138,7 +145,7 @@ defmodule Mydia.Streaming.FfmpegRemuxer do
   ## Private Functions
 
   # Build FFmpeg command arguments for fMP4 remuxing
-  defp build_ffmpeg_args(input_path, seek_seconds) do
+  defp build_ffmpeg_args(input_path, seek_seconds, duration) do
     # Base args - seek first for efficiency (input seeking)
     seek_args =
       if seek_seconds && seek_seconds > 0 do
@@ -151,6 +158,23 @@ defmodule Mydia.Streaming.FfmpegRemuxer do
 
     # Stream copy (no transcoding)
     codec_args = ["-c", "copy"]
+
+    # Duration args - tell FFmpeg the total duration so it writes correct metadata
+    # This prevents the browser from showing progressively increasing duration
+    duration_args =
+      if duration && duration > 0 do
+        # Use -t to specify output duration (accounts for any seek offset)
+        effective_duration =
+          if seek_seconds && seek_seconds > 0 do
+            max(0, duration - seek_seconds)
+          else
+            duration
+          end
+
+        ["-t", to_string(effective_duration)]
+      else
+        []
+      end
 
     # Fragmented MP4 output flags:
     # - frag_keyframe: Create new fragment at each keyframe (enables seeking)
@@ -166,7 +190,7 @@ defmodule Mydia.Streaming.FfmpegRemuxer do
       "pipe:1"
     ]
 
-    seek_args ++ input_args ++ codec_args ++ output_args
+    seek_args ++ input_args ++ codec_args ++ duration_args ++ output_args
   end
 
   # Start FFmpeg process using Port
@@ -218,6 +242,12 @@ defmodule Mydia.Streaming.FfmpegRemuxer do
           {:error, :closed} ->
             # Client disconnected
             Logger.debug("Client disconnected during fMP4 streaming")
+            stop_remux(port, os_pid)
+            conn
+
+          {:error, reason} ->
+            # Other errors (timeout, etc.)
+            Logger.warning("Chunk send failed: #{inspect(reason)}, stopping remux")
             stop_remux(port, os_pid)
             conn
         end

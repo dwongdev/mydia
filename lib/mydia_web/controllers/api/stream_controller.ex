@@ -3,9 +3,7 @@ defmodule MydiaWeb.Api.StreamController do
 
   alias Mydia.Library
   alias Mydia.Library.MediaFile
-  alias Mydia.Streaming.Compatibility
-  alias Mydia.Streaming.FfmpegRemuxer
-  alias Mydia.Streaming.{HlsSessionSupervisor, HlsSession}
+  alias Mydia.Streaming.{Codec, Compatibility, FfmpegRemuxer, HlsSession, HlsSessionSupervisor}
   alias MydiaWeb.Api.RangeHelper
 
   require Logger
@@ -134,14 +132,21 @@ defmodule MydiaWeb.Api.StreamController do
       {:ok, analysis} ->
         # Update the struct with extracted codec info (in-memory only for now)
         # We use the raw codec_name from FFprobe for compatibility checks
+        # Also update metadata with container format and duration for compatibility checks
+        updated_metadata =
+          (media_file.metadata || %{})
+          |> Map.put("container", analysis.container)
+          |> maybe_put_duration(analysis.duration)
+
         updated = %{
           media_file
-          | codec: normalize_codec_for_compat(analysis.codec),
-            audio_codec: normalize_audio_codec_for_compat(analysis.audio_codec)
+          | codec: Codec.normalize_video_codec(analysis.codec),
+            audio_codec: Codec.normalize_audio_codec(analysis.audio_codec),
+            metadata: updated_metadata
         }
 
         Logger.info(
-          "Extracted codec info: video=#{inspect(updated.codec)}, audio=#{inspect(updated.audio_codec)}"
+          "Extracted codec info: video=#{inspect(updated.codec)}, audio=#{inspect(updated.audio_codec)}, container=#{inspect(analysis.container)}, duration=#{inspect(analysis.duration)}"
         )
 
         # Also update in database for future requests
@@ -150,7 +155,8 @@ defmodule MydiaWeb.Api.StreamController do
             codec: updated.codec,
             audio_codec: updated.audio_codec,
             resolution: analysis.resolution,
-            bitrate: analysis.bitrate
+            bitrate: analysis.bitrate,
+            metadata: updated_metadata
           })
         end)
 
@@ -162,43 +168,46 @@ defmodule MydiaWeb.Api.StreamController do
     end
   end
 
-  defp maybe_extract_codec_info(media_file, _absolute_path), do: media_file
+  # Extract fresh duration if missing from metadata (needed for remuxing/transcoding)
+  defp maybe_extract_codec_info(media_file, absolute_path) do
+    # Even if codec info exists, we need to ensure duration is present for proper playback
+    case get_in(media_file.metadata || %{}, ["duration"]) do
+      nil ->
+        # Duration is missing - probe the file to get fresh duration
+        Logger.info("Duration missing for #{media_file.id}, extracting via FFprobe...")
+        extract_duration_only(media_file, absolute_path)
 
-  # Normalize codec names to raw format for compatibility checks
-  # FileAnalyzer returns "H.264 (Main)" but we need "h264" for compatibility
-  defp normalize_codec_for_compat(nil), do: nil
-
-  defp normalize_codec_for_compat(codec) do
-    normalized = String.downcase(codec)
-
-    cond do
-      String.contains?(normalized, "h.264") or String.contains?(normalized, "h264") -> "h264"
-      String.contains?(normalized, "h.265") or String.contains?(normalized, "hevc") -> "hevc"
-      String.contains?(normalized, "vp9") -> "vp9"
-      String.contains?(normalized, "av1") -> "av1"
-      String.contains?(normalized, "mpeg-4") or String.contains?(normalized, "mpeg4") -> "mpeg4"
-      String.contains?(normalized, "wmv") -> "wmv3"
-      true -> codec
+      _duration ->
+        # Duration already present
+        media_file
     end
   end
 
-  defp normalize_audio_codec_for_compat(nil), do: nil
+  # Extract only duration when other codec info is already present
+  defp extract_duration_only(media_file, absolute_path) do
+    case Mydia.Library.ThumbnailGenerator.get_duration(absolute_path) do
+      {:ok, duration} ->
+        updated_metadata =
+          (media_file.metadata || %{})
+          |> Map.put("duration", duration)
 
-  defp normalize_audio_codec_for_compat(codec) do
-    normalized = String.downcase(codec)
+        Logger.info("Extracted duration: #{duration}s for #{media_file.id}")
 
-    cond do
-      String.contains?(normalized, "aac") -> "aac"
-      String.contains?(normalized, "mp3") -> "mp3"
-      String.contains?(normalized, "opus") -> "opus"
-      String.contains?(normalized, "vorbis") -> "vorbis"
-      String.contains?(normalized, "ac3") or String.contains?(normalized, "ac-3") -> "ac3"
-      String.contains?(normalized, "dts") -> "dts"
-      String.contains?(normalized, "truehd") -> "truehd"
-      String.contains?(normalized, "flac") -> "flac"
-      true -> codec
+        # Update in database for future requests
+        spawn(fn ->
+          Library.update_media_file_scan(media_file, %{metadata: updated_metadata})
+        end)
+
+        %{media_file | metadata: updated_metadata}
+
+      {:error, reason} ->
+        Logger.warning("Failed to extract duration for #{media_file.id}: #{inspect(reason)}")
+        media_file
     end
   end
+
+  defp maybe_put_duration(metadata, nil), do: metadata
+  defp maybe_put_duration(metadata, duration), do: Map.put(metadata, "duration", duration)
 
   # Routes to appropriate streaming method based on file compatibility
   defp route_stream(conn, media_file, absolute_path) do
@@ -367,8 +376,13 @@ defmodule MydiaWeb.Api.StreamController do
   end
 
   # Stream file via fMP4 remuxing (for files with compatible codecs but incompatible container)
-  defp stream_file_remux(conn, _media_file, file_path) do
-    case FfmpegRemuxer.start_remux(file_path) do
+  defp stream_file_remux(conn, media_file, file_path) do
+    # Get duration - first try metadata, then probe fresh from file
+    duration = get_duration_for_remux(media_file, file_path)
+
+    Logger.info("Starting remux for #{file_path} with duration: #{inspect(duration)}")
+
+    case FfmpegRemuxer.start_remux(file_path, duration: duration) do
       {:ok, port, os_pid} ->
         # Stream the remuxed content to the client
         FfmpegRemuxer.stream_to_conn(conn, port, os_pid)
@@ -386,6 +400,25 @@ defmodule MydiaWeb.Api.StreamController do
         conn
         |> put_status(:internal_server_error)
         |> json(%{error: "Failed to start streaming"})
+    end
+  end
+
+  # Get duration for remuxing - try metadata first, then probe fresh
+  defp get_duration_for_remux(media_file, file_path) do
+    case get_in(media_file.metadata || %{}, ["duration"]) do
+      duration when is_number(duration) and duration > 0 ->
+        duration
+
+      _ ->
+        # Probe fresh from file
+        case Mydia.Library.ThumbnailGenerator.get_duration(file_path) do
+          {:ok, duration} when duration > 0 ->
+            Logger.info("Probed fresh duration: #{duration}s")
+            duration
+
+          _ ->
+            nil
+        end
     end
   end
 end

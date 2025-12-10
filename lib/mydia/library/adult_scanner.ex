@@ -238,7 +238,7 @@ defmodule Mydia.Library.AdultScanner do
           codec: metadata.codec,
           audio_codec: metadata.audio_codec,
           bitrate: metadata.bitrate,
-          duration: metadata.duration,
+          duration: truncate_duration(metadata.duration),
           hdr_format: metadata.hdr_format
         }
 
@@ -345,4 +345,8 @@ defmodule Mydia.Library.AdultScanner do
 
   defp clean_string(nil), do: nil
   defp clean_string(str), do: String.trim(str)
+
+  defp truncate_duration(nil), do: nil
+  defp truncate_duration(duration) when is_float(duration), do: trunc(duration)
+  defp truncate_duration(duration) when is_integer(duration), do: duration
 end

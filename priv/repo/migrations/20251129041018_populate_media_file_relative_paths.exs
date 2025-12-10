@@ -18,11 +18,10 @@ defmodule Mydia.Repo.Migrations.PopulateMediaFileRelativePaths do
   import Ecto.Query
 
   def up do
-    # Use the shared LibraryPathSync module to sync library paths (safe - uses LibraryPath schema)
-    alias Mydia.Library.LibraryPathSync
-
-    # 1. Sync runtime library paths to database
-    {:ok, %{synced: synced_count}} = LibraryPathSync.sync_from_runtime_config()
+    # 1. Sync runtime library paths to database using schema-less queries
+    # IMPORTANT: We cannot use LibraryPathSync here because it uses the compiled
+    # LibraryPath schema which may include columns added in later migrations.
+    synced_count = sync_library_paths_schemaless()
 
     IO.puts("""
 
@@ -145,5 +144,59 @@ defmodule Mydia.Repo.Migrations.PopulateMediaFileRelativePaths do
     file_path
     |> String.replace_prefix(library_path, "")
     |> String.trim_leading("/")
+  end
+
+  # Schema-less library path sync - only touches columns that exist at migration time
+  defp sync_library_paths_schemaless do
+    runtime_paths = get_runtime_library_paths()
+
+    Enum.reduce(runtime_paths, 0, fn {path, type}, count ->
+      # Check if path already exists (schema-less query)
+      existing =
+        from("library_paths",
+          where: [path: ^path],
+          select: [:id]
+        )
+        |> repo().one()
+
+      if existing do
+        # Already exists, skip
+        count
+      else
+        # Insert new library path with only columns that exist at this migration point
+        # Note: This migration runs after disabled and from_env columns are added
+        now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+        repo().insert_all("library_paths", [
+          %{
+            id: Ecto.UUID.generate(),
+            path: path,
+            type: Atom.to_string(type),
+            monitored: true,
+            from_env: true,
+            disabled: false,
+            inserted_at: now,
+            updated_at: now
+          }
+        ])
+
+        count + 1
+      end
+    end)
+  end
+
+  # Get library paths from runtime config (same logic as LibraryPathSync)
+  defp get_runtime_library_paths do
+    config = Application.get_env(:mydia, Mydia.Library, [])
+
+    movie_paths =
+      (config[:movie_paths] || [])
+      |> Enum.map(&{&1, :movies})
+
+    tv_paths =
+      (config[:tv_paths] || [])
+      |> Enum.map(&{&1, :series})
+
+    movie_paths ++ tv_paths
   end
 end

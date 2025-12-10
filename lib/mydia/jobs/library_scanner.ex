@@ -381,11 +381,22 @@ defmodule Mydia.Jobs.LibraryScanner do
       end)
 
     # Update modified files
-    Enum.each(changes.modified_files, fn {media_file, file_info} ->
-      Library.update_media_file(media_file, %{
-        size: file_info.size,
-        verified_at: DateTime.utc_now()
-      })
+    Enum.each(changes.modified_files, fn file_info ->
+      relative_path = Path.relative_to(file_info.path, library_path.path)
+
+      case Library.get_media_file_by_relative_path(library_path.id, relative_path) do
+        nil ->
+          Logger.warning("Modified file not found in database",
+            path: file_info.path,
+            relative_path: relative_path
+          )
+
+        media_file ->
+          Library.update_media_file(media_file, %{
+            size: file_info.size,
+            verified_at: DateTime.utc_now()
+          })
+      end
     end)
 
     # Delete removed files

@@ -69,12 +69,12 @@ Open http://localhost:4000 and create your admin account.
 
 Full documentation available at **[getmydia.github.io/mydia](https://getmydia.github.io/mydia)**
 
-- [Installation Guide](https://getmydia.github.io/mydia/getting-started/installation/)
-- [Configuration Reference](https://getmydia.github.io/mydia/reference/environment-variables/)
-- [Download Clients Setup](https://getmydia.github.io/mydia/user-guide/download-clients/)
-- [SSO/OIDC Setup](https://getmydia.github.io/mydia/advanced/oidc/)
-- [PostgreSQL Support](https://getmydia.github.io/mydia/advanced/postgresql/)
-- [Development Guide](https://getmydia.github.io/mydia/development/setup/)
+- [Installation Guide](https://getmydia.github.io/mydia/latest/getting-started/installation/)
+- [Configuration Reference](https://getmydia.github.io/mydia/latest/reference/environment-variables/)
+- [Download Clients Setup](https://getmydia.github.io/mydia/latest/user-guide/download-clients/)
+- [SSO/OIDC Setup](https://getmydia.github.io/mydia/latest/advanced/oidc/)
+- [PostgreSQL Support](https://getmydia.github.io/mydia/latest/advanced/postgresql/)
+- [Development Guide](https://getmydia.github.io/mydia/latest/development/setup/)
 
 ## Screenshots
 
@@ -91,7 +91,7 @@ Full documentation available at **[getmydia.github.io/mydia](https://getmydia.gi
 ./dev mix precommit      # Run all checks
 ```
 
-See the [Development Guide](https://getmydia.github.io/mydia/development/setup/) for details.
+See the [Development Guide](https://getmydia.github.io/mydia/latest/development/setup/) for details.
 
 ### Documentation
 

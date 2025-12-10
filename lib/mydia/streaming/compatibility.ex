@@ -160,8 +160,18 @@ defmodule Mydia.Streaming.Compatibility do
       String.contains?(normalized, "vorbis")
   end
 
-  # Extracts container format from metadata or file path
-  defp get_container_format(%MediaFile{metadata: metadata} = media_file) do
+  @doc """
+  Extracts the container format from a media file.
+
+  Tries in order:
+  1. `metadata["container"]`
+  2. `metadata["format_name"]` (first value if comma-separated)
+  3. File extension from absolute path
+
+  Returns "unknown" if none can be determined.
+  """
+  @spec get_container_format(MediaFile.t()) :: String.t()
+  def get_container_format(%MediaFile{metadata: metadata} = media_file) do
     # First try to get from metadata
     case metadata do
       %{"container" => container} when is_binary(container) ->

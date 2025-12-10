@@ -186,4 +186,206 @@ defmodule MydiaWeb.Api.StreamControllerTest do
       end
     end
   end
+
+  describe "GET /api/v1/stream/:content_type/:id/candidates" do
+    test "returns candidates for a movie with direct play compatible file", %{
+      conn: conn,
+      token: token
+    } do
+      # Create a test movie with H.264 + AAC (direct play compatible)
+      library_path = library_path_fixture()
+      File.mkdir_p!(library_path.path)
+      test_file_name = "movie_#{System.unique_integer([:positive])}.mp4"
+      test_file_path = Path.join(library_path.path, test_file_name)
+      File.write!(test_file_path, :crypto.strong_rand_bytes(1024 * 10))
+
+      media_item = media_item_fixture(%{type: "movie"})
+
+      _media_file =
+        media_file_fixture(%{
+          library_path_id: library_path.id,
+          relative_path: test_file_name,
+          media_item_id: media_item.id,
+          codec: "h264",
+          audio_codec: "aac",
+          metadata: %{"container" => "mp4", "duration" => 120.5}
+        })
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/v1/stream/movie/#{media_item.id}/candidates")
+
+      assert conn.status == 200
+      response = json_response(conn, 200)
+
+      assert is_list(response["candidates"])
+      assert length(response["candidates"]) >= 1
+
+      # First candidate should be DIRECT_PLAY for compatible file
+      first_candidate = List.first(response["candidates"])
+      assert first_candidate["strategy"] == "DIRECT_PLAY"
+      assert first_candidate["container"] == "mp4"
+      assert first_candidate["mime"] =~ "video/mp4"
+
+      # Metadata should be present
+      assert response["metadata"]["duration"] == 120.5
+      assert response["metadata"]["original_codec"] == "h264"
+      assert response["metadata"]["original_audio_codec"] == "aac"
+
+      # Clean up
+      File.rm!(test_file_path)
+    end
+
+    test "returns candidates for episode with HEVC (needs transcoding)", %{
+      conn: conn,
+      token: token
+    } do
+      # Create a test episode with HEVC (needs transcoding for most browsers)
+      # Need to use a series library type for episodes
+      library_path = library_path_fixture(%{type: :series})
+      File.mkdir_p!(library_path.path)
+      test_file_name = "episode_#{System.unique_integer([:positive])}.mkv"
+      test_file_path = Path.join(library_path.path, test_file_name)
+      File.write!(test_file_path, :crypto.strong_rand_bytes(1024 * 10))
+
+      media_item = media_item_fixture(%{type: "tv_show"})
+      episode = episode_fixture(%{media_item_id: media_item.id})
+
+      _media_file =
+        media_file_fixture(%{
+          library_path_id: library_path.id,
+          relative_path: test_file_name,
+          episode_id: episode.id,
+          codec: "hevc",
+          audio_codec: "aac",
+          metadata: %{"container" => "mkv", "duration" => 2400.0}
+        })
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/v1/stream/episode/#{episode.id}/candidates")
+
+      assert conn.status == 200
+      response = json_response(conn, 200)
+
+      assert is_list(response["candidates"])
+      assert length(response["candidates"]) >= 1
+
+      # Should have HLS_COPY candidates for native HEVC support (Safari)
+      # and TRANSCODE fallback
+      strategies = Enum.map(response["candidates"], & &1["strategy"])
+      assert "TRANSCODE" in strategies
+
+      # At least one candidate should have HEVC codec string
+      hevc_candidates =
+        Enum.filter(response["candidates"], fn c ->
+          c["video_codec"] && String.starts_with?(c["video_codec"], "hvc1")
+        end)
+
+      assert length(hevc_candidates) >= 1
+
+      # Transcode candidate should have H.264
+      transcode_candidate = Enum.find(response["candidates"], &(&1["strategy"] == "TRANSCODE"))
+      assert transcode_candidate["video_codec"] =~ "avc1"
+
+      # Clean up
+      File.rm!(test_file_path)
+    end
+
+    test "returns candidates for MKV with H.264 (needs remux)", %{
+      conn: conn,
+      token: token
+    } do
+      # Create a test movie with H.264 in MKV container (needs remux)
+      library_path = library_path_fixture()
+      File.mkdir_p!(library_path.path)
+      test_file_name = "remux_test_#{System.unique_integer([:positive])}.mkv"
+      test_file_path = Path.join(library_path.path, test_file_name)
+      File.write!(test_file_path, :crypto.strong_rand_bytes(1024 * 10))
+
+      media_item = media_item_fixture(%{type: "movie"})
+
+      _media_file =
+        media_file_fixture(%{
+          library_path_id: library_path.id,
+          relative_path: test_file_name,
+          media_item_id: media_item.id,
+          codec: "h264",
+          audio_codec: "aac",
+          metadata: %{"container" => "mkv"}
+        })
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/v1/stream/movie/#{media_item.id}/candidates")
+
+      assert conn.status == 200
+      response = json_response(conn, 200)
+
+      # First candidate should be REMUX (container conversion only)
+      first_candidate = List.first(response["candidates"])
+      assert first_candidate["strategy"] == "REMUX"
+      assert first_candidate["container"] == "mp4"
+
+      # Should also have HLS_COPY fallback
+      strategies = Enum.map(response["candidates"], & &1["strategy"])
+      assert "HLS_COPY" in strategies
+
+      # Clean up
+      File.rm!(test_file_path)
+    end
+
+    test "returns 404 for non-existent movie", %{conn: conn, token: token} do
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/v1/stream/movie/00000000-0000-0000-0000-000000000000/candidates")
+
+      assert conn.status == 404
+      assert json_response(conn, 404)["error"] == "movie not found"
+    end
+
+    test "returns 404 for non-existent episode", %{conn: conn, token: token} do
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/v1/stream/episode/00000000-0000-0000-0000-000000000000/candidates")
+
+      assert conn.status == 404
+      assert json_response(conn, 404)["error"] == "episode not found"
+    end
+
+    test "returns 400 for invalid content type", %{conn: conn, token: token} do
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/v1/stream/invalid/some-id/candidates")
+
+      assert conn.status == 400
+      assert json_response(conn, 400)["error"] =~ "Invalid content type"
+    end
+
+    test "returns 404 when movie has no media files", %{conn: conn, token: token} do
+      # Create a movie without any media files
+      media_item = media_item_fixture(%{type: "movie"})
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/v1/stream/movie/#{media_item.id}/candidates")
+
+      assert conn.status == 404
+      assert json_response(conn, 404)["error"] == "No media files available"
+    end
+
+    test "requires authentication", %{conn: conn} do
+      conn = get(conn, "/api/v1/stream/movie/some-id/candidates")
+
+      # Should get 401 Unauthorized or redirect to login
+      assert conn.status in [401, 302]
+    end
+  end
 end

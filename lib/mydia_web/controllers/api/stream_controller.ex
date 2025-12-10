@@ -3,7 +3,16 @@ defmodule MydiaWeb.Api.StreamController do
 
   alias Mydia.Library
   alias Mydia.Library.MediaFile
-  alias Mydia.Streaming.{Codec, Compatibility, FfmpegRemuxer, HlsSession, HlsSessionSupervisor}
+
+  alias Mydia.Streaming.{
+    Codec,
+    CodecString,
+    Compatibility,
+    FfmpegRemuxer,
+    HlsSession,
+    HlsSessionSupervisor
+  }
+
   alias MydiaWeb.Api.RangeHelper
 
   require Logger
@@ -88,6 +97,202 @@ defmodule MydiaWeb.Api.StreamController do
         |> put_status(:not_found)
         |> json(%{error: "Media file not found"})
     end
+  end
+
+  @doc """
+  Returns a prioritized list of streaming candidates for a media file.
+
+  The client should iterate through the candidates using browser APIs
+  (MediaCapabilities, MediaSource.isTypeSupported, canPlayType) to find
+  the first supported option, then use that strategy when calling the
+  stream endpoint.
+
+  ## Parameters
+
+  - content_type: "movie" or "episode"
+  - id: The media item ID or episode ID
+
+  ## Response
+
+  Returns JSON with candidates array and metadata:
+
+      {
+        "candidates": [
+          {
+            "strategy": "DIRECT_PLAY",
+            "mime": "video/mp4; codecs=\"avc1.640028, mp4a.40.2\"",
+            "container": "mp4",
+            "video_codec": "avc1.640028",
+            "audio_codec": "mp4a.40.2"
+          },
+          ...
+        ],
+        "metadata": {
+          "duration": 596.5,
+          "width": 1920,
+          "height": 1080,
+          "bitrate": 5000000
+        }
+      }
+  """
+  def candidates(conn, %{"content_type" => content_type, "id" => id}) do
+    result =
+      case content_type do
+        "movie" ->
+          try do
+            media_item =
+              Mydia.Media.get_media_item!(id, preload: [media_files: :library_path])
+
+            case media_item.media_files do
+              [media_file | _] -> {:ok, media_file}
+              [] -> {:error, :no_media_files}
+            end
+          rescue
+            Ecto.NoResultsError -> {:error, :not_found}
+          end
+
+        "episode" ->
+          try do
+            episode = Mydia.Media.get_episode!(id, preload: [media_files: :library_path])
+
+            case episode.media_files do
+              [media_file | _] -> {:ok, media_file}
+              [] -> {:error, :no_media_files}
+            end
+          rescue
+            Ecto.NoResultsError -> {:error, :not_found}
+          end
+
+        "file" ->
+          # Direct media file access by ID
+          try do
+            media_file = Library.get_media_file!(id, preload: [:library_path])
+            {:ok, media_file}
+          rescue
+            Ecto.NoResultsError -> {:error, :not_found}
+          end
+
+        _ ->
+          {:error, :invalid_content_type}
+      end
+
+    case result do
+      {:ok, media_file} ->
+        candidates_response(conn, media_file)
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{error: "#{content_type} not found"})
+
+      {:error, :no_media_files} ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{error: "No media files available"})
+
+      {:error, :invalid_content_type} ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{error: "Invalid content type. Use 'movie', 'episode', or 'file'"})
+    end
+  end
+
+  defp candidates_response(conn, media_file) do
+    # Ensure we have codec info (may need to extract on-the-fly)
+    absolute_path = MediaFile.absolute_path(media_file)
+
+    media_file =
+      if absolute_path && File.exists?(absolute_path) do
+        maybe_extract_codec_info(media_file, absolute_path)
+      else
+        media_file
+      end
+
+    # Generate streaming candidates
+    candidates = build_streaming_candidates(media_file)
+
+    # Build metadata response
+    metadata = build_metadata_response(media_file)
+
+    json(conn, %{
+      candidates: candidates,
+      metadata: metadata
+    })
+  end
+
+  defp build_streaming_candidates(media_file) do
+    compatibility = Compatibility.check_compatibility(media_file)
+    metadata = media_file.metadata || %{}
+    # Use the same container detection as compatibility check
+    container = Compatibility.get_container_format(media_file)
+
+    # Generate RFC 6381 codec strings
+    video_codec_str = CodecString.video_codec_string(media_file.codec, metadata)
+    audio_codec_str = CodecString.audio_codec_string(media_file.audio_codec, metadata)
+
+    # Get codec variants for browser testing
+    video_variants = CodecString.video_codec_variants(media_file.codec, metadata)
+
+    # Build prioritized candidate list based on compatibility
+    case compatibility do
+      :direct_play ->
+        # File can be played directly - offer direct play plus transcode fallback
+        [
+          build_candidate("DIRECT_PLAY", container, video_codec_str, audio_codec_str),
+          # Always include transcode fallback in case direct play fails
+          build_candidate("TRANSCODE", "ts", "avc1.640028", "mp4a.40.2")
+        ]
+
+      :needs_remux ->
+        # Codecs are compatible, just need container conversion to fMP4
+        [
+          build_candidate("REMUX", "mp4", video_codec_str, audio_codec_str),
+          build_candidate("HLS_COPY", "ts", video_codec_str, audio_codec_str),
+          build_candidate("TRANSCODE", "ts", "avc1.640028", "mp4a.40.2")
+        ]
+
+      :needs_transcoding ->
+        # Build candidates for browsers that might support the codec natively
+        # (e.g., Safari with HEVC) plus transcode fallback
+        native_candidates =
+          Enum.map(video_variants, fn video_variant ->
+            build_candidate("HLS_COPY", "ts", video_variant, audio_codec_str)
+          end)
+
+        # Add transcode fallback (always H.264 + AAC which all browsers support)
+        transcode_candidate =
+          build_candidate("TRANSCODE", "ts", "avc1.640028", "mp4a.40.2")
+
+        native_candidates ++ [transcode_candidate]
+    end
+  end
+
+  defp build_candidate(strategy, container, video_codec, audio_codec) do
+    mime = CodecString.build_mime_type(container, video_codec, audio_codec)
+
+    %{
+      strategy: strategy,
+      mime: mime,
+      container: container,
+      video_codec: video_codec,
+      audio_codec: audio_codec
+    }
+  end
+
+  defp build_metadata_response(media_file) do
+    metadata = media_file.metadata || %{}
+
+    %{
+      duration: metadata["duration"],
+      width: metadata["width"],
+      height: metadata["height"],
+      bitrate: media_file.bitrate,
+      resolution: media_file.resolution,
+      hdr_format: media_file.hdr_format,
+      original_codec: media_file.codec,
+      original_audio_codec: media_file.audio_codec,
+      container: metadata["container"]
+    }
   end
 
   # Main streaming function that handles a media file
@@ -209,10 +414,54 @@ defmodule MydiaWeb.Api.StreamController do
   defp maybe_put_duration(metadata, nil), do: metadata
   defp maybe_put_duration(metadata, duration), do: Map.put(metadata, "duration", duration)
 
-  # Routes to appropriate streaming method based on file compatibility
+  # Routes to appropriate streaming method based on client-selected strategy
+  # or falls back to auto-detection for backward compatibility
   defp route_stream(conn, media_file, absolute_path) do
+    # Check if client specified a strategy (new candidates-based approach)
+    strategy = conn.query_params["strategy"]
+
+    if strategy do
+      # Client has explicitly selected a strategy via candidates API
+      route_with_strategy(conn, media_file, absolute_path, strategy)
+    else
+      # Fallback to legacy auto-detection (for backward compatibility)
+      route_with_auto_detection(conn, media_file, absolute_path)
+    end
+  end
+
+  # Route based on client-selected strategy from candidates API
+  defp route_with_strategy(conn, media_file, absolute_path, strategy) do
+    Logger.info(
+      "Streaming #{absolute_path} with client-selected strategy: #{strategy} (codec: #{media_file.codec}/#{media_file.audio_codec})"
+    )
+
+    case strategy do
+      "DIRECT_PLAY" ->
+        stream_file_direct(conn, media_file, absolute_path)
+
+      "REMUX" ->
+        stream_file_remux(conn, media_file, absolute_path)
+
+      "HLS_COPY" ->
+        reason = "Client selected HLS with stream copy"
+        start_hls_session(conn, media_file, reason, :copy)
+
+      "TRANSCODE" ->
+        reason = "Client selected transcoding"
+        start_hls_session(conn, media_file, reason, :transcode)
+
+      _ ->
+        Logger.warning("Unknown strategy: #{strategy}, falling back to auto-detection")
+        route_with_auto_detection(conn, media_file, absolute_path)
+    end
+  end
+
+  # Legacy auto-detection based on compatibility check (for backward compatibility)
+  # New clients should use the candidates API with explicit strategy parameter
+  defp route_with_auto_detection(conn, media_file, absolute_path) do
     compatibility = Compatibility.check_compatibility(media_file)
-    Logger.info("Compatibility check for #{absolute_path}: #{compatibility}")
+
+    Logger.info("Auto-detecting stream method for #{absolute_path}: #{compatibility}")
 
     case compatibility do
       :direct_play ->
@@ -223,6 +472,7 @@ defmodule MydiaWeb.Api.StreamController do
         stream_file_direct(conn, media_file, absolute_path)
 
       :needs_remux ->
+        # Default to remux - modern browsers support fMP4
         reason = Compatibility.remux_reason(media_file)
 
         Logger.info(
@@ -232,18 +482,18 @@ defmodule MydiaWeb.Api.StreamController do
         stream_file_remux(conn, media_file, absolute_path)
 
       :needs_transcoding ->
+        # Default to transcoding for incompatible codecs
         reason = Compatibility.transcoding_reason(media_file)
 
         Logger.info(
           "File #{absolute_path} needs transcoding: #{reason} (codec: #{media_file.codec}, audio: #{media_file.audio_codec})"
         )
 
-        # Start HLS transcoding session
-        start_hls_session(conn, media_file, reason)
+        start_hls_session(conn, media_file, reason, :transcode)
     end
   end
 
-  defp start_hls_session(conn, media_file, reason) do
+  defp start_hls_session(conn, media_file, reason, hls_mode) do
     case get_user_id(conn) do
       {:ok, user_id} ->
         Logger.info("Starting HLS session for media_file_id=#{media_file.id}, user_id=#{user_id}")
@@ -255,11 +505,13 @@ defmodule MydiaWeb.Api.StreamController do
               {:ok, session_pid} ->
                 case HlsSession.get_info(session_pid) do
                   {:ok, session_info} ->
-                    # Construct master playlist URL (use relative path to preserve host)
-                    master_playlist_path = ~p"/api/v1/hls/#{session_info.session_id}/index.m3u8"
+                    # Construct master playlist URL with mode query param
+                    # mode=copy means stream copy (no re-encoding), mode=transcode means actual transcoding
+                    master_playlist_path =
+                      ~p"/api/v1/hls/#{session_info.session_id}/index.m3u8?mode=#{hls_mode}"
 
                     Logger.info(
-                      "HLS session started, redirecting to master playlist: #{master_playlist_path}"
+                      "HLS session started (#{hls_mode}), redirecting to master playlist: #{master_playlist_path}"
                     )
 
                     # Redirect to master playlist
@@ -355,6 +607,7 @@ defmodule MydiaWeb.Api.StreamController do
         |> put_resp_header("content-type", mime_type)
         |> put_resp_header("content-range", content_range)
         |> put_resp_header("content-length", to_string(length))
+        |> put_resp_header("x-streaming-mode", "direct")
         |> send_file(:partial_content, file_path, offset, length)
 
       :error when is_nil(range_header) ->
@@ -364,6 +617,7 @@ defmodule MydiaWeb.Api.StreamController do
         |> put_resp_header("accept-ranges", "bytes")
         |> put_resp_header("content-type", mime_type)
         |> put_resp_header("content-length", to_string(file_size))
+        |> put_resp_header("x-streaming-mode", "direct")
         |> send_file(:ok, file_path)
 
       :error ->
@@ -376,6 +630,15 @@ defmodule MydiaWeb.Api.StreamController do
   end
 
   # Stream file via fMP4 remuxing (for files with compatible codecs but incompatible container)
+  defp stream_file_remux(conn, _media_file, _file_path) when conn.method == "HEAD" do
+    # For HEAD requests, just return headers without starting the remux process
+    # This allows clients to detect the streaming mode without triggering FFmpeg
+    conn
+    |> put_resp_content_type("video/mp4")
+    |> put_resp_header("x-streaming-mode", "remux")
+    |> send_resp(200, "")
+  end
+
   defp stream_file_remux(conn, media_file, file_path) do
     # Get duration - first try metadata, then probe fresh from file
     duration = get_duration_for_remux(media_file, file_path)

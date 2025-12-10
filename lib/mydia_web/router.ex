@@ -176,6 +176,7 @@ defmodule MydiaWeb.Router do
     get "/stream/episode/:id", StreamController, :stream_episode
     get "/stream/file/:id", StreamController, :stream
     get "/stream/:id", StreamController, :stream
+    get "/stream/:content_type/:id/candidates", StreamController, :candidates
 
     # Playback progress
     get "/playback/movie/:id", PlaybackController, :show_movie

@@ -117,4 +117,69 @@ defmodule Mydia.LibraryTest do
                errors_on(changeset)
     end
   end
+
+  describe "list_media_ids_in_library_path/1" do
+    test "returns unique media item IDs from files in library path" do
+      unique_path = "/media/movies_#{System.unique_integer([:positive])}"
+      library_path = library_path_fixture(%{path: unique_path, type: "movies"})
+
+      # Create a media item
+      {:ok, media_item} =
+        Mydia.Media.create_media_item(%{
+          type: "movie",
+          title: "Test Movie",
+          year: 2024
+        })
+
+      # Create media files for this media item
+      {:ok, _file1} =
+        Library.create_media_file(%{
+          relative_path: "Test Movie/movie.mp4",
+          library_path_id: library_path.id,
+          media_item_id: media_item.id,
+          size: 1_000_000
+        })
+
+      {:ok, _file2} =
+        Library.create_media_file(%{
+          relative_path: "Test Movie/movie.srt",
+          library_path_id: library_path.id,
+          media_item_id: media_item.id,
+          size: 50_000
+        })
+
+      # Get media IDs for this library path
+      media_ids = Library.list_media_ids_in_library_path(library_path)
+
+      # Should return the media item ID once (not duplicated)
+      assert length(media_ids) == 1
+      assert hd(media_ids) == media_item.id
+    end
+
+    test "returns empty list when no files in library path" do
+      unique_path = "/media/empty_#{System.unique_integer([:positive])}"
+      library_path = library_path_fixture(%{path: unique_path, type: "movies"})
+
+      media_ids = Library.list_media_ids_in_library_path(library_path)
+
+      assert media_ids == []
+    end
+
+    test "excludes files without media_item_id" do
+      unique_path = "/media/orphaned_#{System.unique_integer([:positive])}"
+      library_path = library_path_fixture(%{path: unique_path, type: "movies"})
+
+      # Create orphaned file (no media_item_id)
+      {:ok, _orphaned_file} =
+        Library.create_scanned_media_file(%{
+          relative_path: "orphaned.mp4",
+          library_path_id: library_path.id,
+          size: 1_000_000
+        })
+
+      media_ids = Library.list_media_ids_in_library_path(library_path)
+
+      assert media_ids == []
+    end
+  end
 end

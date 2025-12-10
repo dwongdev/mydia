@@ -1568,6 +1568,7 @@ defmodule Mydia.Settings do
       if is_struct(runtime_config) and Map.has_key?(runtime_config, :media) and
            runtime_config.media.movies_path do
         movies_path = runtime_config.media.movies_path
+        movies_auto_organize = Map.get(runtime_config.media, :movies_auto_organize, false)
 
         # Only add if not already in library_paths
         if Enum.any?(paths, &(&1.path == movies_path)) do
@@ -1585,6 +1586,7 @@ defmodule Mydia.Settings do
               last_scan_error: nil,
               quality_profile_id: nil,
               updated_by_id: nil,
+              auto_organize: movies_auto_organize,
               inserted_at: nil,
               updated_at: nil
             }
@@ -1600,6 +1602,7 @@ defmodule Mydia.Settings do
       if is_struct(runtime_config) and Map.has_key?(runtime_config, :media) and
            runtime_config.media.tv_path do
         tv_path = runtime_config.media.tv_path
+        tv_auto_organize = Map.get(runtime_config.media, :tv_auto_organize, false)
 
         # Only add if not already in library_paths
         if Enum.any?(paths, &(&1.path == tv_path)) do
@@ -1617,6 +1620,7 @@ defmodule Mydia.Settings do
               last_scan_error: nil,
               quality_profile_id: nil,
               updated_by_id: nil,
+              auto_organize: tv_auto_organize,
               inserted_at: nil,
               updated_at: nil
             }

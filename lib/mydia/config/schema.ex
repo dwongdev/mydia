@@ -44,6 +44,8 @@ defmodule Mydia.Config.Schema do
     embeds_one :media, Media, on_replace: :update, primary_key: false do
       field :movies_path, :string, default: "/media/movies"
       field :tv_path, :string, default: "/media/tv"
+      field :movies_auto_organize, :boolean, default: false
+      field :tv_auto_organize, :boolean, default: false
       field :scan_interval_hours, :integer, default: 1
       field :auto_search_on_add, :boolean, default: true
       field :monitor_by_default, :boolean, default: true
@@ -208,6 +210,8 @@ defmodule Mydia.Config.Schema do
     |> cast(attrs, [
       :movies_path,
       :tv_path,
+      :movies_auto_organize,
+      :tv_auto_organize,
       :scan_interval_hours,
       :auto_search_on_add,
       :monitor_by_default

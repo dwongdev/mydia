@@ -2399,6 +2399,178 @@ defmodule Mydia.SettingsTest do
     end
   end
 
+  describe "library path category paths" do
+    test "can create library path with category_paths and auto_organize" do
+      {:ok, library_path} =
+        Settings.create_library_path(%{
+          path: "/media/movies_#{System.unique_integer([:positive])}",
+          type: :movies,
+          monitored: true,
+          auto_organize: true,
+          category_paths: %{
+            "anime_movie" => "Anime",
+            "cartoon_movie" => "Animated"
+          }
+        })
+
+      assert library_path.auto_organize == true
+
+      assert library_path.category_paths == %{
+               "anime_movie" => "Anime",
+               "cartoon_movie" => "Animated"
+             }
+    end
+
+    test "defaults auto_organize to false" do
+      {:ok, library_path} =
+        Settings.create_library_path(%{
+          path: "/media/movies_#{System.unique_integer([:positive])}",
+          type: :movies,
+          monitored: true
+        })
+
+      assert library_path.auto_organize == false
+      assert library_path.category_paths == %{}
+    end
+
+    test "validates category_paths keys are valid MediaCategory values" do
+      {:error, changeset} =
+        Settings.create_library_path(%{
+          path: "/media/movies_#{System.unique_integer([:positive])}",
+          type: :movies,
+          monitored: true,
+          category_paths: %{
+            "invalid_category" => "Invalid"
+          }
+        })
+
+      assert changeset.errors[:category_paths] != nil
+      {message, _} = changeset.errors[:category_paths]
+      assert message =~ "invalid category keys"
+      assert message =~ "invalid_category"
+    end
+
+    test "accepts all valid MediaCategory keys in category_paths" do
+      valid_categories = %{
+        "movie" => "Movies",
+        "anime_movie" => "Anime Movies",
+        "cartoon_movie" => "Cartoon Movies",
+        "tv_show" => "TV Shows",
+        "anime_series" => "Anime Series",
+        "cartoon_series" => "Cartoon Series"
+      }
+
+      {:ok, library_path} =
+        Settings.create_library_path(%{
+          path: "/media/all_categories_#{System.unique_integer([:positive])}",
+          type: :mixed,
+          monitored: true,
+          category_paths: valid_categories
+        })
+
+      assert library_path.category_paths == valid_categories
+    end
+
+    test "can update library path with category_paths" do
+      {:ok, library_path} =
+        Settings.create_library_path(%{
+          path: "/media/movies_#{System.unique_integer([:positive])}",
+          type: :movies,
+          monitored: true
+        })
+
+      {:ok, updated} =
+        Settings.update_library_path(library_path, %{
+          auto_organize: true,
+          category_paths: %{"anime_movie" => "Anime"}
+        })
+
+      assert updated.auto_organize == true
+      assert updated.category_paths == %{"anime_movie" => "Anime"}
+    end
+  end
+
+  describe "LibraryPath.resolve_category_path/3" do
+    alias Mydia.Settings.LibraryPath
+
+    test "returns category-specific path when auto_organize is enabled and category is configured" do
+      library = %LibraryPath{
+        path: "/media/movies",
+        category_paths: %{"anime_movie" => "Anime"},
+        auto_organize: true
+      }
+
+      result = LibraryPath.resolve_category_path(library, :anime_movie, "Spirited Away (2001)")
+      assert result == "/media/movies/Anime/Spirited Away (2001)"
+    end
+
+    test "returns default path when auto_organize is disabled" do
+      library = %LibraryPath{
+        path: "/media/movies",
+        category_paths: %{"anime_movie" => "Anime"},
+        auto_organize: false
+      }
+
+      result = LibraryPath.resolve_category_path(library, :anime_movie, "Spirited Away (2001)")
+      assert result == "/media/movies/Spirited Away (2001)"
+    end
+
+    test "returns default path when category is not configured" do
+      library = %LibraryPath{
+        path: "/media/movies",
+        category_paths: %{"anime_movie" => "Anime"},
+        auto_organize: true
+      }
+
+      result = LibraryPath.resolve_category_path(library, :movie, "The Matrix (1999)")
+      assert result == "/media/movies/The Matrix (1999)"
+    end
+
+    test "returns default path when category_paths is empty" do
+      library = %LibraryPath{
+        path: "/media/movies",
+        category_paths: %{},
+        auto_organize: true
+      }
+
+      result = LibraryPath.resolve_category_path(library, :anime_movie, "Spirited Away (2001)")
+      assert result == "/media/movies/Spirited Away (2001)"
+    end
+
+    test "returns default path when category_paths is nil" do
+      library = %LibraryPath{
+        path: "/media/movies",
+        category_paths: nil,
+        auto_organize: true
+      }
+
+      result = LibraryPath.resolve_category_path(library, :anime_movie, "Spirited Away (2001)")
+      assert result == "/media/movies/Spirited Away (2001)"
+    end
+
+    test "accepts string category argument" do
+      library = %LibraryPath{
+        path: "/media/movies",
+        category_paths: %{"anime_movie" => "Anime"},
+        auto_organize: true
+      }
+
+      result = LibraryPath.resolve_category_path(library, "anime_movie", "Spirited Away (2001)")
+      assert result == "/media/movies/Anime/Spirited Away (2001)"
+    end
+
+    test "handles nested category subpaths" do
+      library = %LibraryPath{
+        path: "/media",
+        category_paths: %{"anime_series" => "TV/Anime"},
+        auto_organize: true
+      }
+
+      result = LibraryPath.resolve_category_path(library, :anime_series, "Attack on Titan")
+      assert result == "/media/TV/Anime/Attack on Titan"
+    end
+  end
+
   describe "default quality profile" do
     setup do
       # Ensure we have some quality profiles to work with

@@ -1,0 +1,77 @@
+defmodule Mydia.Jobs.LibraryReorganize do
+  @moduledoc """
+  Background job for reorganizing files in a library based on category paths.
+
+  This job moves existing media files to their category-appropriate paths
+  when auto_organize is enabled on a library path.
+  """
+
+  use Oban.Worker,
+    queue: :media,
+    max_attempts: 1
+
+  require Logger
+  alias Mydia.Settings
+  alias Mydia.Library.FileOrganizer
+
+  @pubsub Mydia.PubSub
+  @topic "library_scanner"
+
+  @impl Oban.Worker
+  def perform(%Oban.Job{args: %{"library_path_id" => library_path_id}}) do
+    start_time = System.monotonic_time(:millisecond)
+
+    Logger.info("Starting library reorganization job",
+      library_path_id: library_path_id
+    )
+
+    broadcast_started(library_path_id)
+
+    library_path = Settings.get_library_path!(library_path_id)
+
+    {:ok, summary} = FileOrganizer.reorganize_library(library_path)
+
+    duration = System.monotonic_time(:millisecond) - start_time
+
+    Logger.info("Library reorganization completed",
+      library_path_id: library_path_id,
+      total: summary.total,
+      moved: summary.moved,
+      skipped: summary.skipped,
+      errors: summary.errors,
+      duration_ms: duration
+    )
+
+    broadcast_completed(library_path_id, summary)
+    :ok
+  end
+
+  @doc """
+  Enqueues a library reorganization job.
+  """
+  def enqueue(library_path_id) do
+    %{library_path_id: library_path_id}
+    |> __MODULE__.new()
+    |> Oban.insert()
+  end
+
+  defp broadcast_started(library_path_id) do
+    Phoenix.PubSub.broadcast(@pubsub, @topic, {
+      :library_reorganize_started,
+      %{library_path_id: library_path_id}
+    })
+  end
+
+  defp broadcast_completed(library_path_id, summary) do
+    Phoenix.PubSub.broadcast(@pubsub, @topic, {
+      :library_reorganize_completed,
+      %{
+        library_path_id: library_path_id,
+        total: summary.total,
+        moved: summary.moved,
+        skipped: summary.skipped,
+        errors: summary.errors
+      }
+    })
+  end
+end

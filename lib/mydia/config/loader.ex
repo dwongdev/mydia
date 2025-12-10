@@ -179,6 +179,12 @@ defmodule Mydia.Config.Loader do
     |> put_if_present(:movies_path, System.get_env("MOVIES_PATH"))
     |> put_if_present(:tv_path, System.get_env("TV_PATH"))
     |> put_if_present(
+      :movies_auto_organize,
+      System.get_env("MOVIES_AUTO_ORGANIZE"),
+      &parse_boolean/1
+    )
+    |> put_if_present(:tv_auto_organize, System.get_env("TV_AUTO_ORGANIZE"), &parse_boolean/1)
+    |> put_if_present(
       :scan_interval_hours,
       System.get_env("MEDIA_SCAN_INTERVAL_HOURS"),
       &parse_integer/1
@@ -365,6 +371,16 @@ defmodule Mydia.Config.Loader do
         System.get_env("#{prefix}QUALITY_PROFILE_ID"),
         &parse_integer/1
       )
+      |> put_if_present(
+        :auto_organize,
+        System.get_env("#{prefix}AUTO_ORGANIZE"),
+        &parse_boolean/1
+      )
+      |> put_if_present(
+        :category_paths,
+        System.get_env("#{prefix}CATEGORY_PATHS"),
+        &parse_json/1
+      )
     end)
     |> Enum.reject(&(&1 == %{}))
   end
@@ -400,6 +416,17 @@ defmodule Mydia.Config.Loader do
   defp parse_boolean("1"), do: {:ok, true}
   defp parse_boolean("0"), do: {:ok, false}
   defp parse_boolean(_), do: :error
+
+  defp parse_json(value) when is_map(value), do: {:ok, value}
+
+  defp parse_json(value) when is_binary(value) do
+    case Jason.decode(value) do
+      {:ok, parsed} when is_map(parsed) -> {:ok, parsed}
+      _ -> :error
+    end
+  end
+
+  defp parse_json(_), do: :error
 
   defp parse_atom(value) when is_atom(value), do: {:ok, value}
 

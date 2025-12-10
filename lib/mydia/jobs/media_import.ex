@@ -24,10 +24,11 @@ defmodule Mydia.Jobs.MediaImport do
   require Logger
   alias Mydia.{Downloads, Library, Media, Settings}
   alias Mydia.Downloads.Client
-  alias Mydia.Library.{FileAnalyzer, FileNamer}
+  alias Mydia.Library.{FileAnalyzer, FileNamer, FileOrganizer}
   alias Mydia.Library.FileParser.V2, as: FileParser
   alias Mydia.Indexers.QualityParser
   alias Mydia.MediaServer.Notifier, as: MediaServerNotifier
+  alias Mydia.Settings.LibraryPath
 
   # Exponential backoff schedule in seconds
   # 1 min, 5 min, 15 min, 1 hour, 4 hours, 12 hours, 24 hours, then 24 hours indefinitely
@@ -373,7 +374,56 @@ defmodule Mydia.Jobs.MediaImport do
     end
   end
 
-  defp build_destination_path(download, library_root) do
+  defp build_destination_path(download, library_path) when is_struct(library_path, LibraryPath) do
+    # Use FileOrganizer for category-aware destination paths when auto_organize is enabled
+    cond do
+      # Movie with auto_organize enabled
+      download.media_item && download.media_item.type == "movie" && library_path.auto_organize ->
+        FileOrganizer.destination_path(download.media_item, library_path)
+
+      # TV episode - always use show folder + season subfolder
+      download.episode && download.media_item ->
+        # Get base folder (potentially category-aware)
+        base_folder =
+          if library_path.auto_organize do
+            FileOrganizer.destination_path(download.media_item, library_path)
+          else
+            title = sanitize_filename(download.media_item.title)
+            Path.join(library_path.path, title)
+          end
+
+        season = download.episode.season_number
+        Path.join(base_folder, "Season #{String.pad_leading("#{season}", 2, "0")}")
+
+      # Movie without auto_organize
+      download.media_item && download.media_item.type == "movie" ->
+        title = sanitize_filename(download.media_item.title)
+        year = download.media_item.year
+
+        if year do
+          Path.join([library_path.path, "#{title} (#{year})"])
+        else
+          Path.join([library_path.path, title])
+        end
+
+      # TV show (no specific episode) - use category-aware path if enabled
+      download.media_item && download.media_item.type == "tv_show" ->
+        if library_path.auto_organize do
+          FileOrganizer.destination_path(download.media_item, library_path)
+        else
+          title = sanitize_filename(download.media_item.title)
+          Path.join(library_path.path, title)
+        end
+
+      # Unknown - use download title
+      true ->
+        title = sanitize_filename(download.title)
+        Path.join(library_path.path, title)
+    end
+  end
+
+  # Legacy clause for string library_root (used internally)
+  defp build_destination_path(download, library_root) when is_binary(library_root) do
     cond do
       # TV episode
       download.episode && download.media_item ->
@@ -402,6 +452,16 @@ defmodule Mydia.Jobs.MediaImport do
       true ->
         title = sanitize_filename(download.title)
         Path.join([library_root, title])
+    end
+  end
+
+  # Helper to build category-aware base path for TV series
+  defp build_series_base_path(media_item, library_path) do
+    if library_path.auto_organize do
+      FileOrganizer.destination_path(media_item, library_path)
+    else
+      title = sanitize_filename(media_item.title)
+      Path.join(library_path.path, title)
     end
   end
 
@@ -472,9 +532,6 @@ defmodule Mydia.Jobs.MediaImport do
     is_season_pack = get_in(download.metadata, ["season_pack"]) == true
     season_pack_season = get_in(download.metadata, ["season_number"])
 
-    # Get library root from library_path struct
-    library_root = library_path.path
-
     # Determine episode and destination path
     {episode, dest_dir} =
       case {download.media_item, download.episode, parsed.type, is_season_pack} do
@@ -535,15 +592,11 @@ defmodule Mydia.Jobs.MediaImport do
               episode_id: episode.id
             )
 
-            # Build destination path using season pack metadata
-            title = sanitize_filename(media_item.title)
+            # Build destination path using season pack metadata (category-aware)
+            base_dir = build_series_base_path(media_item, library_path)
 
             dest_dir =
-              Path.join([
-                library_root,
-                title,
-                "Season #{String.pad_leading("#{season_pack_season}", 2, "0")}"
-              ])
+              Path.join(base_dir, "Season #{String.pad_leading("#{season_pack_season}", 2, "0")}")
 
             {episode, dest_dir}
           else
@@ -554,15 +607,11 @@ defmodule Mydia.Jobs.MediaImport do
               media_item: media_item.title
             )
 
-            # Build season folder path even without episode
-            title = sanitize_filename(media_item.title)
+            # Build season folder path even without episode (category-aware)
+            base_dir = build_series_base_path(media_item, library_path)
 
             dest_dir =
-              Path.join([
-                library_root,
-                title,
-                "Season #{String.pad_leading("#{season_pack_season}", 2, "0")}"
-              ])
+              Path.join(base_dir, "Season #{String.pad_leading("#{season_pack_season}", 2, "0")}")
 
             {nil, dest_dir}
           end
@@ -586,15 +635,11 @@ defmodule Mydia.Jobs.MediaImport do
               episode_id: episode.id
             )
 
-            # Build destination path using parsed season info
-            title = sanitize_filename(media_item.title)
+            # Build destination path using parsed season info (category-aware)
+            base_dir = build_series_base_path(media_item, library_path)
 
             dest_dir =
-              Path.join([
-                library_root,
-                title,
-                "Season #{String.pad_leading("#{parsed.season}", 2, "0")}"
-              ])
+              Path.join(base_dir, "Season #{String.pad_leading("#{parsed.season}", 2, "0")}")
 
             {episode, dest_dir}
           else
@@ -605,19 +650,19 @@ defmodule Mydia.Jobs.MediaImport do
               media_item: media_item.title
             )
 
-            # Fall back to download episode and default path
-            dest_dir = build_destination_path(download, library_root)
+            # Fall back to download episode and default path (category-aware)
+            dest_dir = build_destination_path(download, library_path)
             {download.episode, dest_dir}
           end
 
         # TV show but no parsed info - use download episode
         {%{type: "tv_show"}, episode, _, _} when not is_nil(episode) ->
-          dest_dir = build_destination_path(download, library_root)
+          dest_dir = build_destination_path(download, library_path)
           {episode, dest_dir}
 
-        # Movie or other - use download info
+        # Movie or other - use download info (category-aware)
         _ ->
-          dest_dir = build_destination_path(download, library_root)
+          dest_dir = build_destination_path(download, library_path)
           {download.episode, dest_dir}
       end
 

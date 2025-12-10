@@ -38,6 +38,18 @@ defmodule Mydia.Library do
   end
 
   @doc """
+  Returns a list of unique media item IDs that have files in the given library path.
+  """
+  def list_media_ids_in_library_path(%{id: library_path_id}) do
+    MediaFile
+    |> where([mf], mf.library_path_id == ^library_path_id)
+    |> where([mf], not is_nil(mf.media_item_id))
+    |> select([mf], mf.media_item_id)
+    |> distinct(true)
+    |> Repo.all()
+  end
+
+  @doc """
   Gets a single media file.
 
   ## Options

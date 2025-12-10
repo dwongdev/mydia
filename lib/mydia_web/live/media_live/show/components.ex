@@ -16,8 +16,21 @@ defmodule MydiaWeb.MediaLive.Show.Components do
   attr :auto_searching, :boolean, required: true
   attr :downloads_with_status, :list, required: true
   attr :quality_profiles, :list, required: true
+  attr :applying_monitoring_preset, :boolean, default: false
+
+  @monitoring_presets [
+    {:all, "All Episodes", "Monitor all episodes"},
+    {:future, "Future Episodes", "Only unaired episodes"},
+    {:missing, "Missing Episodes", "Episodes without files"},
+    {:existing, "Existing Episodes", "Only episodes with files"},
+    {:first_season, "First Season", "Only season 1"},
+    {:latest_season, "Latest Season", "Latest + future seasons"},
+    {:none, "None", "Don't monitor any episodes"}
+  ]
 
   def hero_section(assigns) do
+    assigns = assign(assigns, :monitoring_presets, @monitoring_presets)
+
     ~H"""
     <%!-- Left Column: Poster and Quick Actions --%>
     <div class="w-full md:w-64 lg:w-80 flex-shrink-0">
@@ -72,23 +85,79 @@ defmodule MydiaWeb.MediaLive.Show.Components do
 
         <%!-- Secondary actions: 2-column on mobile, stacked on desktop --%>
         <div class="grid grid-cols-2 md:grid-cols-1 gap-2">
-          <button
-            type="button"
-            phx-click="toggle_monitored"
-            class={[
-              "btn btn-sm md:btn-md",
-              @media_item.monitored && "btn-success",
-              !@media_item.monitored && "btn-ghost"
-            ]}
-          >
-            <.icon
-              name={if @media_item.monitored, do: "hero-bookmark-solid", else: "hero-bookmark"}
-              class="w-4 h-4 md:w-5 md:h-5"
-            />
-            <span class="hidden sm:inline">
-              {if @media_item.monitored, do: "Monitored", else: "Not Monitored"}
-            </span>
-          </button>
+          <%= if @media_item.type == "tv_show" do %>
+            <%!-- Monitoring Preset Dropdown (TV shows only) --%>
+            <div class="dropdown dropdown-end w-full col-span-2 md:col-span-1">
+              <div
+                tabindex="0"
+                role="button"
+                class={[
+                  "btn btn-sm md:btn-md w-full justify-between",
+                  @media_item.monitored && "btn-success",
+                  !@media_item.monitored && "btn-ghost"
+                ]}
+                disabled={@applying_monitoring_preset}
+              >
+                <div class="flex items-center gap-1">
+                  <%= if @applying_monitoring_preset do %>
+                    <span class="loading loading-spinner loading-xs"></span>
+                  <% else %>
+                    <.icon
+                      name={
+                        if @media_item.monitored, do: "hero-bookmark-solid", else: "hero-bookmark"
+                      }
+                      class="w-4 h-4 md:w-5 md:h-5"
+                    />
+                  <% end %>
+                  <span class="hidden sm:inline">
+                    {monitoring_preset_label(@media_item.monitoring_preset)}
+                  </span>
+                  <span class="sm:hidden">
+                    {short_monitoring_label(@media_item.monitoring_preset)}
+                  </span>
+                </div>
+                <.icon name="hero-chevron-down" class="w-3 h-3 opacity-70" />
+              </div>
+              <ul
+                tabindex="0"
+                class="dropdown-content z-[1] menu p-2 shadow-lg bg-base-100 rounded-box w-64 border border-base-300"
+              >
+                <li :for={{preset, label, description} <- @monitoring_presets}>
+                  <button
+                    type="button"
+                    phx-click="apply_monitoring_preset"
+                    phx-value-preset={preset}
+                    class={[
+                      "flex flex-col items-start",
+                      @media_item.monitoring_preset == preset && "active"
+                    ]}
+                  >
+                    <span class="font-medium">{label}</span>
+                    <span class="text-xs text-base-content/60">{description}</span>
+                  </button>
+                </li>
+              </ul>
+            </div>
+          <% else %>
+            <%!-- Simple monitored toggle for movies --%>
+            <button
+              type="button"
+              phx-click="toggle_monitored"
+              class={[
+                "btn btn-sm md:btn-md",
+                @media_item.monitored && "btn-success",
+                !@media_item.monitored && "btn-ghost"
+              ]}
+            >
+              <.icon
+                name={if @media_item.monitored, do: "hero-bookmark-solid", else: "hero-bookmark"}
+                class="w-4 h-4 md:w-5 md:h-5"
+              />
+              <span class="hidden sm:inline">
+                {if @media_item.monitored, do: "Monitored", else: "Not Monitored"}
+              </span>
+            </button>
+          <% end %>
 
           <button
             type="button"
@@ -948,4 +1017,24 @@ defmodule MydiaWeb.MediaLive.Show.Components do
     <% end %>
     """
   end
+
+  # Helper functions for monitoring preset labels
+
+  defp monitoring_preset_label(nil), do: "All Episodes"
+  defp monitoring_preset_label(:all), do: "All Episodes"
+  defp monitoring_preset_label(:future), do: "Future Episodes"
+  defp monitoring_preset_label(:missing), do: "Missing Episodes"
+  defp monitoring_preset_label(:existing), do: "Existing Episodes"
+  defp monitoring_preset_label(:first_season), do: "First Season"
+  defp monitoring_preset_label(:latest_season), do: "Latest Season"
+  defp monitoring_preset_label(:none), do: "None"
+
+  defp short_monitoring_label(nil), do: "All"
+  defp short_monitoring_label(:all), do: "All"
+  defp short_monitoring_label(:future), do: "Future"
+  defp short_monitoring_label(:missing), do: "Missing"
+  defp short_monitoring_label(:existing), do: "Existing"
+  defp short_monitoring_label(:first_season), do: "S1"
+  defp short_monitoring_label(:latest_season), do: "Latest"
+  defp short_monitoring_label(:none), do: "None"
 end

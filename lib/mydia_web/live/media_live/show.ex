@@ -101,6 +101,8 @@ defmodule MydiaWeb.MediaLive.Show do
      # Next episode for TV shows
      |> assign(:next_episode, next_episode)
      |> assign(:next_episode_state, next_episode_state)
+     # Monitoring preset state
+     |> assign(:applying_monitoring_preset, false)
      # Subtitle state
      |> assign(:show_subtitle_search_modal, false)
      |> assign(:searching_subtitles, false)
@@ -146,6 +148,47 @@ defmodule MydiaWeb.MediaLive.Show do
        )}
     else
       {:unauthorized, socket} -> {:noreply, socket}
+    end
+  end
+
+  @valid_monitoring_presets ~w(all future missing existing first_season latest_season none)
+
+  def handle_event("apply_monitoring_preset", %{"preset" => preset_str}, socket) do
+    with :ok <- Authorization.authorize_update_media(socket),
+         true <- preset_str in @valid_monitoring_presets do
+      media_item = socket.assigns.media_item
+      preset = String.to_existing_atom(preset_str)
+
+      # Show loading state
+      socket = assign(socket, :applying_monitoring_preset, true)
+
+      case Media.apply_monitoring_preset(media_item, preset) do
+        {:ok, updated_item, count} ->
+          # Reload the full media item with episodes to refresh the UI
+          reloaded_item = load_media_item(updated_item.id)
+
+          preset_label = monitoring_preset_label(preset)
+
+          {:noreply,
+           socket
+           |> assign(:media_item, reloaded_item)
+           |> assign(:applying_monitoring_preset, false)
+           |> put_flash(:info, "Applied '#{preset_label}' monitoring to #{count} episodes")}
+
+        {:error, reason} ->
+          Logger.error("Failed to apply monitoring preset: #{inspect(reason)}")
+
+          {:noreply,
+           socket
+           |> assign(:applying_monitoring_preset, false)
+           |> put_flash(:error, "Failed to apply monitoring preset")}
+      end
+    else
+      {:unauthorized, socket} ->
+        {:noreply, socket}
+
+      false ->
+        {:noreply, put_flash(socket, :error, "Invalid monitoring preset")}
     end
   end
 
@@ -1208,6 +1251,15 @@ defmodule MydiaWeb.MediaLive.Show do
       {:unauthorized, socket} -> {:noreply, socket}
     end
   end
+
+  # Private helpers for monitoring presets
+  defp monitoring_preset_label(:all), do: "All Episodes"
+  defp monitoring_preset_label(:future), do: "Future Episodes"
+  defp monitoring_preset_label(:missing), do: "Missing Episodes"
+  defp monitoring_preset_label(:existing), do: "Existing Episodes"
+  defp monitoring_preset_label(:first_season), do: "First Season"
+  defp monitoring_preset_label(:latest_season), do: "Latest Season"
+  defp monitoring_preset_label(:none), do: "None"
 
   @impl true
   def handle_info({:download_created, download}, socket) do

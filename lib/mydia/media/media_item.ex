@@ -19,6 +19,11 @@ defmodule Mydia.Media.MediaItem do
     field :imdb_id, :string
     field :metadata, Mydia.Media.MetadataType
     field :monitored, :boolean, default: true
+
+    field :monitoring_preset, Ecto.Enum,
+      values: [:all, :future, :missing, :existing, :first_season, :latest_season, :none],
+      default: :all
+
     field :category, :string
     field :category_override, :boolean, default: false
 
@@ -46,6 +51,7 @@ defmodule Mydia.Media.MediaItem do
       :imdb_id,
       :metadata,
       :monitored,
+      :monitoring_preset,
       :quality_profile_id
     ])
     |> validate_required([:type, :title])

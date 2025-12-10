@@ -283,6 +283,34 @@ defmodule MydiaWeb.MediaLive.Index do
     {:noreply, put_flash(socket, :info, "Download functionality coming soon")}
   end
 
+  def handle_event("batch_reclassify", _params, socket) do
+    selected_ids = MapSet.to_list(socket.assigns.selected_ids)
+
+    {:ok, summary} = Media.reclassify_media_items(selected_ids)
+
+    message =
+      cond do
+        summary.updated > 0 && summary.skipped > 0 ->
+          "Reclassified #{summary.updated} #{pluralize_items(summary.updated)}, #{summary.skipped} skipped (category override)"
+
+        summary.updated > 0 ->
+          "Reclassified #{summary.updated} #{pluralize_items(summary.updated)}"
+
+        summary.skipped > 0 ->
+          "No changes - #{summary.skipped} #{pluralize_items(summary.skipped)} have category override"
+
+        true ->
+          "No category changes detected"
+      end
+
+    {:noreply,
+     socket
+     |> put_flash(:info, message)
+     |> assign(:selection_mode, false)
+     |> assign(:selected_ids, MapSet.new())
+     |> load_media_items(reset: true)}
+  end
+
   def handle_event("show_delete_confirmation", _params, socket) do
     {:noreply,
      socket
@@ -822,14 +850,18 @@ defmodule MydiaWeb.MediaLive.Index do
 
   defp format_episode_count(_), do: nil
 
-  # File indicator helpers for unmonitored items
+  # File indicator helpers for unmonitored items (movies only, not series)
   defp show_file_indicator?(status, counts) do
-    status == :not_monitored && has_files?(counts)
+    status == :not_monitored && has_files?(counts) && !is_series?(counts)
   end
 
   defp has_files?(nil), do: false
   defp has_files?(%{has_files: has_files}), do: has_files
   defp has_files?(%{downloaded: downloaded}), do: downloaded > 0
+
+  # Series have episode counts (downloaded/total), movies don't
+  defp is_series?(%{total: total}) when is_integer(total), do: true
+  defp is_series?(_), do: false
 
   defp get_file_indicator_tooltip(counts) do
     case counts do

@@ -450,6 +450,16 @@
                           </span>
                         </div>
                       <% end %>
+                      <%!-- Category badge --%>
+                      <%= if item.category do %>
+                        <div>
+                          <.category_badge
+                            category={item.category}
+                            override={item.category_override}
+                            size="xs"
+                          />
+                        </div>
+                      <% end %>
                     </div>
                     <span class="text-xs text-base-content/70">{format_year(item.year)}</span>
                   </div>
@@ -519,6 +529,15 @@
                     </div>
                   <% end %>
                 </div>
+                <%!-- Category badge --%>
+                <%= if item.category do %>
+                  <.category_badge
+                    category={item.category}
+                    override={item.category_override}
+                    size="xs"
+                    class="flex-shrink-0"
+                  />
+                <% end %>
                 <%!-- Progress indicator for list view --%>
                 <% progress = get_progress(item) %>
                 <%= if progress do %>
@@ -636,6 +655,16 @@
               >
                 <.icon name="hero-arrow-down-tray" class="w-4 h-4" />
                 <span>Download</span>
+              </button>
+
+              <button
+                type="button"
+                class="btn btn-sm btn-ghost gap-2"
+                phx-click="batch_reclassify"
+                title="Re-classify selected items (update categories based on metadata)"
+              >
+                <.icon name="hero-tag" class="w-4 h-4" />
+                <span>Re-classify</span>
               </button>
 
               <button

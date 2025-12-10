@@ -48,6 +48,51 @@ defmodule MydiaWeb.MediaLive.Show.Helpers do
     end
   end
 
+  def get_media_path(media_item) do
+    # For movies, check media_files directly
+    # For TV shows, check episode media_files
+    first_file =
+      case media_item.media_files do
+        [file | _] ->
+          file
+
+        _ ->
+          # Try to get from episodes for TV shows
+          media_item
+          |> Map.get(:episodes, [])
+          |> Enum.flat_map(&Map.get(&1, :media_files, []))
+          |> List.first()
+      end
+
+    case first_file do
+      %{library_path: %{path: lib_path}, relative_path: rel_path}
+      when is_binary(lib_path) and is_binary(rel_path) ->
+        # For TV shows, go up one level to show series folder (not season folder)
+        folder = Path.dirname(rel_path)
+
+        folder =
+          if media_item.type == "tv_show" do
+            Path.dirname(folder)
+          else
+            folder
+          end
+
+        Path.join(lib_path, folder)
+
+      %{relative_path: rel_path} when is_binary(rel_path) ->
+        folder = Path.dirname(rel_path)
+
+        if media_item.type == "tv_show" do
+          Path.dirname(folder)
+        else
+          folder
+        end
+
+      _ ->
+        nil
+    end
+  end
+
   def get_overview(media_item) do
     case media_item.metadata do
       %MediaMetadata{overview: overview} when is_binary(overview) and overview != "" ->

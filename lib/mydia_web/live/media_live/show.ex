@@ -115,6 +115,10 @@ defmodule MydiaWeb.MediaLive.Show do
      |> assign(:playback_enabled, playback_enabled?())
      |> assign(:subtitle_feature_enabled, subtitle_feature_enabled?())
      |> assign(:raw_search_results, [])
+     # Category modal state
+     |> assign(:show_category_modal, false)
+     |> assign(:category_form, nil)
+     |> assign(:available_categories, available_categories_for(media_item.type))
      |> stream_configure(:search_results, dom_id: &generate_result_id/1)
      |> stream(:search_results, [])}
   end
@@ -1132,6 +1136,97 @@ defmodule MydiaWeb.MediaLive.Show do
     end
   end
 
+  # Category override event handlers
+
+  def handle_event("show_category_modal", _params, socket) do
+    media_item = socket.assigns.media_item
+
+    changeset =
+      Media.change_media_item_category(media_item, %{
+        category: media_item.category,
+        category_override: media_item.category_override
+      })
+
+    {:noreply,
+     socket
+     |> assign(:show_category_modal, true)
+     |> assign(:category_form, to_form(changeset))}
+  end
+
+  def handle_event("hide_category_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_category_modal, false)
+     |> assign(:category_form, nil)}
+  end
+
+  def handle_event("validate_category", %{"media_item" => params}, socket) do
+    changeset =
+      socket.assigns.media_item
+      |> Media.change_media_item_category(params)
+      |> Map.put(:action, :validate)
+
+    {:noreply, assign(socket, :category_form, to_form(changeset))}
+  end
+
+  def handle_event("save_category", %{"media_item" => params}, socket) do
+    with :ok <- Authorization.authorize_update_media(socket) do
+      media_item = socket.assigns.media_item
+
+      # Set override to true when manually changing category
+      params = Map.put(params, "category_override", params["override"] == "true")
+
+      case Media.update_media_item(media_item, params, reason: "Category updated") do
+        {:ok, updated_item} ->
+          {:noreply,
+           socket
+           |> assign(:media_item, updated_item)
+           |> assign(:show_category_modal, false)
+           |> assign(:category_form, nil)
+           |> put_flash(:info, "Category updated successfully")}
+
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:noreply, assign(socket, :category_form, to_form(changeset))}
+      end
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("reset_category_to_auto", _params, socket) do
+    with :ok <- Authorization.authorize_update_media(socket) do
+      media_item = socket.assigns.media_item
+
+      # Re-classify using the category classifier
+      new_category = Mydia.Media.CategoryClassifier.classify(media_item)
+
+      case Media.update_media_item(
+             media_item,
+             %{category: new_category, category_override: false},
+             reason: "Category reset to auto-detected"
+           ) do
+        {:ok, updated_item} ->
+          {:noreply,
+           socket
+           |> assign(:media_item, updated_item)
+           |> assign(:show_category_modal, false)
+           |> assign(:category_form, nil)
+           |> put_flash(
+             :info,
+             "Category reset to auto-detected: #{category_display_name(new_category)}"
+           )}
+
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:noreply,
+           socket
+           |> assign(:category_form, to_form(changeset))
+           |> put_flash(:error, "Failed to reset category")}
+      end
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
+    end
+  end
+
   @impl true
   def handle_info({:download_created, download}, socket) do
     if download_for_media?(download, socket.assigns.media_item) do
@@ -1690,4 +1785,32 @@ defmodule MydiaWeb.MediaLive.Show do
         "Search complete: #{indexers} indexer(s) searched, no results found"
     end
   end
+
+  # Category helper functions
+
+  defp available_categories_for("movie") do
+    [
+      {"Movie", "movie"},
+      {"Anime Movie", "anime_movie"},
+      {"Cartoon Movie", "cartoon_movie"}
+    ]
+  end
+
+  defp available_categories_for("tv_show") do
+    [
+      {"TV Show", "tv_show"},
+      {"Anime Series", "anime_series"},
+      {"Cartoon Series", "cartoon_series"}
+    ]
+  end
+
+  defp available_categories_for(_), do: []
+
+  defp category_display_name(:movie), do: "Movie"
+  defp category_display_name(:anime_movie), do: "Anime Movie"
+  defp category_display_name(:cartoon_movie), do: "Cartoon Movie"
+  defp category_display_name(:tv_show), do: "TV Show"
+  defp category_display_name(:anime_series), do: "Anime Series"
+  defp category_display_name(:cartoon_series), do: "Cartoon Series"
+  defp category_display_name(cat), do: to_string(cat)
 end

@@ -69,8 +69,8 @@ defmodule MydiaWeb.MediaLive.Show.Components do
           <.icon name="hero-magnifying-glass" class="w-5 h-5" /> Manual Search
         </button>
 
-        <%!-- Secondary actions in a 2-column grid on mobile --%>
-        <div class="grid grid-cols-2 gap-2">
+        <%!-- Secondary actions: 2-column on mobile, stacked on desktop --%>
+        <div class="grid grid-cols-2 md:grid-cols-1 gap-2">
           <button
             type="button"
             phx-click="toggle_monitored"
@@ -138,16 +138,54 @@ defmodule MydiaWeb.MediaLive.Show.Components do
 
         <div class="divider my-2"></div>
 
-        <%!-- Quality Profile Display - compact on mobile --%>
-        <div class="stat bg-base-200 rounded-box p-2 md:p-3">
-          <div class="stat-title text-xs">Quality Profile</div>
-          <div class="stat-value text-sm">
-            <%= if @media_item.quality_profile do %>
-              {@media_item.quality_profile.name}
-            <% else %>
-              <span class="text-base-content/50">Not Set</span>
-            <% end %>
+        <%!-- Info Cards --%>
+        <div class="space-y-2">
+          <%!-- Quality Profile --%>
+          <div class="stat bg-base-200 rounded-box p-2 md:p-3">
+            <div class="stat-title text-xs">Quality Profile</div>
+            <div class="stat-value text-sm">
+              <%= if @media_item.quality_profile do %>
+                {@media_item.quality_profile.name}
+              <% else %>
+                <span class="text-base-content/50">Not Set</span>
+              <% end %>
+            </div>
           </div>
+
+          <%!-- Category --%>
+          <div class="stat bg-base-200 rounded-box p-2 md:p-3">
+            <div class="stat-title text-xs">Category</div>
+            <div class="stat-value text-sm">
+              <button
+                type="button"
+                phx-click="show_category_modal"
+                class="group cursor-pointer"
+                title="Click to change category"
+              >
+                <%= if @media_item.category do %>
+                  <.category_badge
+                    category={@media_item.category}
+                    override={@media_item.category_override}
+                    class="group-hover:ring-2 group-hover:ring-primary transition-all"
+                  />
+                <% else %>
+                  <span class="badge badge-ghost group-hover:ring-2 group-hover:ring-primary transition-all">
+                    {if @media_item.type == "movie", do: "Movie", else: "TV Show"}
+                  </span>
+                <% end %>
+              </button>
+            </div>
+          </div>
+
+          <%!-- Path --%>
+          <%= if path = get_media_path(@media_item) do %>
+            <div class="stat bg-base-200 rounded-box p-2 md:p-3">
+              <div class="stat-title text-xs">Path</div>
+              <div class="stat-value text-xs font-mono truncate" title={path}>
+                {path}
+              </div>
+            </div>
+          <% end %>
         </div>
 
         <div class="divider my-2"></div>

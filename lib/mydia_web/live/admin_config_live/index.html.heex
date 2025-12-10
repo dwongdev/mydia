@@ -121,7 +121,11 @@
         <% end %>
         <%!-- Library Paths Tab --%>
         <%= if @active_tab == "library" do %>
-          <Components.library_paths_tab library_paths={@library_paths} />
+          <Components.library_paths_tab
+            library_paths={@library_paths}
+            reorganizing_library_ids={@reorganizing_library_ids}
+            reclassifying_library_ids={@reclassifying_library_ids}
+          />
         <% end %>
         <%!-- Media Servers Tab --%>
         <%= if @active_tab == "media_servers" do %>

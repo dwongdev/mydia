@@ -1169,6 +1169,8 @@ defmodule MydiaWeb.AdminConfigLive.Components do
   Renders the Library Paths tab content.
   """
   attr :library_paths, :list, required: true
+  attr :reorganizing_library_ids, :any, default: MapSet.new()
+  attr :reclassifying_library_ids, :any, default: MapSet.new()
 
   def library_paths_tab(assigns) do
     {enabled, disabled} = Enum.split_with(assigns.library_paths, &(!&1.disabled))
@@ -1200,7 +1202,11 @@ defmodule MydiaWeb.AdminConfigLive.Components do
         <%= if @enabled_paths != [] do %>
           <div class="bg-base-200 rounded-box divide-y divide-base-300">
             <%= for library_path <- @enabled_paths do %>
-              <.library_path_row library_path={library_path} />
+              <.library_path_row
+                library_path={library_path}
+                is_reorganizing={MapSet.member?(@reorganizing_library_ids, library_path.id)}
+                is_reclassifying={MapSet.member?(@reclassifying_library_ids, library_path.id)}
+              />
             <% end %>
           </div>
         <% end %>
@@ -1212,7 +1218,11 @@ defmodule MydiaWeb.AdminConfigLive.Components do
           </div>
           <div class="bg-base-200 rounded-box divide-y divide-base-300 opacity-60">
             <%= for library_path <- @disabled_paths do %>
-              <.library_path_row library_path={library_path} />
+              <.library_path_row
+                library_path={library_path}
+                is_reorganizing={MapSet.member?(@reorganizing_library_ids, library_path.id)}
+                is_reclassifying={MapSet.member?(@reclassifying_library_ids, library_path.id)}
+              />
             <% end %>
           </div>
         <% end %>
@@ -1222,6 +1232,8 @@ defmodule MydiaWeb.AdminConfigLive.Components do
   end
 
   attr :library_path, :map, required: true
+  attr :is_reorganizing, :boolean, default: false
+  attr :is_reclassifying, :boolean, default: false
 
   defp library_path_row(assigns) do
     ~H"""
@@ -1261,37 +1273,95 @@ defmodule MydiaWeb.AdminConfigLive.Components do
             {if @library_path.monitored, do: "Monitored", else: "Not Monitored"}
           </span>
 
-          <div class="join ml-auto sm:ml-2">
-            <%= if @library_path.from_env do %>
-              <div class="tooltip" data-tip="Cannot edit environment-configured libraries">
-                <button class="btn btn-sm btn-ghost join-item" disabled>
-                  <.icon name="hero-pencil" class="w-4 h-4 opacity-30" />
-                </button>
-              </div>
-              <div class="tooltip" data-tip="Cannot delete environment-configured libraries">
-                <button class="btn btn-sm btn-ghost join-item" disabled>
-                  <.icon name="hero-trash" class="w-4 h-4 opacity-30" />
-                </button>
-              </div>
-            <% else %>
-              <button
-                class="btn btn-sm btn-ghost join-item"
-                phx-click="edit_library_path"
-                phx-value-id={@library_path.id}
-                title="Edit"
-              >
-                <.icon name="hero-pencil" class="w-4 h-4" />
-              </button>
-              <button
-                class="btn btn-sm btn-ghost join-item text-error"
-                phx-click="delete_library_path"
-                phx-value-id={@library_path.id}
-                data-confirm="Are you sure you want to delete this library path?"
-                title="Delete"
-              >
-                <.icon name="hero-trash" class="w-4 h-4" />
-              </button>
+          <div class="flex items-center gap-2 ml-auto sm:ml-2">
+            <%!-- Organize dropdown - Re-classify always available, Reorganize only if auto_organize enabled --%>
+            <%= cond do %>
+              <% @is_reorganizing -> %>
+                <div class="btn btn-sm btn-ghost gap-1 no-animation">
+                  <span class="loading loading-spinner loading-xs"></span>
+                  <span class="hidden sm:inline">Reorganizing...</span>
+                </div>
+              <% @is_reclassifying -> %>
+                <div class="btn btn-sm btn-ghost gap-1 no-animation">
+                  <span class="loading loading-spinner loading-xs"></span>
+                  <span class="hidden sm:inline">Reclassifying...</span>
+                </div>
+              <% true -> %>
+                <div class="dropdown dropdown-end">
+                  <div tabindex="0" role="button" class="btn btn-sm btn-ghost gap-1">
+                    <.icon name="hero-cog-6-tooth" class="w-4 h-4" />
+                    <span class="hidden sm:inline">Actions</span>
+                    <.icon name="hero-chevron-down" class="w-3 h-3" />
+                  </div>
+                  <ul
+                    tabindex="0"
+                    class="dropdown-content z-[1] menu p-2 shadow-lg bg-base-100 rounded-box w-56"
+                  >
+                    <li>
+                      <button phx-click="reclassify_library" phx-value-id={@library_path.id}>
+                        <.icon name="hero-tag" class="w-4 h-4" /> Re-classify All
+                      </button>
+                    </li>
+                    <%= if @library_path.auto_organize do %>
+                      <li class="menu-title pt-2">
+                        <span>File Organization</span>
+                      </li>
+                      <li>
+                        <button phx-click="preview_reorganize" phx-value-id={@library_path.id}>
+                          <.icon name="hero-eye" class="w-4 h-4" /> Preview Organization
+                        </button>
+                      </li>
+                      <li>
+                        <button phx-click="reorganize_library" phx-value-id={@library_path.id}>
+                          <.icon name="hero-folder-arrow-down" class="w-4 h-4" /> Reorganize Files
+                        </button>
+                      </li>
+                    <% else %>
+                      <li class="menu-title pt-2">
+                        <span class="text-base-content/50">File Organization</span>
+                      </li>
+                      <li class="disabled">
+                        <span class="text-base-content/40 text-xs">
+                          Enable auto-organize to move files
+                        </span>
+                      </li>
+                    <% end %>
+                  </ul>
+                </div>
             <% end %>
+
+            <div class="join">
+              <%= if @library_path.from_env do %>
+                <div class="tooltip" data-tip="Cannot edit environment-configured libraries">
+                  <button class="btn btn-sm btn-ghost join-item" disabled>
+                    <.icon name="hero-pencil" class="w-4 h-4 opacity-30" />
+                  </button>
+                </div>
+                <div class="tooltip" data-tip="Cannot delete environment-configured libraries">
+                  <button class="btn btn-sm btn-ghost join-item" disabled>
+                    <.icon name="hero-trash" class="w-4 h-4 opacity-30" />
+                  </button>
+                </div>
+              <% else %>
+                <button
+                  class="btn btn-sm btn-ghost join-item"
+                  phx-click="edit_library_path"
+                  phx-value-id={@library_path.id}
+                  title="Edit"
+                >
+                  <.icon name="hero-pencil" class="w-4 h-4" />
+                </button>
+                <button
+                  class="btn btn-sm btn-ghost join-item text-error"
+                  phx-click="delete_library_path"
+                  phx-value-id={@library_path.id}
+                  data-confirm="Are you sure you want to delete this library path?"
+                  title="Delete"
+                >
+                  <.icon name="hero-trash" class="w-4 h-4" />
+                </button>
+              <% end %>
+            </div>
           </div>
         </div>
       </div>
@@ -2507,6 +2577,9 @@ defmodule MydiaWeb.AdminConfigLive.Components do
                 </div>
               </label>
             </div>
+
+            <%!-- Auto-Organize Toggle (only for movies/series/mixed) --%>
+            <.auto_organize_section form={@library_path_form} />
           </div>
 
           <div class="modal-action mt-6">
@@ -2523,6 +2596,188 @@ defmodule MydiaWeb.AdminConfigLive.Components do
       <div class="modal-backdrop" phx-click="close_library_path_modal"></div>
     </div>
     """
+  end
+
+  # Renders the auto-organize section for library paths.
+  # This section allows users to enable automatic file organization by media category
+  # and configure category-specific subfolder paths.
+  attr :form, :any, required: true
+
+  defp auto_organize_section(assigns) do
+    library_type = get_library_type_from_form(assigns.form)
+    categories = Mydia.Media.MediaCategory.for_library_type(library_type)
+
+    assigns =
+      assigns
+      |> assign(:library_type, library_type)
+      |> assign(:categories, categories)
+      |> assign(:show_section, categories != [])
+
+    ~H"""
+    <div :if={@show_section} class="space-y-4">
+      <%!-- Auto-Organize Toggle --%>
+      <div class="form-control bg-base-200 rounded-lg p-4">
+        <label class="label cursor-pointer justify-start gap-4">
+          <input
+            type="checkbox"
+            name={@form[:auto_organize].name}
+            value="true"
+            checked={
+              Phoenix.HTML.Form.normalize_value(
+                "checkbox",
+                @form[:auto_organize].value
+              )
+            }
+            class="toggle toggle-secondary"
+          />
+          <div>
+            <span class="label-text font-medium">Auto-organize by Category</span>
+            <p class="text-xs text-base-content/50 mt-0.5">
+              Automatically organize imported files into category-specific subfolders
+            </p>
+          </div>
+        </label>
+      </div>
+
+      <%!-- Category Path Inputs (shown when auto-organize is enabled) --%>
+      <%= if auto_organize_enabled?(@form) do %>
+        <div class="bg-base-200 rounded-lg p-4 space-y-4">
+          <div class="flex items-center gap-2 mb-2">
+            <.icon name="hero-folder-open" class="w-5 h-5 text-secondary" />
+            <h4 class="font-medium">Category Paths</h4>
+          </div>
+          <p class="text-xs text-base-content/60 mb-4">
+            Define subfolder paths for each category. Leave empty to use the library root.
+          </p>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
+            <.category_path_input
+              :for={category <- @categories}
+              form={@form}
+              category={category}
+            />
+          </div>
+
+          <%!-- Path Preview --%>
+          <.category_path_preview form={@form} categories={@categories} />
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  # Renders a single category path input field.
+  attr :form, :any, required: true
+  attr :category, :atom, required: true
+
+  defp category_path_input(assigns) do
+    category_key = Atom.to_string(assigns.category)
+    category_paths = get_category_paths_from_form(assigns.form)
+    current_value = Map.get(category_paths, category_key, "")
+
+    assigns =
+      assigns
+      |> assign(:category_key, category_key)
+      |> assign(:current_value, current_value)
+      |> assign(:label, Mydia.Media.MediaCategory.label(assigns.category))
+
+    ~H"""
+    <div class="form-control">
+      <label class="label py-1">
+        <span class="label-text text-xs">{@label}</span>
+      </label>
+      <input
+        type="text"
+        name={"#{@form[:category_paths].name}[#{@category_key}]"}
+        value={@current_value}
+        placeholder="subfolder path"
+        class="input input-bordered input-sm"
+      />
+    </div>
+    """
+  end
+
+  # Renders a preview of the resolved category paths.
+  attr :form, :any, required: true
+  attr :categories, :list, required: true
+
+  defp category_path_preview(assigns) do
+    base_path = Phoenix.HTML.Form.input_value(assigns.form, :path) || ""
+    category_paths = get_category_paths_from_form(assigns.form)
+
+    resolved_paths =
+      Enum.map(assigns.categories, fn category ->
+        category_key = Atom.to_string(category)
+        subpath = Map.get(category_paths, category_key, "")
+        label = Mydia.Media.MediaCategory.label(category)
+
+        resolved =
+          if subpath == "" or subpath == nil do
+            base_path
+          else
+            Path.join(base_path, subpath)
+          end
+
+        %{
+          category: category,
+          label: label,
+          path: resolved,
+          is_root: subpath == "" or subpath == nil
+        }
+      end)
+
+    assigns =
+      assigns
+      |> assign(:base_path, base_path)
+      |> assign(:resolved_paths, resolved_paths)
+
+    ~H"""
+    <div class="divider text-xs opacity-60">Path Preview</div>
+    <div class="bg-base-300 rounded-lg p-3 font-mono text-xs space-y-1">
+      <div class="text-base-content/60 mb-2">
+        Base: <span class="text-primary">{@base_path || "(not set)"}</span>
+      </div>
+      <div :for={rp <- @resolved_paths} class="flex items-center gap-2">
+        <span class={[
+          "w-1.5 h-1.5 rounded-full shrink-0",
+          if(rp.is_root, do: "bg-base-content/30", else: "bg-secondary")
+        ]}>
+        </span>
+        <span class="text-base-content/70">{rp.label}</span>
+        <span class="text-base-content/40">→</span>
+        <span class={if(rp.is_root, do: "text-base-content/50", else: "text-secondary")}>
+          {rp.path || "(base)"}
+        </span>
+      </div>
+    </div>
+    """
+  end
+
+  # Helper to check if auto-organize is enabled
+  defp auto_organize_enabled?(form) do
+    Phoenix.HTML.Form.normalize_value(
+      "checkbox",
+      Phoenix.HTML.Form.input_value(form, :auto_organize)
+    )
+  end
+
+  # Helper to get the library type from form
+  defp get_library_type_from_form(form) do
+    case Phoenix.HTML.Form.input_value(form, :type) do
+      type when is_atom(type) -> type
+      type when is_binary(type) -> String.to_existing_atom(type)
+      _ -> nil
+    end
+  rescue
+    ArgumentError -> nil
+  end
+
+  # Helper to extract category_paths from form
+  defp get_category_paths_from_form(form) do
+    case Phoenix.HTML.Form.input_value(form, :category_paths) do
+      paths when is_map(paths) -> paths
+      _ -> %{}
+    end
   end
 
   @doc """
@@ -3503,7 +3758,7 @@ defmodule MydiaWeb.AdminConfigLive.Components do
   defp library_type_badge_class(:adult), do: "badge-error"
   defp library_type_badge_class(_), do: "badge-ghost"
 
-  defp library_type_display(:series), do: "TV Series"
+  defp library_type_display(:series), do: "Series"
   defp library_type_display(:movies), do: "Movies"
   defp library_type_display(:mixed), do: "Mixed"
   defp library_type_display(:music), do: "Music"

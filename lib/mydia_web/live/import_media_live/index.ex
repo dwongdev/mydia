@@ -491,7 +491,8 @@ defmodule MydiaWeb.ImportMediaLive.Index do
        socket
        |> assign(:edit_form, updated_form)
        |> assign(:search_results, [])
-       |> assign(:search_query, validated_data.title)}
+       |> assign(:search_query, validated_data.title)
+       |> persist_session()}
     else
       {:noreply, socket}
     end

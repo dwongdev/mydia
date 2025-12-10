@@ -33,6 +33,8 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     if connected?(socket) do
       # Refresh system data every 5 seconds for real-time updates
       :timer.send_interval(5000, self(), :refresh_system_data)
+      # Subscribe to library scanner topic for job updates
+      Phoenix.PubSub.subscribe(Mydia.PubSub, "library_scanner")
     end
 
     {:ok,
@@ -40,6 +42,8 @@ defmodule MydiaWeb.AdminConfigLive.Index do
      |> assign(:page_title, "Configuration")
      |> assign(:active_tab, "status")
      |> assign(:cardigann_enabled, CardigannFeatureFlags.enabled?())
+     |> assign(:reorganizing_library_ids, MapSet.new())
+     |> assign(:reclassifying_library_ids, MapSet.new())
      |> load_configuration_data()
      |> load_system_data()}
   end
@@ -57,6 +61,61 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   @impl true
   def handle_info(:refresh_system_data, socket) do
     {:noreply, load_system_data(socket)}
+  end
+
+  # Library reorganization job handlers
+  @impl true
+  def handle_info({:library_reorganize_started, %{library_path_id: id}}, socket) do
+    {:noreply, update(socket, :reorganizing_library_ids, &MapSet.put(&1, id))}
+  end
+
+  @impl true
+  def handle_info({:library_reorganize_completed, %{library_path_id: id} = result}, socket) do
+    message =
+      cond do
+        result.moved == 0 && result.total == 0 ->
+          "Reorganization complete: No files to reorganize"
+
+        result.moved == 0 ->
+          "Reorganization complete: No files needed moving (#{result.total} already in correct locations)"
+
+        true ->
+          "Reorganization complete: Moved #{result.moved} of #{result.total} files"
+      end
+
+    {:noreply,
+     socket
+     |> update(:reorganizing_library_ids, &MapSet.delete(&1, id))
+     |> put_flash(:info, message)}
+  end
+
+  # Media reclassification job handlers
+  @impl true
+  def handle_info({:media_reclassify_started, %{library_path_id: id}}, socket) do
+    {:noreply, update(socket, :reclassifying_library_ids, &MapSet.put(&1, id))}
+  end
+
+  @impl true
+  def handle_info({:media_reclassify_completed, %{library_path_id: id} = result}, socket) do
+    message =
+      cond do
+        result.updated > 0 && result.skipped > 0 ->
+          "Reclassification complete: #{result.updated} updated (#{result.skipped} skipped with override)"
+
+        result.updated > 0 ->
+          "Reclassification complete: #{result.updated} items updated"
+
+        result.skipped > 0 ->
+          "Reclassification complete: No changes (#{result.skipped} items have override)"
+
+        true ->
+          "Reclassification complete: No category changes detected"
+      end
+
+    {:noreply,
+     socket
+     |> update(:reclassifying_library_ids, &MapSet.delete(&1, id))
+     |> put_flash(:info, message)}
   end
 
   @impl true
@@ -1700,6 +1759,56 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   @impl true
   def handle_event("close_library_path_modal", _params, socket) do
     {:noreply, assign(socket, :show_library_path_modal, false)}
+  end
+
+  @impl true
+  def handle_event("preview_reorganize", %{"id" => id}, socket) do
+    alias Mydia.Library.FileOrganizer
+
+    library_path = Settings.get_library_path!(id)
+
+    {:ok, summary} = FileOrganizer.reorganize_library(library_path, dry_run: true)
+
+    message =
+      if summary.total == 0 do
+        "No files need reorganization"
+      else
+        "Preview: #{summary.moved} of #{summary.total} files would be moved to category folders"
+      end
+
+    {:noreply, put_flash(socket, :info, message)}
+  end
+
+  @impl true
+  def handle_event("reorganize_library", %{"id" => id}, socket) do
+    alias Mydia.Jobs.LibraryReorganize
+
+    case LibraryReorganize.enqueue(id) do
+      {:ok, _job} ->
+        {:noreply,
+         socket
+         |> update(:reorganizing_library_ids, &MapSet.put(&1, id))
+         |> put_flash(:info, "Library reorganization started...")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to start reorganization")}
+    end
+  end
+
+  @impl true
+  def handle_event("reclassify_library", %{"id" => id}, socket) do
+    alias Mydia.Jobs.MediaReclassify
+
+    case MediaReclassify.enqueue(id) do
+      {:ok, _job} ->
+        {:noreply,
+         socket
+         |> update(:reclassifying_library_ids, &MapSet.put(&1, id))
+         |> put_flash(:info, "Media reclassification started...")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to start reclassification")}
+    end
   end
 
   ## Media Server Events

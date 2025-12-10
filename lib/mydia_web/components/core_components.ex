@@ -1077,6 +1077,66 @@ defmodule MydiaWeb.CoreComponents do
   def format_duration(_, _), do: nil
 
   @doc """
+  Renders a category badge for media items.
+
+  Displays the media category (movie, anime, cartoon, etc.) with appropriate styling.
+  Shows an indicator for manual vs auto-detected categories.
+
+  ## Examples
+
+      <.category_badge category="anime_movie" />
+      <.category_badge category="tv_show" override={true} />
+  """
+  attr :category, :string, required: true, doc: "The media category string"
+  attr :override, :boolean, default: false, doc: "Whether this is a manual override"
+  attr :class, :string, default: "", doc: "Additional CSS classes"
+  attr :size, :string, default: "sm", values: ~w(xs sm), doc: "Badge size"
+
+  def category_badge(assigns) do
+    ~H"""
+    <span
+      :if={@category}
+      class={[
+        "badge inline-flex items-center",
+        @override && "gap-1",
+        badge_size_class(@size),
+        category_badge_class(@category),
+        @class
+      ]}
+      title={category_title(@category, @override)}
+    >
+      <.icon :if={@override} name="hero-pencil-square" class={icon_size_class(@size)} />
+      {category_label(@category)}
+    </span>
+    """
+  end
+
+  defp badge_size_class("xs"), do: "badge-xs"
+  defp badge_size_class(_), do: "badge-sm"
+
+  defp icon_size_class("xs"), do: "w-2.5 h-2.5"
+  defp icon_size_class(_), do: "w-3 h-3"
+
+  defp category_badge_class("movie"), do: "badge-primary"
+  defp category_badge_class("anime_movie"), do: "badge-secondary"
+  defp category_badge_class("cartoon_movie"), do: "badge-accent"
+  defp category_badge_class("tv_show"), do: "badge-primary"
+  defp category_badge_class("anime_series"), do: "badge-secondary"
+  defp category_badge_class("cartoon_series"), do: "badge-accent"
+  defp category_badge_class(_), do: "badge-ghost"
+
+  defp category_label("movie"), do: "Movie"
+  defp category_label("anime_movie"), do: "Anime"
+  defp category_label("cartoon_movie"), do: "Cartoon"
+  defp category_label("tv_show"), do: "TV"
+  defp category_label("anime_series"), do: "Anime"
+  defp category_label("cartoon_series"), do: "Cartoon"
+  defp category_label(_), do: "Unknown"
+
+  defp category_title(category, true), do: "#{category_label(category)} (Manual override)"
+  defp category_title(category, false), do: "#{category_label(category)} (Auto-detected)"
+
+  @doc """
   Translates an error message using gettext.
   """
   def translate_error({msg, opts}) do

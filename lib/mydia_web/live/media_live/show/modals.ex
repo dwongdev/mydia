@@ -863,6 +863,97 @@ defmodule MydiaWeb.MediaLive.Show.Modals do
   end
 
   @doc """
+  Category override modal for changing media item category.
+  """
+  attr :media_item, :map, required: true
+  attr :category_form, :map, required: true
+  attr :available_categories, :list, required: true
+
+  def category_override_modal(assigns) do
+    ~H"""
+    <div class="modal modal-open">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg mb-4">Change Category</h3>
+
+        <div class="mb-4 p-3 bg-base-200 rounded-box">
+          <div class="flex items-center gap-2 text-sm">
+            <span class="text-base-content/70">Current category:</span>
+            <%= if @media_item.category do %>
+              <.category_badge
+                category={@media_item.category}
+                override={@media_item.category_override}
+              />
+            <% else %>
+              <span class="text-base-content/50">Not set</span>
+            <% end %>
+          </div>
+          <%= if @media_item.category_override do %>
+            <div class="text-xs text-warning mt-2 flex items-center gap-1">
+              <.icon name="hero-exclamation-triangle" class="w-3 h-3" />
+              Category was manually set and won't change on metadata refresh
+            </div>
+          <% end %>
+        </div>
+
+        <.form
+          for={@category_form}
+          id="category-override-form"
+          phx-change="validate_category"
+          phx-submit="save_category"
+        >
+          <div class="form-control mb-4">
+            <label class="label">
+              <span class="label-text font-medium">Select Category</span>
+            </label>
+            <.input
+              field={@category_form[:category]}
+              type="select"
+              options={@available_categories}
+              prompt="Select a category"
+            />
+          </div>
+
+          <div class="form-control mb-4">
+            <label class="label cursor-pointer justify-start gap-4">
+              <.input
+                field={@category_form[:override]}
+                type="checkbox"
+                class="checkbox checkbox-primary"
+              />
+              <div>
+                <span class="label-text font-medium">Lock category</span>
+                <p class="label-text-alt mt-1 text-base-content/70">
+                  Prevent auto-classification from changing this category
+                </p>
+              </div>
+            </label>
+          </div>
+
+          <div class="modal-action">
+            <button type="button" phx-click="hide_category_modal" class="btn btn-ghost">
+              Cancel
+            </button>
+            <%= if @media_item.category_override do %>
+              <button
+                type="button"
+                phx-click="reset_category_to_auto"
+                class="btn btn-warning btn-outline"
+              >
+                <.icon name="hero-arrow-path" class="w-4 h-4" /> Reset to Auto
+              </button>
+            <% end %>
+            <button type="submit" class="btn btn-primary">
+              Save Category
+            </button>
+          </div>
+        </.form>
+      </div>
+      <div class="modal-backdrop" phx-click="hide_category_modal"></div>
+    </div>
+    """
+  end
+
+  @doc """
   Subtitle search modal for searching and downloading subtitles.
   """
   attr :media_file, :map, required: true

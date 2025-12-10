@@ -58,9 +58,24 @@
                 <span>{runtime}</span>
               <% end %>
 
-              <span class="badge badge-ghost">
-                {if @media_item.type == "movie", do: "Movie", else: "TV Show"}
-              </span>
+              <button
+                type="button"
+                phx-click="show_category_modal"
+                class="group cursor-pointer"
+                title="Click to change category"
+              >
+                <%= if @media_item.category do %>
+                  <.category_badge
+                    category={@media_item.category}
+                    override={@media_item.category_override}
+                    class="group-hover:ring-2 group-hover:ring-primary transition-all"
+                  />
+                <% else %>
+                  <span class="badge badge-ghost group-hover:ring-2 group-hover:ring-primary transition-all">
+                    {if @media_item.type == "movie", do: "Movie", else: "TV Show"}
+                  </span>
+                <% end %>
+              </button>
             </div>
 
             <%!-- Genres --%>
@@ -169,6 +184,13 @@
       subtitle_search_results={@subtitle_search_results}
       downloading_subtitle={@downloading_subtitle}
       selected_languages={@selected_languages}
+    />
+  <% end %>
+  <%= if @show_category_modal && @category_form do %>
+    <Modals.category_override_modal
+      media_item={@media_item}
+      category_form={@category_form}
+      available_categories={@available_categories}
     />
   <% end %>
 </Layouts.app>

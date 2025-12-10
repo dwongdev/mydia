@@ -2,9 +2,13 @@ defmodule Mydia.Library.SpriteGenerator do
   @moduledoc """
   Generates sprite sheets and WebVTT files for video scrubbing timelines.
 
-  This module extracts frames from video files at regular intervals, stitches them
+  This module extracts a fixed number of frames from video files, stitches them
   into a single sprite sheet image, and generates a WebVTT file that maps timestamps
   to sprite coordinates for video player timeline previews.
+
+  The frame interval is calculated dynamically based on video duration to ensure
+  consistent sprite sizes regardless of video length. This approach is inspired by
+  Stash (https://github.com/stashapp/stash).
 
   ## Usage
 
@@ -14,10 +18,10 @@ defmodule Mydia.Library.SpriteGenerator do
 
       # With custom options
       {:ok, result} = SpriteGenerator.generate(media_file,
-        interval: 10,          # Extract frame every 10 seconds
+        frame_count: 81,       # Extract 81 frames total (9x9 grid)
         thumbnail_width: 160,  # Each thumbnail 160px wide
         thumbnail_height: 90,  # Each thumbnail 90px tall
-        columns: 10,           # 10 thumbnails per row
+        columns: 9,            # 9 thumbnails per row
         skip_start: 5,         # Skip first 5 seconds
         skip_end: 5            # Skip last 5 seconds
       )
@@ -46,22 +50,28 @@ defmodule Mydia.Library.SpriteGenerator do
   alias Mydia.Library.MediaFile
   alias Mydia.Library.ThumbnailGenerator
 
-  @default_interval 5
+  # Sprite grid configuration (matching Stash defaults)
+  @default_sprite_rows 9
+  @default_sprite_cols 9
+  @default_frame_count @default_sprite_rows * @default_sprite_cols
+
+  # Thumbnail configuration
   @default_thumbnail_width 160
   @default_thumbnail_height 90
-  @default_columns 10
   @default_quality 3
-  @default_skip_start 0
-  @default_skip_end 0
+
+  # Skip configuration (as percentages of duration)
+  @default_skip_start_percent 0.02
+  @default_skip_end_percent 0.02
 
   @type generate_opts :: [
-          interval: pos_integer(),
+          frame_count: pos_integer(),
           thumbnail_width: pos_integer(),
           thumbnail_height: pos_integer(),
           columns: pos_integer(),
           quality: pos_integer(),
-          skip_start: non_neg_integer(),
-          skip_end: non_neg_integer()
+          skip_start: number(),
+          skip_end: number()
         ]
 
   @type generate_result :: %{
@@ -73,19 +83,20 @@ defmodule Mydia.Library.SpriteGenerator do
   @doc """
   Generates a sprite sheet and WebVTT file from a video file.
 
-  Extracts frames at regular intervals, creates a sprite sheet with all frames
-  arranged in a grid, and generates a WebVTT file mapping timestamps to coordinates.
+  Extracts a fixed number of frames distributed evenly across the video,
+  creates a sprite sheet with all frames arranged in a grid, and generates
+  a WebVTT file mapping timestamps to coordinates.
 
   ## Parameters
     - `media_file` - The MediaFile struct (must have library_path preloaded)
     - `opts` - Optional settings:
-      - `:interval` - Seconds between frames (default: #{@default_interval})
+      - `:frame_count` - Total frames to extract (default: #{@default_frame_count})
       - `:thumbnail_width` - Width of each thumbnail (default: #{@default_thumbnail_width})
       - `:thumbnail_height` - Height of each thumbnail (default: #{@default_thumbnail_height})
-      - `:columns` - Number of thumbnails per row (default: #{@default_columns})
+      - `:columns` - Number of thumbnails per row (default: #{@default_sprite_cols})
       - `:quality` - JPEG quality 1-31, lower is better (default: #{@default_quality})
-      - `:skip_start` - Seconds to skip at start (default: #{@default_skip_start})
-      - `:skip_end` - Seconds to skip at end (default: #{@default_skip_end})
+      - `:skip_start` - Seconds to skip at start (default: 2% of duration)
+      - `:skip_end` - Seconds to skip at end (default: 2% of duration)
 
   ## Returns
     - `{:ok, result}` - Map with sprite_checksum, vtt_checksum, and frame_count
@@ -94,7 +105,7 @@ defmodule Mydia.Library.SpriteGenerator do
   ## Examples
 
       {:ok, result} = SpriteGenerator.generate(media_file)
-      {:ok, result} = SpriteGenerator.generate(media_file, interval: 10, columns: 8)
+      {:ok, result} = SpriteGenerator.generate(media_file, frame_count: 64, columns: 8)
   """
   @spec generate(MediaFile.t(), generate_opts()) :: {:ok, generate_result()} | {:error, term()}
   def generate(%MediaFile{} = media_file, opts \\ []) do
@@ -125,16 +136,17 @@ defmodule Mydia.Library.SpriteGenerator do
   # Private implementation
 
   defp do_generate(input_path, opts) do
-    interval = Keyword.get(opts, :interval, @default_interval)
+    frame_count = Keyword.get(opts, :frame_count, @default_frame_count)
     thumb_width = Keyword.get(opts, :thumbnail_width, @default_thumbnail_width)
     thumb_height = Keyword.get(opts, :thumbnail_height, @default_thumbnail_height)
-    columns = Keyword.get(opts, :columns, @default_columns)
+    columns = Keyword.get(opts, :columns, @default_sprite_cols)
     quality = Keyword.get(opts, :quality, @default_quality)
-    skip_start = Keyword.get(opts, :skip_start, @default_skip_start)
-    skip_end = Keyword.get(opts, :skip_end, @default_skip_end)
+    skip_start = Keyword.get(opts, :skip_start, :default)
+    skip_end = Keyword.get(opts, :skip_end, :default)
 
     with {:ok, duration} <- ThumbnailGenerator.get_duration(input_path),
-         {:ok, timestamps} <- calculate_timestamps(duration, interval, skip_start, skip_end),
+         {:ok, timestamps, interval} <-
+           calculate_timestamps(duration, frame_count, skip_start, skip_end),
          {:ok, temp_dir} <- create_temp_directory(),
          {:ok, frame_paths} <-
            extract_frames(input_path, timestamps, temp_dir, thumb_width, thumb_height),
@@ -159,22 +171,42 @@ defmodule Mydia.Library.SpriteGenerator do
     end
   end
 
-  defp calculate_timestamps(duration, interval, skip_start, skip_end) do
+  # Calculate timestamps for frame extraction based on fixed frame count
+  # Returns timestamps and the computed interval for VTT generation
+  defp calculate_timestamps(duration, frame_count, skip_start_opt, skip_end_opt) do
+    # Calculate skip values (use percentage of duration if :default)
+    skip_start =
+      case skip_start_opt do
+        :default -> duration * @default_skip_start_percent
+        value when is_number(value) -> value
+      end
+
+    skip_end =
+      case skip_end_opt do
+        :default -> duration * @default_skip_end_percent
+        value when is_number(value) -> value
+      end
+
     effective_start = skip_start
     effective_end = max(0, duration - skip_end)
+    effective_duration = effective_end - effective_start
 
-    if effective_start >= effective_end do
+    if effective_duration <= 0 do
       {:error, :video_too_short}
     else
+      # Calculate interval to distribute frames evenly across the video
+      interval = effective_duration / frame_count
+
+      # Generate timestamps starting from effective_start
       timestamps =
-        Stream.iterate(effective_start, &(&1 + interval))
-        |> Stream.take_while(&(&1 < effective_end))
-        |> Enum.to_list()
+        0..(frame_count - 1)
+        |> Enum.map(fn i -> effective_start + i * interval end)
+        |> Enum.filter(&(&1 < effective_end))
 
       if timestamps == [] do
         {:error, :no_frames_to_extract}
       else
-        {:ok, timestamps}
+        {:ok, timestamps, interval}
       end
     end
   end

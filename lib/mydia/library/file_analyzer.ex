@@ -121,6 +121,7 @@ defmodule Mydia.Library.FileAnalyzer do
         bitrate: extract_bitrate(video_stream, format),
         hdr_format: extract_hdr_format(video_stream),
         duration: extract_duration(format),
+        container: extract_container(format),
         size: nil
       })
 
@@ -145,6 +146,40 @@ defmodule Mydia.Library.FileAnalyzer do
         nil
     end
   end
+
+  # Extracts container format from FFprobe format section.
+  # FFprobe returns format_name which may contain comma-separated values like "mov,mp4,m4a,3gp"
+  # We normalize this to a single, canonical container name.
+  defp extract_container(format) do
+    case format["format_name"] do
+      nil ->
+        nil
+
+      format_name when is_binary(format_name) ->
+        # Take the first format if comma-separated (e.g., "mov,mp4,m4a" -> "mov")
+        format_name
+        |> String.split(",")
+        |> List.first()
+        |> String.trim()
+        |> String.downcase()
+        |> normalize_container_name()
+
+      _ ->
+        nil
+    end
+  end
+
+  # Normalizes container names to canonical forms for consistency
+  defp normalize_container_name("matroska"), do: "mkv"
+  defp normalize_container_name("mov"), do: "mp4"
+  defp normalize_container_name("m4v"), do: "mp4"
+  defp normalize_container_name("m4a"), do: "mp4"
+  defp normalize_container_name("3gp"), do: "mp4"
+  defp normalize_container_name("3g2"), do: "mp4"
+  defp normalize_container_name("mj2"), do: "mp4"
+  defp normalize_container_name("mpegts"), do: "ts"
+  defp normalize_container_name("mpeg"), do: "ts"
+  defp normalize_container_name(name), do: name
 
   defp extract_resolution(nil), do: nil
 

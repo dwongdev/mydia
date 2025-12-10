@@ -56,9 +56,15 @@ defmodule Mydia.Media do
   @doc """
   Creates a media item.
 
+  For TV shows, this automatically fetches and creates all episodes from the
+  metadata provider. This ensures TV shows are never created without their
+  episode data.
+
   ## Options
     - `:actor_type` - The type of actor (:user, :system, :job) - defaults to :system
     - `:actor_id` - The ID of the actor (user_id, job name, etc.)
+    - `:season_monitoring` - For TV shows, which seasons to fetch ("all", "first", "latest", "none") - defaults to "all"
+    - `:skip_episode_refresh` - Skip automatic episode fetching (for tests or special cases) - defaults to false
   """
   def create_media_item(attrs \\ %{}, opts \\ []) do
     with {:ok, media_item} <-
@@ -78,6 +84,21 @@ defmodule Mydia.Media do
       Mydia.Hooks.execute_async("after_media_added", %{
         media_item: serialize_media_item(media_item)
       })
+
+      # For TV shows, automatically fetch episodes unless explicitly skipped
+      if media_item.type == "tv_show" and not Keyword.get(opts, :skip_episode_refresh, false) do
+        season_monitoring = Keyword.get(opts, :season_monitoring, "all")
+
+        case refresh_episodes_for_tv_show(media_item, season_monitoring: season_monitoring) do
+          {:ok, count} ->
+            Logger.info("Created #{count} episodes for #{media_item.title}")
+
+          {:error, reason} ->
+            # Log the error but don't fail the media item creation
+            # The show is still usable and episodes can be refreshed later
+            Logger.warning("Failed to fetch episodes for #{media_item.title}: #{inspect(reason)}")
+        end
+      end
 
       {:ok, media_item}
     end

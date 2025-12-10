@@ -5,6 +5,7 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
   This job processes media files to generate:
   - Cover thumbnails (static image from video)
   - Optionally sprite sheets and VTT files for scrubbing
+  - Optionally video previews for hover playback
 
   ## Features
 
@@ -24,6 +25,9 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
       # Generate for all files missing thumbnails
       Mydia.Jobs.ThumbnailGeneration.enqueue_missing()
 
+      # Include sprites and video previews
+      Mydia.Jobs.ThumbnailGeneration.enqueue_file(id, include_sprites: true, include_previews: true)
+
   ## Job Arguments
 
   - `media_file_id` - Generate thumbnail for a single file
@@ -31,6 +35,7 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
   - `library_path_id` - Generate thumbnails for all files in a library
   - `mode` - Processing mode: "single", "batch", or "missing"
   - `include_sprites` - Also generate sprite sheets (default: false)
+  - `include_previews` - Also generate video previews (default: false)
   """
 
   use Oban.Worker,
@@ -46,6 +51,7 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
   alias Mydia.Library.MediaFile
   alias Mydia.Library.ThumbnailGenerator
   alias Mydia.Library.SpriteGenerator
+  alias Mydia.Library.PreviewGenerator
   alias Mydia.Repo
 
   @pubsub Mydia.PubSub
@@ -76,12 +82,14 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
 
   ## Options
     - `:include_sprites` - Also generate sprite sheet and VTT (default: false)
+    - `:include_previews` - Also generate video preview clips (default: false)
   """
   def enqueue_file(media_file_id, opts \\ []) when is_binary(media_file_id) do
     %{
       mode: "single",
       media_file_id: media_file_id,
-      include_sprites: Keyword.get(opts, :include_sprites, false)
+      include_sprites: Keyword.get(opts, :include_sprites, false),
+      include_previews: Keyword.get(opts, :include_previews, false)
     }
     |> new()
     |> Oban.insert()
@@ -94,12 +102,14 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
 
   ## Options
     - `:include_sprites` - Also generate sprite sheets and VTT (default: false)
+    - `:include_previews` - Also generate video preview clips (default: false)
   """
   def enqueue_batch(media_file_ids, opts \\ []) when is_list(media_file_ids) do
     %{
       mode: "batch",
       media_file_ids: media_file_ids,
-      include_sprites: Keyword.get(opts, :include_sprites, false)
+      include_sprites: Keyword.get(opts, :include_sprites, false),
+      include_previews: Keyword.get(opts, :include_previews, false)
     }
     |> new()
     |> Oban.insert()
@@ -110,6 +120,7 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
 
   ## Options
     - `:include_sprites` - Also generate sprite sheets and VTT (default: false)
+    - `:include_previews` - Also generate video preview clips (default: false)
     - `:regenerate` - Regenerate even if thumbnails exist (default: false)
   """
   def enqueue_library(library_path_id, opts \\ []) when is_binary(library_path_id) do
@@ -117,6 +128,7 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
       mode: "library",
       library_path_id: library_path_id,
       include_sprites: Keyword.get(opts, :include_sprites, false),
+      include_previews: Keyword.get(opts, :include_previews, false),
       regenerate: Keyword.get(opts, :regenerate, false)
     }
     |> new()
@@ -128,12 +140,14 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
 
   ## Options
     - `:include_sprites` - Also generate sprite sheets and VTT (default: false)
+    - `:include_previews` - Also generate video preview clips (default: false)
     - `:library_type` - Only process files from this library type (optional)
   """
   def enqueue_missing(opts \\ []) do
     args = %{
       mode: "missing",
-      include_sprites: Keyword.get(opts, :include_sprites, false)
+      include_sprites: Keyword.get(opts, :include_sprites, false),
+      include_previews: Keyword.get(opts, :include_previews, false)
     }
 
     args =
@@ -167,33 +181,41 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"mode" => "single", "media_file_id" => id} = args}) do
-    include_sprites = Map.get(args, "include_sprites", false)
+    opts = extract_generation_opts(args)
 
-    case process_single_file(id, include_sprites) do
+    case process_single_file(id, opts) do
       {:ok, _} -> :ok
       {:error, reason} -> {:error, reason}
     end
   end
 
   def perform(%Oban.Job{args: %{"mode" => "batch", "media_file_ids" => ids} = args}) do
-    include_sprites = Map.get(args, "include_sprites", false)
-    process_batch(ids, include_sprites)
+    opts = extract_generation_opts(args)
+    process_batch(ids, opts)
   end
 
   def perform(%Oban.Job{args: %{"mode" => "library", "library_path_id" => id} = args}) do
-    include_sprites = Map.get(args, "include_sprites", false)
+    opts = extract_generation_opts(args)
     regenerate = Map.get(args, "regenerate", false)
 
-    process_library(id, include_sprites, regenerate)
+    process_library(id, opts, regenerate)
     :ok
   end
 
   def perform(%Oban.Job{args: %{"mode" => "missing"} = args}) do
-    include_sprites = Map.get(args, "include_sprites", false)
+    opts = extract_generation_opts(args)
     library_type = Map.get(args, "library_type")
 
-    process_missing(include_sprites, library_type)
+    process_missing(opts, library_type)
     :ok
+  end
+
+  # Extract generation options from job args
+  defp extract_generation_opts(args) do
+    %{
+      include_sprites: Map.get(args, "include_sprites", false),
+      include_previews: Map.get(args, "include_previews", false)
+    }
   end
 
   @impl Oban.Worker
@@ -204,7 +226,7 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
 
   ## Private Implementation
 
-  defp process_single_file(media_file_id, include_sprites) do
+  defp process_single_file(media_file_id, opts) do
     broadcast_progress(%{event: :started, total: 1, completed: 0})
 
     media_file =
@@ -212,7 +234,7 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
       |> Repo.get(media_file_id)
       |> Repo.preload(:library_path)
 
-    result = generate_for_file(media_file, include_sprites)
+    result = generate_for_file(media_file, opts)
 
     case result do
       {:ok, _} ->
@@ -225,7 +247,7 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
     end
   end
 
-  defp process_batch(media_file_ids, include_sprites) do
+  defp process_batch(media_file_ids, opts) do
     total = length(media_file_ids)
     broadcast_progress(%{event: :started, total: total, completed: 0})
 
@@ -238,7 +260,7 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
           |> Repo.get(id)
           |> Repo.preload(:library_path)
 
-        case generate_for_file(media_file, include_sprites) do
+        case generate_for_file(media_file, opts) do
           {:ok, _} ->
             broadcast_progress(%{
               event: :progress,
@@ -259,7 +281,7 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
     :ok
   end
 
-  defp process_library(library_path_id, include_sprites, regenerate) do
+  defp process_library(library_path_id, opts, regenerate) do
     # Get all video files in the library
     query =
       from mf in MediaFile,
@@ -280,12 +302,12 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
       {:ok, :no_files}
     else
       # Process in batches
-      process_in_batches(file_ids, include_sprites)
+      process_in_batches(file_ids, opts)
       {:ok, :completed}
     end
   end
 
-  defp process_missing(include_sprites, library_type) do
+  defp process_missing(opts, library_type) do
     # Query files missing thumbnails
     query =
       from mf in MediaFile,
@@ -307,12 +329,12 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
       broadcast_progress(%{event: :completed, total: 0, completed: 0, failed: 0})
       {:ok, :no_files}
     else
-      process_in_batches(file_ids, include_sprites)
+      process_in_batches(file_ids, opts)
       {:ok, :completed}
     end
   end
 
-  defp process_in_batches(file_ids, include_sprites) do
+  defp process_in_batches(file_ids, opts) do
     total = length(file_ids)
     broadcast_progress(%{event: :started, total: total, completed: 0})
 
@@ -332,7 +354,7 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
               |> Repo.get(id)
               |> Repo.preload(:library_path)
 
-            case generate_for_file(media_file, include_sprites) do
+            case generate_for_file(media_file, opts) do
               {:ok, _} ->
                 broadcast_progress(%{
                   event: :progress,
@@ -356,11 +378,14 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
     {completed, failed}
   end
 
-  defp generate_for_file(nil, _include_sprites) do
+  defp generate_for_file(nil, _opts) do
     {:error, :file_not_found}
   end
 
-  defp generate_for_file(%MediaFile{} = media_file, include_sprites) do
+  defp generate_for_file(%MediaFile{} = media_file, opts) do
+    include_sprites = Map.get(opts, :include_sprites, false)
+    include_previews = Map.get(opts, :include_previews, false)
+
     # Check if FFmpeg is available
     unless ThumbnailGenerator.ffmpeg_available?() do
       {:error, :ffmpeg_not_found}
@@ -370,6 +395,7 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
         # Update media file with cover checksum
         attrs = %{cover_blob: cover_checksum, generated_at: DateTime.utc_now()}
 
+        # Generate sprite sheet if requested
         attrs =
           if include_sprites do
             case SpriteGenerator.generate(media_file) do
@@ -379,6 +405,24 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
               {:error, reason} ->
                 Logger.warning(
                   "Failed to generate sprites for #{media_file.id}: #{inspect(reason)}"
+                )
+
+                attrs
+            end
+          else
+            attrs
+          end
+
+        # Generate video preview if requested
+        attrs =
+          if include_previews do
+            case PreviewGenerator.generate(media_file) do
+              {:ok, %{preview_checksum: preview}} ->
+                Map.put(attrs, :preview_blob, preview)
+
+              {:error, reason} ->
+                Logger.warning(
+                  "Failed to generate preview for #{media_file.id}: #{inspect(reason)}"
                 )
 
                 attrs

@@ -64,6 +64,53 @@ defmodule Mydia.Library do
   end
 
   @doc """
+  Gets adjacent media files (previous and next) for navigation.
+
+  Files are ordered by insertion date (newest first) to match the default
+  listing order in the adult library index.
+
+  ## Options
+    - `:library_path_type` - Filter by library path type (e.g., :adult)
+
+  Returns `{previous_file, next_file}` where either can be nil if at the boundary.
+  """
+  def get_adjacent_media_files(current_file_id, opts \\ []) do
+    # Build base query with optional library type filter
+    base_query =
+      MediaFile
+      |> apply_media_file_filters(opts)
+      |> order_by([f], desc: f.inserted_at, desc: f.id)
+
+    # Get the current file to find its position
+    current_file = Repo.get!(MediaFile, current_file_id)
+
+    # Previous file: files inserted after the current one (newer)
+    previous_file =
+      base_query
+      |> where(
+        [f],
+        f.inserted_at > ^current_file.inserted_at or
+          (f.inserted_at == ^current_file.inserted_at and f.id > ^current_file_id)
+      )
+      |> order_by([f], asc: f.inserted_at, asc: f.id)
+      |> limit(1)
+      |> Repo.one()
+
+    # Next file: files inserted before the current one (older)
+    next_file =
+      base_query
+      |> where(
+        [f],
+        f.inserted_at < ^current_file.inserted_at or
+          (f.inserted_at == ^current_file.inserted_at and f.id < ^current_file_id)
+      )
+      |> limit(1)
+      |> Repo.one()
+
+    {previous_file, next_file}
+  end
+
+  @doc """
   Gets a media file by absolute path.
 
   Matches the path against all library paths to find the relative path,
@@ -117,12 +164,76 @@ defmodule Mydia.Library do
   @doc """
   Creates a media file during library scanning.
   Parent association is optional and will be set later during metadata enrichment.
+
+  Automatically extracts technical metadata (codec, resolution, container) via FFprobe
+  using the library_path_id and relative_path to compute the absolute path.
   """
   def create_scanned_media_file(attrs \\ %{}) do
+    # Extract technical metadata by computing absolute path from library_path + relative_path
+    attrs = maybe_extract_technical_metadata(attrs)
+
     %MediaFile{}
     |> MediaFile.scan_changeset(attrs)
     |> Repo.insert()
   end
+
+  defp maybe_extract_technical_metadata(
+         %{library_path_id: library_path_id, relative_path: relative_path} = attrs
+       )
+       when is_binary(relative_path) do
+    # Get library path to compute absolute path
+    library_path =
+      try do
+        Mydia.Settings.get_library_path!(library_path_id)
+      rescue
+        _ -> nil
+      end
+
+    case library_path do
+      nil ->
+        attrs
+
+      library_path ->
+        absolute_path = Path.join(library_path.path, relative_path)
+
+        case FileAnalyzer.analyze(absolute_path) do
+          {:ok, analysis} ->
+            # Build metadata map with duration and container
+            metadata =
+              %{}
+              |> maybe_put_metadata("duration", analysis.duration)
+              |> maybe_put_metadata("container", analysis.container)
+
+            alias Mydia.Streaming.Codec
+
+            attrs
+            |> Map.put(:codec, Codec.normalize_video_codec(analysis.codec))
+            |> Map.put(:audio_codec, Codec.normalize_audio_codec(analysis.audio_codec))
+            |> Map.put(:resolution, analysis.resolution)
+            |> Map.put(:bitrate, analysis.bitrate)
+            |> Map.put(:hdr_format, analysis.hdr_format)
+            |> maybe_put_if_not_empty(:metadata, metadata)
+
+          {:error, reason} ->
+            require Logger
+
+            Logger.warning("Failed to extract technical metadata",
+              path: absolute_path,
+              reason: inspect(reason)
+            )
+
+            attrs
+        end
+    end
+  end
+
+  defp maybe_extract_technical_metadata(attrs), do: attrs
+
+  defp maybe_put_metadata(map, _key, nil), do: map
+  defp maybe_put_metadata(map, key, value), do: Map.put(map, key, value)
+
+  defp maybe_put_if_not_empty(attrs, _key, map) when map == %{}, do: attrs
+  defp maybe_put_if_not_empty(attrs, key, map), do: Map.put(attrs, key, map)
 
   @doc """
   Updates a media file.
@@ -1162,6 +1273,20 @@ defmodule Mydia.Library do
   """
   def trigger_full_library_scan do
     %{}
+    |> Mydia.Jobs.LibraryScanner.new()
+    |> Oban.insert()
+  end
+
+  @doc """
+  Triggers a manual library scan for all adult library paths.
+
+  This will scan for new/modified/deleted files and automatically
+  generate thumbnails for any new files.
+
+  Returns an Oban job that will perform the scan.
+  """
+  def trigger_adult_library_scan do
+    %{library_type: "adult"}
     |> Mydia.Jobs.LibraryScanner.new()
     |> Oban.insert()
   end

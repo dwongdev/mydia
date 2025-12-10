@@ -19,7 +19,6 @@ defmodule Mydia.Jobs.LibraryScanner do
   alias Mydia.Library.{
     MetadataMatcher,
     MetadataEnricher,
-    FileAnalyzer,
     MusicScanner,
     BookScanner,
     AdultScanner
@@ -32,14 +31,18 @@ defmodule Mydia.Jobs.LibraryScanner do
     start_time = System.monotonic_time(:millisecond)
     # Oban job args use string keys (JSON) - optional field with default
     library_path_id = args["library_path_id"]
+    library_type = args["library_type"]
 
     result =
-      case library_path_id do
-        nil ->
-          scan_all_libraries()
+      cond do
+        library_path_id != nil ->
+          scan_single_library(library_path_id)
 
-        id ->
-          scan_single_library(id)
+        library_type != nil ->
+          scan_libraries_by_type(String.to_existing_atom(library_type))
+
+        true ->
+          scan_all_libraries()
       end
 
     duration = System.monotonic_time(:millisecond) - start_time
@@ -48,7 +51,8 @@ defmodule Mydia.Jobs.LibraryScanner do
       :ok ->
         Logger.info("Library scan job completed",
           duration_ms: duration,
-          library_path_id: library_path_id
+          library_path_id: library_path_id,
+          library_type: library_type
         )
 
         :ok
@@ -57,7 +61,8 @@ defmodule Mydia.Jobs.LibraryScanner do
         Logger.error("Library scan job failed",
           error: inspect(reason),
           duration_ms: duration,
-          library_path_id: library_path_id
+          library_path_id: library_path_id,
+          library_type: library_type
         )
 
         {:error, reason}
@@ -83,6 +88,35 @@ defmodule Mydia.Jobs.LibraryScanner do
     failed = Enum.count(results, &match?({:error, _}, &1))
 
     Logger.info("Library scan completed",
+      total: length(results),
+      successful: successful,
+      failed: failed
+    )
+
+    :ok
+  end
+
+  defp scan_libraries_by_type(library_type) do
+    Logger.info("Starting scan of library paths by type", library_type: library_type)
+
+    library_paths = Settings.list_library_paths()
+
+    # For manual scans by type, include all libraries of that type (not just monitored)
+    # This allows users to trigger re-scans even for unmonitored libraries
+    paths_of_type = Enum.filter(library_paths, &(&1.type == library_type))
+
+    Logger.info("Found #{length(paths_of_type)} #{library_type} library paths")
+
+    results =
+      Enum.map(paths_of_type, fn library_path ->
+        scan_library_path(library_path)
+      end)
+
+    successful = Enum.count(results, &match?({:ok, _}, &1))
+    failed = Enum.count(results, &match?({:error, _}, &1))
+
+    Logger.info("Library scan by type completed",
+      library_type: library_type,
       total: length(results),
       successful: successful,
       failed: failed
@@ -307,7 +341,80 @@ defmodule Mydia.Jobs.LibraryScanner do
       files_found: length(scan_result.files)
     )
 
-    result = AdultScanner.process_scan_result(library_path, scan_result)
+    # Process adult content metadata (studios, scenes, adult_files)
+    adult_result = AdultScanner.process_scan_result(library_path, scan_result)
+
+    # Also process as standard media files for thumbnails and playback
+    # Get existing media files from database
+    existing_files = Library.list_media_files(library_path_id: library_path.id)
+
+    # Detect changes using the shared scanner logic
+    changes = Library.Scanner.detect_changes(scan_result, existing_files, library_path)
+
+    # Create MediaFile records for new files (for thumbnails and playback)
+    new_media_file_ids =
+      Enum.flat_map(changes.new_files, fn file_info ->
+        relative_path = Path.relative_to(file_info.path, library_path.path)
+
+        case Library.create_scanned_media_file(%{
+               library_path_id: library_path.id,
+               relative_path: relative_path,
+               size: file_info.size,
+               verified_at: DateTime.utc_now()
+             }) do
+          {:ok, media_file} ->
+            Logger.debug("Created media file for adult content",
+              path: file_info.path,
+              media_file_id: media_file.id
+            )
+
+            [media_file.id]
+
+          {:error, changeset} ->
+            Logger.error("Failed to create media file for adult content",
+              path: file_info.path,
+              errors: inspect(changeset.errors)
+            )
+
+            []
+        end
+      end)
+
+    # Update modified files
+    Enum.each(changes.modified_files, fn {media_file, file_info} ->
+      Library.update_media_file(media_file, %{
+        size: file_info.size,
+        verified_at: DateTime.utc_now()
+      })
+    end)
+
+    # Delete removed files
+    Enum.each(changes.deleted_files, fn media_file ->
+      Library.delete_media_file(media_file)
+    end)
+
+    # Find existing files missing thumbnails
+    existing_files_missing_thumbnails =
+      existing_files
+      |> Enum.filter(&is_nil(&1.cover_blob))
+      |> Enum.map(& &1.id)
+
+    # Combine new files and existing files missing thumbnails
+    files_needing_thumbnails = new_media_file_ids ++ existing_files_missing_thumbnails
+
+    # Enqueue thumbnail generation for all files needing thumbnails (includes sprites)
+    if length(files_needing_thumbnails) > 0 do
+      Logger.info("Enqueueing thumbnail generation for adult files",
+        new_files: length(new_media_file_ids),
+        existing_missing: length(existing_files_missing_thumbnails),
+        total: length(files_needing_thumbnails)
+      )
+
+      Mydia.Jobs.ThumbnailGeneration.enqueue_batch(files_needing_thumbnails,
+        include_sprites: true,
+        include_previews: true
+      )
+    end
 
     # Update library path with success status
     if updatable_library_path?(library_path) do
@@ -327,13 +434,13 @@ defmodule Mydia.Jobs.LibraryScanner do
        %{
          library_path_id: library_path.id,
          type: library_path.type,
-         new_files: result.new_files,
-         modified_files: result.modified_files,
-         deleted_files: result.deleted_files
+         new_files: adult_result.new_files,
+         modified_files: adult_result.modified_files,
+         deleted_files: adult_result.deleted_files
        }}
     )
 
-    {:ok, result}
+    {:ok, adult_result}
   rescue
     error ->
       error_message = Exception.format(:error, error, __STACKTRACE__)
@@ -890,8 +997,6 @@ defmodule Mydia.Jobs.LibraryScanner do
                 path: file_info.path
               )
 
-              # Extract technical file metadata (resolution, codec, bitrate, etc.)
-              extract_and_update_file_metadata(media_file, file_info)
               {:ok, :enriched}
 
             {:error, {:library_type_mismatch, message}} ->
@@ -1288,84 +1393,4 @@ defmodule Mydia.Jobs.LibraryScanner do
   end
 
   defp parse_air_date(_), do: nil
-
-  # Extract technical metadata from file and update the media_file record
-  defp extract_and_update_file_metadata(media_file, file_info) do
-    # Parse filename for fallback metadata
-    filename_metadata = FileParser.parse(Path.basename(file_info.path))
-
-    # Extract technical metadata from the actual file using FFprobe
-    file_metadata =
-      case FileAnalyzer.analyze(file_info.path) do
-        {:ok, metadata} ->
-          Logger.debug("Extracted file metadata via FFprobe",
-            path: file_info.path,
-            resolution: metadata.resolution,
-            codec: metadata.codec
-          )
-
-          metadata
-
-        {:error, reason} ->
-          Logger.debug("Failed to analyze file with FFprobe, using filename metadata only",
-            path: file_info.path,
-            reason: reason
-          )
-
-          # Continue with empty metadata - we'll use filename fallback below
-          %{
-            resolution: nil,
-            codec: nil,
-            audio_codec: nil,
-            bitrate: nil,
-            hdr_format: nil
-          }
-      end
-
-    # Merge metadata: prefer actual file metadata, fall back to filename parsing
-    # Build metadata map with duration if available
-    metadata_update =
-      if Map.get(file_metadata, :duration) do
-        %{"duration" => file_metadata.duration}
-      else
-        nil
-      end
-
-    update_attrs = %{
-      resolution: file_metadata.resolution || filename_metadata.quality.resolution,
-      codec: file_metadata.codec || filename_metadata.quality.codec,
-      audio_codec: file_metadata.audio_codec || filename_metadata.quality.audio,
-      bitrate: file_metadata.bitrate,
-      hdr_format: file_metadata.hdr_format || filename_metadata.quality.hdr_format,
-      metadata: metadata_update
-    }
-
-    # Use scan changeset to allow updates on orphaned files (files without media_item_id/episode_id)
-    case Library.update_media_file_scan(media_file, update_attrs) do
-      {:ok, updated_file} ->
-        Logger.debug("Updated file with technical metadata",
-          path: file_info.path,
-          resolution: updated_file.resolution,
-          codec: updated_file.codec
-        )
-
-        :ok
-
-      {:error, changeset} ->
-        Logger.warning("Failed to update file with technical metadata",
-          path: file_info.path,
-          errors: inspect(changeset.errors)
-        )
-
-        :error
-    end
-  rescue
-    error ->
-      Logger.error("Exception while extracting file metadata",
-        path: file_info.path,
-        error: Exception.message(error)
-      )
-
-      :error
-  end
 end

@@ -17,11 +17,21 @@ defmodule Mydia.Library.Structs.FileAnalysisResult do
   - `:hdr_format` - HDR format if present (e.g., "HDR10", "Dolby Vision")
   - `:size` - File size in bytes
   - `:duration` - Duration in seconds (floating point for precision)
+  - `:container` - Container format (e.g., "mp4", "mkv", "webm")
 
   All fields are optional as FFprobe may not be able to extract all metadata.
   """
 
-  defstruct [:resolution, :codec, :audio_codec, :bitrate, :hdr_format, :size, :duration]
+  defstruct [
+    :resolution,
+    :codec,
+    :audio_codec,
+    :bitrate,
+    :hdr_format,
+    :size,
+    :duration,
+    :container
+  ]
 
   @type t :: %__MODULE__{
           resolution: String.t() | nil,
@@ -30,7 +40,8 @@ defmodule Mydia.Library.Structs.FileAnalysisResult do
           bitrate: integer() | nil,
           hdr_format: String.t() | nil,
           size: integer() | nil,
-          duration: float() | nil
+          duration: float() | nil,
+          container: String.t() | nil
         }
 
   @doc """

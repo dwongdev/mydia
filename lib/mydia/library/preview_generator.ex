@@ -1,29 +1,33 @@
 defmodule Mydia.Library.PreviewGenerator do
   @moduledoc """
-  Generates short preview video clips from video files using FFmpeg.
+  Generates video preview clips for hover previews.
 
-  This module extracts multiple segments from different parts of a video,
-  concatenates them into a single preview video, and stores the result
-  using the GeneratedMedia content-addressable storage.
+  This module creates short video clips that can be played on hover to give users
+  a quick preview of the video content. It extracts multiple short segments from
+  different parts of the video and concatenates them into a single preview file.
+
+  Implementation inspired by Stash (https://github.com/stashapp/stash).
 
   ## Usage
 
-      # Generate a preview video with default settings
-      {:ok, checksum} = PreviewGenerator.generate(media_file)
+      # Generate preview for a video file
+      {:ok, %{preview_checksum: checksum, duration: duration}} =
+        PreviewGenerator.generate(media_file)
 
-      # Generate with custom options
-      {:ok, checksum} = PreviewGenerator.generate(media_file,
-        segment_count: 6,           # Number of segments to extract
-        segment_duration: 2,        # Duration of each segment in seconds
-        skip_start_percent: 10,     # Skip first 10% of video
-        skip_end_percent: 10        # Skip last 10% of video
+      # With custom options
+      {:ok, result} = PreviewGenerator.generate(media_file,
+        segment_count: 5,        # Number of segments to extract
+        segment_duration: 2.0,   # Duration of each segment in seconds
+        skip_start_percent: 0.05 # Skip first 5% of video
       )
 
   ## Output Format
 
-  The preview is an MP4 video composed of short segments from different
-  parts of the source video. By default, it creates a 12-second preview
-  (4 segments × 3 seconds each).
+  The output is an MP4 video file with:
+  - H.264 video codec
+  - 640px width (height auto-scaled to preserve aspect ratio)
+  - No audio track (muted preview)
+  - Approximately 10 seconds total duration (5 segments x 2 seconds)
 
   ## Requirements
 
@@ -36,54 +40,49 @@ defmodule Mydia.Library.PreviewGenerator do
   alias Mydia.Library.MediaFile
   alias Mydia.Library.ThumbnailGenerator
 
-  @default_segment_count 4
-  @default_segment_duration 3
-  @default_skip_start_percent 5
-  @default_skip_end_percent 5
-  @default_output_width 640
-  @default_output_height 360
-  @default_video_bitrate "1M"
-  @default_audio_bitrate "128k"
+  # Preview configuration
+  @default_segment_count 5
+  @default_segment_duration 2.0
+  @default_skip_start_percent 0.05
+  @default_skip_end_percent 0.05
+  @default_width 640
+  @default_crf 23
 
   @type generate_opts :: [
           segment_count: pos_integer(),
-          segment_duration: pos_integer(),
-          skip_start_percent: number(),
-          skip_end_percent: number(),
-          output_width: pos_integer(),
-          output_height: pos_integer(),
-          video_bitrate: String.t(),
-          audio_bitrate: String.t()
+          segment_duration: float(),
+          skip_start_percent: float(),
+          skip_end_percent: float(),
+          width: pos_integer(),
+          crf: pos_integer()
         ]
 
-  @doc """
-  Generates a preview video from a media file.
+  @type generate_result :: %{
+          preview_checksum: String.t(),
+          duration: float()
+        }
 
-  Extracts multiple segments from evenly-spaced positions in the video,
-  concatenates them, and stores the result using GeneratedMedia storage.
+  @doc """
+  Generates a video preview from a video file.
+
+  Extracts multiple short segments evenly distributed across the video
+  and concatenates them into a single preview file.
 
   ## Parameters
     - `media_file` - The MediaFile struct (must have library_path preloaded)
     - `opts` - Optional settings:
-      - `:segment_count` - Number of segments to extract (default: #{@default_segment_count})
-      - `:segment_duration` - Duration of each segment in seconds (default: #{@default_segment_duration})
-      - `:skip_start_percent` - Percentage of video to skip at start (default: #{@default_skip_start_percent})
-      - `:skip_end_percent` - Percentage of video to skip at end (default: #{@default_skip_end_percent})
-      - `:output_width` - Output video width (default: #{@default_output_width})
-      - `:output_height` - Output video height (default: #{@default_output_height})
-      - `:video_bitrate` - Video bitrate (default: #{@default_video_bitrate})
-      - `:audio_bitrate` - Audio bitrate (default: #{@default_audio_bitrate})
+      - `:segment_count` - Number of segments (default: #{@default_segment_count})
+      - `:segment_duration` - Duration per segment in seconds (default: #{@default_segment_duration})
+      - `:skip_start_percent` - Skip percentage at start (default: #{@default_skip_start_percent})
+      - `:skip_end_percent` - Skip percentage at end (default: #{@default_skip_end_percent})
+      - `:width` - Output width in pixels (default: #{@default_width})
+      - `:crf` - Quality (0-51, lower is better, default: #{@default_crf})
 
   ## Returns
-    - `{:ok, checksum}` - The MD5 checksum of the generated preview
+    - `{:ok, result}` - Map with preview_checksum and duration
     - `{:error, reason}` - Error description
-
-  ## Examples
-
-      {:ok, checksum} = PreviewGenerator.generate(media_file)
-      {:ok, checksum} = PreviewGenerator.generate(media_file, segment_count: 6, segment_duration: 2)
   """
-  @spec generate(MediaFile.t(), generate_opts()) :: {:ok, String.t()} | {:error, term()}
+  @spec generate(MediaFile.t(), generate_opts()) :: {:ok, generate_result()} | {:error, term()}
   def generate(%MediaFile{} = media_file, opts \\ []) do
     input_path = MediaFile.absolute_path(media_file)
 
@@ -95,11 +94,12 @@ defmodule Mydia.Library.PreviewGenerator do
   end
 
   @doc """
-  Generates a preview video from a file path.
+  Generates a video preview from a file path.
 
   Same as `generate/2` but takes a file path directly instead of a MediaFile.
   """
-  @spec generate_from_path(Path.t(), generate_opts()) :: {:ok, String.t()} | {:error, term()}
+  @spec generate_from_path(Path.t(), generate_opts()) ::
+          {:ok, generate_result()} | {:error, term()}
   def generate_from_path(input_path, opts \\ []) when is_binary(input_path) do
     if File.exists?(input_path) do
       do_generate(input_path, opts)
@@ -115,14 +115,12 @@ defmodule Mydia.Library.PreviewGenerator do
     segment_duration = Keyword.get(opts, :segment_duration, @default_segment_duration)
     skip_start_percent = Keyword.get(opts, :skip_start_percent, @default_skip_start_percent)
     skip_end_percent = Keyword.get(opts, :skip_end_percent, @default_skip_end_percent)
-    output_width = Keyword.get(opts, :output_width, @default_output_width)
-    output_height = Keyword.get(opts, :output_height, @default_output_height)
-    video_bitrate = Keyword.get(opts, :video_bitrate, @default_video_bitrate)
-    audio_bitrate = Keyword.get(opts, :audio_bitrate, @default_audio_bitrate)
+    width = Keyword.get(opts, :width, @default_width)
+    crf = Keyword.get(opts, :crf, @default_crf)
 
     with {:ok, duration} <- ThumbnailGenerator.get_duration(input_path),
-         {:ok, timestamps} <-
-           calculate_segment_timestamps(
+         {:ok, segment_starts} <-
+           calculate_segment_starts(
              duration,
              segment_count,
              segment_duration,
@@ -131,88 +129,95 @@ defmodule Mydia.Library.PreviewGenerator do
            ),
          {:ok, temp_dir} <- create_temp_directory(),
          {:ok, segment_paths} <-
-           extract_segments(
-             input_path,
-             timestamps,
-             segment_duration,
-             temp_dir,
-             output_width,
-             output_height,
-             video_bitrate,
-             audio_bitrate
-           ),
-         {:ok, output_path} <- concatenate_segments(segment_paths, temp_dir),
-         {:ok, checksum} <- GeneratedMedia.store_file(:preview, output_path) do
+           extract_segments(input_path, segment_starts, segment_duration, temp_dir, width, crf),
+         {:ok, preview_path} <- concatenate_segments(segment_paths, temp_dir),
+         {:ok, preview_checksum} <- GeneratedMedia.store_file(:preview, preview_path) do
       cleanup_temp_directory(temp_dir)
-      {:ok, checksum}
+
+      preview_duration = length(segment_starts) * segment_duration
+
+      {:ok,
+       %{
+         preview_checksum: preview_checksum,
+         duration: preview_duration
+       }}
     else
       {:error, reason} = error ->
-        Logger.error("Failed to generate preview video: #{inspect(reason)}")
+        Logger.error("Failed to generate video preview: #{inspect(reason)}")
         error
     end
   end
 
-  defp calculate_segment_timestamps(
+  # Calculate start times for each segment, evenly distributed across the video
+  defp calculate_segment_starts(
          duration,
          segment_count,
          segment_duration,
          skip_start_percent,
          skip_end_percent
        ) do
-    # Calculate effective range
-    effective_start = duration * (skip_start_percent / 100)
-    effective_end = duration * (1 - skip_end_percent / 100)
+    skip_start = duration * skip_start_percent
+    skip_end = duration * skip_end_percent
+    effective_start = skip_start
+    effective_end = duration - skip_end
     effective_duration = effective_end - effective_start
 
-    # Check if there's enough time for all segments
-    total_segment_time = segment_count * segment_duration
+    # Check if video is long enough for all segments
+    total_segment_duration = segment_count * segment_duration
 
-    if effective_duration < total_segment_time do
-      {:error, :video_too_short}
+    if effective_duration < total_segment_duration do
+      # Video is too short - use what we can
+      if effective_duration < segment_duration do
+        {:error, :video_too_short}
+      else
+        # Reduce segment count to fit
+        adjusted_count = max(1, trunc(effective_duration / segment_duration))
+        step = effective_duration / adjusted_count
+
+        starts =
+          0..(adjusted_count - 1)
+          |> Enum.map(fn i -> effective_start + i * step end)
+
+        {:ok, starts}
+      end
     else
-      # Calculate evenly-spaced positions for segments
-      # We want to space them evenly across the effective duration
-      available_duration = effective_duration - total_segment_time
-      gap = available_duration / segment_count
+      # Distribute segments evenly across effective duration
+      step = (effective_duration - segment_duration) / max(1, segment_count - 1)
 
-      timestamps =
+      starts =
         0..(segment_count - 1)
-        |> Enum.map(fn i ->
-          # Position each segment at: effective_start + gap/2 + i*(gap + segment_duration)
-          effective_start + gap / 2 + i * (gap + segment_duration)
-        end)
+        |> Enum.map(fn i -> effective_start + i * step end)
+        # Ensure segments don't extend past effective_end
+        |> Enum.filter(&(&1 + segment_duration <= effective_end + 0.1))
 
-      {:ok, timestamps}
+      if starts == [] do
+        {:error, :no_segments_possible}
+      else
+        {:ok, starts}
+      end
     end
   end
 
-  defp extract_segments(
-         input_path,
-         timestamps,
-         segment_duration,
-         temp_dir,
-         output_width,
-         output_height,
-         video_bitrate,
-         audio_bitrate
-       ) do
+  # Extract each segment as a separate video file
+  defp extract_segments(input_path, segment_starts, segment_duration, temp_dir, width, crf) do
     results =
-      timestamps
+      segment_starts
       |> Enum.with_index()
-      |> Enum.map(fn {timestamp, index} ->
+      |> Enum.map(fn {start_time, index} ->
         output_path =
           Path.join(temp_dir, "segment_#{String.pad_leading(to_string(index), 3, "0")}.mp4")
 
-        extract_single_segment(
-          input_path,
-          timestamp,
-          segment_duration,
-          output_path,
-          output_width,
-          output_height,
-          video_bitrate,
-          audio_bitrate
-        )
+        case extract_single_segment(
+               input_path,
+               start_time,
+               segment_duration,
+               output_path,
+               width,
+               crf
+             ) do
+          :ok -> {:ok, output_path}
+          {:error, reason} -> {:error, {index, reason}}
+        end
       end)
 
     errors = Enum.filter(results, &match?({:error, _}, &1))
@@ -224,37 +229,38 @@ defmodule Mydia.Library.PreviewGenerator do
     end
   end
 
-  defp extract_single_segment(
-         input_path,
-         timestamp,
-         duration,
-         output_path,
-         output_width,
-         output_height,
-         video_bitrate,
-         audio_bitrate
-       ) do
+  defp extract_single_segment(input_path, start_time, duration, output_path, width, crf) do
     args = [
+      # Fast seek to start position
       "-ss",
-      format_time(timestamp),
+      format_time(start_time),
       "-i",
       input_path,
+      # Duration of segment
       "-t",
-      to_string(duration),
+      Float.to_string(duration),
+      # Video filters: scale, ensure even dimensions for H.264
       "-vf",
-      "scale=#{output_width}:#{output_height}:force_original_aspect_ratio=decrease,pad=#{output_width}:#{output_height}:(ow-iw)/2:(oh-ih)/2,setsar=1",
+      "scale=#{width}:-2",
+      # Video codec settings (H.264)
       "-c:v",
       "libx264",
+      "-profile:v",
+      "high",
+      "-level",
+      "4.2",
+      "-crf",
+      to_string(crf),
       "-preset",
       "fast",
-      "-b:v",
-      video_bitrate,
-      "-c:a",
-      "aac",
-      "-b:a",
-      audio_bitrate,
-      "-movflags",
-      "+faststart",
+      "-pix_fmt",
+      "yuv420p",
+      # No audio
+      "-an",
+      # Handle variable framerate
+      "-vsync",
+      "2",
+      # Overwrite
       "-y",
       output_path
     ]
@@ -262,9 +268,9 @@ defmodule Mydia.Library.PreviewGenerator do
     case run_ffmpeg(args) do
       {:ok, _output} ->
         if File.exists?(output_path) do
-          {:ok, output_path}
+          :ok
         else
-          {:error, {:segment_not_created, timestamp}}
+          {:error, {:segment_not_created, start_time}}
         end
 
       {:error, reason} ->
@@ -272,41 +278,38 @@ defmodule Mydia.Library.PreviewGenerator do
     end
   end
 
+  # Concatenate all segments into a single preview video
   defp concatenate_segments(segment_paths, temp_dir) do
-    # Create a concat demuxer file listing all segments
-    concat_list_path = Path.join(temp_dir, "concat_list.txt")
-
-    concat_content =
-      segment_paths
-      |> Enum.map(&"file '#{&1}'")
-      |> Enum.join("\n")
-
-    File.write!(concat_list_path, concat_content)
-
     output_path = Path.join(temp_dir, "preview.mp4")
+    list_path = Path.join(temp_dir, "segments.txt")
 
-    # Use concat demuxer for lossless concatenation
+    # Create concat list file
+    list_content =
+      segment_paths
+      |> Enum.map_join("\n", &"file '#{&1}'")
+
+    File.write!(list_path, list_content)
+
     args = [
       "-f",
       "concat",
       "-safe",
       "0",
       "-i",
-      concat_list_path,
+      list_path,
+      # Copy streams (already encoded)
       "-c",
       "copy",
-      "-movflags",
-      "+faststart",
       "-y",
       output_path
     ]
 
     case run_ffmpeg(args) do
-      {:ok, _output} ->
+      {:ok, _} ->
         if File.exists?(output_path) do
           {:ok, output_path}
         else
-          {:error, :concatenation_failed}
+          {:error, :preview_not_created}
         end
 
       {:error, reason} ->

@@ -12,57 +12,10 @@
       <%!-- Actions and view controls --%>
       <div class="flex items-center gap-2">
         <%!-- Selection controls --%>
-        <%= if @selection_mode do %>
-          <%= if MapSet.size(@selected_ids) > 0 do %>
-            <div class="flex items-center gap-2">
-              <span class="text-sm text-base-content/70">
-                {MapSet.size(@selected_ids)} selected
-              </span>
-              <button
-                type="button"
-                class="btn btn-ghost btn-sm"
-                phx-click="clear_selection"
-                title="Clear selection"
-              >
-                <.icon name="hero-x-mark" class="w-4 h-4" />
-              </button>
-            </div>
-            <div class="divider divider-horizontal mx-0"></div>
-          <% end %>
-
-          <%!-- Select all button --%>
-          <button
-            type="button"
-            class="btn btn-ghost btn-sm"
-            phx-click="select_all"
-            title="Select all (Ctrl+A)"
-          >
-            <.icon name="hero-check-circle" class="w-4 h-4" />
-            <span class="hidden sm:inline ml-1">Select All</span>
-          </button>
-
-          <%!-- Cancel selection mode button --%>
-          <button
-            type="button"
-            class="btn btn-ghost btn-sm"
-            phx-click="toggle_selection_mode"
-            title="Exit selection mode (Esc)"
-          >
-            <.icon name="hero-x-circle" class="w-4 h-4" />
-            <span class="hidden sm:inline ml-1">Cancel</span>
-          </button>
-        <% else %>
-          <%!-- Enter selection mode button --%>
-          <button
-            type="button"
-            class="btn btn-ghost btn-sm"
-            phx-click="toggle_selection_mode"
-            title="Enter selection mode"
-          >
-            <.icon name="hero-check-circle" class="w-4 h-4" />
-            <span class="hidden sm:inline ml-1">Select</span>
-          </button>
-        <% end %>
+        <.selection_controls
+          selection_mode={@selection_mode}
+          selected_count={MapSet.size(@selected_ids)}
+        />
 
         <%!-- Re-scan button (shown on Movies and TV Shows pages) --%>
         <%= if @filter_type in ["movie", "tv_show"] do %>
@@ -126,34 +79,7 @@
         <% end %>
 
         <%!-- View mode toggle --%>
-        <div class="join">
-          <button
-            type="button"
-            class={[
-              "btn btn-sm join-item",
-              @view_mode == :grid && "btn-primary",
-              @view_mode != :grid && "btn-ghost"
-            ]}
-            phx-click="toggle_view"
-            phx-value-mode="grid"
-          >
-            <.icon name="hero-squares-2x2" class="w-5 h-5" />
-            <span class="hidden sm:inline ml-1">Grid</span>
-          </button>
-          <button
-            type="button"
-            class={[
-              "btn btn-sm join-item",
-              @view_mode == :list && "btn-primary",
-              @view_mode != :list && "btn-ghost"
-            ]}
-            phx-click="toggle_view"
-            phx-value-mode="list"
-          >
-            <.icon name="hero-list-bullet" class="w-5 h-5" />
-            <span class="hidden sm:inline ml-1">List</span>
-          </button>
-        </div>
+        <.view_mode_toggle view_mode={@view_mode} />
       </div>
     </div>
 
@@ -705,69 +631,12 @@
     <% end %>
 
     <%!-- Delete Confirmation Modal --%>
-    <.modal id="delete-confirmation-modal" show={@show_delete_modal} on_cancel="cancel_delete">
-      <:title>
-        Delete <strong>{MapSet.size(@selected_ids)}</strong>
-        {if MapSet.size(@selected_ids) == 1, do: "Item", else: "Items"}?
-      </:title>
-
-      <form phx-change="toggle_delete_files">
-        <div class="space-y-2.5">
-          <label class={[
-            "flex items-start gap-3 p-3.5 rounded-lg border-2 cursor-pointer transition-all hover:shadow-sm",
-            !@delete_files && "border-primary bg-primary/10",
-            @delete_files && "border-base-300 hover:border-primary/50"
-          ]}>
-            <input
-              type="radio"
-              name="delete_files"
-              value="false"
-              class="radio radio-primary mt-0.5 flex-shrink-0"
-              checked={!@delete_files}
-            />
-            <div>
-              <div class="font-medium mb-1">Remove from library only</div>
-              <div class="text-sm opacity-75">Files stay on disk, can be re-imported later</div>
-            </div>
-          </label>
-
-          <label class={[
-            "flex items-start gap-3 p-3.5 rounded-lg border-2 cursor-pointer transition-all hover:shadow-sm",
-            @delete_files && "border-error bg-error/10",
-            !@delete_files && "border-base-300 hover:border-error/50"
-          ]}>
-            <input
-              type="radio"
-              name="delete_files"
-              value="true"
-              class="radio radio-error mt-0.5 flex-shrink-0"
-              checked={@delete_files}
-            />
-            <div>
-              <div class="font-medium mb-1">Delete files from disk</div>
-              <div class="text-sm opacity-75 flex items-center gap-1">
-                <.icon name="hero-exclamation-triangle" class="w-4 h-4" />
-                <span>Permanently deletes all files - cannot be undone</span>
-              </div>
-            </div>
-          </label>
-        </div>
-      </form>
-
-      <:actions>
-        <button type="button" class="btn btn-ghost" phx-click="cancel_delete">
-          Cancel
-        </button>
-        <button
-          type="button"
-          class={["btn", (@delete_files && "btn-error") || "btn-warning"]}
-          phx-click="batch_delete_confirmed"
-        >
-          <.icon name="hero-trash" class="w-4 h-4" />
-          {if @delete_files, do: "Delete Everything", else: "Remove from Library"}
-        </button>
-      </:actions>
-    </.modal>
+    <.delete_confirmation_modal
+      id="delete-confirmation-modal"
+      show={@show_delete_modal}
+      selected_count={MapSet.size(@selected_ids)}
+      delete_files={@delete_files}
+    />
 
     <%!-- Batch Edit Modal --%>
     <.modal id="batch-edit-modal" show={@show_batch_edit_modal} on_cancel="cancel_batch_edit">

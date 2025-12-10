@@ -24,6 +24,7 @@
           next_episode_state={@next_episode_state}
           auto_searching={@auto_searching}
           downloads_with_status={@downloads_with_status}
+          quality_profiles={@quality_profiles}
         />
         <%!-- Right Column: Main Content --%>
         <div class="flex-1 min-w-0">
@@ -133,13 +134,6 @@
   <%!-- Modals --%>
   <%= if @show_delete_confirm do %>
     <Modals.delete_confirm_modal media_item={@media_item} delete_files={@delete_files} />
-  <% end %>
-  <%= if @show_edit_modal && @edit_form do %>
-    <Modals.edit_modal
-      media_item={@media_item}
-      edit_form={@edit_form}
-      quality_profiles={@quality_profiles}
-    />
   <% end %>
   <%= if @show_file_delete_confirm && @file_to_delete do %>
     <Modals.file_delete_confirm_modal file_to_delete={@file_to_delete} />

@@ -8,9 +8,9 @@ defmodule MydiaWeb.AdultLive.Index do
 
   use MydiaWeb, :live_view
 
-  alias Mydia.Jobs.ThumbnailGeneration
   alias Mydia.Library
   alias Mydia.Library.GeneratedMedia
+  alias Mydia.Jobs.ThumbnailGeneration
 
   @items_per_page 50
   @items_per_scroll 25
@@ -18,6 +18,7 @@ defmodule MydiaWeb.AdultLive.Index do
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
+      Phoenix.PubSub.subscribe(Mydia.PubSub, "library_scanner")
       ThumbnailGeneration.subscribe()
     end
 
@@ -29,8 +30,11 @@ defmodule MydiaWeb.AdultLive.Index do
      |> assign(:page, 0)
      |> assign(:has_more, true)
      |> assign(:page_title, "Adult")
-     |> assign(:generating_thumbnails, false)
-     |> assign(:generation_progress, nil)
+     |> assign(:scanning, false)
+     |> assign(:selection_mode, false)
+     |> assign(:selected_ids, MapSet.new())
+     |> assign(:show_delete_modal, false)
+     |> assign(:delete_files, false)
      |> stream(:files, [])}
   end
 
@@ -81,68 +85,226 @@ defmodule MydiaWeb.AdultLive.Index do
     end
   end
 
-  def handle_event("generate_all_thumbnails", _params, socket) do
-    case ThumbnailGeneration.enqueue_missing(library_type: :adult) do
+  def handle_event("trigger_rescan", _params, socket) do
+    case Library.trigger_adult_library_scan() do
       {:ok, _job} ->
         {:noreply,
          socket
-         |> assign(:generating_thumbnails, true)
-         |> put_flash(:info, "Thumbnail generation started")}
+         |> assign(:scanning, true)
+         |> put_flash(:info, "Library scan started...")}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to start generation: #{inspect(reason)}")}
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to start library scan")}
     end
   end
 
-  def handle_event("generate_all_sprites", _params, socket) do
-    case ThumbnailGeneration.enqueue_missing(library_type: :adult, include_sprites: true) do
-      {:ok, _job} ->
-        {:noreply,
-         socket
-         |> assign(:generating_thumbnails, true)
-         |> put_flash(:info, "Thumbnail and sprite generation started")}
+  def handle_event("toggle_selection_mode", _params, socket) do
+    selection_mode = !socket.assigns.selection_mode
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to start generation: #{inspect(reason)}")}
-    end
+    socket =
+      if selection_mode do
+        socket
+      else
+        # Exiting selection mode - clear selection
+        assign(socket, :selected_ids, MapSet.new())
+      end
+
+    {:noreply, assign(socket, :selection_mode, selection_mode)}
   end
 
-  def handle_event("cancel_generation", _params, socket) do
-    ThumbnailGeneration.cancel_all()
+  def handle_event("toggle_select", %{"id" => id}, socket) do
+    selected_ids = socket.assigns.selected_ids
+
+    updated_ids =
+      if MapSet.member?(selected_ids, id) do
+        MapSet.delete(selected_ids, id)
+      else
+        MapSet.put(selected_ids, id)
+      end
+
+    {:noreply, assign(socket, :selected_ids, updated_ids)}
+  end
+
+  def handle_event("select_all", _params, socket) do
+    # Get all visible files from the current stream
+    all_files =
+      Library.list_media_files(library_path_type: :adult)
+
+    # Apply search filter if present
+    files =
+      if socket.assigns.search_query != "" do
+        query = String.downcase(socket.assigns.search_query)
+
+        Enum.filter(all_files, fn file ->
+          filename = file.relative_path || ""
+          String.contains?(String.downcase(filename), query)
+        end)
+      else
+        all_files
+      end
+
+    all_ids = MapSet.new(files, & &1.id)
+
+    {:noreply, assign(socket, :selected_ids, all_ids)}
+  end
+
+  def handle_event("clear_selection", _params, socket) do
+    {:noreply, assign(socket, :selected_ids, MapSet.new())}
+  end
+
+  def handle_event("keydown", %{"key" => "Escape"}, socket) do
+    {:noreply,
+     socket
+     |> assign(:selection_mode, false)
+     |> assign(:selected_ids, MapSet.new())}
+  end
+
+  def handle_event("keydown", %{"key" => "a", "ctrlKey" => true}, socket) do
+    # Ctrl+A - select all
+    all_files =
+      Library.list_media_files(library_path_type: :adult)
+
+    files =
+      if socket.assigns.search_query != "" do
+        query = String.downcase(socket.assigns.search_query)
+
+        Enum.filter(all_files, fn file ->
+          filename = file.relative_path || ""
+          String.contains?(String.downcase(filename), query)
+        end)
+      else
+        all_files
+      end
+
+    all_ids = MapSet.new(files, & &1.id)
+
+    {:noreply, assign(socket, :selected_ids, all_ids)}
+  end
+
+  def handle_event("keydown", _params, socket) do
+    # Ignore other key events
+    {:noreply, socket}
+  end
+
+  def handle_event("show_delete_confirmation", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_delete_modal, true)
+     |> assign(:delete_files, false)}
+  end
+
+  def handle_event("cancel_delete", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_delete_modal, false)
+     |> assign(:delete_files, false)}
+  end
+
+  def handle_event("toggle_delete_files", %{"delete_files" => value}, socket) do
+    delete_files = value == "true"
+    {:noreply, assign(socket, :delete_files, delete_files)}
+  end
+
+  def handle_event("batch_delete_confirmed", _params, socket) do
+    selected_ids = MapSet.to_list(socket.assigns.selected_ids)
+    delete_files = socket.assigns.delete_files
+
+    # Get the media files to delete
+    media_files = Enum.map(selected_ids, &Library.get_media_file!/1)
+
+    # Delete files from disk if requested
+    if delete_files do
+      Library.delete_media_files_from_disk(media_files)
+    end
+
+    # Delete records from database
+    deleted_count =
+      media_files
+      |> Enum.map(&Library.delete_media_file/1)
+      |> Enum.count(&match?({:ok, _}, &1))
+
+    message =
+      if delete_files do
+        "#{deleted_count} #{pluralize_files(deleted_count)} deleted (including files)"
+      else
+        "#{deleted_count} #{pluralize_files(deleted_count)} removed from library"
+      end
 
     {:noreply,
      socket
-     |> assign(:generating_thumbnails, false)
-     |> assign(:generation_progress, nil)
-     |> put_flash(:info, "Generation cancelled")}
+     |> put_flash(:info, message)
+     |> assign(:selection_mode, false)
+     |> assign(:selected_ids, MapSet.new())
+     |> assign(:show_delete_modal, false)
+     |> assign(:delete_files, false)
+     |> load_files(reset: true)}
   end
 
   @impl true
-  def handle_info({:thumbnail_generation, %{event: :started} = progress}, socket) do
-    {:noreply,
-     socket
-     |> assign(:generating_thumbnails, true)
-     |> assign(:generation_progress, progress)}
+  def handle_info({:library_scan_started, %{type: :adult}}, socket) do
+    {:noreply, assign(socket, :scanning, true)}
   end
 
-  def handle_info({:thumbnail_generation, %{event: :progress} = progress}, socket) do
-    {:noreply, assign(socket, :generation_progress, progress)}
+  def handle_info({:library_scan_started, _}, socket) do
+    # Ignore scans for other library types
+    {:noreply, socket}
   end
 
-  def handle_info({:thumbnail_generation, %{event: :completed} = progress}, socket) do
+  def handle_info(
+        {:library_scan_completed,
+         %{
+           type: :adult,
+           new_files: new_files,
+           modified_files: modified_files,
+           deleted_files: deleted_files
+         }},
+        socket
+      ) do
+    total_changes = new_files + modified_files + deleted_files
+
+    message =
+      if total_changes > 0 do
+        parts = []
+        parts = if new_files > 0, do: ["#{new_files} new" | parts], else: parts
+        parts = if modified_files > 0, do: ["#{modified_files} modified" | parts], else: parts
+        parts = if deleted_files > 0, do: ["#{deleted_files} removed" | parts], else: parts
+        "Library scan completed: " <> Enum.join(parts, ", ")
+      else
+        "Library scan completed: No changes detected"
+      end
+
     {:noreply,
      socket
-     |> assign(:generating_thumbnails, false)
-     |> assign(:generation_progress, progress)
-     |> load_files(reset: true)
-     |> put_flash(:info, "Generation complete: #{progress.completed}/#{progress.total} succeeded")}
+     |> assign(:scanning, false)
+     |> put_flash(:info, message)
+     |> load_files(reset: true)}
   end
 
-  def handle_info({:thumbnail_generation, %{event: :cancelled}}, socket) do
+  def handle_info({:library_scan_completed, _}, socket) do
+    # Ignore completions for other library types
+    {:noreply, socket}
+  end
+
+  def handle_info({:library_scan_failed, %{error: error}}, socket) do
     {:noreply,
      socket
-     |> assign(:generating_thumbnails, false)
-     |> assign(:generation_progress, nil)}
+     |> assign(:scanning, false)
+     |> put_flash(:error, "Library scan failed: #{error}")}
+  end
+
+  # Thumbnail generation updates - reload files when thumbnails are generated
+  def handle_info({:thumbnail_generation, %{event: :completed}}, socket) do
+    {:noreply, load_files(socket, reset: true)}
+  end
+
+  def handle_info({:thumbnail_generation, _}, socket) do
+    # Ignore progress and started events to avoid excessive reloads
+    {:noreply, socket}
+  end
+
+  def handle_info(_msg, socket) do
+    # Ignore other PubSub messages
+    {:noreply, socket}
   end
 
   defp load_files(socket, opts) do
@@ -245,6 +407,14 @@ defmodule MydiaWeb.AdultLive.Index do
     end
   end
 
+  defp get_preview_url(file) do
+    if file.preview_blob do
+      GeneratedMedia.url_path(:preview, file.preview_blob)
+    else
+      nil
+    end
+  end
+
   defp get_duration(file) do
     case file.metadata do
       %{"duration" => duration} when is_number(duration) -> trunc(duration)
@@ -272,4 +442,11 @@ defmodule MydiaWeb.AdultLive.Index do
   defp format_date(%DateTime{} = date) do
     Calendar.strftime(date, "%Y-%m-%d")
   end
+
+  defp item_selected?(selected_ids, item_id) do
+    MapSet.member?(selected_ids, item_id)
+  end
+
+  defp pluralize_files(1), do: "file"
+  defp pluralize_files(_), do: "files"
 end

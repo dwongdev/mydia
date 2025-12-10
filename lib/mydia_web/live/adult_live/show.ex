@@ -6,22 +6,25 @@ defmodule MydiaWeb.AdultLive.Show do
   use MydiaWeb, :live_view
 
   alias Mydia.Library
-  alias Mydia.Library.GeneratedMedia
-  alias Mydia.Library.PreviewGenerator
-  alias Mydia.Library.SpriteGenerator
-  alias Mydia.Library.ThumbnailGenerator
+  alias Mydia.Library.{MediaFile, ThumbnailGenerator}
+
+  require Logger
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     file = Library.get_media_file!(id, preload: [:library_path])
+    {prev_file, next_file} = Library.get_adjacent_media_files(id, library_path_type: :adult)
+
+    # Get known duration from file metadata, or probe fresh if missing
+    known_duration = get_known_duration(file)
 
     {:ok,
      socket
      |> assign(:file, file)
-     |> assign(:page_title, get_display_name(file))
-     |> assign(:generating_thumbnail, false)
-     |> assign(:generating_sprites, false)
-     |> assign(:generating_preview, false)}
+     |> assign(:prev_file, prev_file)
+     |> assign(:next_file, next_file)
+     |> assign(:known_duration, known_duration)
+     |> assign(:page_title, get_display_name(file))}
   end
 
   @impl true
@@ -30,79 +33,25 @@ defmodule MydiaWeb.AdultLive.Show do
   end
 
   @impl true
-  def handle_event("generate_thumbnail", _params, socket) do
-    file = socket.assigns.file
+  def handle_event("keydown", %{"key" => "ArrowLeft"}, socket) do
+    case socket.assigns.prev_file do
+      nil -> {:noreply, socket}
+      file -> {:noreply, push_navigate(socket, to: ~p"/adult/#{file.id}")}
+    end
+  end
 
-    socket = assign(socket, :generating_thumbnail, true)
+  def handle_event("keydown", %{"key" => "ArrowRight"}, socket) do
+    case socket.assigns.next_file do
+      nil -> {:noreply, socket}
+      file -> {:noreply, push_navigate(socket, to: ~p"/adult/#{file.id}")}
+    end
+  end
 
-    # Generate thumbnail in a task to avoid blocking
-    Task.start(fn ->
-      case ThumbnailGenerator.generate_cover(file) do
-        {:ok, checksum} ->
-          # Update the media file with the new thumbnail
-          Library.update_media_file(file, %{
-            cover_blob: checksum,
-            generated_at: DateTime.utc_now()
-          })
-
-          send(self(), {:thumbnail_generated, checksum})
-
-        {:error, reason} ->
-          send(self(), {:thumbnail_error, reason})
-      end
-    end)
-
+  def handle_event("keydown", _params, socket) do
     {:noreply, socket}
   end
 
-  def handle_event("generate_sprites", _params, socket) do
-    file = socket.assigns.file
-
-    socket = assign(socket, :generating_sprites, true)
-
-    Task.start(fn ->
-      case SpriteGenerator.generate(file) do
-        {:ok, result} ->
-          # Update the media file with the new sprite and VTT
-          Library.update_media_file(file, %{
-            sprite_blob: result.sprite_checksum,
-            vtt_blob: result.vtt_checksum,
-            generated_at: DateTime.utc_now()
-          })
-
-          send(self(), {:sprites_generated, result})
-
-        {:error, reason} ->
-          send(self(), {:sprites_error, reason})
-      end
-    end)
-
-    {:noreply, socket}
-  end
-
-  def handle_event("generate_preview", _params, socket) do
-    file = socket.assigns.file
-
-    socket = assign(socket, :generating_preview, true)
-
-    Task.start(fn ->
-      case PreviewGenerator.generate(file) do
-        {:ok, checksum} ->
-          Library.update_media_file(file, %{
-            preview_blob: checksum,
-            generated_at: DateTime.utc_now()
-          })
-
-          send(self(), {:preview_generated, checksum})
-
-        {:error, reason} ->
-          send(self(), {:preview_error, reason})
-      end
-    end)
-
-    {:noreply, socket}
-  end
-
+  @impl true
   def handle_event("delete_file", _params, socket) do
     file = socket.assigns.file
 
@@ -118,59 +67,6 @@ defmodule MydiaWeb.AdultLive.Show do
     end
   end
 
-  @impl true
-  def handle_info({:thumbnail_generated, checksum}, socket) do
-    file = %{socket.assigns.file | cover_blob: checksum}
-
-    {:noreply,
-     socket
-     |> assign(:file, file)
-     |> assign(:generating_thumbnail, false)
-     |> put_flash(:info, "Thumbnail generated successfully")}
-  end
-
-  def handle_info({:thumbnail_error, reason}, socket) do
-    {:noreply,
-     socket
-     |> assign(:generating_thumbnail, false)
-     |> put_flash(:error, "Failed to generate thumbnail: #{inspect(reason)}")}
-  end
-
-  def handle_info({:sprites_generated, _result}, socket) do
-    # Reload the file to get updated sprite/vtt blobs
-    file = Library.get_media_file!(socket.assigns.file.id, preload: [:library_path])
-
-    {:noreply,
-     socket
-     |> assign(:file, file)
-     |> assign(:generating_sprites, false)
-     |> put_flash(:info, "Sprite sheet and VTT generated successfully")}
-  end
-
-  def handle_info({:sprites_error, reason}, socket) do
-    {:noreply,
-     socket
-     |> assign(:generating_sprites, false)
-     |> put_flash(:error, "Failed to generate sprites: #{inspect(reason)}")}
-  end
-
-  def handle_info({:preview_generated, checksum}, socket) do
-    file = %{socket.assigns.file | preview_blob: checksum}
-
-    {:noreply,
-     socket
-     |> assign(:file, file)
-     |> assign(:generating_preview, false)
-     |> put_flash(:info, "Preview video generated successfully")}
-  end
-
-  def handle_info({:preview_error, reason}, socket) do
-    {:noreply,
-     socket
-     |> assign(:generating_preview, false)
-     |> put_flash(:error, "Failed to generate preview: #{inspect(reason)}")}
-  end
-
   defp get_display_name(file) do
     case file.relative_path do
       nil -> "Unknown"
@@ -178,32 +74,7 @@ defmodule MydiaWeb.AdultLive.Show do
     end
   end
 
-  defp get_sprite_url(file) do
-    if file.sprite_blob do
-      GeneratedMedia.url_path(:sprite, file.sprite_blob)
-    else
-      nil
-    end
-  end
-
-  defp get_vtt_url(file) do
-    if file.vtt_blob do
-      GeneratedMedia.url_path(:vtt, file.vtt_blob)
-    else
-      nil
-    end
-  end
-
-  defp get_preview_url(file) do
-    if file.preview_blob do
-      GeneratedMedia.url_path(:preview, file.preview_blob)
-    else
-      nil
-    end
-  end
-
   defp get_video_url(file) do
-    # Use the existing stream endpoint with media file ID
     "/api/v1/stream/#{file.id}"
   end
 
@@ -222,5 +93,55 @@ defmodule MydiaWeb.AdultLive.Show do
 
   defp format_date(%DateTime{} = date) do
     Calendar.strftime(date, "%Y-%m-%d %H:%M")
+  end
+
+  # Extract known duration from media file metadata, or probe fresh if missing
+  defp get_known_duration(file) do
+    case file.metadata do
+      %{"duration" => duration} when is_number(duration) and duration > 0 ->
+        duration
+
+      _ ->
+        # Duration not in metadata - probe fresh from the file
+        probe_duration(file)
+    end
+  end
+
+  # Probe duration directly from the video file using FFprobe
+  defp probe_duration(file) do
+    case MediaFile.absolute_path(file) do
+      nil ->
+        Logger.warning("Cannot probe duration: library_path not loaded for media_file #{file.id}")
+        nil
+
+      absolute_path ->
+        if File.exists?(absolute_path) do
+          case ThumbnailGenerator.get_duration(absolute_path) do
+            {:ok, duration} when duration > 0 ->
+              Logger.info("Probed fresh duration #{duration}s for media_file #{file.id}")
+
+              # Update the database in the background for future requests
+              spawn(fn ->
+                updated_metadata =
+                  (file.metadata || %{})
+                  |> Map.put("duration", duration)
+
+                Library.update_media_file_scan(file, %{metadata: updated_metadata})
+              end)
+
+              duration
+
+            {:ok, _} ->
+              nil
+
+            {:error, reason} ->
+              Logger.warning("Failed to probe duration for #{absolute_path}: #{inspect(reason)}")
+              nil
+          end
+        else
+          Logger.warning("Cannot probe duration: file not found at #{absolute_path}")
+          nil
+        end
+    end
   end
 end

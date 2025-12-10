@@ -336,20 +336,9 @@ defmodule MydiaWeb.SearchLive.Index do
          case fetch_full_metadata(config, selected_match, media_type_atom) do
            {:ok, metadata} ->
              # Create media item without parsed data (since parsing failed)
+             # Episodes are automatically fetched for TV shows via create_media_item
              attrs = build_media_item_attrs_from_metadata_only(metadata, media_type_atom)
-
-             case Media.create_media_item(attrs) do
-               {:ok, media_item} ->
-                 # For TV shows, always fetch all episodes
-                 if media_type_atom == :tv_show do
-                   Media.refresh_episodes_for_tv_show(media_item, season_monitoring: "all")
-                 end
-
-                 {:ok, media_item}
-
-               error ->
-                 error
-             end
+             Media.create_media_item(attrs)
 
            error ->
              error
@@ -1226,24 +1215,9 @@ defmodule MydiaWeb.SearchLive.Index do
         # Create new media item
         attrs = build_media_item_attrs(parsed, metadata)
 
+        # Episodes are automatically fetched for TV shows via create_media_item
         case Media.create_media_item(attrs) do
           {:ok, media_item} ->
-            # For TV shows, create episode records
-            media_item =
-              if parsed.type == :tv_show do
-                # If parsed from release with specific season/episodes, create those
-                if parsed.season && parsed.episodes do
-                  create_episodes_for_release(media_item, parsed)
-                end
-
-                # Always fetch all episodes from metadata
-                Media.refresh_episodes_for_tv_show(media_item, season_monitoring: "all")
-
-                Media.get_media_item!(media_item.id)
-              else
-                media_item
-              end
-
             {:ok, media_item}
 
           {:error, changeset} ->
@@ -1282,30 +1256,6 @@ defmodule MydiaWeb.SearchLive.Index do
       metadata: metadata,
       monitored: monitor_by_default
     }
-  end
-
-  defp create_episodes_for_release(media_item, parsed) do
-    # For each episode in the parsed release, create an episode record
-    Enum.each(parsed.episodes || [], fn episode_number ->
-      episode_attrs = %{
-        media_item_id: media_item.id,
-        season_number: parsed.season,
-        episode_number: episode_number,
-        title: "Episode #{episode_number}",
-        monitored: true
-      }
-
-      case Media.create_episode(episode_attrs) do
-        {:ok, episode} ->
-          Logger.debug("Created episode S#{parsed.season}E#{episode_number}")
-          episode
-
-        {:error, changeset} ->
-          # Episode might already exist, log and continue
-          Logger.debug("Episode already exists or error: #{inspect(changeset.errors)}")
-          nil
-      end
-    end)
   end
 
   defp extract_year_from_date(%Date{} = date), do: date.year

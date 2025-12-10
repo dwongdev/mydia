@@ -60,11 +60,9 @@ defmodule MydiaWeb.MediaLive.Show do
      |> assign(:downloads_with_status, downloads_with_status)
      |> assign(:timeline_events, timeline_events)
      |> assign(:page_title, media_item.title)
-     |> assign(:show_edit_modal, false)
      |> assign(:show_delete_confirm, false)
      |> assign(:delete_files, false)
      |> assign(:quality_profiles, quality_profiles)
-     |> assign(:edit_form, nil)
      |> assign(:show_file_delete_confirm, false)
      |> assign(:file_to_delete, nil)
      |> assign(:show_file_details_modal, false)
@@ -404,53 +402,6 @@ defmodule MydiaWeb.MediaLive.Show do
              {error, {:ok, 0, 0}}
          end
        end)}
-    end
-  end
-
-  def handle_event("show_edit_modal", _params, socket) do
-    media_item = socket.assigns.media_item
-    changeset = Media.change_media_item(media_item)
-
-    {:noreply,
-     socket
-     |> assign(:show_edit_modal, true)
-     |> assign(:edit_form, to_form(changeset))}
-  end
-
-  def handle_event("hide_edit_modal", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:show_edit_modal, false)
-     |> assign(:edit_form, nil)}
-  end
-
-  def handle_event("validate_edit", %{"media_item" => media_params}, socket) do
-    changeset =
-      socket.assigns.media_item
-      |> Media.change_media_item(media_params)
-      |> Map.put(:action, :validate)
-
-    {:noreply, assign(socket, :edit_form, to_form(changeset))}
-  end
-
-  def handle_event("save_edit", %{"media_item" => media_params}, socket) do
-    with :ok <- Authorization.authorize_update_media(socket) do
-      media_item = socket.assigns.media_item
-
-      case Media.update_media_item(media_item, media_params, reason: "Settings updated") do
-        {:ok, updated_item} ->
-          {:noreply,
-           socket
-           |> assign(:media_item, updated_item)
-           |> assign(:show_edit_modal, false)
-           |> assign(:edit_form, nil)
-           |> put_flash(:info, "Settings updated successfully")}
-
-        {:error, %Ecto.Changeset{} = changeset} ->
-          {:noreply, assign(socket, :edit_form, to_form(changeset))}
-      end
-    else
-      {:unauthorized, socket} -> {:noreply, socket}
     end
   end
 
@@ -1221,6 +1172,37 @@ defmodule MydiaWeb.MediaLive.Show do
            socket
            |> assign(:category_form, to_form(changeset))
            |> put_flash(:error, "Failed to reset category")}
+      end
+    else
+      {:unauthorized, socket} -> {:noreply, socket}
+    end
+  end
+
+  # Quality profile event handler
+
+  def handle_event("update_quality_profile", %{"profile-id" => profile_id}, socket) do
+    with :ok <- Authorization.authorize_update_media(socket) do
+      media_item = socket.assigns.media_item
+
+      # Convert empty string to nil
+      quality_profile_id = if profile_id == "", do: nil, else: profile_id
+
+      case Media.update_media_item(
+             media_item,
+             %{quality_profile_id: quality_profile_id},
+             reason: "Quality profile updated"
+           ) do
+        {:ok, _updated_item} ->
+          # Reload media item to get preloaded associations
+          reloaded_item = load_media_item(media_item.id)
+
+          {:noreply,
+           socket
+           |> assign(:media_item, reloaded_item)
+           |> put_flash(:info, "Quality profile updated")}
+
+        {:error, _changeset} ->
+          {:noreply, put_flash(socket, :error, "Failed to update quality profile")}
       end
     else
       {:unauthorized, socket} -> {:noreply, socket}

@@ -222,29 +222,12 @@ defmodule MydiaWeb.AddMediaLive.Index do
          ) do
       {:ok, full_metadata} ->
         # Create media item
+        # Episodes are automatically fetched for TV shows via create_media_item
         attrs = build_media_item_attrs(full_metadata, config, socket.assigns.media_type)
+        season_monitoring = config[:season_monitoring] || "all"
 
-        case Media.create_media_item(attrs) do
+        case Media.create_media_item(attrs, season_monitoring: season_monitoring) do
           {:ok, media_item} ->
-            # Create episodes for TV shows using season monitoring preference
-            if socket.assigns.media_type == :tv_show do
-              season_monitoring = config[:season_monitoring] || "all"
-
-              case Media.refresh_episodes_for_tv_show(media_item,
-                     season_monitoring: season_monitoring
-                   ) do
-                {:ok, count} ->
-                  Logger.info("Created #{count} episodes for #{media_item.title}")
-
-                {:error, reason} ->
-                  Logger.error(
-                    "Failed to fetch episodes for #{media_item.title}: #{inspect(reason)}"
-                  )
-
-                  # Continue anyway - the media item was created successfully
-              end
-            end
-
             # Stay on page with success message
             tmdb_id = String.to_integer(selected.provider_id)
 

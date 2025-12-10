@@ -15,6 +15,7 @@ defmodule MydiaWeb.MediaLive.Show.Components do
   attr :next_episode_state, :atom, default: nil
   attr :auto_searching, :boolean, required: true
   attr :downloads_with_status, :list, required: true
+  attr :quality_profiles, :list, required: true
 
   def hero_section(assigns) do
     ~H"""
@@ -141,15 +142,67 @@ defmodule MydiaWeb.MediaLive.Show.Components do
         <%!-- Info Cards --%>
         <div class="space-y-2">
           <%!-- Quality Profile --%>
-          <div class="stat bg-base-200 rounded-box p-2 md:p-3">
-            <div class="stat-title text-xs">Quality Profile</div>
-            <div class="stat-value text-sm">
-              <%= if @media_item.quality_profile do %>
-                {@media_item.quality_profile.name}
-              <% else %>
-                <span class="text-base-content/50">Not Set</span>
-              <% end %>
+          <div class="dropdown dropdown-end w-full">
+            <div
+              tabindex="0"
+              role="button"
+              class="stat bg-base-200 rounded-box p-2 md:p-3 cursor-pointer hover:bg-base-300 transition-colors text-left w-full group"
+              title="Click to change quality profile"
+            >
+              <div class="stat-title text-xs">Quality Profile</div>
+              <div class="stat-value text-sm flex items-center gap-2">
+                <%= if @media_item.quality_profile do %>
+                  <span class="group-hover:text-primary transition-colors">
+                    {@media_item.quality_profile.name}
+                  </span>
+                <% else %>
+                  <span class="text-base-content/50 group-hover:text-primary transition-colors">
+                    Not Set
+                  </span>
+                <% end %>
+                <.icon
+                  name="hero-chevron-down"
+                  class="w-3 h-3 opacity-50 group-hover:opacity-100 transition-opacity"
+                />
+              </div>
             </div>
+            <ul
+              tabindex="0"
+              class="dropdown-content z-[1] menu p-2 shadow-lg bg-base-100 rounded-box w-52 border border-base-300"
+            >
+              <li>
+                <button
+                  type="button"
+                  phx-click="update_quality_profile"
+                  phx-value-profile-id=""
+                  class={[
+                    "justify-between",
+                    is_nil(@media_item.quality_profile_id) && "active"
+                  ]}
+                >
+                  No Profile
+                  <%= if is_nil(@media_item.quality_profile_id) do %>
+                    <.icon name="hero-check" class="w-4 h-4" />
+                  <% end %>
+                </button>
+              </li>
+              <li :for={profile <- @quality_profiles}>
+                <button
+                  type="button"
+                  phx-click="update_quality_profile"
+                  phx-value-profile-id={profile.id}
+                  class={[
+                    "justify-between",
+                    @media_item.quality_profile_id == profile.id && "active"
+                  ]}
+                >
+                  {profile.name}
+                  <%= if @media_item.quality_profile_id == profile.id do %>
+                    <.icon name="hero-check" class="w-4 h-4" />
+                  <% end %>
+                </button>
+              </li>
+            </ul>
           </div>
 
           <%!-- Category --%>
@@ -190,27 +243,15 @@ defmodule MydiaWeb.MediaLive.Show.Components do
 
         <div class="divider my-2"></div>
 
-        <%!-- Edit/Delete actions in row on mobile --%>
-        <div class="flex gap-2">
-          <button
-            type="button"
-            phx-click="show_edit_modal"
-            class="btn btn-ghost btn-sm md:btn-md flex-1 justify-start"
-          >
-            <.icon name="hero-pencil" class="w-4 h-4 md:w-5 md:h-5" />
-            <span class="hidden sm:inline">Edit Settings</span>
-            <span class="sm:hidden">Edit</span>
-          </button>
-
-          <button
-            type="button"
-            phx-click="show_delete_confirm"
-            class="btn btn-error btn-ghost btn-sm md:btn-md flex-1 justify-start"
-          >
-            <.icon name="hero-trash" class="w-4 h-4 md:w-5 md:h-5" />
-            <span class="hidden sm:inline">Delete</span>
-          </button>
-        </div>
+        <%!-- Delete action --%>
+        <button
+          type="button"
+          phx-click="show_delete_confirm"
+          class="btn btn-error btn-ghost btn-sm md:btn-md w-full justify-start"
+        >
+          <.icon name="hero-trash" class="w-4 h-4 md:w-5 md:h-5" />
+          <span>Delete</span>
+        </button>
       </div>
     </div>
     """

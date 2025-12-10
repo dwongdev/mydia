@@ -8,7 +8,7 @@ defmodule MydiaWeb.LibraryComponents do
   use Phoenix.Component
 
   # Import only what we need to avoid circular dependency
-  import MydiaWeb.CoreComponents, only: [icon: 1, progress_bar: 1, progress_badge: 1]
+  import MydiaWeb.CoreComponents, only: [icon: 1, progress_bar: 1, progress_badge: 1, modal: 1]
 
   use Phoenix.VerifiedRoutes,
     endpoint: MydiaWeb.Endpoint,
@@ -653,6 +653,166 @@ defmodule MydiaWeb.LibraryComponents do
         </div>
       </div>
     <% end %>
+    """
+  end
+
+  @doc """
+  Renders selection controls for the header area.
+
+  ## Attributes
+
+    * `:selection_mode` - Whether selection mode is active.
+    * `:selected_count` - Number of selected items.
+  """
+  attr :selection_mode, :boolean, required: true
+  attr :selected_count, :integer, required: true
+
+  def selection_controls(assigns) do
+    ~H"""
+    <%= if @selection_mode do %>
+      <%= if @selected_count > 0 do %>
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-base-content/70">
+            {@selected_count} selected
+          </span>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="clear_selection"
+            title="Clear selection"
+          >
+            <.icon name="hero-x-mark" class="w-4 h-4" />
+          </button>
+        </div>
+        <div class="divider divider-horizontal mx-0"></div>
+      <% end %>
+
+      <%!-- Select all button --%>
+      <button
+        type="button"
+        class="btn btn-ghost btn-sm"
+        phx-click="select_all"
+        title="Select all (Ctrl+A)"
+      >
+        <.icon name="hero-check-circle" class="w-4 h-4" />
+        <span class="hidden sm:inline ml-1">Select All</span>
+      </button>
+
+      <%!-- Cancel selection mode button --%>
+      <button
+        type="button"
+        class="btn btn-ghost btn-sm"
+        phx-click="toggle_selection_mode"
+        title="Exit selection mode (Esc)"
+      >
+        <.icon name="hero-x-circle" class="w-4 h-4" />
+        <span class="hidden sm:inline ml-1">Cancel</span>
+      </button>
+    <% else %>
+      <%!-- Enter selection mode button --%>
+      <button
+        type="button"
+        class="btn btn-ghost btn-sm"
+        phx-click="toggle_selection_mode"
+        title="Enter selection mode"
+      >
+        <.icon name="hero-check-circle" class="w-4 h-4" />
+        <span class="hidden sm:inline ml-1">Select</span>
+      </button>
+    <% end %>
+    """
+  end
+
+  @doc """
+  Renders a delete confirmation modal with file deletion options.
+
+  ## Attributes
+
+    * `:id` - Required. The modal ID.
+    * `:show` - Whether to show the modal.
+    * `:selected_count` - Number of items to delete.
+    * `:delete_files` - Whether file deletion is selected.
+    * `:item_label` - Label for items (default: "Item"/"Items").
+  """
+  attr :id, :string, required: true
+  attr :show, :boolean, required: true
+  attr :selected_count, :integer, required: true
+  attr :delete_files, :boolean, required: true
+  attr :item_label, :string, default: nil
+
+  def delete_confirmation_modal(assigns) do
+    item_word =
+      if assigns.item_label do
+        if assigns.selected_count == 1, do: assigns.item_label, else: assigns.item_label <> "s"
+      else
+        if assigns.selected_count == 1, do: "Item", else: "Items"
+      end
+
+    assigns = assign(assigns, :item_word, item_word)
+
+    ~H"""
+    <.modal id={@id} show={@show} on_cancel="cancel_delete">
+      <:title>
+        Delete <strong>{@selected_count}</strong> {@item_word}?
+      </:title>
+
+      <form phx-change="toggle_delete_files">
+        <div class="space-y-2.5">
+          <label class={[
+            "flex items-start gap-3 p-3.5 rounded-lg border-2 cursor-pointer transition-all hover:shadow-sm",
+            !@delete_files && "border-primary bg-primary/10",
+            @delete_files && "border-base-300 hover:border-primary/50"
+          ]}>
+            <input
+              type="radio"
+              name="delete_files"
+              value="false"
+              class="radio radio-primary mt-0.5 flex-shrink-0"
+              checked={!@delete_files}
+            />
+            <div>
+              <div class="font-medium mb-1">Remove from library only</div>
+              <div class="text-sm opacity-75">Files stay on disk, can be re-imported later</div>
+            </div>
+          </label>
+
+          <label class={[
+            "flex items-start gap-3 p-3.5 rounded-lg border-2 cursor-pointer transition-all hover:shadow-sm",
+            @delete_files && "border-error bg-error/10",
+            !@delete_files && "border-base-300 hover:border-error/50"
+          ]}>
+            <input
+              type="radio"
+              name="delete_files"
+              value="true"
+              class="radio radio-error mt-0.5 flex-shrink-0"
+              checked={@delete_files}
+            />
+            <div>
+              <div class="font-medium mb-1">Delete files from disk</div>
+              <div class="text-sm opacity-75 flex items-center gap-1">
+                <.icon name="hero-exclamation-triangle" class="w-4 h-4" />
+                <span>Permanently deletes all files - cannot be undone</span>
+              </div>
+            </div>
+          </label>
+        </div>
+      </form>
+
+      <:actions>
+        <button type="button" class="btn btn-ghost" phx-click="cancel_delete">
+          Cancel
+        </button>
+        <button
+          type="button"
+          class={["btn", (@delete_files && "btn-error") || "btn-warning"]}
+          phx-click="batch_delete_confirmed"
+        >
+          <.icon name="hero-trash" class="w-4 h-4" />
+          {if @delete_files, do: "Delete Everything", else: "Remove from Library"}
+        </button>
+      </:actions>
+    </.modal>
     """
   end
 

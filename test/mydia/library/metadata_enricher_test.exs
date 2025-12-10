@@ -111,12 +111,15 @@ defmodule Mydia.Library.MetadataEnricherTest do
     test "allows TV shows in series-only library", %{series_lib: series_lib} do
       # First create a TV show and episode
       {:ok, tv_show} =
-        Mydia.Media.create_media_item(%{
-          title: "Breaking Bad",
-          type: "tv_show",
-          year: 2008,
-          tmdb_id: 1396
-        })
+        Mydia.Media.create_media_item(
+          %{
+            title: "Breaking Bad",
+            type: "tv_show",
+            year: 2008,
+            tmdb_id: 1396
+          },
+          skip_episode_refresh: true
+        )
 
       {:ok, episode} =
         Mydia.Media.create_episode(%{
@@ -150,12 +153,15 @@ defmodule Mydia.Library.MetadataEnricherTest do
 
       # Create TV show and episode
       {:ok, tv_show} =
-        Mydia.Media.create_media_item(%{
-          title: "Breaking Bad",
-          type: "tv_show",
-          year: 2008,
-          tmdb_id: 1396
-        })
+        Mydia.Media.create_media_item(
+          %{
+            title: "Breaking Bad",
+            type: "tv_show",
+            year: 2008,
+            tmdb_id: 1396
+          },
+          skip_episode_refresh: true
+        )
 
       {:ok, episode} =
         Mydia.Media.create_episode(%{
@@ -211,12 +217,15 @@ defmodule Mydia.Library.MetadataEnricherTest do
     test "prevents TV shows in movies-only library", %{movies_lib: movies_lib} do
       # First create a TV show media item
       {:ok, tv_show} =
-        Mydia.Media.create_media_item(%{
-          title: "Breaking Bad",
-          type: "tv_show",
-          year: 2008,
-          tmdb_id: 1396
-        })
+        Mydia.Media.create_media_item(
+          %{
+            title: "Breaking Bad",
+            type: "tv_show",
+            year: 2008,
+            tmdb_id: 1396
+          },
+          skip_episode_refresh: true
+        )
 
       # Create an episode
       {:ok, episode} =

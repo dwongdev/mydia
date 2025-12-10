@@ -70,24 +70,27 @@ defmodule Mydia.Media.MetadataTypeTest do
 
     test "handles TV show metadata with seasons" do
       {:ok, media_item} =
-        Media.create_media_item(%{
-          type: "tv_show",
-          title: "Breaking Bad",
-          year: 2008,
-          tmdb_id: 1396,
-          metadata: %{
-            "id" => 1396,
-            "provider_id" => "1396",
-            "provider" => "metadata_relay",
-            "media_type" => "tv_show",
-            "title" => "Breaking Bad",
-            "number_of_seasons" => 5,
-            "number_of_episodes" => 62,
-            "seasons" => [
-              %{"season_number" => 1, "name" => "Season 1", "episode_count" => 7}
-            ]
-          }
-        })
+        Media.create_media_item(
+          %{
+            type: "tv_show",
+            title: "Breaking Bad",
+            year: 2008,
+            tmdb_id: 1396,
+            metadata: %{
+              "id" => 1396,
+              "provider_id" => "1396",
+              "provider" => "metadata_relay",
+              "media_type" => "tv_show",
+              "title" => "Breaking Bad",
+              "number_of_seasons" => 5,
+              "number_of_episodes" => 62,
+              "seasons" => [
+                %{"season_number" => 1, "name" => "Season 1", "episode_count" => 7}
+              ]
+            }
+          },
+          skip_episode_refresh: true
+        )
 
       reloaded = Repo.get!(Mydia.Media.MediaItem, media_item.id)
 

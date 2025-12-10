@@ -7,6 +7,9 @@ defmodule Mydia.MediaFixtures do
 
   @doc """
   Generate a media item.
+
+  By default, skips automatic episode refresh for TV shows in tests
+  to avoid external API calls and allow tests to create their own episodes.
   """
   def media_item_fixture(attrs \\ %{}) do
     {:ok, media_item} =
@@ -17,7 +20,9 @@ defmodule Mydia.MediaFixtures do
         year: 2024,
         monitored: true
       })
-      |> Mydia.Media.create_media_item()
+      # Skip episode refresh in tests to avoid external API calls
+      # and to allow tests to create their own episode fixtures
+      |> Mydia.Media.create_media_item(skip_episode_refresh: true)
 
     media_item
   end

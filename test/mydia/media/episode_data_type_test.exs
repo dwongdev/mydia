@@ -9,12 +9,15 @@ defmodule Mydia.Media.EpisodeDataTypeTest do
     test "loading episode from database returns EpisodeData struct, not plain map" do
       # Create a media item first
       {:ok, media_item} =
-        Media.create_media_item(%{
-          type: "tv_show",
-          title: "Bluey",
-          year: 2018,
-          tmdb_id: 12345
-        })
+        Media.create_media_item(
+          %{
+            type: "tv_show",
+            title: "Bluey",
+            year: 2018,
+            tmdb_id: 12345
+          },
+          skip_episode_refresh: true
+        )
 
       # Create an episode with full metadata
       {:ok, episode} =
@@ -60,11 +63,14 @@ defmodule Mydia.Media.EpisodeDataTypeTest do
 
     test "handles nil metadata gracefully" do
       {:ok, media_item} =
-        Media.create_media_item(%{
-          type: "tv_show",
-          title: "Test Show",
-          year: 2024
-        })
+        Media.create_media_item(
+          %{
+            type: "tv_show",
+            title: "Test Show",
+            year: 2024
+          },
+          skip_episode_refresh: true
+        )
 
       {:ok, episode} =
         Repo.insert(%Mydia.Media.Episode{
@@ -81,11 +87,14 @@ defmodule Mydia.Media.EpisodeDataTypeTest do
 
     test "handles partial metadata with missing optional fields" do
       {:ok, media_item} =
-        Media.create_media_item(%{
-          type: "tv_show",
-          title: "Test Show",
-          year: 2024
-        })
+        Media.create_media_item(
+          %{
+            type: "tv_show",
+            title: "Test Show",
+            year: 2024
+          },
+          skip_episode_refresh: true
+        )
 
       {:ok, episode} =
         Repo.insert(%Mydia.Media.Episode{

@@ -414,12 +414,15 @@ defmodule MydiaWeb.Api.PlaybackControllerTest do
 
   defp create_episode do
     {:ok, media_item} =
-      Media.create_media_item(%{
-        title: "Test Show #{System.unique_integer([:positive])}",
-        tmdb_id: System.unique_integer([:positive]),
-        type: "tv_show",
-        monitored: true
-      })
+      Media.create_media_item(
+        %{
+          title: "Test Show #{System.unique_integer([:positive])}",
+          tmdb_id: System.unique_integer([:positive]),
+          type: "tv_show",
+          monitored: true
+        },
+        skip_episode_refresh: true
+      )
 
     Media.create_episode(%{
       media_item_id: media_item.id,

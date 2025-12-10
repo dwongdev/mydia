@@ -63,7 +63,9 @@ defmodule Mydia.MediaTest do
         monitored: true
       }
 
-      assert {:ok, %MediaItem{} = media_item} = Media.create_media_item(attrs_without_year)
+      assert {:ok, %MediaItem{} = media_item} =
+               Media.create_media_item(attrs_without_year, skip_episode_refresh: true)
+
       assert media_item.type == "tv_show"
       assert media_item.title == "Test Show"
       assert media_item.year == nil
@@ -205,7 +207,9 @@ defmodule Mydia.MediaTest do
         metadata: %{genres: ["Drama"]}
       }
 
-      assert {:ok, %MediaItem{} = media_item} = Media.create_media_item(attrs)
+      assert {:ok, %MediaItem{} = media_item} =
+               Media.create_media_item(attrs, skip_episode_refresh: true)
+
       assert media_item.category == "tv_show"
     end
 
@@ -219,7 +223,9 @@ defmodule Mydia.MediaTest do
         }
       }
 
-      assert {:ok, %MediaItem{} = media_item} = Media.create_media_item(attrs)
+      assert {:ok, %MediaItem{} = media_item} =
+               Media.create_media_item(attrs, skip_episode_refresh: true)
+
       assert media_item.category == "anime_series"
     end
 
@@ -233,7 +239,9 @@ defmodule Mydia.MediaTest do
         }
       }
 
-      assert {:ok, %MediaItem{} = media_item} = Media.create_media_item(attrs)
+      assert {:ok, %MediaItem{} = media_item} =
+               Media.create_media_item(attrs, skip_episode_refresh: true)
+
       assert media_item.category == "cartoon_series"
     end
 

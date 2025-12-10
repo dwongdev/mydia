@@ -231,7 +231,10 @@ defmodule Mydia.Metadata.Provider.Relay do
       "in_production" => get_in(data, ["status", "name"]) == "Continuing",
       "seasons" => seasons,
       # Include year for compatibility
-      "year" => year
+      "year" => year,
+      # Classification fields for category auto-detection
+      "origin_country" => transform_tvdb_origin_country(data["originalCountry"]),
+      "original_language" => data["originalLanguage"]
     }
   end
 
@@ -288,6 +291,12 @@ defmodule Mydia.Metadata.Provider.Relay do
   end
 
   defp transform_tvdb_genres(_), do: []
+
+  # TVDB returns originalCountry as a string, convert to list for consistency with TMDB
+  defp transform_tvdb_origin_country(nil), do: []
+  defp transform_tvdb_origin_country(country) when is_binary(country), do: [country]
+  defp transform_tvdb_origin_country(countries) when is_list(countries), do: countries
+  defp transform_tvdb_origin_country(_), do: []
 
   # TVDB images are full URLs or relative paths
   defp transform_tvdb_image(nil), do: nil

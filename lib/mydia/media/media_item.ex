@@ -19,6 +19,8 @@ defmodule Mydia.Media.MediaItem do
     field :imdb_id, :string
     field :metadata, Mydia.Media.MetadataType
     field :monitored, :boolean, default: true
+    field :category, :string
+    field :category_override, :boolean, default: false
 
     belongs_to :quality_profile, Mydia.Settings.QualityProfile
     has_many :episodes, Mydia.Media.Episode
@@ -64,6 +66,46 @@ defmodule Mydia.Media.MediaItem do
     else
       changeset
     end
+  end
+
+  @doc """
+  Changeset for updating the category of a media item.
+
+  When `override` is true, sets `category_override` to true, preventing
+  automatic re-classification on metadata refresh.
+  """
+  def category_changeset(media_item, category, opts \\ []) do
+    override = Keyword.get(opts, :override, false)
+
+    media_item
+    |> cast(%{category: to_string(category), category_override: override}, [
+      :category,
+      :category_override
+    ])
+    |> validate_category()
+  end
+
+  @doc """
+  Changeset to clear the category override flag, allowing auto-classification.
+  """
+  def clear_category_override_changeset(media_item) do
+    media_item
+    |> cast(%{category_override: false}, [:category_override])
+  end
+
+  defp validate_category(changeset) do
+    alias Mydia.Media.MediaCategory
+
+    category = get_field(changeset, :category)
+
+    if category && not MediaCategory.valid?(String.to_existing_atom(category)) do
+      add_error(changeset, :category, "is not a valid category")
+    else
+      changeset
+    end
+  rescue
+    ArgumentError ->
+      add_error(changeset, :category, "is not a valid category")
   end
 
   @doc """

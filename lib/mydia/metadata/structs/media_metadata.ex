@@ -41,6 +41,9 @@ defmodule Mydia.Metadata.Structs.MediaMetadata do
     :crew,
     :alternative_titles,
     :videos,
+    # Classification fields (for category auto-detection)
+    :origin_country,
+    :original_language,
     # TV show specific fields
     :number_of_seasons,
     :number_of_episodes,
@@ -79,6 +82,8 @@ defmodule Mydia.Metadata.Structs.MediaMetadata do
           crew: [CrewMember.t()] | nil,
           alternative_titles: [String.t()] | nil,
           videos: [Video.t()] | nil,
+          origin_country: [String.t()] | nil,
+          original_language: String.t() | nil,
           number_of_seasons: integer() | nil,
           number_of_episodes: integer() | nil,
           episode_run_time: [integer()] | nil,
@@ -128,7 +133,9 @@ defmodule Mydia.Metadata.Structs.MediaMetadata do
       cast: parse_cast(data["credits"]["cast"]),
       crew: parse_crew(data["credits"]["crew"]),
       alternative_titles: parse_alternative_titles(data["alternative_titles"]),
-      videos: parse_videos(data["videos"])
+      videos: parse_videos(data["videos"]),
+      origin_country: parse_origin_country(data["origin_country"]),
+      original_language: data["original_language"]
     }
 
     case media_type do
@@ -231,6 +238,11 @@ defmodule Mydia.Metadata.Structs.MediaMetadata do
     do: Enum.map(languages, & &1["iso_639_1"])
 
   defp parse_language_codes(_), do: []
+
+  # TMDB returns origin_country as a list of ISO 3166-1 country codes
+  defp parse_origin_country(nil), do: []
+  defp parse_origin_country(countries) when is_list(countries), do: countries
+  defp parse_origin_country(_), do: []
 
   defp parse_cast(nil), do: []
 

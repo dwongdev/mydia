@@ -6,7 +6,7 @@ defmodule Mydia.Media do
   import Ecto.Query, warn: false
   require Logger
   alias Mydia.Repo
-  alias Mydia.Media.{MediaItem, Episode}
+  alias Mydia.Media.{MediaItem, Episode, CategoryClassifier}
   alias Mydia.Media.Structs.CalendarEntry
   alias Mydia.Events
 
@@ -18,6 +18,7 @@ defmodule Mydia.Media do
   ## Options
     - `:type` - Filter by type ("movie" or "tv_show")
     - `:monitored` - Filter by monitored status (true/false)
+    - `:category` - Filter by category (atom or string, e.g., :anime_movie or "anime_movie")
     - `:library_path_type` - Filter by library path type (:adult, :music, :books, etc.)
     - `:preload` - List of associations to preload
   """
@@ -64,6 +65,9 @@ defmodule Mydia.Media do
            %MediaItem{}
            |> MediaItem.changeset(attrs)
            |> Repo.insert() do
+      # Auto-classify the media item based on metadata
+      media_item = auto_classify_media_item(media_item)
+
       # Track event
       actor_type = Keyword.get(opts, :actor_type, :system)
       actor_id = Keyword.get(opts, :actor_id, "media_context")
@@ -181,6 +185,23 @@ defmodule Mydia.Media do
   """
   def change_media_item(%MediaItem{} = media_item, attrs \\ %{}) do
     MediaItem.changeset(media_item, attrs)
+  end
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for tracking category changes on a media item.
+  """
+  def change_media_item_category(%MediaItem{} = media_item, attrs \\ %{}) do
+    media_item
+    |> Ecto.Changeset.cast(attrs, [:category, :category_override])
+    |> Ecto.Changeset.validate_required([:category])
+    |> Ecto.Changeset.validate_inclusion(:category, [
+      "movie",
+      "anime_movie",
+      "cartoon_movie",
+      "tv_show",
+      "anime_series",
+      "cartoon_series"
+    ])
   end
 
   @doc """
@@ -909,6 +930,12 @@ defmodule Mydia.Media do
       {:monitored, monitored}, query ->
         where(query, [m], m.monitored == ^monitored)
 
+      {:category, category}, query when is_atom(category) ->
+        where(query, [m], m.category == ^to_string(category))
+
+      {:category, category}, query when is_binary(category) ->
+        where(query, [m], m.category == ^category)
+
       {:library_path_type, library_type}, query ->
         filter_by_library_path_type(query, library_type)
 
@@ -982,6 +1009,195 @@ defmodule Mydia.Media do
       monitored: media_item.monitored,
       metadata: media_item.metadata
     }
+  end
+
+  ## Category Classification
+
+  @doc """
+  Updates the category of a media item.
+
+  ## Options
+    - `:override` - If true, sets `category_override` flag to prevent auto-reclassification (default: false)
+
+  ## Examples
+
+      iex> update_category(media_item, :anime_movie)
+      {:ok, %MediaItem{}}
+
+      iex> update_category(media_item, :anime_movie, override: true)
+      {:ok, %MediaItem{category: "anime_movie", category_override: true}}
+  """
+  def update_category(%MediaItem{} = media_item, category, opts \\ []) do
+    media_item
+    |> MediaItem.category_changeset(category, opts)
+    |> Repo.update()
+  end
+
+  @doc """
+  Clears the category override flag, allowing auto-reclassification on metadata refresh.
+
+  ## Examples
+
+      iex> clear_category_override(media_item)
+      {:ok, %MediaItem{category_override: false}}
+  """
+  def clear_category_override(%MediaItem{} = media_item) do
+    media_item
+    |> MediaItem.clear_category_override_changeset()
+    |> Repo.update()
+  end
+
+  @doc """
+  Re-classifies a media item based on its current metadata.
+
+  If `category_override` is true, the category is not changed unless `force: true` is passed.
+
+  ## Options
+    - `:force` - If true, ignores the override flag and re-classifies anyway (default: false)
+
+  ## Examples
+
+      iex> reclassify_media_item(media_item)
+      {:ok, %MediaItem{}}
+  """
+  def reclassify_media_item(%MediaItem{} = media_item, opts \\ []) do
+    force = Keyword.get(opts, :force, false)
+
+    if media_item.category_override && !force do
+      {:ok, media_item}
+    else
+      category = CategoryClassifier.classify(media_item)
+
+      media_item
+      |> MediaItem.category_changeset(category)
+      |> Repo.update()
+    end
+  end
+
+  @doc """
+  Re-classifies all media items that don't have a category override.
+
+  Useful for backfilling categories on existing media items.
+
+  Returns `{:ok, count}` where count is the number of updated items.
+  """
+  def reclassify_all_media_items do
+    MediaItem
+    |> where([m], m.category_override == false or is_nil(m.category_override))
+    |> Repo.all()
+    |> Enum.reduce(0, fn media_item, count ->
+      category = CategoryClassifier.classify(media_item)
+
+      case update_category(media_item, category) do
+        {:ok, _} -> count + 1
+        {:error, _} -> count
+      end
+    end)
+    |> then(&{:ok, &1})
+  end
+
+  @doc """
+  Re-classifies multiple media items by their IDs.
+
+  Returns a summary map with counts and details of what changed.
+
+  ## Options
+    - `:force` - If true, ignores category_override flags (default: false)
+
+  ## Returns
+
+      {:ok, %{
+        total: 10,
+        updated: 5,
+        skipped: 3,
+        unchanged: 2,
+        details: [%{id: "...", old_category: "movie", new_category: "anime_movie", changed: true}, ...]
+      }}
+  """
+  def reclassify_media_items(ids, opts \\ []) when is_list(ids) do
+    force = Keyword.get(opts, :force, false)
+
+    media_items =
+      MediaItem
+      |> where([m], m.id in ^ids)
+      |> Repo.all()
+
+    results =
+      Enum.map(media_items, fn media_item ->
+        old_category = media_item.category
+        new_category = CategoryClassifier.classify(media_item)
+
+        cond do
+          media_item.category_override && !force ->
+            %{
+              id: media_item.id,
+              title: media_item.title,
+              old_category: old_category,
+              new_category: old_category,
+              changed: false,
+              skipped: true,
+              reason: "category_override"
+            }
+
+          to_string(old_category) == to_string(new_category) ->
+            %{
+              id: media_item.id,
+              title: media_item.title,
+              old_category: old_category,
+              new_category: to_string(new_category),
+              changed: false,
+              skipped: false,
+              reason: nil
+            }
+
+          true ->
+            case update_category(media_item, new_category) do
+              {:ok, _updated} ->
+                %{
+                  id: media_item.id,
+                  title: media_item.title,
+                  old_category: old_category,
+                  new_category: to_string(new_category),
+                  changed: true,
+                  skipped: false,
+                  reason: nil
+                }
+
+              {:error, _} ->
+                %{
+                  id: media_item.id,
+                  title: media_item.title,
+                  old_category: old_category,
+                  new_category: old_category,
+                  changed: false,
+                  skipped: true,
+                  reason: "update_failed"
+                }
+            end
+        end
+      end)
+
+    summary = %{
+      total: length(results),
+      updated: Enum.count(results, & &1.changed),
+      skipped: Enum.count(results, & &1.skipped),
+      unchanged: Enum.count(results, &(!&1.changed && !&1.skipped)),
+      details: results
+    }
+
+    {:ok, summary}
+  end
+
+  # Auto-classify a newly created media item
+  defp auto_classify_media_item(%MediaItem{} = media_item) do
+    category = CategoryClassifier.classify(media_item)
+
+    case media_item
+         |> MediaItem.category_changeset(category)
+         |> Repo.update() do
+      {:ok, updated_item} -> updated_item
+      {:error, _} -> media_item
+    end
   end
 
   @doc """

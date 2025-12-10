@@ -9,6 +9,10 @@ A modern, self-hosted media management platform for tracking, organizing, and mo
 
 > **Warning:** Mydia is in early development (0.x.x). Expect breaking changes. [Report issues](https://github.com/getmydia/mydia/issues) or [request features](https://github.com/getmydia/mydia/issues/new).
 
+<p align="center">
+  <img src="screenshots/homepage.png" alt="Mydia Dashboard" width="800" />
+</p>
+
 ## Quick Start
 
 **1. Generate secrets:**
@@ -74,13 +78,9 @@ Full documentation available at **[getmydia.github.io/mydia](https://getmydia.gi
 
 ## Screenshots
 
-| Dashboard | Movies |
-|:---------:|:------:|
-| ![Dashboard](screenshots/homepage.png) | ![Movies](screenshots/movies.png) |
-
-| TV Shows | Calendar |
-|:--------:|:--------:|
-| ![TV Shows](screenshots/tv-shows.png) | ![Calendar](screenshots/calendar.png) |
+| Movies | TV Shows | Calendar |
+|:------:|:--------:|:--------:|
+| ![Movies](screenshots/movies.png) | ![TV Shows](screenshots/tv-shows.png) | ![Calendar](screenshots/calendar.png) |
 
 ## Contributing
 

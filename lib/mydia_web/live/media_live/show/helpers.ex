@@ -8,6 +8,7 @@ defmodule MydiaWeb.MediaLive.Show.Helpers do
   alias Mydia.Media.EpisodeStatus
   alias Mydia.Library
   alias Mydia.Metadata.Structs.MediaMetadata
+  alias Mydia.Metadata.Structs.Video
 
   require Logger
 
@@ -179,6 +180,23 @@ defmodule MydiaWeb.MediaLive.Show.Helpers do
 
       _ ->
         []
+    end
+  end
+
+  def get_first_trailer(media_item) do
+    case media_item.metadata do
+      %MediaMetadata{videos: [%Video{} = video | _]} ->
+        video
+
+      _ ->
+        nil
+    end
+  end
+
+  def get_trailer_embed_url(media_item) do
+    case get_first_trailer(media_item) do
+      %Video{} = video -> Video.youtube_embed_url(video)
+      _ -> nil
     end
   end
 

@@ -339,6 +339,25 @@ defmodule MydiaWeb.MediaLive.Show.Components do
       </div>
     </div>
 
+    <%!-- Trailer --%>
+    <%= if trailer_url = get_trailer_embed_url(@media_item) do %>
+      <div class="card bg-base-200 shadow-lg mb-4 md:mb-6">
+        <div class="card-body p-4 md:p-6">
+          <h2 class="card-title text-lg md:text-xl mb-3">Trailer</h2>
+          <div class="aspect-video rounded-lg overflow-hidden bg-base-300">
+            <iframe
+              src={trailer_url <> "?rel=0&modestbranding=1"}
+              title="Trailer"
+              class="w-full h-full"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowfullscreen
+            >
+            </iframe>
+          </div>
+        </div>
+      </div>
+    <% end %>
+
     <%!-- Cast and Crew --%>
     <% cast = get_cast(@media_item)
     crew = get_crew(@media_item) %>

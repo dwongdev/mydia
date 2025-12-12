@@ -69,12 +69,9 @@ Configure additional libraries using numbered variables (`<N>` = 1, 2, 3, etc.):
 
 ## Feature Flags
 
-!!! warning "Experimental Features"
-    These features are unstable and may not work correctly. Enable at your own risk.
-
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `ENABLE_PLAYBACK` | Enable media playback controls and HLS streaming | `false` |
+| `ENABLE_PLAYBACK` | Enable media playback controls and HLS streaming | `true` |
 | `ENABLE_CARDIGANN` | Enable native Cardigann indexer support | `true` |
 | `ENABLE_SUBTITLES` | Enable subtitle download and management | `false` |
 | `ENABLE_IMPORT_LISTS` | Enable import lists for syncing external lists (TMDB watchlists, popular, etc.) | `true` |

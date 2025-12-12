@@ -193,7 +193,7 @@ if config_env() == :prod do
     case System.get_env("ENABLE_PLAYBACK") do
       "true" -> true
       "false" -> false
-      _ -> Application.get_env(:mydia, :features)[:playback_enabled] || false
+      _ -> Application.get_env(:mydia, :features)[:playback_enabled] || true
     end
 
   cardigann_enabled =
@@ -253,7 +253,7 @@ if config_env() in [:dev, :test] do
     case System.get_env("ENABLE_PLAYBACK") do
       "true" -> true
       "false" -> false
-      _ -> Application.get_env(:mydia, :features)[:playback_enabled] || false
+      _ -> Application.get_env(:mydia, :features)[:playback_enabled] || true
     end
 
   cardigann_enabled =

@@ -25,7 +25,7 @@ defmodule Mydia.Media.MetadataType do
 
   use Ecto.Type
 
-  alias Mydia.Metadata.Structs.{MediaMetadata, CastMember, CrewMember, SeasonInfo}
+  alias Mydia.Metadata.Structs.{MediaMetadata, CastMember, CrewMember, SeasonInfo, Video}
 
   @doc """
   Returns the underlying database type (:string for text columns).
@@ -124,7 +124,7 @@ defmodule Mydia.Media.MetadataType do
       cast: parse_cast_list(data[:cast]),
       crew: parse_crew_list(data[:crew]),
       alternative_titles: data[:alternative_titles],
-      videos: data[:videos],
+      videos: parse_videos_list(data[:videos]),
       origin_country: data[:origin_country],
       original_language: data[:original_language],
       number_of_seasons: data[:number_of_seasons],
@@ -147,9 +147,17 @@ defmodule Mydia.Media.MetadataType do
 
   # Convert nested structs to maps
   defp convert_value_to_map(%Date{} = date), do: date
+  defp convert_value_to_map(%DateTime{} = datetime), do: DateTime.to_iso8601(datetime)
   defp convert_value_to_map(%CastMember{} = member), do: Map.from_struct(member)
   defp convert_value_to_map(%CrewMember{} = member), do: Map.from_struct(member)
   defp convert_value_to_map(%SeasonInfo{} = season), do: Map.from_struct(season)
+
+  defp convert_value_to_map(%Video{} = video) do
+    video
+    |> Map.from_struct()
+    |> Map.update(:published_at, nil, &convert_value_to_map/1)
+  end
+
   defp convert_value_to_map(list) when is_list(list), do: Enum.map(list, &convert_value_to_map/1)
   defp convert_value_to_map(value), do: value
 
@@ -206,6 +214,26 @@ defmodule Mydia.Media.MetadataType do
     end)
   end
 
+  # Parse videos list from maps to Video structs
+  defp parse_videos_list(nil), do: nil
+  defp parse_videos_list([]), do: []
+
+  defp parse_videos_list(videos) when is_list(videos) do
+    Enum.map(videos, fn video ->
+      video = atomize_keys(video)
+
+      %Video{
+        id: video[:id],
+        key: video[:key],
+        name: video[:name],
+        site: video[:site],
+        type: video[:type],
+        official: video[:official],
+        published_at: parse_datetime(video[:published_at])
+      }
+    end)
+  end
+
   # Parse date strings to Date structs
   defp parse_date(nil), do: nil
   defp parse_date(%Date{} = date), do: date
@@ -218,6 +246,19 @@ defmodule Mydia.Media.MetadataType do
   end
 
   defp parse_date(_), do: nil
+
+  # Parse datetime strings to DateTime structs (for Video published_at)
+  defp parse_datetime(nil), do: nil
+  defp parse_datetime(%DateTime{} = datetime), do: datetime
+
+  defp parse_datetime(datetime_string) when is_binary(datetime_string) do
+    case DateTime.from_iso8601(datetime_string) do
+      {:ok, datetime, _offset} -> datetime
+      _ -> nil
+    end
+  end
+
+  defp parse_datetime(_), do: nil
 
   # Convert string keys to atom keys for easier access
   defp atomize_keys(map) when is_map(map) do

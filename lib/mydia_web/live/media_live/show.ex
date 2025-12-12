@@ -119,6 +119,8 @@ defmodule MydiaWeb.MediaLive.Show do
      |> assign(:show_category_modal, false)
      |> assign(:category_form, nil)
      |> assign(:available_categories, available_categories_for(media_item.type))
+     # Trailer modal state
+     |> assign(:show_trailer_modal, false)
      |> stream_configure(:search_results, dom_id: &generate_result_id/1)
      |> stream(:search_results, [])}
   end
@@ -1152,6 +1154,14 @@ defmodule MydiaWeb.MediaLive.Show do
      socket
      |> assign(:show_category_modal, false)
      |> assign(:category_form, nil)}
+  end
+
+  def handle_event("show_trailer_modal", _params, socket) do
+    {:noreply, assign(socket, :show_trailer_modal, true)}
+  end
+
+  def handle_event("hide_trailer_modal", _params, socket) do
+    {:noreply, assign(socket, :show_trailer_modal, false)}
   end
 
   def handle_event("validate_category", %{"media_item" => params}, socket) do

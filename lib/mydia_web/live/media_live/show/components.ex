@@ -323,97 +323,184 @@ defmodule MydiaWeb.MediaLive.Show.Components do
   end
 
   @doc """
-  Overview section with description, cast, and crew.
+  Compact secondary info section with overview, trailer, and cast.
+  Uses proper lifted tabs for TV shows, full cards for movies.
   """
   attr :media_item, :map, required: true
 
   def overview_section(assigns) do
+    cast = get_cast(assigns.media_item)
+    crew = get_crew(assigns.media_item)
+    trailer_url = get_trailer_embed_url(assigns.media_item)
+    has_cast_crew = cast != [] or crew != []
+
+    assigns =
+      assigns
+      |> assign(:cast, cast)
+      |> assign(:crew, crew)
+      |> assign(:trailer_url, trailer_url)
+      |> assign(:has_cast_crew, has_cast_crew)
+
     ~H"""
-    <%!-- Overview --%>
-    <div class="card bg-base-200 shadow-lg mb-4 md:mb-6">
-      <div class="card-body p-4 md:p-6">
-        <h2 class="card-title text-lg md:text-xl">Overview</h2>
-        <p class="text-sm md:text-base text-base-content/80 leading-relaxed">
+    <%= if @media_item.type == "tv_show" do %>
+      <%!-- Compact inline layout for TV shows --%>
+      <div class="flex flex-wrap items-start gap-4 mb-4 text-sm">
+        <%!-- Overview text --%>
+        <p class="flex-1 min-w-[200px] text-base-content/70 leading-relaxed line-clamp-2">
           {get_overview(@media_item)}
         </p>
-      </div>
-    </div>
 
-    <%!-- Trailer --%>
-    <%= if trailer_url = get_trailer_embed_url(@media_item) do %>
+        <%!-- Action buttons for trailer and cast --%>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <%= if @trailer_url do %>
+            <button
+              type="button"
+              phx-click="show_trailer_modal"
+              class="btn btn-sm btn-ghost gap-1"
+            >
+              <.icon name="hero-play-circle" class="w-4 h-4 text-primary" />
+              <span>Trailer</span>
+            </button>
+          <% end %>
+
+          <%= if @has_cast_crew do %>
+            <div class="dropdown dropdown-end">
+              <div tabindex="0" role="button" class="btn btn-sm btn-ghost gap-1">
+                <.icon name="hero-users" class="w-4 h-4 text-primary" />
+                <span>Cast</span>
+                <.icon name="hero-chevron-down" class="w-3 h-3 opacity-60" />
+              </div>
+              <div
+                tabindex="0"
+                class="dropdown-content z-[1] card card-compact w-72 p-2 shadow-xl bg-base-100 border border-base-300"
+              >
+                <div class="card-body p-3">
+                  <%= if @crew != [] do %>
+                    <div class="mb-3">
+                      <div class="text-xs font-semibold text-base-content/50 uppercase mb-2">
+                        Crew
+                      </div>
+                      <div class="space-y-1">
+                        <div :for={member <- Enum.take(@crew, 3)} class="text-sm">
+                          <span class="font-medium">{member.name}</span>
+                          <span class="text-base-content/60">— {member.job}</span>
+                        </div>
+                      </div>
+                    </div>
+                  <% end %>
+                  <%= if @cast != [] do %>
+                    <div class="text-xs font-semibold text-base-content/50 uppercase mb-2">
+                      Cast
+                    </div>
+                    <div class="space-y-1.5">
+                      <div :for={actor <- Enum.take(@cast, 6)} class="flex items-center gap-2">
+                        <div class="avatar">
+                          <div class="w-6 h-6 rounded-full bg-base-300">
+                            <%= if get_profile_image_url(actor.profile_path) do %>
+                              <img src={get_profile_image_url(actor.profile_path)} alt={actor.name} />
+                            <% else %>
+                              <div class="flex items-center justify-center h-full">
+                                <.icon name="hero-user" class="w-3 h-3 text-base-content/30" />
+                              </div>
+                            <% end %>
+                          </div>
+                        </div>
+                        <div class="text-sm">
+                          <span class="font-medium">{actor.name}</span>
+                          <span class="text-base-content/60 text-xs">as {actor.character}</span>
+                        </div>
+                      </div>
+                    </div>
+                  <% end %>
+                </div>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% else %>
+      <%!-- Full layout for movies --%>
       <div class="card bg-base-200 shadow-lg mb-4 md:mb-6">
         <div class="card-body p-4 md:p-6">
-          <h2 class="card-title text-lg md:text-xl mb-3">Trailer</h2>
-          <div class="aspect-video rounded-lg overflow-hidden bg-base-300">
-            <iframe
-              src={trailer_url <> "?rel=0&modestbranding=1"}
-              title="Trailer"
-              class="w-full h-full"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowfullscreen
-            >
-            </iframe>
+          <h2 class="card-title text-lg md:text-xl">Overview</h2>
+          <p class="text-sm md:text-base text-base-content/80 leading-relaxed">
+            {get_overview(@media_item)}
+          </p>
+        </div>
+      </div>
+
+      <%= if @trailer_url do %>
+        <div class="card bg-base-200 shadow-lg mb-4 md:mb-6">
+          <div class="card-body p-4 md:p-6">
+            <h2 class="card-title text-lg md:text-xl mb-3">Trailer</h2>
+            <div class="aspect-video rounded-lg overflow-hidden bg-base-300">
+              <iframe
+                src={@trailer_url <> "?rel=0&modestbranding=1"}
+                title="Trailer"
+                class="w-full h-full"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowfullscreen
+              >
+              </iframe>
+            </div>
           </div>
         </div>
-      </div>
-    <% end %>
+      <% end %>
 
-    <%!-- Cast and Crew --%>
-    <% cast = get_cast(@media_item)
-    crew = get_crew(@media_item) %>
-    <%= if cast != [] or crew != [] do %>
-      <div class="card bg-base-200 shadow-lg mb-4 md:mb-6">
-        <div class="card-body p-4 md:p-6">
-          <h2 class="card-title text-lg md:text-xl mb-3 md:mb-4">Cast & Crew</h2>
+      <%= if @has_cast_crew do %>
+        <div class="card bg-base-200 shadow-lg mb-4 md:mb-6">
+          <div class="card-body p-4 md:p-6">
+            <h2 class="card-title text-lg md:text-xl mb-3 md:mb-4">Cast & Crew</h2>
 
-          <%= if crew != [] do %>
-            <div class="mb-6">
-              <h3 class="text-sm font-semibold text-base-content/70 mb-3">Key Crew</h3>
-              <div class="flex flex-wrap gap-3">
-                <div :for={member <- crew} class="badge badge-lg badge-outline gap-2">
-                  <span class="font-medium">{member.name}</span>
-                  <span class="text-base-content/60">• {member.job}</span>
+            <%= if @crew != [] do %>
+              <div class="mb-6">
+                <h3 class="text-sm font-semibold text-base-content/70 mb-3">Key Crew</h3>
+                <div class="flex flex-wrap gap-3">
+                  <div :for={member <- @crew} class="badge badge-lg badge-outline gap-2">
+                    <span class="font-medium">{member.name}</span>
+                    <span class="text-base-content/60">• {member.job}</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          <% end %>
+            <% end %>
 
-          <%= if cast != [] do %>
-            <div>
-              <h3 class="text-sm font-semibold text-base-content/70 mb-3">Cast</h3>
-              <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                <div :for={actor <- cast} class="flex flex-col items-center text-center">
-                  <div class="avatar mb-2">
-                    <div class="w-20 h-20 rounded-full bg-base-300">
-                      <%= if get_profile_image_url(actor.profile_path) do %>
-                        <img
-                          src={get_profile_image_url(actor.profile_path)}
-                          alt={actor.name}
-                          class="object-cover"
-                        />
-                      <% else %>
-                        <div class="flex items-center justify-center h-full">
-                          <.icon name="hero-user" class="w-10 h-10 text-base-content/30" />
-                        </div>
-                      <% end %>
+            <%= if @cast != [] do %>
+              <div>
+                <h3 class="text-sm font-semibold text-base-content/70 mb-3">Cast</h3>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                  <div :for={actor <- @cast} class="flex flex-col items-center text-center">
+                    <div class="avatar mb-2">
+                      <div class="w-20 h-20 rounded-full bg-base-300">
+                        <%= if get_profile_image_url(actor.profile_path) do %>
+                          <img
+                            src={get_profile_image_url(actor.profile_path)}
+                            alt={actor.name}
+                            class="object-cover"
+                          />
+                        <% else %>
+                          <div class="flex items-center justify-center h-full">
+                            <.icon name="hero-user" class="w-10 h-10 text-base-content/30" />
+                          </div>
+                        <% end %>
+                      </div>
+                    </div>
+                    <div class="text-sm font-medium line-clamp-2">{actor.name}</div>
+                    <div class="text-xs text-base-content/60 line-clamp-2">
+                      {actor.character}
                     </div>
                   </div>
-                  <div class="text-sm font-medium line-clamp-2">{actor.name}</div>
-                  <div class="text-xs text-base-content/60 line-clamp-2">
-                    {actor.character}
-                  </div>
                 </div>
               </div>
-            </div>
-          <% end %>
+            <% end %>
+          </div>
         </div>
-      </div>
+      <% end %>
     <% end %>
     """
   end
 
   @doc """
-  Episodes section for TV shows.
+  Episodes section for TV shows with non-collapsible seasons.
   """
   attr :media_item, :map, required: true
   attr :expanded_seasons, :map, required: true
@@ -426,247 +513,244 @@ defmodule MydiaWeb.MediaLive.Show.Components do
   def episodes_section(assigns) do
     ~H"""
     <%= if @media_item.type == "tv_show" && length(@media_item.episodes) > 0 do %>
-      <div class="card bg-base-200 shadow-lg mb-4 md:mb-6">
-        <div class="card-body p-4 md:p-6">
-          <h2 class="card-title text-lg md:text-xl mb-3 md:mb-4">Episodes</h2>
+      <% grouped_seasons = group_episodes_by_season(@media_item.episodes) %>
 
-          <% grouped_seasons = group_episodes_by_season(@media_item.episodes) %>
+      <div class="card bg-base-200 shadow-lg">
+        <%!-- Card header with stats --%>
+        <div class="card-body p-4 pb-0">
+          <div class="flex items-center justify-between flex-wrap gap-2">
+            <h2 class="card-title text-lg">Seasons & Episodes</h2>
+            <div class="flex items-center gap-4 text-sm">
+              <span class="text-base-content/60">
+                {length(grouped_seasons)} seasons
+              </span>
+              <span class="text-base-content/60">•</span>
+              <span class="text-success">
+                {Enum.count(@media_item.episodes, &(length(&1.media_files) > 0))} available
+              </span>
+              <span class="text-base-content/60">/</span>
+              <span>{length(@media_item.episodes)} total</span>
+            </div>
+          </div>
+        </div>
+
+        <%!-- All seasons in one container --%>
+        <div class="divide-y divide-base-300">
           <%= for {season_num, episodes} <- grouped_seasons do %>
-            <div class="collapse collapse-arrow bg-base-100 mb-2">
-              <input
-                type="checkbox"
-                checked={MapSet.member?(@expanded_seasons, season_num)}
-                phx-click="toggle_season_expanded"
-                phx-value-season-number={season_num}
-              />
-              <div class="collapse-title text-lg font-medium">
-                Season {season_num}
-                <span class="badge badge-ghost badge-sm ml-2">
-                  {length(episodes)} episodes
-                </span>
-              </div>
-              <div class="collapse-content">
-                <%!-- Season-level actions - scrollable on mobile --%>
-                <div class="flex gap-1 mb-4 justify-end overflow-x-auto pb-2">
-                  <div
-                    class="tooltip tooltip-bottom"
-                    data-tip="Auto search season (prefers season pack)"
+            <% season_available = Enum.count(episodes, &(length(&1.media_files) > 0))
+            season_total = length(episodes) %>
+
+            <div class="p-4">
+              <%!-- Season header row --%>
+              <div class="flex items-center justify-between gap-4 mb-3">
+                <div class="flex items-center gap-3">
+                  <span class="badge badge-primary badge-lg font-bold">S{season_num}</span>
+                  <span class="text-sm text-base-content/70">
+                    {season_available}/{season_total} episodes
+                  </span>
+                  <progress
+                    class="progress progress-success w-20"
+                    value={season_available}
+                    max={season_total}
                   >
+                  </progress>
+                </div>
+
+                <%!-- Season actions --%>
+                <div class="flex items-center gap-1">
+                  <div class="tooltip tooltip-bottom" data-tip="Auto search season">
                     <button
                       type="button"
                       phx-click="auto_search_season"
                       phx-value-season-number={season_num}
-                      class="btn btn-xs sm:btn-sm btn-primary"
+                      class="btn btn-sm btn-primary"
                       disabled={@auto_searching_season == season_num}
                     >
                       <%= if @auto_searching_season == season_num do %>
-                        <span class="loading loading-spinner loading-xs"></span>
+                        <span class="loading loading-spinner loading-sm"></span>
                       <% else %>
-                        <.icon name="hero-bolt" class="w-3 h-3 sm:w-4 sm:h-4" />
+                        <.icon name="hero-bolt" class="w-4 h-4" />
                       <% end %>
                     </button>
                   </div>
-                  <div class="tooltip tooltip-bottom" data-tip="Manual search season">
+                  <div class="tooltip tooltip-bottom" data-tip="Manual search">
                     <button
                       type="button"
                       phx-click="manual_search_season"
                       phx-value-season-number={season_num}
-                      class="btn btn-xs sm:btn-sm btn-outline"
+                      class="btn btn-sm btn-ghost"
                     >
-                      <.icon name="hero-magnifying-glass" class="w-3 h-3 sm:w-4 sm:h-4" />
+                      <.icon name="hero-magnifying-glass" class="w-4 h-4" />
                     </button>
                   </div>
-                  <div
-                    class="tooltip tooltip-bottom"
-                    data-tip="Re-scan season: discover new files and refresh metadata"
-                  >
+                  <div class="tooltip tooltip-bottom" data-tip="Re-scan">
                     <button
                       type="button"
                       phx-click="rescan_season"
                       phx-value-season-number={season_num}
-                      class="btn btn-xs sm:btn-sm btn-ghost"
+                      class="btn btn-sm btn-ghost"
                       disabled={@rescanning_season == season_num}
                     >
                       <%= if @rescanning_season == season_num do %>
-                        <span class="loading loading-spinner loading-xs"></span>
+                        <span class="loading loading-spinner loading-sm"></span>
                       <% else %>
-                        <.icon name="hero-arrow-path" class="w-3 h-3 sm:w-4 sm:h-4" />
+                        <.icon name="hero-arrow-path" class="w-4 h-4" />
                       <% end %>
                     </button>
                   </div>
-                  <div class="tooltip tooltip-bottom" data-tip="Monitor all episodes">
+                  <div class="tooltip tooltip-bottom" data-tip="Monitor all">
                     <button
                       type="button"
                       phx-click="monitor_season"
                       phx-value-season-number={season_num}
-                      class="btn btn-xs sm:btn-sm btn-ghost"
+                      class="btn btn-sm btn-ghost"
                     >
-                      <.icon name="hero-bookmark-solid" class="w-3 h-3 sm:w-4 sm:h-4" />
+                      <.icon name="hero-bookmark-solid" class="w-4 h-4" />
                     </button>
                   </div>
-                  <div class="tooltip tooltip-bottom" data-tip="Unmonitor all episodes">
+                  <div class="tooltip tooltip-bottom" data-tip="Unmonitor all">
                     <button
                       type="button"
                       phx-click="unmonitor_season"
                       phx-value-season-number={season_num}
-                      class="btn btn-xs sm:btn-sm btn-ghost"
+                      class="btn btn-sm btn-ghost"
                     >
-                      <.icon name="hero-bookmark" class="w-3 h-3 sm:w-4 sm:h-4" />
+                      <.icon name="hero-bookmark" class="w-4 h-4" />
                     </button>
                   </div>
                 </div>
-                <div class="overflow-x-auto">
-                  <table class="table table-sm">
-                    <thead>
-                      <tr>
-                        <th class="w-16">#</th>
-                        <th>Title</th>
-                        <th class="hidden md:table-cell">Air Date</th>
-                        <th class="hidden lg:table-cell">Quality</th>
-                        <th>Status</th>
-                        <th class="w-24">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <%= for episode <- Enum.sort_by(episodes, & &1.episode_number, :desc) do %>
-                        <% has_files = length(episode.media_files) > 0
-                        is_expanded = MapSet.member?(@expanded_episodes, episode.id) %>
-                        <tr>
-                          <td class="font-mono text-base-content/70">
-                            <div
-                              class={[
-                                "flex items-center gap-1",
-                                has_files && "cursor-pointer hover:text-primary"
-                              ]}
-                              phx-click={has_files && "toggle_episode_expanded"}
-                              phx-value-episode-id={episode.id}
-                              title={has_files && "Click to expand/collapse file details"}
-                            >
-                              <%= if has_files do %>
-                                <.icon
-                                  name={
-                                    if is_expanded,
-                                      do: "hero-chevron-down",
-                                      else: "hero-chevron-right"
-                                  }
-                                  class="w-4 h-4 text-base-content/50"
-                                />
-                              <% else %>
-                                <span class="w-4"></span>
-                              <% end %>
-                              {episode.episode_number}
-                            </div>
-                          </td>
-                          <td>
-                            <div
-                              class={[
-                                "font-medium",
-                                has_files && "cursor-pointer hover:text-primary"
-                              ]}
-                              phx-click={has_files && "toggle_episode_expanded"}
-                              phx-value-episode-id={episode.id}
-                            >
-                              {episode.title || "TBA"}
-                            </div>
-                          </td>
-                          <td class="hidden md:table-cell text-sm">
-                            {format_date(episode.air_date)}
-                          </td>
-                          <td class="hidden lg:table-cell">
-                            <%= if quality = get_episode_quality_badge(episode) do %>
-                              <span class="badge badge-primary badge-sm">{quality}</span>
-                            <% else %>
-                              <span class="text-base-content/50">—</span>
-                            <% end %>
-                          </td>
-                          <td>
-                            <% status = get_episode_status(episode) %>
-                            <div
-                              class="tooltip tooltip-left"
-                              data-tip={episode_status_tooltip(episode)}
-                            >
-                              <span class={[
-                                "badge badge-sm",
-                                episode_status_color(status)
-                              ]}>
-                                <.icon name={episode_status_icon(status)} class="w-4 h-4" />
-                              </span>
-                            </div>
-                          </td>
-                          <td>
-                            <div class="flex gap-0.5 sm:gap-1">
-                              <%!-- Play button (if episode has media files) --%>
-                              <%= if @playback_enabled && has_files do %>
-                                <.link
-                                  navigate={~p"/play/episode/#{episode.id}"}
-                                  class="btn btn-success btn-xs btn-square"
-                                  title="Play episode"
-                                >
-                                  <.icon name="hero-play-solid" class="w-3 h-3" />
-                                </.link>
-                              <% end %>
-                              <button
-                                type="button"
-                                phx-click="auto_search_episode"
-                                phx-value-episode-id={episode.id}
-                                class="btn btn-primary btn-xs btn-square"
-                                disabled={@auto_searching_episode == episode.id}
-                                title="Auto search and download this episode"
-                              >
-                                <%= if @auto_searching_episode == episode.id do %>
-                                  <span class="loading loading-spinner loading-xs"></span>
-                                <% else %>
-                                  <.icon name="hero-bolt" class="w-3 h-3" />
-                                <% end %>
-                              </button>
-                              <button
-                                type="button"
-                                phx-click="search_episode"
-                                phx-value-episode-id={episode.id}
-                                class="btn btn-ghost btn-xs btn-square"
-                                title="Manual search for episode"
-                              >
-                                <.icon name="hero-magnifying-glass" class="w-3 h-3" />
-                              </button>
-                              <button
-                                type="button"
-                                phx-click="toggle_episode_monitored"
-                                phx-value-episode-id={episode.id}
-                                class="btn btn-ghost btn-xs btn-square"
-                                title={
-                                  if episode.monitored,
-                                    do: "Stop monitoring",
-                                    else: "Start monitoring"
-                                }
-                              >
-                                <.icon
-                                  name={
-                                    if episode.monitored,
-                                      do: "hero-bookmark-solid",
-                                      else: "hero-bookmark"
-                                  }
-                                  class="w-3 h-3"
-                                />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                        <%!-- Expanded file details row --%>
-                        <%= if is_expanded && has_files do %>
-                          <tr :for={file <- episode.media_files} class="bg-base-300/30">
-                            <td colspan="6" class="py-2 pl-10">
-                              <.episode_file_row
-                                file={file}
-                                episode={episode}
-                                playback_enabled={@playback_enabled}
-                              />
-                            </td>
-                          </tr>
+              </div>
+
+              <%!-- Episodes list --%>
+              <div class="bg-base-100 rounded-lg divide-y divide-base-200">
+                <%= for episode <- Enum.sort_by(episodes, & &1.episode_number, :asc) do %>
+                  <% has_files = length(episode.media_files) > 0
+                  is_expanded = MapSet.member?(@expanded_episodes, episode.id)
+                  status = get_episode_status(episode) %>
+
+                  <div class={["py-2 px-3", has_files && "border-l-2 border-l-success"]}>
+                    <div class="flex items-center gap-3">
+                      <%!-- Episode number --%>
+                      <div
+                        class={[
+                          "flex items-center gap-1 w-8 flex-shrink-0",
+                          has_files && "cursor-pointer hover:text-primary"
+                        ]}
+                        phx-click={has_files && "toggle_episode_expanded"}
+                        phx-value-episode-id={episode.id}
+                      >
+                        <%= if has_files do %>
+                          <.icon
+                            name={if is_expanded, do: "hero-chevron-down", else: "hero-chevron-right"}
+                            class="w-3 h-3 text-base-content/40"
+                          />
                         <% end %>
-                      <% end %>
-                    </tbody>
-                  </table>
-                </div>
+                        <span class="font-mono text-sm font-medium text-base-content/70">
+                          {episode.episode_number}
+                        </span>
+                      </div>
+
+                      <%!-- Title and metadata --%>
+                      <div
+                        class={["flex-1 min-w-0", has_files && "cursor-pointer"]}
+                        phx-click={has_files && "toggle_episode_expanded"}
+                        phx-value-episode-id={episode.id}
+                      >
+                        <div class="flex items-center gap-2">
+                          <span class={[
+                            "text-sm font-medium truncate",
+                            has_files && "hover:text-primary"
+                          ]}>
+                            {episode.title || "TBA"}
+                          </span>
+                          <%= if quality = get_episode_quality_badge(episode) do %>
+                            <span class="badge badge-primary badge-xs flex-shrink-0">{quality}</span>
+                          <% end %>
+                        </div>
+                        <div class="flex items-center gap-2 text-xs text-base-content/50">
+                          <%= if episode.air_date do %>
+                            <span>{format_date(episode.air_date)}</span>
+                          <% end %>
+                        </div>
+                      </div>
+
+                      <%!-- Status badge --%>
+                      <div class="tooltip tooltip-left" data-tip={episode_status_tooltip(episode)}>
+                        <span class={["badge badge-xs", episode_status_color(status)]}>
+                          <.icon name={episode_status_icon(status)} class="w-3 h-3" />
+                        </span>
+                      </div>
+
+                      <%!-- Actions --%>
+                      <div class="flex gap-1 flex-shrink-0">
+                        <%= if @playback_enabled && has_files do %>
+                          <.link
+                            navigate={~p"/play/episode/#{episode.id}"}
+                            class="btn btn-success btn-sm btn-square"
+                            title="Play"
+                          >
+                            <.icon name="hero-play-solid" class="w-4 h-4" />
+                          </.link>
+                        <% end %>
+                        <button
+                          type="button"
+                          phx-click="auto_search_episode"
+                          phx-value-episode-id={episode.id}
+                          class="btn btn-primary btn-sm btn-square"
+                          disabled={@auto_searching_episode == episode.id}
+                          title="Auto search"
+                        >
+                          <%= if @auto_searching_episode == episode.id do %>
+                            <span class="loading loading-spinner loading-sm"></span>
+                          <% else %>
+                            <.icon name="hero-bolt" class="w-4 h-4" />
+                          <% end %>
+                        </button>
+                        <button
+                          type="button"
+                          phx-click="search_episode"
+                          phx-value-episode-id={episode.id}
+                          class="btn btn-ghost btn-sm btn-square"
+                          title="Manual search"
+                        >
+                          <.icon name="hero-magnifying-glass" class="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          phx-click="toggle_episode_monitored"
+                          phx-value-episode-id={episode.id}
+                          class={[
+                            "btn btn-sm btn-square",
+                            if(episode.monitored, do: "btn-ghost", else: "btn-ghost opacity-40")
+                          ]}
+                          title={
+                            if episode.monitored, do: "Stop monitoring", else: "Start monitoring"
+                          }
+                        >
+                          <.icon
+                            name={
+                              if episode.monitored, do: "hero-bookmark-solid", else: "hero-bookmark"
+                            }
+                            class="w-4 h-4"
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    <%!-- Expanded file details --%>
+                    <%= if is_expanded && has_files do %>
+                      <div class="mt-2 ml-8 space-y-1">
+                        <div :for={file <- episode.media_files} class="bg-base-200/50 rounded p-2">
+                          <.episode_file_row
+                            file={file}
+                            episode={episode}
+                            playback_enabled={@playback_enabled}
+                          />
+                        </div>
+                      </div>
+                    <% end %>
+                  </div>
+                <% end %>
               </div>
             </div>
           <% end %>

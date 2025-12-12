@@ -79,6 +79,12 @@ defmodule Mydia.Jobs.MetadataRefresh do
     end
   end
 
+  # Fallback for manual trigger from UI (empty args) - treat as refresh all
+  @impl Oban.Worker
+  def perform(%Oban.Job{args: args}) when args == %{} do
+    perform(%Oban.Job{args: %{"refresh_all" => true}})
+  end
+
   ## Private Functions
 
   defp refresh_media_item(media_item, config, fetch_episodes) do

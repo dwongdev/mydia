@@ -1074,4 +1074,37 @@ defmodule MydiaWeb.MediaLive.Show.Modals do
     </div>
     """
   end
+
+  @doc """
+  Trailer modal for viewing embedded YouTube trailer.
+  """
+  attr :trailer_url, :string, required: true
+  attr :title, :string, required: true
+
+  def trailer_modal(assigns) do
+    ~H"""
+    <div class="modal modal-open">
+      <div class="modal-box max-w-4xl p-0 overflow-hidden relative">
+        <button
+          type="button"
+          phx-click="hide_trailer_modal"
+          class="btn btn-circle btn-sm absolute top-2 right-2 z-10 bg-black/50 border-0 hover:bg-black/70"
+        >
+          <.icon name="hero-x-mark" class="w-5 h-5 text-white" />
+        </button>
+        <div class="aspect-video bg-black">
+          <iframe
+            src={@trailer_url <> "?rel=0&modestbranding=1&autoplay=1"}
+            title="Trailer"
+            class="w-full h-full"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowfullscreen
+          >
+          </iframe>
+        </div>
+      </div>
+      <div class="modal-backdrop bg-black/80" phx-click="hide_trailer_modal"></div>
+    </div>
+    """
+  end
 end

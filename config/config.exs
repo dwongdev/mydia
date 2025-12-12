@@ -269,7 +269,9 @@ config :mydia, Oban,
        # Clean up old import sessions daily at 4 AM
        {"0 4 * * *", Mydia.Jobs.ImportSessionCleanup},
        # Check for import lists due for sync every 15 minutes
-       {"*/15 * * * *", Mydia.Jobs.ImportListScheduler}
+       {"*/15 * * * *", Mydia.Jobs.ImportListScheduler},
+       # Refresh metadata for all monitored items weekly on Sunday at 5 AM
+       {"0 5 * * 0", Mydia.Jobs.MetadataRefresh, args: %{"refresh_all" => true}}
      ]}
   ]
 
@@ -323,7 +325,7 @@ config :mydia, :features,
   # Enable/disable media playback feature (Play Movie, Play Episode buttons)
   # Set to false to hide playback controls from the UI
   # Can be overridden via ENABLE_PLAYBACK environment variable
-  playback_enabled: false,
+  playback_enabled: true,
   # Enable/disable Cardigann native indexer support
   # When enabled, provides access to hundreds of torrent indexers without external Prowlarr/Jackett
   # Set to false to disable Cardigann indexers

@@ -803,9 +803,10 @@ defmodule MydiaWeb.ImportMediaLive.Components do
           phx-click="toggle_file_selection"
           phx-value-index={@movie.index}
         />
-        <%= if match.metadata.poster_path do %>
+        <%!-- Use Map.get for safe access since metadata can be empty (issue #44) --%>
+        <%= if poster_path = Map.get(match.metadata || %{}, :poster_path) do %>
           <img
-            src={"https://image.tmdb.org/t/p/w92#{match.metadata.poster_path}"}
+            src={"https://image.tmdb.org/t/p/w92#{poster_path}"}
             alt={match.title}
             class="w-12 h-18 rounded object-cover"
           />

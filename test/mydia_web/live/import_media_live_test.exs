@@ -378,4 +378,200 @@ defmodule MydiaWeb.ImportMediaLiveTest do
              |> has_element?()
     end
   end
+
+  describe "manual matching (issue #44)" do
+    setup do
+      user = user_fixture()
+
+      # Create a movies library path
+      {:ok, movies_path} =
+        Settings.create_library_path(%{
+          path: "/test/media/movies_#{System.unique_integer([:positive])}",
+          type: :movies,
+          monitored: true
+        })
+
+      %{user: user, movies_path: movies_path}
+    end
+
+    test "renders movie with empty metadata (manually matched file) without crashing", %{
+      conn: conn,
+      user: user,
+      movies_path: movies_path
+    } do
+      # This reproduces issue #44: manual matching of a movie crashes the importer
+      # because the metadata is an empty map and accessing .poster_path raises KeyError
+
+      session_id = Ecto.UUID.generate()
+
+      # Create a manually matched movie file with empty metadata
+      # This simulates what happens when a user manually matches an unmatched file
+      manually_matched_movie = %{
+        "file" => %{
+          "path" => "#{movies_path.path}/Test.Movie.2024.mkv",
+          "size" => 1_500_000_000
+        },
+        "match_result" => %{
+          "title" => "Test Movie",
+          "provider_id" => "12345",
+          "year" => 2024,
+          "match_confidence" => 1.0,
+          "manually_edited" => true,
+          # Empty metadata is the root cause of issue #44
+          # When a file is manually matched, no metadata is fetched,
+          # so metadata is set to %{} in the save_edit handler
+          "metadata" => %{},
+          "parsed_info" => %{
+            "type" => "movie",
+            "season" => nil,
+            "episodes" => []
+          }
+        },
+        "import_status" => "pending"
+      }
+
+      # Grouped file with index (required by the UI template)
+      grouped_movie = Map.put(manually_matched_movie, "index", 0)
+
+      # Create session with the manually matched file at review step
+      session_data = %{
+        "matched_files" => [manually_matched_movie],
+        "grouped_files" => %{
+          "series" => [],
+          "movies" => [grouped_movie],
+          "ungrouped" => [],
+          "type_filtered" => []
+        },
+        "selected_files" => [0],
+        "discovered_files" => [],
+        "detailed_results" => []
+      }
+
+      {:ok, session} =
+        Library.create_import_session(%{
+          id: session_id,
+          user_id: user.id,
+          step: :review,
+          scan_path: movies_path.path,
+          session_data: session_data,
+          scan_stats: %{"total" => 1, "matched" => 1, "unmatched" => 0},
+          import_progress: %{"current" => 0, "total" => 0, "current_file" => nil},
+          import_results: %{"success" => 0, "failed" => 0, "skipped" => 0},
+          status: :active
+        })
+
+      conn = log_in_user(conn, user)
+
+      # Navigate to the import page with the session_id
+      # This should NOT crash - before the fix it would raise:
+      # KeyError: key :poster_path not found in: %{}
+      {:ok, view, html} = live(conn, ~p"/import?session_id=#{session_id}")
+
+      # Verify the page rendered successfully
+      assert html =~ "Review Matches"
+      assert html =~ "Test Movie"
+
+      # Verify the movie is in the list and displays correctly
+      # (without a poster since metadata is empty)
+      assert has_element?(view, "#selection-toolbar")
+
+      # Clean up
+      Mydia.Repo.delete(session)
+    end
+
+    test "save_edit creates match with empty metadata for unmatched file", %{
+      conn: conn,
+      user: user,
+      movies_path: movies_path
+    } do
+      # This test verifies the flow that leads to the crash:
+      # 1. User has an unmatched file
+      # 2. User clicks edit and searches for a match
+      # 3. User selects a result and saves
+      # 4. The match_result is created with metadata: %{}
+      # 5. On next render, accessing match.metadata.poster_path crashes
+
+      session_id = Ecto.UUID.generate()
+
+      # Create an unmatched file
+      unmatched_file = %{
+        "file" => %{
+          "path" => "#{movies_path.path}/Unknown.Movie.2024.mkv",
+          "size" => 1_500_000_000
+        },
+        "match_result" => nil,
+        "import_status" => "pending"
+      }
+
+      # Grouped file with index (required by the UI template)
+      grouped_unmatched_file = Map.put(unmatched_file, "index", 0)
+
+      session_data = %{
+        "matched_files" => [unmatched_file],
+        "grouped_files" => %{
+          "series" => [],
+          "movies" => [],
+          "ungrouped" => [grouped_unmatched_file],
+          "type_filtered" => []
+        },
+        "selected_files" => [],
+        "discovered_files" => [],
+        "detailed_results" => []
+      }
+
+      {:ok, session} =
+        Library.create_import_session(%{
+          id: session_id,
+          user_id: user.id,
+          step: :review,
+          scan_path: movies_path.path,
+          session_data: session_data,
+          scan_stats: %{"total" => 1, "matched" => 0, "unmatched" => 1},
+          import_progress: %{"current" => 0, "total" => 0, "current_file" => nil},
+          import_results: %{"success" => 0, "failed" => 0, "skipped" => 0},
+          status: :active
+        })
+
+      conn = log_in_user(conn, user)
+
+      {:ok, view, _html} = live(conn, ~p"/import?session_id=#{session_id}")
+
+      # Click the edit button for the unmatched file
+      view
+      |> element("button[phx-click='edit_file'][phx-value-index='0']")
+      |> render_click()
+
+      # Simulate selecting a search result (this updates the form)
+      view
+      |> render_click("select_search_result", %{
+        "provider_id" => "movie-12345",
+        "title" => "The Manual Match Movie",
+        "year" => "2024",
+        "type" => "movie"
+      })
+
+      # Save the edit - this creates a match with empty metadata
+      # After the fix, this should not crash
+      html =
+        view
+        |> element("form#edit-form-0")
+        |> render_submit(%{
+          "edit_form" => %{
+            "title" => "The Manual Match Movie",
+            "provider_id" => "movie-12345",
+            "year" => "2024",
+            "type" => "movie",
+            "season" => "",
+            "episodes" => ""
+          }
+        })
+
+      # Verify the page didn't crash and shows the matched movie
+      assert html =~ "The Manual Match Movie"
+      assert html =~ "Match created successfully"
+
+      # Clean up
+      Mydia.Repo.delete(session)
+    end
+  end
 end

@@ -77,6 +77,9 @@ compose.override.yml
 # MkDocs build output
 /site/
 
+# Metadata relay logs
+/metadata-relay/logs/
+
 # Python virtual environment
 .venv/
 mkdocs-docs/.venv/

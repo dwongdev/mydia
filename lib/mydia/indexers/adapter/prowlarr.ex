@@ -154,7 +154,10 @@ defmodule Mydia.Indexers.Adapter.Prowlarr do
   end
 
   defp build_search_url(config, query, opts) do
-    indexer_ids = opts[:indexer_ids] || get_in(config, [:options, :indexer_ids]) || []
+    # Note: We intentionally do NOT use opts[:indexer_ids] here.
+    # opts[:indexer_ids] contains mydia config IDs (for filtering which indexer configs to search),
+    # while config.options.indexer_ids contains Prowlarr's internal indexer UUIDs.
+    indexer_ids = get_in(config, [:options, :indexer_ids]) || []
     categories = opts[:categories] || get_in(config, [:options, :categories]) || []
     limit = opts[:limit] || 100
 

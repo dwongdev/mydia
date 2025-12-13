@@ -1446,10 +1446,14 @@ defmodule MydiaWeb.ImportMediaLive.Components do
     ~H"""
     <div class="mb-6">
       <%!-- Summary Stats with Header --%>
-      <div class="stats stats-vertical sm:stats-horizontal shadow-md w-full mb-4 bg-base-100 border border-base-300">
-        <div class="stat">
-          <div class="stat-figure">
-            <div class={if(@import_results.failed == 0, do: "text-success", else: "text-warning")}>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-4">
+        <%!-- Total Processed --%>
+        <div class="card bg-base-100 border border-base-300 shadow-sm">
+          <div class="card-body p-3 sm:p-4 text-center">
+            <div class={[
+              "mx-auto w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center mb-1 sm:mb-2",
+              if(@import_results.failed == 0, do: "bg-success/10", else: "bg-warning/10")
+            ]}>
               <.icon
                 name={
                   if(@import_results.failed == 0,
@@ -1457,52 +1461,103 @@ defmodule MydiaWeb.ImportMediaLive.Components do
                     else: "hero-exclamation-triangle"
                   )
                 }
-                class="w-8 h-8"
+                class={
+                  "w-4 h-4 sm:w-5 sm:h-5 " <>
+                    if(@import_results.failed == 0, do: "text-success", else: "text-warning")
+                }
               />
             </div>
+            <div class="text-xl sm:text-2xl font-bold">
+              {@import_results.success + @import_results.failed + @import_results.skipped}
+            </div>
+            <div class="text-[10px] sm:text-xs text-base-content/60">Total Processed</div>
           </div>
-          <div class="stat-title text-xs">Total Processed</div>
-          <div class="stat-value text-lg">
-            {@import_results.success + @import_results.failed + @import_results.skipped}
+        </div>
+
+        <%!-- Imported --%>
+        <div class="card bg-base-100 border border-success/30 shadow-sm">
+          <div class="card-body p-3 sm:p-4 text-center">
+            <div class="mx-auto w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-success/10 flex items-center justify-center mb-1 sm:mb-2">
+              <.icon name="hero-check-circle" class="w-4 h-4 sm:w-5 sm:h-5 text-success" />
+            </div>
+            <div class="text-xl sm:text-2xl font-bold text-success">{@import_results.success}</div>
+            <div class="text-[10px] sm:text-xs text-base-content/60">Imported</div>
           </div>
-          <div class="stat-desc text-xs">Import complete</div>
         </div>
-        <div class="stat">
-          <div class="stat-title text-xs">Imported</div>
-          <div class="stat-value text-lg text-success">{@import_results.success}</div>
-          <div class="stat-desc text-xs">added to library</div>
-        </div>
-        <div class="stat">
-          <div class="stat-title text-xs">Failed</div>
-          <div class="stat-value text-lg text-error">{@import_results.failed}</div>
-          <div class="stat-desc text-xs">with errors</div>
-        </div>
-        <%= if @import_results.skipped > 0 do %>
-          <div class="stat">
-            <div class="stat-title text-xs">Skipped</div>
-            <div class="stat-value text-lg text-base-content/50">{@import_results.skipped}</div>
-            <div class="stat-desc text-xs">items skipped</div>
+
+        <%!-- Failed --%>
+        <div class={[
+          "card bg-base-100 shadow-sm",
+          if(@import_results.failed > 0, do: "border border-error/30", else: "border border-base-300")
+        ]}>
+          <div class="card-body p-3 sm:p-4 text-center">
+            <div class={[
+              "mx-auto w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center mb-1 sm:mb-2",
+              if(@import_results.failed > 0, do: "bg-error/10", else: "bg-base-200")
+            ]}>
+              <.icon
+                name="hero-x-circle"
+                class={
+                  "w-4 h-4 sm:w-5 sm:h-5 " <>
+                    if(@import_results.failed > 0, do: "text-error", else: "text-base-content/30")
+                }
+              />
+            </div>
+            <div class={[
+              "text-xl sm:text-2xl font-bold",
+              if(@import_results.failed > 0, do: "text-error", else: "text-base-content/30")
+            ]}>
+              {@import_results.failed}
+            </div>
+            <div class="text-[10px] sm:text-xs text-base-content/60">Failed</div>
           </div>
-        <% end %>
+        </div>
+
+        <%!-- Skipped --%>
+        <div class="card bg-base-100 border border-base-300 shadow-sm">
+          <div class="card-body p-3 sm:p-4 text-center">
+            <div class="mx-auto w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-base-200 flex items-center justify-center mb-1 sm:mb-2">
+              <.icon name="hero-minus-circle" class="w-4 h-4 sm:w-5 sm:h-5 text-base-content/50" />
+            </div>
+            <div class="text-xl sm:text-2xl font-bold text-base-content/50">
+              {@import_results.skipped}
+            </div>
+            <div class="text-[10px] sm:text-xs text-base-content/60">Skipped</div>
+          </div>
+        </div>
       </div>
 
-      <%!-- Action Buttons --%>
-      <div class="flex items-center justify-between mb-4">
-        <div class="flex gap-2">
+      <%!-- Action Buttons - Stack on mobile --%>
+      <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between mb-4">
+        <div class="flex flex-wrap gap-2">
           <%= if @import_results.failed > 0 do %>
-            <button type="button" class="btn btn-warning btn-sm" phx-click="retry_all_failed">
-              <.icon name="hero-arrow-path" class="w-4 h-4" /> Retry All Failed
+            <button
+              type="button"
+              class="btn btn-warning btn-sm flex-1 sm:flex-none"
+              phx-click="retry_all_failed"
+            >
+              <.icon name="hero-arrow-path" class="w-4 h-4" />
+              <span class="hidden xs:inline">Retry All Failed</span>
+              <span class="xs:hidden">Retry</span>
             </button>
           <% end %>
           <button type="button" class="btn btn-ghost btn-sm" phx-click="export_results">
-            <.icon name="hero-arrow-down-tray" class="w-4 h-4" /> Export Details
+            <.icon name="hero-arrow-down-tray" class="w-4 h-4" />
+            <span class="hidden sm:inline">Export Details</span>
+            <span class="sm:hidden">Export</span>
           </button>
         </div>
         <div class="flex gap-2">
-          <button type="button" class="btn btn-outline btn-sm" phx-click="start_over">
-            <.icon name="hero-arrow-path" class="w-4 h-4" /> Import More Files
+          <button
+            type="button"
+            class="btn btn-outline btn-sm flex-1 sm:flex-none"
+            phx-click="start_over"
+          >
+            <.icon name="hero-arrow-path" class="w-4 h-4" />
+            <span class="hidden sm:inline">Import More</span>
+            <span class="sm:hidden">More</span>
           </button>
-          <button type="button" class="btn btn-primary btn-sm" phx-click="cancel">
+          <button type="button" class="btn btn-primary btn-sm flex-1 sm:flex-none" phx-click="cancel">
             <.icon name="hero-check" class="w-4 h-4" /> Done
           </button>
         </div>
@@ -1510,28 +1565,32 @@ defmodule MydiaWeb.ImportMediaLive.Components do
 
       <%!-- Detailed Results --%>
       <%= if @import_results.success > 0 do %>
-        <div class="mb-6">
-          <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
-            <.icon name="hero-check-circle" class="w-6 h-6 text-success" />
+        <div class="mb-4 sm:mb-6">
+          <h3 class="text-base sm:text-lg font-semibold mb-2 sm:mb-3 flex items-center gap-2">
+            <.icon name="hero-check-circle" class="w-5 h-5 sm:w-6 sm:h-6 text-success" />
             Successfully Imported ({@import_results.success})
           </h3>
-          <div class="space-y-2">
+          <div class="space-y-1.5 sm:space-y-2">
             <%= for {result, _idx} <- Enum.with_index(@detailed_results) do %>
               <%= if result.status == :success do %>
                 <div class="card bg-base-100 shadow-sm border border-success/20">
-                  <div class="card-body p-4">
-                    <div class="flex items-start gap-3">
-                      <div class="text-success mt-1">
-                        <.icon name="hero-check-circle" class="w-5 h-5" />
+                  <div class="card-body p-2.5 sm:p-4">
+                    <div class="flex items-start gap-2 sm:gap-3">
+                      <div class="text-success mt-0.5 sm:mt-1 shrink-0">
+                        <.icon name="hero-check-circle" class="w-4 h-4 sm:w-5 sm:h-5" />
                       </div>
                       <div class="flex-1 min-w-0">
-                        <p class="font-semibold text-sm">{result.file_name}</p>
-                        <p class="text-xs text-base-content/60 truncate">{result.file_path}</p>
+                        <p class="font-semibold text-xs sm:text-sm truncate">{result.file_name}</p>
+                        <p class="text-[10px] sm:text-xs text-base-content/60 truncate hidden sm:block">
+                          {result.file_path}
+                        </p>
                         <%= if result.action_taken do %>
-                          <p class="text-xs text-success mt-1">{result.action_taken}</p>
+                          <p class="text-[10px] sm:text-xs text-success mt-0.5 sm:mt-1 line-clamp-1">
+                            {result.action_taken}
+                          </p>
                         <% end %>
                       </div>
-                      <div class="badge badge-success badge-sm">Success</div>
+                      <div class="badge badge-success badge-xs sm:badge-sm shrink-0">Success</div>
                     </div>
                   </div>
                 </div>
@@ -1542,40 +1601,52 @@ defmodule MydiaWeb.ImportMediaLive.Components do
       <% end %>
 
       <%= if @import_results.failed > 0 do %>
-        <div class="mb-6">
-          <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
-            <.icon name="hero-x-circle" class="w-6 h-6 text-error" />
+        <div class="mb-4 sm:mb-6">
+          <h3 class="text-base sm:text-lg font-semibold mb-2 sm:mb-3 flex items-center gap-2">
+            <.icon name="hero-x-circle" class="w-5 h-5 sm:w-6 sm:h-6 text-error" />
             Failed ({@import_results.failed})
           </h3>
-          <div class="space-y-2">
+          <div class="space-y-1.5 sm:space-y-2">
             <%= for {result, idx} <- Enum.with_index(@detailed_results) do %>
               <%= if result.status == :failed do %>
                 <div class="card bg-base-100 shadow-sm border border-error/20">
-                  <div class="card-body p-4">
-                    <div class="flex items-start gap-3">
-                      <div class="text-error mt-1">
-                        <.icon name="hero-x-circle" class="w-5 h-5" />
+                  <div class="card-body p-2.5 sm:p-4">
+                    <div class="flex items-start gap-2 sm:gap-3">
+                      <div class="text-error mt-0.5 sm:mt-1 shrink-0">
+                        <.icon name="hero-x-circle" class="w-4 h-4 sm:w-5 sm:h-5" />
                       </div>
                       <div class="flex-1 min-w-0">
-                        <p class="font-semibold text-sm">{result.file_name}</p>
-                        <p class="text-xs text-base-content/60 truncate">{result.file_path}</p>
+                        <div class="flex items-start justify-between gap-2">
+                          <p class="font-semibold text-xs sm:text-sm truncate flex-1">
+                            {result.file_name}
+                          </p>
+                          <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                            <div class="badge badge-error badge-xs sm:badge-sm">Failed</div>
+                            <button
+                              type="button"
+                              class="btn btn-xs btn-warning"
+                              phx-click="retry_failed_item"
+                              phx-value-index={idx}
+                            >
+                              <.icon name="hero-arrow-path" class="w-3 h-3" />
+                              <span class="hidden sm:inline">Retry</span>
+                            </button>
+                          </div>
+                        </div>
+                        <p class="text-[10px] sm:text-xs text-base-content/60 truncate hidden sm:block">
+                          {result.file_path}
+                        </p>
                         <%= if result.error_message do %>
-                          <div class="alert alert-error mt-2 py-2 px-3">
-                            <.icon name="hero-exclamation-triangle" class="w-4 h-4" />
-                            <span class="text-xs">{result.error_message}</span>
+                          <div class="alert alert-error mt-1.5 sm:mt-2 py-1.5 sm:py-2 px-2 sm:px-3">
+                            <.icon
+                              name="hero-exclamation-triangle"
+                              class="w-3 h-3 sm:w-4 sm:h-4 shrink-0"
+                            />
+                            <span class="text-[10px] sm:text-xs line-clamp-2">
+                              {result.error_message}
+                            </span>
                           </div>
                         <% end %>
-                      </div>
-                      <div class="flex flex-col gap-2">
-                        <div class="badge badge-error badge-sm">Failed</div>
-                        <button
-                          type="button"
-                          class="btn btn-xs btn-warning"
-                          phx-click="retry_failed_item"
-                          phx-value-index={idx}
-                        >
-                          <.icon name="hero-arrow-path" class="w-3 h-3" /> Retry
-                        </button>
                       </div>
                     </div>
                   </div>
@@ -1587,30 +1658,32 @@ defmodule MydiaWeb.ImportMediaLive.Components do
       <% end %>
 
       <%= if @import_results.skipped > 0 do %>
-        <div class="mb-6">
-          <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
-            <.icon name="hero-arrow-path" class="w-6 h-6 text-base-content/50" />
+        <div class="mb-4 sm:mb-6">
+          <h3 class="text-base sm:text-lg font-semibold mb-2 sm:mb-3 flex items-center gap-2">
+            <.icon name="hero-minus-circle" class="w-5 h-5 sm:w-6 sm:h-6 text-base-content/50" />
             Skipped ({@import_results.skipped})
           </h3>
-          <div class="space-y-2">
+          <div class="space-y-1.5 sm:space-y-2">
             <%= for {result, _idx} <- Enum.with_index(@detailed_results) do %>
               <%= if result.status == :skipped do %>
                 <div class="card bg-base-100 shadow-sm border border-base-content/10">
-                  <div class="card-body p-4">
-                    <div class="flex items-start gap-3">
-                      <div class="text-base-content/50 mt-1">
-                        <.icon name="hero-arrow-path" class="w-5 h-5" />
+                  <div class="card-body p-2.5 sm:p-4">
+                    <div class="flex items-start gap-2 sm:gap-3">
+                      <div class="text-base-content/50 mt-0.5 sm:mt-1 shrink-0">
+                        <.icon name="hero-minus-circle" class="w-4 h-4 sm:w-5 sm:h-5" />
                       </div>
                       <div class="flex-1 min-w-0">
-                        <p class="font-semibold text-sm">{result.file_name}</p>
-                        <p class="text-xs text-base-content/60 truncate">{result.file_path}</p>
+                        <p class="font-semibold text-xs sm:text-sm truncate">{result.file_name}</p>
+                        <p class="text-[10px] sm:text-xs text-base-content/60 truncate hidden sm:block">
+                          {result.file_path}
+                        </p>
                         <%= if result.error_message do %>
-                          <p class="text-xs text-base-content/50 mt-1">
+                          <p class="text-[10px] sm:text-xs text-base-content/50 mt-0.5 sm:mt-1 line-clamp-1">
                             {result.error_message}
                           </p>
                         <% end %>
                       </div>
-                      <div class="badge badge-ghost badge-sm">Skipped</div>
+                      <div class="badge badge-ghost badge-xs sm:badge-sm shrink-0">Skipped</div>
                     </div>
                   </div>
                 </div>

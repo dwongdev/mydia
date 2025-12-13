@@ -894,17 +894,40 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     selected_indices = MapSet.to_list(socket.assigns.selected_files)
     selected_files = Enum.map(selected_indices, &Enum.at(socket.assigns.matched_files, &1))
 
-    # Import each file and collect detailed results
-    detailed_results =
-      Enum.with_index(selected_files)
-      |> Enum.map(fn {matched_file, idx} ->
-        # Update progress with current file
-        file_name = Path.basename(matched_file.file.path)
-        send(self(), {:update_import_progress, idx + 1, file_name})
+    # Spawn async task for importing - keeps LiveView responsive to updates
+    liveview_pid = self()
+    metadata_config = socket.assigns.metadata_config
 
-        import_file_with_details(matched_file, socket.assigns.metadata_config)
-      end)
+    Task.Supervisor.start_child(Mydia.TaskSupervisor, fn ->
+      # Import each file and send progress updates back to the LiveView
+      detailed_results =
+        selected_files
+        |> Enum.with_index()
+        |> Enum.map(fn {matched_file, idx} ->
+          # Send progress update before importing each file
+          file_name = Path.basename(matched_file.file.path)
+          send(liveview_pid, {:import_progress_update, idx + 1, file_name})
 
+          import_file_with_details(matched_file, metadata_config)
+        end)
+
+      # Send completion message with all results
+      send(liveview_pid, {:import_complete, detailed_results})
+    end)
+
+    {:noreply, socket}
+  end
+
+  def handle_info({:import_progress_update, current, current_file}, socket) do
+    {:noreply,
+     assign(socket, :import_progress, %{
+       socket.assigns.import_progress
+       | current: current,
+         current_file: current_file
+     })}
+  end
+
+  def handle_info({:import_complete, detailed_results}, socket) do
     success_count = Enum.count(detailed_results, &(&1.status == :success))
     failed_count = Enum.count(detailed_results, &(&1.status == :failed))
     skipped_count = Enum.count(detailed_results, &(&1.status == :skipped))
@@ -927,15 +950,6 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     end
 
     {:noreply, socket}
-  end
-
-  def handle_info({:update_import_progress, current, current_file}, socket) do
-    {:noreply,
-     assign(socket, :import_progress, %{
-       socket.assigns.import_progress
-       | current: current,
-         current_file: current_file
-     })}
   end
 
   ## Specialized Library Handling
@@ -1329,14 +1343,14 @@ defmodule MydiaWeb.ImportMediaLive.Index do
           }
 
         {:error, changeset} ->
-          error_msg = format_changeset_errors(changeset)
+          error_msg = format_changeset_errors_friendly(changeset)
 
           %{
             file_path: file.path,
             file_name: Path.basename(file.path),
             status: :failed,
             media_item_title: nil,
-            error_message: "Database error: #{error_msg}",
+            error_message: error_msg,
             action_taken: nil,
             metadata: %{size: file.size}
           }
@@ -1419,23 +1433,14 @@ defmodule MydiaWeb.ImportMediaLive.Index do
         end
 
       {:error, changeset} ->
-        error_msg =
-          case changeset do
-            %Ecto.Changeset{errors: errors} ->
-              errors
-              |> Enum.map(fn {field, {msg, _}} -> "#{field} #{msg}" end)
-              |> Enum.join(", ")
-
-            other ->
-              format_error(other)
-          end
+        error_msg = format_changeset_errors_friendly(changeset)
 
         %{
           file_path: file.path,
           file_name: Path.basename(file.path),
           status: :failed,
           media_item_title: match_result.title,
-          error_message: "Database error: #{error_msg}",
+          error_message: error_msg,
           action_taken: nil,
           metadata: %{size: file.size}
         }
@@ -1475,10 +1480,47 @@ defmodule MydiaWeb.ImportMediaLive.Index do
   defp library_type_label(:adult), do: "Adult"
   defp library_type_label(type), do: to_string(type)
 
-  defp format_changeset_errors(%Ecto.Changeset{errors: errors}) do
-    errors
-    |> Enum.map(fn {field, {msg, _}} -> "#{field} #{msg}" end)
-    |> Enum.join(", ")
+  # Formats changeset errors with user-friendly messages for known issues
+  defp format_changeset_errors_friendly(%Ecto.Changeset{} = changeset) do
+    # Check for specific known error patterns
+    cond do
+      has_size_error?(changeset) ->
+        "File appears to be empty or incomplete (0 bytes). This usually means the download was interrupted or the file is a placeholder."
+
+      has_library_type_mismatch?(changeset) ->
+        "File type doesn't match the library type"
+
+      true ->
+        "Database error: #{format_changeset_errors(changeset)}"
+    end
+  end
+
+  defp format_changeset_errors_friendly(other), do: format_error(other)
+
+  defp has_size_error?(changeset) do
+    Enum.any?(changeset.errors, fn
+      {:size, {_msg, _opts}} -> true
+      _ -> false
+    end)
+  end
+
+  defp has_library_type_mismatch?(changeset) do
+    Enum.any?(changeset.errors, fn
+      {field, {msg, _opts}} when field in [:media_item_id, :episode_id] ->
+        String.contains?(msg, "library type")
+
+      _ ->
+        false
+    end)
+  end
+
+  defp format_changeset_errors(%Ecto.Changeset{} = changeset) do
+    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+      Enum.reduce(opts, msg, fn {key, value}, acc_msg ->
+        String.replace(acc_msg, "%{#{key}}", to_string(value))
+      end)
+    end)
+    |> Enum.map_join(", ", fn {field, errors} -> "#{field}: #{Enum.join(errors, ", ")}" end)
   end
 
   defp format_changeset_errors(other), do: format_error(other)

@@ -139,6 +139,9 @@ defmodule MydiaWeb.Features.ImportTest do
       session
       |> click(Query.css("button[phx-click='edit_file'][phx-value-index='0']"))
 
+      # Wait for LiveView to process the event and update the DOM
+      :timer.sleep(500)
+
       # Should see the edit form
       assert Wallaby.Browser.has_text?(session, "Find Metadata Match")
 
@@ -297,6 +300,9 @@ defmodule MydiaWeb.Features.ImportTest do
       session
       |> click(Query.css("button[phx-click='clear_match'][phx-value-index='0']"))
 
+      # Wait for LiveView to process the event and update the DOM
+      :timer.sleep(500)
+
       # Now file should show as unmatched
       assert Wallaby.Browser.has_text?(session, "No Match")
       assert Wallaby.Browser.has_text?(session, "SomeMovie.2024.mkv")
@@ -387,16 +393,16 @@ defmodule MydiaWeb.Features.ImportTest do
       # Should see review step
       assert Wallaby.Browser.has_text?(session, "Review")
 
-      # Click the import button (text is "Import (N)" where N is the count)
+      # Click the import button in the main toolbar (not the fixed/sticky one)
       session
-      |> click(Query.button("Import (2)"))
+      |> click(Query.css("#selection-toolbar button[phx-click='start_import']"))
 
       # Should transition to importing step or complete step
       # (The import happens quickly since we're not actually writing files)
       :timer.sleep(1000)
 
       # Should reach complete step (import fails since files don't exist, but UI should handle gracefully)
-      assert Wallaby.Browser.has_text?(session, "Import Complete") or
+      assert Wallaby.Browser.has_text?(session, "Total Processed") or
                Wallaby.Browser.has_text?(session, "Importing") or
                Wallaby.Browser.has_text?(session, "Failed")
     end
@@ -605,6 +611,9 @@ defmodule MydiaWeb.Features.ImportTest do
       session
       |> click(Query.css("button[phx-click='edit_file'][phx-value-index='0']"))
 
+      # Wait for LiveView to process the event and update the DOM
+      :timer.sleep(500)
+
       # Should see the edit form with season/episode fields
       assert Wallaby.Browser.has_text?(session, "Edit Episode Match")
       assert Wallaby.Browser.has_css?(session, "input[name='edit_form[season]']")
@@ -708,9 +717,9 @@ defmodule MydiaWeb.Features.ImportTest do
       assert Wallaby.Browser.has_text?(session, "Review Matches")
       assert Wallaby.Browser.has_text?(session, "Test Manual Match Movie")
 
-      # Click import to start the import process
+      # Click import to start the import process (use specific toolbar selector)
       session
-      |> click(Query.button("Import (1)"))
+      |> click(Query.css("#selection-toolbar button[phx-click='start_import']"))
 
       # Wait for import to complete
       :timer.sleep(2000)

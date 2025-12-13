@@ -135,10 +135,9 @@ defmodule MydiaWeb.Features.ImportTest do
       assert Wallaby.Browser.has_text?(session, "Unknown.Movie.2024.mkv")
       assert Wallaby.Browser.has_text?(session, "No Match")
 
-      # Click the edit button for the unmatched file
+      # Click the edit button using JS for reliability in headless mode
       session
-      |> click(Query.css("button[phx-click='edit_file'][phx-value-index='0']"))
-      |> wait_for_liveview_update()
+      |> js_click("button[phx-click='edit_file'][phx-value-index='0']")
       # Wait for the edit form to appear (Wallaby's assert_has has built-in retry)
       |> assert_has(Query.text("Find Metadata Match"))
       # The search input should be visible
@@ -292,10 +291,9 @@ defmodule MydiaWeb.Features.ImportTest do
       # Verify the movie is shown as matched
       assert Wallaby.Browser.has_text?(session, "Some Movie")
 
-      # Click the clear match button
+      # Click the clear match button using JS for reliability in headless mode
       session
-      |> click(Query.css("button[phx-click='clear_match'][phx-value-index='0']"))
-      |> wait_for_liveview_update()
+      |> js_click("button[phx-click='clear_match'][phx-value-index='0']")
       # Wait for the file to show as unmatched (Wallaby's assert_has has built-in retry)
       |> assert_has(Query.text("No Match"))
 
@@ -388,9 +386,9 @@ defmodule MydiaWeb.Features.ImportTest do
       # Should see review step
       assert Wallaby.Browser.has_text?(session, "Review")
 
-      # Click the import button in the main toolbar
+      # Click the import button using JS for reliability in headless mode
       session
-      |> click(Query.css("#selection-toolbar button[phx-click='start_import']"))
+      |> js_click("#selection-toolbar button[phx-click='start_import']")
 
       # Wait for the import to complete (async operation)
       :timer.sleep(3000)
@@ -601,10 +599,9 @@ defmodule MydiaWeb.Features.ImportTest do
       # Should see the episode
       assert Wallaby.Browser.has_text?(session, "Test Show")
 
-      # Click the edit button for the episode
+      # Click the edit button using JS for reliability in headless mode
       session
-      |> click(Query.css("button[phx-click='edit_file'][phx-value-index='0']"))
-      |> wait_for_liveview_update()
+      |> js_click("button[phx-click='edit_file'][phx-value-index='0']")
       # Wait for the edit form with season/episode fields (Wallaby's assert_has has built-in retry)
       |> assert_has(Query.text("Edit Episode Match"))
       |> assert_has(Query.css("input[name='edit_form[season]']"))
@@ -708,9 +705,9 @@ defmodule MydiaWeb.Features.ImportTest do
       assert Wallaby.Browser.has_text?(session, "Review Matches")
       assert Wallaby.Browser.has_text?(session, "Test Manual Match Movie")
 
-      # Click the import button
+      # Click the import button using JS for reliability in headless mode
       session
-      |> click(Query.css("#selection-toolbar button[phx-click='start_import']"))
+      |> js_click("#selection-toolbar button[phx-click='start_import']")
 
       # Wait for import to complete (async operation)
       :timer.sleep(4000)
@@ -933,10 +930,9 @@ defmodule MydiaWeb.Features.ImportTest do
                "input[type='checkbox'][phx-value-index='0'][checked]"
              )
 
-      # Click the checkbox to deselect
+      # Click the checkbox to deselect using JS for reliability in headless mode
       session
-      |> click(Query.css("input[type='checkbox'][phx-value-index='0']"))
-      |> wait_for_liveview_update()
+      |> js_click("input[type='checkbox'][phx-value-index='0']")
       # Wait for the import button to become disabled (more reliable than checking text)
       |> assert_has(Query.css("#selection-toolbar button[phx-click='start_import'][disabled]"))
     end

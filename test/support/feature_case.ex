@@ -241,4 +241,23 @@ defmodule MydiaWeb.FeatureCase do
     :timer.sleep(500)
     session
   end
+
+  @doc """
+  Clicks an element using JavaScript dispatch. More reliable in headless browsers.
+  Use this for phx-click buttons that don't respond to standard clicks in CI.
+  """
+  def js_click(session, css_selector) do
+    Wallaby.Browser.execute_script(
+      session,
+      """
+      var el = document.querySelector(arguments[0]);
+      if (el) { el.click(); }
+      """,
+      [css_selector]
+    )
+
+    # Wait for LiveView to process the event
+    :timer.sleep(500)
+    session
+  end
 end

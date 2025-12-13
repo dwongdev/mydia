@@ -65,6 +65,18 @@ defmodule Mydia.Metadata.Provider.HTTP do
   @default_connect_timeout 5_000
 
   @doc """
+  Builds the User-Agent string with version and architecture info.
+
+  Returns a string like "Mydia/0.7.4 (x86_64-linux-gnu)"
+  """
+  @spec user_agent() :: String.t()
+  def user_agent do
+    version = Application.spec(:mydia, :vsn) |> to_string()
+    arch = :erlang.system_info(:system_architecture) |> to_string()
+    "Mydia/#{version} (#{arch})"
+  end
+
+  @doc """
   Creates a new Req request struct configured for the metadata provider.
 
   ## Examples
@@ -102,7 +114,7 @@ defmodule Mydia.Metadata.Provider.HTTP do
       Req.merge(req,
         headers: [
           accept: "application/json",
-          user_agent: "Mydia/1.0"
+          user_agent: user_agent()
         ]
       )
 

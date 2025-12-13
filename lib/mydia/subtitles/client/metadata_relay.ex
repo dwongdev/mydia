@@ -162,7 +162,11 @@ defmodule Mydia.Subtitles.Client.MetadataRelay do
   end
 
   defp perform_post_request(url, body, timeout, retry_count \\ 0) do
-    headers = [{"content-type", "application/json"}]
+    headers = [
+      {"content-type", "application/json"},
+      {"user-agent", Mydia.Metadata.Provider.HTTP.user_agent()}
+    ]
+
     json_body = Jason.encode!(body)
 
     case Req.post(url, headers: headers, body: json_body, receive_timeout: timeout) do
@@ -211,7 +215,9 @@ defmodule Mydia.Subtitles.Client.MetadataRelay do
   end
 
   defp perform_get_request(url, timeout, retry_count \\ 0) do
-    case Req.get(url, receive_timeout: timeout) do
+    headers = [{"user-agent", Mydia.Metadata.Provider.HTTP.user_agent()}]
+
+    case Req.get(url, headers: headers, receive_timeout: timeout) do
       {:ok, %{status: 200, body: response}} ->
         {:ok, response}
 

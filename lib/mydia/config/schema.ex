@@ -49,6 +49,8 @@ defmodule Mydia.Config.Schema do
       field :scan_interval_hours, :integer, default: 1
       field :auto_search_on_add, :boolean, default: true
       field :monitor_by_default, :boolean, default: true
+      field :season_refresh_threshold_hours, :integer, default: 24
+      field :completed_show_refresh_threshold_hours, :integer, default: 168
     end
 
     embeds_one :downloads, Downloads, on_replace: :update, primary_key: false do
@@ -214,10 +216,14 @@ defmodule Mydia.Config.Schema do
       :tv_auto_organize,
       :scan_interval_hours,
       :auto_search_on_add,
-      :monitor_by_default
+      :monitor_by_default,
+      :season_refresh_threshold_hours,
+      :completed_show_refresh_threshold_hours
     ])
     |> validate_required([:movies_path, :tv_path])
     |> validate_number(:scan_interval_hours, greater_than: 0)
+    |> validate_number(:season_refresh_threshold_hours, greater_than: 0)
+    |> validate_number(:completed_show_refresh_threshold_hours, greater_than: 0)
   end
 
   defp downloads_changeset(schema, attrs) do

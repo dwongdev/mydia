@@ -26,6 +26,7 @@ defmodule Mydia.Media.MediaItem do
 
     field :category, :string
     field :category_override, :boolean, default: false
+    field :seasons_refreshed_at, :utc_datetime
 
     belongs_to :quality_profile, Mydia.Settings.QualityProfile
     has_many :episodes, Mydia.Media.Episode

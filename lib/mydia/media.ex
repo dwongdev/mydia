@@ -844,67 +844,88 @@ defmodule Mydia.Media do
     if is_nil(tmdb_id) or tmdb_id == "" do
       {:error, :missing_tmdb_id}
     else
-      # Fetch fresh metadata to get seasons info
-      config = Metadata.default_relay_config()
+      # Check if we should skip season refresh based on threshold
+      if should_skip_season_refresh?(media_item, force) do
+        Logger.info(
+          "Skipping season refresh for #{media_item.title} - recently refreshed at #{media_item.seasons_refreshed_at}"
+        )
 
-      case Metadata.fetch_by_id(config, to_string(tmdb_id), media_type: :tv_show) do
-        {:ok, metadata} ->
-          # Delete existing episodes if force option is enabled
-          if force do
-            Episode
-            |> where([e], e.media_item_id == ^media_item.id)
-            |> Repo.delete_all()
-          end
+        # Count existing episodes instead
+        episode_count =
+          Episode
+          |> where([e], e.media_item_id == ^media_item.id)
+          |> Repo.aggregate(:count)
 
-          # Get seasons from metadata struct
-          seasons = metadata.seasons || []
+        {:ok, episode_count}
+      else
+        # Fetch fresh metadata to get seasons info
+        config = Metadata.default_relay_config()
 
-          Logger.info(
-            "Fetching episodes for TV show: #{media_item.title}, found #{length(seasons)} seasons in metadata"
-          )
-
-          # Filter seasons based on monitoring preference
-          seasons_to_fetch =
-            case season_monitoring do
-              "all" -> seasons
-              "first" -> Enum.take(seasons, 1)
-              "latest" -> Enum.take(seasons, -1)
-              "none" -> []
-              _ -> seasons
+        case Metadata.fetch_by_id(config, to_string(tmdb_id), media_type: :tv_show) do
+          {:ok, metadata} ->
+            # Delete existing episodes if force option is enabled
+            if force do
+              Episode
+              |> where([e], e.media_item_id == ^media_item.id)
+              |> Repo.delete_all()
             end
 
-          # Fetch and create episodes for each season
-          episode_count =
-            Enum.reduce(seasons_to_fetch, 0, fn season, count ->
-              # Skip season 0 (specials) unless explicitly monitoring all
-              if season.season_number == 0 and season_monitoring != "all" do
-                count
-              else
-                Logger.info("Processing episodes for season #{season.season_number}")
+            # Get seasons from metadata struct
+            seasons = metadata.seasons || []
 
-                case create_episodes_for_season(media_item, season, config, force) do
-                  {:ok, created} ->
-                    Logger.info(
-                      "Processed #{created} episodes for season #{season.season_number}"
-                    )
+            Logger.info(
+              "Fetching episodes for TV show: #{media_item.title}, found #{length(seasons)} seasons in metadata"
+            )
 
-                    count + created
-
-                  {:error, reason} ->
-                    Logger.error(
-                      "Failed to create episodes for season #{season.season_number}: #{inspect(reason)}"
-                    )
-
-                    count
-                end
+            # Filter seasons based on monitoring preference
+            seasons_to_fetch =
+              case season_monitoring do
+                "all" -> seasons
+                "first" -> Enum.take(seasons, 1)
+                "latest" -> Enum.take(seasons, -1)
+                "none" -> []
+                _ -> seasons
               end
-            end)
 
-          Logger.info("Total episodes processed: #{episode_count}")
-          {:ok, episode_count}
+            # Fetch and create episodes for each season
+            episode_count =
+              Enum.reduce(seasons_to_fetch, 0, fn season, count ->
+                # Skip season 0 (specials) unless explicitly monitoring all
+                if season.season_number == 0 and season_monitoring != "all" do
+                  count
+                else
+                  Logger.info("Processing episodes for season #{season.season_number}")
 
-        {:error, reason} ->
-          {:error, reason}
+                  case create_episodes_for_season(media_item, season, config, force) do
+                    {:ok, created} ->
+                      Logger.info(
+                        "Processed #{created} episodes for season #{season.season_number}"
+                      )
+
+                      count + created
+
+                    {:error, reason} ->
+                      Logger.error(
+                        "Failed to create episodes for season #{season.season_number}: #{inspect(reason)}"
+                      )
+
+                      count
+                  end
+                end
+              end)
+
+            Logger.info("Total episodes processed: #{episode_count}")
+
+            # Update seasons_refreshed_at timestamp
+            update_media_item(media_item, %{seasons_refreshed_at: DateTime.utc_now()},
+              reason: "Season metadata refreshed"
+            )
+
+            {:ok, episode_count}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
       end
     end
   end
@@ -1607,4 +1628,38 @@ defmodule Mydia.Media do
   end
 
   defp year_matches?(_result_year, _media_year), do: false
+
+  # Determines if we should skip refreshing season data based on the last refresh time
+  defp should_skip_season_refresh?(_media_item, true), do: false
+
+  defp should_skip_season_refresh?(%MediaItem{seasons_refreshed_at: nil}, _force), do: false
+
+  defp should_skip_season_refresh?(%MediaItem{} = media_item, _force) do
+    config = Mydia.Config.get()
+
+    # Determine if show is completed/ended
+    is_completed =
+      case media_item.metadata do
+        %{"status" => status} when is_binary(status) ->
+          String.downcase(status) in ["ended", "canceled", "cancelled"]
+
+        _ ->
+          false
+      end
+
+    # Get appropriate threshold based on show status
+    threshold_hours =
+      if is_completed do
+        config.media.completed_show_refresh_threshold_hours
+      else
+        config.media.season_refresh_threshold_hours
+      end
+
+    # Check if enough time has passed since last refresh
+    now = DateTime.utc_now()
+    threshold_seconds = threshold_hours * 3600
+    diff = DateTime.diff(now, media_item.seasons_refreshed_at, :second)
+
+    diff < threshold_seconds
+  end
 end

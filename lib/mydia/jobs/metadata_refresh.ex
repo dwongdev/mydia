@@ -7,6 +7,9 @@ defmodule Mydia.Jobs.MetadataRefresh do
   - Updates media items with fresh data
   - For TV shows, updates episode information
   - Can be triggered manually or scheduled
+
+  For scheduled "refresh all" runs, a random delay (0-30 minutes) is applied
+  to spread load across self-hosted instances hitting the metadata relay.
   """
 
   use Oban.Worker,
@@ -15,6 +18,9 @@ defmodule Mydia.Jobs.MetadataRefresh do
 
   require Logger
   alias Mydia.{Media, Metadata}
+
+  # Random delay range for scheduled refresh_all (0-30 minutes in ms)
+  @max_startup_delay_ms 30 * 60 * 1000
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"media_item_id" => media_item_id} = args}) do
@@ -61,7 +67,17 @@ defmodule Mydia.Jobs.MetadataRefresh do
   end
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"refresh_all" => true}}) do
+  def perform(%Oban.Job{args: %{"refresh_all" => true} = args}) do
+    # Add random delay for scheduled runs to spread load across instances
+    # Skip delay for manual triggers (skip_delay: true)
+    unless Map.get(args, "skip_delay", false) do
+      delay_ms = :rand.uniform(@max_startup_delay_ms)
+      delay_minutes = Float.round(delay_ms / 60_000, 1)
+
+      Logger.info("Metadata refresh scheduled, waiting #{delay_minutes} minutes before starting")
+      Process.sleep(delay_ms)
+    end
+
     start_time = System.monotonic_time(:millisecond)
     Logger.info("Starting metadata refresh for all media items")
 
@@ -79,10 +95,10 @@ defmodule Mydia.Jobs.MetadataRefresh do
     end
   end
 
-  # Fallback for manual trigger from UI (empty args) - treat as refresh all
+  # Fallback for manual trigger from UI (empty args) - skip delay for immediate execution
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) when args == %{} do
-    perform(%Oban.Job{args: %{"refresh_all" => true}})
+    perform(%Oban.Job{args: %{"refresh_all" => true, "skip_delay" => true}})
   end
 
   ## Private Functions

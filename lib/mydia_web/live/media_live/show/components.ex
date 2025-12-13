@@ -83,16 +83,16 @@ defmodule MydiaWeb.MediaLive.Show.Components do
           <.icon name="hero-magnifying-glass" class="w-5 h-5" /> Manual Search
         </button>
 
-        <%!-- Secondary actions: 2-column on mobile, stacked on desktop --%>
-        <div class="grid grid-cols-2 md:grid-cols-1 gap-2">
+        <%!-- Secondary actions: stacked on mobile --%>
+        <div class="flex flex-col gap-2">
           <%= if @media_item.type == "tv_show" do %>
             <%!-- Monitoring Preset Dropdown (TV shows only) --%>
-            <div class="dropdown dropdown-end w-full col-span-2 md:col-span-1">
+            <div class="dropdown dropdown-end w-full">
               <div
                 tabindex="0"
                 role="button"
                 class={[
-                  "btn btn-sm md:btn-md w-full",
+                  "btn w-full",
                   @media_item.monitored && "btn-success",
                   !@media_item.monitored && "btn-ghost"
                 ]}
@@ -103,14 +103,11 @@ defmodule MydiaWeb.MediaLive.Show.Components do
                 <% else %>
                   <.monitoring_icon
                     preset={@media_item.monitoring_preset}
-                    class="w-4 h-4 md:w-5 md:h-5"
+                    class="w-5 h-5"
                   />
                 <% end %>
-                <span class="hidden sm:inline">
+                <span>
                   {monitoring_preset_label(@media_item.monitoring_preset)}
-                </span>
-                <span class="sm:hidden">
-                  {short_monitoring_label(@media_item.monitoring_preset)}
                 </span>
                 <.icon name="hero-chevron-down" class="w-3 h-3 opacity-70" />
               </div>
@@ -140,16 +137,16 @@ defmodule MydiaWeb.MediaLive.Show.Components do
               type="button"
               phx-click="toggle_monitored"
               class={[
-                "btn btn-sm md:btn-md",
+                "btn w-full",
                 @media_item.monitored && "btn-success",
                 !@media_item.monitored && "btn-ghost"
               ]}
             >
               <.icon
                 name={if @media_item.monitored, do: "hero-bookmark-solid", else: "hero-bookmark"}
-                class="w-4 h-4 md:w-5 md:h-5"
+                class="w-5 h-5"
               />
-              <span class="hidden sm:inline">
+              <span>
                 {if @media_item.monitored, do: "Monitored", else: "Not Monitored"}
               </span>
             </button>
@@ -158,22 +155,22 @@ defmodule MydiaWeb.MediaLive.Show.Components do
           <button
             type="button"
             phx-click="refresh_metadata"
-            class="btn btn-ghost btn-sm md:btn-md"
+            class="btn btn-ghost w-full"
             title="Refresh metadata and episodes from metadata provider"
           >
-            <.icon name="hero-arrow-path" class="w-4 h-4 md:w-5 md:h-5" />
-            <span class="hidden sm:inline">Refresh</span>
+            <.icon name="hero-arrow-path" class="w-5 h-5" />
+            <span>Refresh</span>
           </button>
 
           <%= if @media_item.type == "tv_show" && has_media_files?(@media_item) do %>
             <button
               type="button"
               phx-click="rescan_series"
-              class="btn btn-ghost btn-sm md:btn-md"
+              class="btn btn-ghost w-full"
               title="Re-scan series: discover new files and refresh metadata for all episodes"
             >
-              <.icon name="hero-folder-arrow-down" class="w-4 h-4 md:w-5 md:h-5" />
-              <span class="hidden sm:inline">Re-scan</span>
+              <.icon name="hero-folder-arrow-down" class="w-5 h-5" />
+              <span>Re-scan</span>
             </button>
           <% end %>
 
@@ -181,11 +178,11 @@ defmodule MydiaWeb.MediaLive.Show.Components do
             <button
               type="button"
               phx-click="rescan_movie"
-              class="btn btn-ghost btn-sm md:btn-md"
+              class="btn btn-ghost w-full"
               title="Re-scan movie: discover new files and refresh metadata"
             >
-              <.icon name="hero-folder-arrow-down" class="w-4 h-4 md:w-5 md:h-5" />
-              <span class="hidden sm:inline">Re-scan</span>
+              <.icon name="hero-folder-arrow-down" class="w-5 h-5" />
+              <span>Re-scan</span>
             </button>
           <% end %>
 
@@ -193,11 +190,11 @@ defmodule MydiaWeb.MediaLive.Show.Components do
             <button
               type="button"
               phx-click="show_rename_modal"
-              class="btn btn-ghost btn-sm md:btn-md"
+              class="btn btn-ghost w-full"
               title="Rename files to follow naming convention"
             >
-              <.icon name="hero-pencil-square" class="w-4 h-4 md:w-5 md:h-5" />
-              <span class="hidden sm:inline">Rename</span>
+              <.icon name="hero-pencil-square" class="w-5 h-5" />
+              <span>Rename</span>
             </button>
           <% end %>
         </div>
@@ -324,7 +321,7 @@ defmodule MydiaWeb.MediaLive.Show.Components do
 
   @doc """
   Compact secondary info section with overview, trailer, and cast.
-  Uses proper lifted tabs for TV shows, full cards for movies.
+  Uses the same compact inline layout for both TV shows and movies.
   """
   attr :media_item, :map, required: true
 
@@ -342,160 +339,81 @@ defmodule MydiaWeb.MediaLive.Show.Components do
       |> assign(:has_cast_crew, has_cast_crew)
 
     ~H"""
-    <%= if @media_item.type == "tv_show" do %>
-      <%!-- Compact inline layout for TV shows --%>
-      <div class="flex flex-wrap items-start gap-4 mb-4 text-sm">
-        <%!-- Overview text --%>
-        <p class="flex-1 min-w-[200px] text-base-content/70 leading-relaxed line-clamp-2">
-          {get_overview(@media_item)}
-        </p>
+    <%!-- Compact inline layout for both TV shows and movies --%>
+    <div class="flex flex-wrap items-start gap-4 mb-4 text-sm">
+      <%!-- Overview text --%>
+      <p class="flex-1 min-w-[200px] text-base-content/70 leading-relaxed line-clamp-2">
+        {get_overview(@media_item)}
+      </p>
 
-        <%!-- Action buttons for trailer and cast --%>
-        <div class="flex items-center gap-2 flex-shrink-0">
-          <%= if @trailer_url do %>
-            <button
-              type="button"
-              phx-click="show_trailer_modal"
-              class="btn btn-sm btn-ghost gap-1"
+      <%!-- Action buttons for trailer and cast --%>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <%= if @trailer_url do %>
+          <button
+            type="button"
+            phx-click="show_trailer_modal"
+            class="btn btn-sm btn-ghost gap-1"
+          >
+            <.icon name="hero-play-circle" class="w-4 h-4 text-primary" />
+            <span>Trailer</span>
+          </button>
+        <% end %>
+
+        <%= if @has_cast_crew do %>
+          <div class="dropdown dropdown-end">
+            <div tabindex="0" role="button" class="btn btn-sm btn-ghost gap-1">
+              <.icon name="hero-users" class="w-4 h-4 text-primary" />
+              <span>Cast</span>
+              <.icon name="hero-chevron-down" class="w-3 h-3 opacity-60" />
+            </div>
+            <div
+              tabindex="0"
+              class="dropdown-content z-50 card card-compact w-72 p-2 shadow-xl bg-base-100 border border-base-300"
             >
-              <.icon name="hero-play-circle" class="w-4 h-4 text-primary" />
-              <span>Trailer</span>
-            </button>
-          <% end %>
-
-          <%= if @has_cast_crew do %>
-            <div class="dropdown dropdown-end">
-              <div tabindex="0" role="button" class="btn btn-sm btn-ghost gap-1">
-                <.icon name="hero-users" class="w-4 h-4 text-primary" />
-                <span>Cast</span>
-                <.icon name="hero-chevron-down" class="w-3 h-3 opacity-60" />
-              </div>
-              <div
-                tabindex="0"
-                class="dropdown-content z-[1] card card-compact w-72 p-2 shadow-xl bg-base-100 border border-base-300"
-              >
-                <div class="card-body p-3">
-                  <%= if @crew != [] do %>
-                    <div class="mb-3">
-                      <div class="text-xs font-semibold text-base-content/50 uppercase mb-2">
-                        Crew
-                      </div>
-                      <div class="space-y-1">
-                        <div :for={member <- Enum.take(@crew, 3)} class="text-sm">
-                          <span class="font-medium">{member.name}</span>
-                          <span class="text-base-content/60">— {member.job}</span>
-                        </div>
-                      </div>
-                    </div>
-                  <% end %>
-                  <%= if @cast != [] do %>
+              <div class="card-body p-3">
+                <%= if @crew != [] do %>
+                  <div class="mb-3">
                     <div class="text-xs font-semibold text-base-content/50 uppercase mb-2">
-                      Cast
+                      Crew
                     </div>
-                    <div class="space-y-1.5">
-                      <div :for={actor <- Enum.take(@cast, 6)} class="flex items-center gap-2">
-                        <div class="avatar">
-                          <div class="w-6 h-6 rounded-full bg-base-300">
-                            <%= if get_profile_image_url(actor.profile_path) do %>
-                              <img src={get_profile_image_url(actor.profile_path)} alt={actor.name} />
-                            <% else %>
-                              <div class="flex items-center justify-center h-full">
-                                <.icon name="hero-user" class="w-3 h-3 text-base-content/30" />
-                              </div>
-                            <% end %>
-                          </div>
-                        </div>
-                        <div class="text-sm">
-                          <span class="font-medium">{actor.name}</span>
-                          <span class="text-base-content/60 text-xs">as {actor.character}</span>
-                        </div>
+                    <div class="space-y-1">
+                      <div :for={member <- Enum.take(@crew, 3)} class="text-sm">
+                        <span class="font-medium">{member.name}</span>
+                        <span class="text-base-content/60">— {member.job}</span>
                       </div>
                     </div>
-                  <% end %>
-                </div>
-              </div>
-            </div>
-          <% end %>
-        </div>
-      </div>
-    <% else %>
-      <%!-- Full layout for movies --%>
-      <div class="card bg-base-200 shadow-lg mb-4 md:mb-6">
-        <div class="card-body p-4 md:p-6">
-          <h2 class="card-title text-lg md:text-xl">Overview</h2>
-          <p class="text-sm md:text-base text-base-content/80 leading-relaxed">
-            {get_overview(@media_item)}
-          </p>
-        </div>
-      </div>
-
-      <%= if @trailer_url do %>
-        <div class="card bg-base-200 shadow-lg mb-4 md:mb-6">
-          <div class="card-body p-4 md:p-6">
-            <h2 class="card-title text-lg md:text-xl mb-3">Trailer</h2>
-            <div class="aspect-video rounded-lg overflow-hidden bg-base-300">
-              <iframe
-                src={@trailer_url <> "?rel=0&modestbranding=1"}
-                title="Trailer"
-                class="w-full h-full"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowfullscreen
-              >
-              </iframe>
-            </div>
-          </div>
-        </div>
-      <% end %>
-
-      <%= if @has_cast_crew do %>
-        <div class="card bg-base-200 shadow-lg mb-4 md:mb-6">
-          <div class="card-body p-4 md:p-6">
-            <h2 class="card-title text-lg md:text-xl mb-3 md:mb-4">Cast & Crew</h2>
-
-            <%= if @crew != [] do %>
-              <div class="mb-6">
-                <h3 class="text-sm font-semibold text-base-content/70 mb-3">Key Crew</h3>
-                <div class="flex flex-wrap gap-3">
-                  <div :for={member <- @crew} class="badge badge-lg badge-outline gap-2">
-                    <span class="font-medium">{member.name}</span>
-                    <span class="text-base-content/60">• {member.job}</span>
                   </div>
-                </div>
-              </div>
-            <% end %>
-
-            <%= if @cast != [] do %>
-              <div>
-                <h3 class="text-sm font-semibold text-base-content/70 mb-3">Cast</h3>
-                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                  <div :for={actor <- @cast} class="flex flex-col items-center text-center">
-                    <div class="avatar mb-2">
-                      <div class="w-20 h-20 rounded-full bg-base-300">
-                        <%= if get_profile_image_url(actor.profile_path) do %>
-                          <img
-                            src={get_profile_image_url(actor.profile_path)}
-                            alt={actor.name}
-                            class="object-cover"
-                          />
-                        <% else %>
-                          <div class="flex items-center justify-center h-full">
-                            <.icon name="hero-user" class="w-10 h-10 text-base-content/30" />
-                          </div>
-                        <% end %>
+                <% end %>
+                <%= if @cast != [] do %>
+                  <div class="text-xs font-semibold text-base-content/50 uppercase mb-2">
+                    Cast
+                  </div>
+                  <div class="space-y-1.5">
+                    <div :for={actor <- Enum.take(@cast, 6)} class="flex items-center gap-2">
+                      <div class="avatar">
+                        <div class="w-6 h-6 rounded-full bg-base-300">
+                          <%= if get_profile_image_url(actor.profile_path) do %>
+                            <img src={get_profile_image_url(actor.profile_path)} alt={actor.name} />
+                          <% else %>
+                            <div class="flex items-center justify-center h-full">
+                              <.icon name="hero-user" class="w-3 h-3 text-base-content/30" />
+                            </div>
+                          <% end %>
+                        </div>
+                      </div>
+                      <div class="text-sm">
+                        <span class="font-medium">{actor.name}</span>
+                        <span class="text-base-content/60 text-xs">as {actor.character}</span>
                       </div>
                     </div>
-                    <div class="text-sm font-medium line-clamp-2">{actor.name}</div>
-                    <div class="text-xs text-base-content/60 line-clamp-2">
-                      {actor.character}
-                    </div>
                   </div>
-                </div>
+                <% end %>
               </div>
-            <% end %>
+            </div>
           </div>
-        </div>
-      <% end %>
-    <% end %>
+        <% end %>
+      </div>
+    </div>
     """
   end
 
@@ -518,9 +436,9 @@ defmodule MydiaWeb.MediaLive.Show.Components do
       <div class="card bg-base-200 shadow-lg">
         <%!-- Card header with stats --%>
         <div class="card-body p-4 pb-0">
-          <div class="flex items-center justify-between flex-wrap gap-2">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <h2 class="card-title text-lg">Seasons & Episodes</h2>
-            <div class="flex items-center gap-4 text-sm">
+            <div class="flex items-center gap-2 sm:gap-4 text-sm flex-wrap">
               <span class="text-base-content/60">
                 {length(grouped_seasons)} seasons
               </span>
@@ -541,15 +459,15 @@ defmodule MydiaWeb.MediaLive.Show.Components do
             season_total = length(episodes) %>
 
             <div class="p-4">
-              <%!-- Season header row --%>
-              <div class="flex items-center justify-between gap-4 mb-3">
+              <%!-- Season header row - wraps on mobile --%>
+              <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
                 <div class="flex items-center gap-3">
-                  <span class="badge badge-primary badge-lg font-bold">S{season_num}</span>
-                  <span class="text-sm text-base-content/70">
+                  <span class="badge badge-primary badge-lg font-bold shrink-0">S{season_num}</span>
+                  <span class="text-sm text-base-content/70 shrink-0">
                     {season_available}/{season_total} episodes
                   </span>
                   <progress
-                    class="progress progress-success w-20"
+                    class="progress progress-success w-20 shrink-0"
                     value={season_available}
                     max={season_total}
                   >
@@ -1127,15 +1045,6 @@ defmodule MydiaWeb.MediaLive.Show.Components do
   defp monitoring_preset_label(:first_season), do: "First Season"
   defp monitoring_preset_label(:latest_season), do: "Latest Season"
   defp monitoring_preset_label(:none), do: "None"
-
-  defp short_monitoring_label(nil), do: "All"
-  defp short_monitoring_label(:all), do: "All"
-  defp short_monitoring_label(:future), do: "Future"
-  defp short_monitoring_label(:missing), do: "Missing"
-  defp short_monitoring_label(:existing), do: "Existing"
-  defp short_monitoring_label(:first_season), do: "S1"
-  defp short_monitoring_label(:latest_season), do: "Latest"
-  defp short_monitoring_label(:none), do: "None"
 
   @doc """
   Monitoring icon that shows different states:

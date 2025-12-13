@@ -81,7 +81,9 @@ defmodule Mydia.Metadata.Provider.HTTPTest do
       user_agent_header = Req.Request.get_header(req, "user-agent")
 
       assert accept_header == ["application/json"]
-      assert user_agent_header == ["Mydia/1.0"]
+      # User-agent is dynamic: "Mydia/<version> (<architecture>)"
+      assert [user_agent] = user_agent_header
+      assert user_agent =~ ~r/^Mydia\/[\d.]+ \(.+\)$/
     end
 
     test "raises error when base_url is missing" do

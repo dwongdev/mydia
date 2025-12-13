@@ -400,9 +400,11 @@ defmodule MydiaWeb.ImportMediaLive.Index do
             })
           else
             # Create new match for previously unmatched file
+            # Note: provider_type is required by MetadataEnricher (issue #52)
             %{
               title: validated_data.title,
               provider_id: validated_data.provider_id,
+              provider_type: :tmdb,
               year: validated_data.year,
               match_confidence: 1.0,
               manually_edited: true,

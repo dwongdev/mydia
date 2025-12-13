@@ -13,9 +13,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to deploy (e.g., 1.0.0 or latest)'
+        description: 'Version to deploy (e.g., 1.0.0 or dev)'
         required: false
-        default: 'latest'
+        default: 'dev'
 
 permissions:
   contents: write
@@ -53,8 +53,15 @@ jobs:
       - name: Deploy latest (push to master)
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         run: |
-          uv run --project mkdocs-docs mike deploy --push --update-aliases latest
-          uv run --project mkdocs-docs mike set-default --push latest
+          uv run --project mkdocs-docs mike deploy --push --update-aliases dev
+          uv run --project mkdocs-docs mike set-default --push dev
+
+      - name: Cleanup stale latest version
+        if: github.event_name == 'release'
+        run: |
+          # Delete "latest" if it exists as a version (from old workflow bug)
+          # This allows us to use "latest" as an alias instead
+          uv run --project mkdocs-docs mike delete --push latest || true
 
       - name: Deploy release version
         if: github.event_name == 'release'
@@ -69,9 +76,12 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           VERSION="${{ github.event.inputs.version }}"
-          if [ "$VERSION" = "latest" ]; then
-            uv run --project mkdocs-docs mike deploy --push --update-aliases latest
+          if [ "$VERSION" = "dev" ]; then
+            uv run --project mkdocs-docs mike deploy --push --update-aliases dev
+            uv run --project mkdocs-docs mike set-default --push dev
           else
-            uv run --project mkdocs-docs mike deploy --push --update-aliases "$VERSION"
+            # Delete stale "latest" version if it exists (from old workflow bug)
+            uv run --project mkdocs-docs mike delete --push latest || true
+            uv run --project mkdocs-docs mike deploy --push --update-aliases "$VERSION" latest
+            uv run --project mkdocs-docs mike set-default --push latest
           fi
-          uv run --project mkdocs-docs mike set-default --push latest

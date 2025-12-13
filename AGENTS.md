@@ -40,6 +40,90 @@ Mydia uses a companion service called **metadata-relay**, which is a developer-o
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
 
+### DRY Patterns (Don't Repeat Yourself)
+
+**Extract repeated logic into private functions:**
+
+    # BAD: duplicated validation logic
+    def create_show(attrs) do
+      if String.length(attrs["title"] || "") > 0 do
+        # ...
+      end
+    end
+
+    def update_show(show, attrs) do
+      if String.length(attrs["title"] || "") > 0 do
+        # ...
+      end
+    end
+
+    # GOOD: extract to private function
+    defp valid_title?(attrs), do: String.length(attrs["title"] || "") > 0
+
+**Use `with` for sequential operations instead of nested case:**
+
+    # BAD: deeply nested case statements
+    case fetch_show(id) do
+      {:ok, show} ->
+        case fetch_seasons(show) do
+          {:ok, seasons} ->
+            case update_metadata(show, seasons) do
+              {:ok, updated} -> {:ok, updated}
+              {:error, reason} -> {:error, reason}
+            end
+          {:error, reason} -> {:error, reason}
+        end
+      {:error, reason} -> {:error, reason}
+    end
+
+    # GOOD: flat with statement
+    with {:ok, show} <- fetch_show(id),
+         {:ok, seasons} <- fetch_seasons(show),
+         {:ok, updated} <- update_metadata(show, seasons) do
+      {:ok, updated}
+    end
+
+**Centralize business logic in context modules:**
+
+- **Never** duplicate query logic across LiveViews or controllers
+- **Always** put queries and business logic in context modules (e.g., `Mydia.Media`, `Mydia.Libraries`)
+- Create reusable query functions: `list_shows/1`, `get_show!/1`, `list_shows_with_seasons/1`
+
+**Leverage existing components - check before creating:**
+
+- **Always** check `core_components.ex` before creating new UI components
+- **Always** use `<.input>`, `<.button>`, `<.modal>`, `<.table>` from core components
+- **Never** duplicate styling - if a pattern repeats 3+ times, extract to a component
+
+**Create shared function components for repeated UI patterns:**
+
+    # In core_components.ex or a dedicated components module
+    attr :show, :map, required: true
+    def show_card(assigns) do
+      ~H"""
+      <div class="card bg-base-100 shadow-xl">
+        <figure><img src={@show.poster_url} /></figure>
+        <div class="card-body">
+          <h2 class="card-title">{@show.title}</h2>
+        </div>
+      </div>
+      """
+    end
+
+**Use module attributes for repeated values:**
+
+    # BAD: magic strings scattered throughout
+    def fetch_metadata(show) do
+      Req.get("https://api.metadata-relay.example.com/shows/#{show.id}")
+    end
+
+    # GOOD: module attribute
+    @metadata_relay_url Application.compile_env(:mydia, :metadata_relay_url)
+
+    def fetch_metadata(show) do
+      Req.get("#{@metadata_relay_url}/shows/#{show.id}")
+    end
+
 ### Development environment
 
 This project uses Docker Compose for development. **Always** use the `./dev` command wrapper instead of running commands directly:

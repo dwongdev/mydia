@@ -7,6 +7,9 @@ defmodule Mydia.Jobs.LibraryScanner do
   - Detects new, modified, and deleted files
   - Updates the database with file information
   - Tracks scan status and errors
+
+  For scheduled "scan all" runs, a random delay (0-30 minutes) is applied
+  to spread load across self-hosted instances hitting the metadata relay.
   """
 
   use Oban.Worker,
@@ -15,6 +18,9 @@ defmodule Mydia.Jobs.LibraryScanner do
 
   require Logger
   alias Mydia.{Library, Settings, Repo, Metadata}
+
+  # Random delay range for scheduled scan_all (0-30 minutes in ms)
+  @max_startup_delay_ms 30 * 60 * 1000
 
   alias Mydia.Library.{
     MetadataMatcher,
@@ -28,10 +34,21 @@ defmodule Mydia.Jobs.LibraryScanner do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
-    start_time = System.monotonic_time(:millisecond)
     # Oban job args use string keys (JSON) - optional field with default
     library_path_id = args["library_path_id"]
     library_type = args["library_type"]
+
+    # Add random delay for scheduled "scan all" runs to spread load across instances
+    # Skip delay for manual triggers (skip_delay: true) or specific library scans
+    if is_nil(library_path_id) and is_nil(library_type) and not Map.get(args, "skip_delay", false) do
+      delay_ms = :rand.uniform(@max_startup_delay_ms)
+      delay_minutes = Float.round(delay_ms / 60_000, 1)
+
+      Logger.info("Library scan scheduled, waiting #{delay_minutes} minutes before starting")
+      Process.sleep(delay_ms)
+    end
+
+    start_time = System.monotonic_time(:millisecond)
 
     result =
       cond do

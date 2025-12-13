@@ -31,6 +31,7 @@ defmodule Mydia.Application do
         Mydia.Indexers.RateLimiter,
         Mydia.Metadata.Provider.Registry,
         Mydia.Metadata.Cache,
+        Mydia.Metadata.ProviderIDRegistry,
         {Task.Supervisor, name: Mydia.TaskSupervisor},
         Mydia.Hooks.Manager,
         {Registry, keys: :unique, name: Mydia.Streaming.HlsSessionRegistry},

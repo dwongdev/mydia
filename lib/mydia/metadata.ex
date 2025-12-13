@@ -112,6 +112,53 @@ defmodule Mydia.Metadata do
   end
 
   @doc """
+  Searches for media with caching to reduce API calls.
+
+  This is a cached wrapper around `search/3` that caches results
+  for 1 hour to reduce redundant API calls.
+
+  Results are cached by query, media_type, year, and language.
+
+  ## Parameters
+    - `config` - Provider configuration map
+    - `query` - Search query string
+    - `opts` - Search options (see `Mydia.Metadata.Provider` for available options)
+
+  ## Options
+    * `:media_type` - Filter by media type (`:movie`, `:tv_show`)
+    * `:year` - Filter by release year
+    * `:language` - Language for results (default: "en-US")
+    * `:page` - Page number for pagination (default: 1)
+
+  ## Examples
+
+      iex> config = %{type: :metadata_relay, base_url: "https://metadata-relay.dorninger.co/tmdb"}
+      iex> Mydia.Metadata.search_cached(config, "The Matrix", media_type: :movie, year: 1999)
+      {:ok, [%{provider_id: "603", title: "The Matrix", ...}]}
+  """
+  def search_cached(%{type: type} = config, query, opts \\ []) when is_atom(type) do
+    alias Mydia.Metadata.Cache
+
+    # Build cache key including all relevant search parameters
+    media_type = Keyword.get(opts, :media_type)
+    year = Keyword.get(opts, :year)
+    language = Keyword.get(opts, :language, "en-US")
+    page = Keyword.get(opts, :page, 1)
+
+    # Create a stable cache key from query and options
+    cache_key = "search:#{query}:#{media_type}:#{year}:#{language}:#{page}"
+
+    # Cache for 1 hour
+    Cache.fetch(
+      cache_key,
+      fn ->
+        search(config, query, opts)
+      end,
+      ttl: :timer.hours(1)
+    )
+  end
+
+  @doc """
   Fetches detailed metadata for a specific media item by provider ID.
 
   ## Parameters
@@ -184,6 +231,47 @@ defmodule Mydia.Metadata do
     with {:ok, provider} <- Provider.Registry.get_provider(type) do
       provider.fetch_season(config, provider_id, season_number, opts)
     end
+  end
+
+  @doc """
+  Fetches season details with caching to reduce API calls.
+
+  This is a cached wrapper around `fetch_season/4` that caches results
+  for 24 hours to reduce redundant API calls.
+
+  Results are cached by provider_id, season_number, and language.
+
+  ## Parameters
+    - `config` - Provider configuration map
+    - `provider_id` - Provider-specific ID for the TV show
+    - `season_number` - Season number to fetch
+    - `opts` - Season fetch options
+
+  ## Options
+    * `:language` - Language for results (default: "en-US")
+
+  ## Examples
+
+      iex> config = %{type: :metadata_relay, base_url: "https://metadata-relay.dorninger.co/tmdb"}
+      iex> Mydia.Metadata.fetch_season_cached(config, "1396", 1)
+      {:ok, %{season_number: 1, episodes: [...], ...}}
+  """
+  def fetch_season_cached(%{type: type} = config, provider_id, season_number, opts \\ [])
+      when is_atom(type) do
+    alias Mydia.Metadata.Cache
+
+    # Build cache key including language to avoid returning wrong language results
+    language = Keyword.get(opts, :language, "en-US")
+    cache_key = "season:#{provider_id}:#{season_number}:#{language}"
+
+    # Cache for 24 hours
+    Cache.fetch(
+      cache_key,
+      fn ->
+        fetch_season(config, provider_id, season_number, opts)
+      end,
+      ttl: :timer.hours(24)
+    )
   end
 
   @doc """

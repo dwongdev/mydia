@@ -64,7 +64,9 @@ defmodule Mydia.Metadata.Provider.Relay do
 
   @behaviour Mydia.Metadata.Provider
 
+  require Logger
   alias Mydia.Metadata.Provider.{Error, HTTP}
+  alias Mydia.Metadata.ProviderIDRegistry
 
   alias Mydia.Metadata.Structs.{
     SearchResult,
@@ -142,6 +144,30 @@ defmodule Mydia.Metadata.Provider.Relay do
 
   # Fetch from TMDB (default behavior)
   defp fetch_tmdb_by_id(config, provider_id, media_type, opts) do
+    # Validate that the provider ID matches the requested media type
+    case ProviderIDRegistry.validate_id_type(provider_id, :tmdb, media_type) do
+      :ok ->
+        # Validation passed, proceed with fetch
+        perform_tmdb_fetch(config, provider_id, media_type, opts)
+
+      {:error, :type_mismatch, actual_type} ->
+        # Known ID with wrong type - skip the request
+        Logger.warning(
+          "Skipping TMDB fetch: provider ID belongs to different media type",
+          provider_id: provider_id,
+          requested_type: media_type,
+          actual_type: actual_type
+        )
+
+        {:error,
+         Error.invalid_request(
+           "Provider ID #{provider_id} is a #{actual_type}, not a #{media_type}"
+         )}
+    end
+  end
+
+  # Perform the actual TMDB fetch after validation
+  defp perform_tmdb_fetch(config, provider_id, media_type, opts) do
     language = Keyword.get(opts, :language, @default_language)
     append = Keyword.get(opts, :append_to_response, ["credits", "alternative_titles", "videos"])
 
@@ -156,6 +182,8 @@ defmodule Mydia.Metadata.Provider.Relay do
 
     case HTTP.get(req, endpoint, params: params) do
       {:ok, %{status: 200, body: body}} ->
+        # Successful fetch - record the ID→type mapping
+        ProviderIDRegistry.record_id_type(provider_id, :tmdb, media_type)
         metadata = parse_metadata(body, media_type, provider_id)
         {:ok, metadata}
 
@@ -174,6 +202,30 @@ defmodule Mydia.Metadata.Provider.Relay do
   defp fetch_tvdb_by_id(config, provider_id, opts) do
     media_type = Keyword.get(opts, :media_type, :tv_show)
 
+    # Validate that the provider ID matches the requested media type
+    case ProviderIDRegistry.validate_id_type(provider_id, :tvdb, media_type) do
+      :ok ->
+        # Validation passed, proceed with fetch
+        perform_tvdb_fetch(config, provider_id, media_type, opts)
+
+      {:error, :type_mismatch, actual_type} ->
+        # Known ID with wrong type - skip the request
+        Logger.warning(
+          "Skipping TVDB fetch: provider ID belongs to different media type",
+          provider_id: provider_id,
+          requested_type: media_type,
+          actual_type: actual_type
+        )
+
+        {:error,
+         Error.invalid_request(
+           "Provider ID #{provider_id} is a #{actual_type}, not a #{media_type}"
+         )}
+    end
+  end
+
+  # Perform the actual TVDB fetch after validation
+  defp perform_tvdb_fetch(config, provider_id, media_type, _opts) do
     # Use extended endpoint to get more details including seasons
     endpoint = "/tvdb/series/#{provider_id}/extended"
 
@@ -181,6 +233,8 @@ defmodule Mydia.Metadata.Provider.Relay do
 
     case HTTP.get(req, endpoint, params: []) do
       {:ok, %{status: 200, body: body}} ->
+        # Successful fetch - record the ID→type mapping
+        ProviderIDRegistry.record_id_type(provider_id, :tvdb, media_type)
         # TVDB wraps response in "data" key
         data = body["data"] || body
         # Transform TVDB response to TMDB-like format for parsing
@@ -462,7 +516,19 @@ defmodule Mydia.Metadata.Provider.Relay do
     # Pass media_type from search options to override API response's media_type
     # This is needed because endpoint-specific searches (e.g., /tmdb/tv/search)
     # don't include media_type in each result
-    SearchResult.from_api_response(result, media_type: media_type)
+    search_result = SearchResult.from_api_response(result, media_type: media_type)
+
+    # Record the ID→type mapping from search results
+    # This helps prevent future 404s from type mismatches
+    if search_result.provider_id && media_type do
+      ProviderIDRegistry.record_id_type(
+        to_string(search_result.provider_id),
+        :tmdb,
+        media_type
+      )
+    end
+
+    search_result
   end
 
   defp parse_metadata(data, media_type, provider_id) do

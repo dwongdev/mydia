@@ -18,6 +18,58 @@ defmodule Mydia.Library.MetadataMatcher do
   @type match_result :: MatchResult.t()
 
   @doc """
+  Normalizes a search query by removing metadata artifacts from filenames.
+
+  This removes:
+  - Year suffixes and everything after (e.g., ".1989-...", "(1989)", etc.)
+  - Release group tags, quality indicators, codec info
+  - IMDB/TVDB ID annotations like {imdb-...} or [tvdbid-...]
+  - File separators (., -, _, +) replaced with spaces
+  - Multiple whitespace collapsed to single space
+
+  ## Examples
+
+      iex> normalize_search_query("The.Simpsons.1989-(71663)")
+      "The Simpsons"
+
+      iex> normalize_search_query("The+Simpsons+(1989)+{imdb-tt0096697}")
+      "The Simpsons"
+
+      iex> normalize_search_query("Movie.Name.2020.1080p.BluRay.x264-RARBG")
+      "Movie Name"
+  """
+  @spec normalize_search_query(String.t()) :: String.t()
+  def normalize_search_query(query) when is_binary(query) do
+    query
+    # Remove IMDB/TVDB/TMDB ID annotations like {imdb-tt0096697} or [tvdbid-12345]
+    |> String.replace(~r/\{imdb-[^\}]+\}/i, "")
+    |> String.replace(~r/\[tvdbid-[^\]]+\]/i, "")
+    |> String.replace(~r/\{tmdb-[^\}]+\}/i, "")
+    |> String.replace(~r/\[tmdbid-[^\]]+\]/i, "")
+    # Remove year in parentheses and everything after: (1989)...
+    |> String.replace(~r/\(\d{4}\).*$/, "")
+    # Remove year with separators and everything after: .1989-... or -1989. or _1989_
+    |> String.replace(~r/[._-]\d{4}[._-].*$/, "")
+    # Remove standalone year at end with separator: .1989 or -1989 or _1989
+    |> String.replace(~r/[._-]\d{4}$/, "")
+    # Remove common quality indicators and everything after
+    |> String.replace(~r/[._-](480p|720p|1080p|2160p|4k).*$/i, "")
+    |> String.replace(~r/[._-](bluray|brrip|webrip|web-dl|webdl|hdtv|dvdrip).*$/i, "")
+    # Remove codec info and everything after
+    |> String.replace(~r/[._-](x264|x265|h264|h265|hevc|xvid|divx|avc).*$/i, "")
+    # Remove release group tags (usually at the end like -RARBG, -YTS, etc.)
+    |> String.replace(~r/-[A-Z0-9]+$/, "")
+    # Replace separators with spaces
+    |> String.replace(~r/[._+\-]+/, " ")
+    # Collapse multiple spaces
+    |> String.replace(~r/\s+/, " ")
+    # Trim whitespace
+    |> String.trim()
+  end
+
+  def normalize_search_query(query), do: query
+
+  @doc """
   Matches a file path to metadata provider entries.
 
   Returns the best match with confidence score, or nil if no match found.
@@ -180,8 +232,9 @@ defmodule Mydia.Library.MetadataMatcher do
   # Search external metadata provider for movie
   defp search_external_movie(parsed, config, opts) do
     search_opts = build_movie_search_opts(parsed, opts)
+    normalized_title = normalize_search_query(parsed.title)
 
-    case Metadata.search(config, parsed.title, search_opts) do
+    case Metadata.search_cached(config, normalized_title, search_opts) do
       {:ok, []} ->
         # Try without year if we got no results
         if parsed.year do
@@ -192,7 +245,7 @@ defmodule Mydia.Library.MetadataMatcher do
 
           retry_opts = Keyword.delete(search_opts, :year)
 
-          case Metadata.search(config, parsed.title, retry_opts) do
+          case Metadata.search_cached(config, normalized_title, retry_opts) do
             {:ok, results} when results != [] ->
               select_best_movie_match(results, parsed)
 
@@ -374,8 +427,9 @@ defmodule Mydia.Library.MetadataMatcher do
   # Search external metadata provider for TV show
   defp search_external_tv_show(parsed, config, opts) do
     search_opts = build_tv_search_opts(parsed, opts)
+    normalized_title = normalize_search_query(parsed.title)
 
-    case Metadata.search(config, parsed.title, search_opts) do
+    case Metadata.search_cached(config, normalized_title, search_opts) do
       {:ok, []} ->
         # Try without year if we got no results
         if parsed.year do
@@ -386,7 +440,7 @@ defmodule Mydia.Library.MetadataMatcher do
 
           retry_opts = Keyword.delete(search_opts, :year)
 
-          case Metadata.search(config, parsed.title, retry_opts) do
+          case Metadata.search_cached(config, normalized_title, retry_opts) do
             {:ok, results} when results != [] ->
               select_best_tv_match(results, parsed)
 
@@ -438,7 +492,9 @@ defmodule Mydia.Library.MetadataMatcher do
     search_opts =
       [media_type: :tv_show] |> Keyword.merge(Keyword.take(opts, [:language, :include_adult]))
 
-    case Metadata.search(config, parsed.title, search_opts) do
+    normalized_title = normalize_search_query(parsed.title)
+
+    case Metadata.search_cached(config, normalized_title, search_opts) do
       {:ok, results} when results != [] ->
         # Find best matching series
         case find_best_series_match(results, parsed) do

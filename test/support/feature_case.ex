@@ -222,9 +222,13 @@ defmodule MydiaWeb.FeatureCase do
   Useful after navigation or form submissions.
   """
   def wait_for_liveview(session) do
-    # Wait for phx-connected attribute which indicates LiveView is fully mounted
+    # Wait for data-phx-main which indicates LiveView root is present
     session
     |> Wallaby.Browser.find(Wallaby.Query.css("[data-phx-main]", []))
-    |> then(fn _ -> session end)
+    |> then(fn _ ->
+      # Additional wait for LiveView to fully initialize and become interactive
+      :timer.sleep(500)
+      session
+    end)
   end
 end

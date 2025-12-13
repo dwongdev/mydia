@@ -227,8 +227,18 @@ defmodule MydiaWeb.FeatureCase do
     |> Wallaby.Browser.find(Wallaby.Query.css("[data-phx-main]", []))
     |> then(fn _ ->
       # Additional wait for LiveView to fully initialize and become interactive
-      :timer.sleep(500)
+      # Using 1 second wait to ensure stability in slower CI environments
+      :timer.sleep(1000)
       session
     end)
+  end
+
+  @doc """
+  Waits for LiveView to process an event after a button click.
+  Use this after click() calls to ensure DOM updates are complete.
+  """
+  def wait_for_liveview_update(session) do
+    :timer.sleep(500)
+    session
   end
 end

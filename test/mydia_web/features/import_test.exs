@@ -138,9 +138,8 @@ defmodule MydiaWeb.Features.ImportTest do
       # Click the edit button for the unmatched file
       session
       |> click(Query.css("button[phx-click='edit_file'][phx-value-index='0']"))
-
+      |> wait_for_liveview_update()
       # Wait for the edit form to appear (Wallaby's assert_has has built-in retry)
-      session
       |> assert_has(Query.text("Find Metadata Match"))
       # The search input should be visible
       |> assert_has(Query.css("input[name='edit_form[title]']"))
@@ -296,9 +295,8 @@ defmodule MydiaWeb.Features.ImportTest do
       # Click the clear match button
       session
       |> click(Query.css("button[phx-click='clear_match'][phx-value-index='0']"))
-
+      |> wait_for_liveview_update()
       # Wait for the file to show as unmatched (Wallaby's assert_has has built-in retry)
-      session
       |> assert_has(Query.text("No Match"))
 
       # Filename should still be visible (may appear multiple times, so use count: :any)
@@ -606,9 +604,8 @@ defmodule MydiaWeb.Features.ImportTest do
       # Click the edit button for the episode
       session
       |> click(Query.css("button[phx-click='edit_file'][phx-value-index='0']"))
-
+      |> wait_for_liveview_update()
       # Wait for the edit form with season/episode fields (Wallaby's assert_has has built-in retry)
-      session
       |> assert_has(Query.text("Edit Episode Match"))
       |> assert_has(Query.css("input[name='edit_form[season]']"))
       |> assert_has(Query.css("input[name='edit_form[episodes]']"))
@@ -939,12 +936,9 @@ defmodule MydiaWeb.Features.ImportTest do
       # Click the checkbox to deselect
       session
       |> click(Query.css("input[type='checkbox'][phx-value-index='0']"))
-
+      |> wait_for_liveview_update()
       # Wait for the import button to become disabled (more reliable than checking text)
-      assert_has(
-        session,
-        Query.css("#selection-toolbar button[phx-click='start_import'][disabled]")
-      )
+      |> assert_has(Query.css("#selection-toolbar button[phx-click='start_import'][disabled]"))
     end
 
     @tag :feature

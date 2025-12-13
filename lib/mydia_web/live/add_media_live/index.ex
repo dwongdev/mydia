@@ -457,7 +457,11 @@ defmodule MydiaWeb.AddMediaLive.Index do
   end
 
   defp format_changeset_errors(changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)
+    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+      Enum.reduce(opts, msg, fn {key, value}, acc_msg ->
+        String.replace(acc_msg, "%{#{key}}", to_string(value))
+      end)
+    end)
     |> Enum.map(fn {field, errors} -> "#{field}: #{Enum.join(errors, ", ")}" end)
     |> Enum.join("; ")
   end

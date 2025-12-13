@@ -97,4 +97,6 @@ config :wallaby,
   base_url: "http://localhost:4002",
   screenshot_on_failure: true,
   screenshot_dir: "tmp/wallaby_screenshots",
-  chromedriver: wallaby_chromedriver_opts
+  chromedriver: wallaby_chromedriver_opts,
+  # Increase timeout for CI environments which may be slower
+  max_wait_time: 10_000

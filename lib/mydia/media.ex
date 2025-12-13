@@ -1055,7 +1055,7 @@ defmodule Mydia.Media do
         _ -> media_item.tmdb_id
       end
 
-    case Metadata.fetch_season(config, to_string(tmdb_id), season.season_number) do
+    case Metadata.fetch_season_cached(config, to_string(tmdb_id), season.season_number) do
       {:ok, season_data} ->
         episodes = season_data.episodes || []
 

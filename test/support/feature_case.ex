@@ -226,9 +226,25 @@ defmodule MydiaWeb.FeatureCase do
     session
     |> Wallaby.Browser.find(Wallaby.Query.css("[data-phx-main]", []))
     |> then(fn _ ->
-      # Additional wait for LiveView to fully initialize and become interactive
-      # Using 2 seconds for CI environments which can be significantly slower
-      :timer.sleep(2000)
+      # Wait for LiveView socket to be connected using JavaScript
+      # The liveSocket will have isConnected() return true when ready
+      Wallaby.Browser.execute_script(session, """
+        return new Promise((resolve) => {
+          const checkConnected = () => {
+            if (window.liveSocket && window.liveSocket.isConnected()) {
+              resolve(true);
+            } else {
+              setTimeout(checkConnected, 100);
+            }
+          };
+          checkConnected();
+          // Timeout after 5 seconds
+          setTimeout(() => resolve(true), 5000);
+        });
+      """)
+
+      # Additional buffer after connection
+      :timer.sleep(500)
       session
     end)
   end

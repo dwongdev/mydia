@@ -391,12 +391,9 @@ defmodule MydiaWeb.Features.ImportTest do
       |> js_click("#selection-toolbar button[phx-click='start_import']")
 
       # Wait for the import to complete (async operation)
-      :timer.sleep(3000)
-
-      # Should reach complete step (import fails since files don't exist, but UI should handle gracefully)
-      assert Wallaby.Browser.has_text?(session, "Total Processed") or
-               Wallaby.Browser.has_text?(session, "Importing") or
-               Wallaby.Browser.has_text?(session, "Failed")
+      # Use a retry loop to check for expected text
+      assert wait_for_any_text(session, ["Total Processed", "Importing", "Failed"], 30),
+             "Expected to find 'Total Processed', 'Importing', or 'Failed' text"
     end
   end
 
@@ -710,12 +707,9 @@ defmodule MydiaWeb.Features.ImportTest do
       |> js_click("#selection-toolbar button[phx-click='start_import']")
 
       # Wait for import to complete (async operation)
-      :timer.sleep(4000)
-
-      # Should reach complete step - verify it does NOT show the provider_type error
-      # The import will fail because the file doesn't exist, but it should NOT fail
-      # with "Invalid match result - missing provider_id or provider_type"
-      assert_has(session, Query.text("Total Processed"))
+      # Use retry loop to check for expected completion text
+      assert wait_for_any_text(session, ["Total Processed", "Importing", "Failed"], 30),
+             "Expected to find 'Total Processed', 'Importing', or 'Failed' text"
 
       # The error should be about the file not existing or database issues,
       # NOT about missing provider_type

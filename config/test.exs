@@ -85,11 +85,34 @@ config :mydia,
 # Uses Chrome/Chromium in headless mode
 # Chromedriver path is auto-detected, or can be set via CHROMEDRIVER_PATH
 wallaby_headless = System.get_env("WALLABY_HEADLESS", "true") == "true"
+is_ci = System.get_env("CI") == "true" || System.get_env("GITHUB_ACTIONS") == "true"
 
 wallaby_chromedriver_opts =
   case System.get_env("CHROMEDRIVER_PATH") do
     nil -> [headless: wallaby_headless]
     path -> [path: path, headless: wallaby_headless]
+  end
+
+# Chrome capabilities for headless mode
+# These are especially important for CI environments
+chrome_capabilities =
+  if is_ci do
+    %{
+      chromeOptions: %{
+        args: [
+          "--headless=new",
+          "--no-sandbox",
+          "--disable-gpu",
+          "--disable-dev-shm-usage",
+          "--window-size=1920,1080",
+          "--disable-software-rasterizer",
+          "--disable-extensions",
+          "--remote-debugging-port=9222"
+        ]
+      }
+    }
+  else
+    %{}
   end
 
 config :wallaby,
@@ -98,5 +121,6 @@ config :wallaby,
   screenshot_on_failure: true,
   screenshot_dir: "tmp/wallaby_screenshots",
   chromedriver: wallaby_chromedriver_opts,
+  capabilities: chrome_capabilities,
   # Increase timeout for CI environments which may be slower
   max_wait_time: 10_000

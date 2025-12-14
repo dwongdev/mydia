@@ -61,6 +61,14 @@ jobs:
       - name: Compile code
         run: mix compile
 
+      - name: Install Node.js dependencies
+        run: npm ci --prefix assets
+
+      - name: Build JavaScript assets
+        run: mix assets.deploy
+        env:
+          MIX_ENV: test
+
       - name: Run feature tests
         run: ./scripts/run-feature-tests.sh
 

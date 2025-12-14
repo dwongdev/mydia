@@ -226,28 +226,10 @@ defmodule MydiaWeb.FeatureCase do
     session
     |> Wallaby.Browser.find(Wallaby.Query.css("[data-phx-main]", []))
     |> then(fn _ ->
-      # Wait for LiveView to be fully connected
-      # Poll for liveSocket.isConnected() to return true
-      wait_for_connected(session, 20)
+      # Wait for LiveView to connect and stabilize
+      :timer.sleep(3000)
       session
     end)
-  end
-
-  defp wait_for_connected(_session, 0), do: :ok
-
-  defp wait_for_connected(session, attempts) do
-    result =
-      Wallaby.Browser.execute_script(
-        session,
-        "return window.liveSocket && window.liveSocket.isConnected() ? 'connected' : 'not_connected'"
-      )
-
-    if result == "connected" do
-      :ok
-    else
-      :timer.sleep(250)
-      wait_for_connected(session, attempts - 1)
-    end
   end
 
   @doc """
@@ -260,22 +242,75 @@ defmodule MydiaWeb.FeatureCase do
   end
 
   @doc """
-  Clicks an element using JavaScript dispatch. More reliable in headless browsers.
-  Use this for phx-click buttons that don't respond to standard clicks in CI.
+  Clicks an element using JavaScript. More reliable in headless browsers
+  for phx-click buttons that don't respond to standard clicks.
   """
   def js_click(session, css_selector) do
+    # Scroll element into view and click
     Wallaby.Browser.execute_script(
       session,
       """
       var el = document.querySelector(arguments[0]);
-      if (el) { el.click(); }
+      if (el) {
+        el.scrollIntoView({behavior: 'instant', block: 'center'});
+        el.focus();
+        el.click();
+      }
       """,
       [css_selector]
     )
 
-    # Wait for LiveView to process the event
-    # Using 1 second to handle slower CI environments
-    :timer.sleep(1000)
+    # Wait for LiveView to process the event and update the DOM
+    :timer.sleep(2000)
+
     session
+  end
+
+  @doc """
+  Waits for LiveView to be idle (no pending operations).
+  Uses a simple delay-based approach since checking phx-loading classes
+  via execute_script is unreliable (returns session, not value).
+  """
+  def wait_for_liveview_idle(session) do
+    # Simple approach: wait a fixed amount of time for LiveView to stabilize
+    # This is more reliable than trying to check for phx-loading classes
+    :timer.sleep(500)
+    session
+  end
+
+  @doc """
+  Asserts that the page has the given text, with retry.
+  More reliable than Wallaby.Browser.has_text? in CI environments.
+  """
+  def assert_has_text_with_retry(session, text, attempts \\ 20) do
+    if attempts <= 0 do
+      raise "Expected to find text '#{text}' but it was not found after retries"
+    end
+
+    if Wallaby.Browser.has_text?(session, text) do
+      session
+    else
+      :timer.sleep(500)
+      assert_has_text_with_retry(session, text, attempts - 1)
+    end
+  end
+
+  @doc """
+  Waits for any of the given texts to appear on the page.
+  Returns true if any text is found, false after all attempts exhausted.
+  """
+  def wait_for_any_text(session, texts, attempts \\ 20) when is_list(texts) do
+    if attempts <= 0 do
+      false
+    else
+      found = Enum.any?(texts, fn text -> Wallaby.Browser.has_text?(session, text) end)
+
+      if found do
+        true
+      else
+        :timer.sleep(500)
+        wait_for_any_text(session, texts, attempts - 1)
+      end
+    end
   end
 end

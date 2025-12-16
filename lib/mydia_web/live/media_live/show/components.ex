@@ -539,7 +539,7 @@ defmodule MydiaWeb.MediaLive.Show.Components do
 
               <%!-- Episodes list --%>
               <div class="bg-base-100 rounded-lg divide-y divide-base-200">
-                <%= for episode <- Enum.sort_by(episodes, & &1.episode_number, :asc) do %>
+                <%= for episode <- Enum.sort_by(episodes, & &1.episode_number, :desc) do %>
                   <% has_files = length(episode.media_files) > 0
                   is_expanded = MapSet.member?(@expanded_episodes, episode.id)
                   status = get_episode_status(episode) %>

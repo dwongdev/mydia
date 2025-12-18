@@ -99,11 +99,11 @@ defmodule MydiaWeb.CalendarLive.Index do
     start_date = Date.new!(socket.assigns.selected_year, socket.assigns.selected_month, 1)
     end_date = Date.end_of_month(start_date)
 
-    # Load episodes
-    episodes = Media.list_episodes_by_air_date(start_date, end_date)
+    # Load episodes (all, regardless of monitored status)
+    episodes = Media.list_episodes_by_air_date(start_date, end_date, monitored: nil)
 
-    # Load movies
-    movies = Media.list_movies_by_release_date(start_date, end_date)
+    # Load movies (all, regardless of monitored status)
+    movies = Media.list_movies_by_release_date(start_date, end_date, monitored: nil)
 
     # Combine and filter
     items =

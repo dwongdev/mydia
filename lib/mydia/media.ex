@@ -942,16 +942,25 @@ defmodule Mydia.Media do
 
   ## Options
     - `:preload` - List of associations to preload
-    - `:monitored` - Filter by media item monitored status (default: true)
+    - `:monitored` - Filter by media item monitored status (default: true, nil for all)
   """
   def list_episodes_by_air_date(start_date, end_date, opts \\ []) do
     monitored = Keyword.get(opts, :monitored, true)
 
-    Episode
-    |> join(:inner, [e], m in MediaItem, on: e.media_item_id == m.id)
-    |> where([e, m], not is_nil(e.air_date))
-    |> where([e, m], e.air_date >= ^start_date and e.air_date <= ^end_date)
-    |> where([e, m], m.monitored == ^monitored)
+    query =
+      Episode
+      |> join(:inner, [e], m in MediaItem, on: e.media_item_id == m.id)
+      |> where([e, m], not is_nil(e.air_date))
+      |> where([e, m], e.air_date >= ^start_date and e.air_date <= ^end_date)
+
+    query =
+      if is_nil(monitored) do
+        query
+      else
+        where(query, [e, m], m.monitored == ^monitored)
+      end
+
+    query
     |> select([e, m], %{
       id: e.id,
       type: "episode",
@@ -985,8 +994,9 @@ defmodule Mydia.Media do
         media_item_id: entry.media_item_id,
         media_item_title: entry.media_item_title,
         media_item_type: entry.media_item_type,
-        has_files: entry.has_files,
-        has_downloads: entry.has_downloads
+        # SQLite returns 0/1 for booleans, convert to proper Elixir booleans
+        has_files: entry.has_files == 1,
+        has_downloads: entry.has_downloads == 1
       )
     end)
   end
@@ -996,15 +1006,24 @@ defmodule Mydia.Media do
   Movies must have a release_date in their metadata field.
 
   ## Options
-    - `:monitored` - Filter by monitored status (default: true)
+    - `:monitored` - Filter by monitored status (default: true, nil for all)
   """
   def list_movies_by_release_date(start_date, end_date, opts \\ []) do
     monitored = Keyword.get(opts, :monitored, true)
 
-    MediaItem
-    |> where([m], m.type == "movie")
-    |> where([m], m.monitored == ^monitored)
-    |> where([m], ^Mydia.DB.json_is_not_null(:metadata, "$.release_date"))
+    query =
+      MediaItem
+      |> where([m], m.type == "movie")
+      |> where([m], ^Mydia.DB.json_is_not_null(:metadata, "$.release_date"))
+
+    query =
+      if is_nil(monitored) do
+        query
+      else
+        where(query, [m], m.monitored == ^monitored)
+      end
+
+    query
     |> Repo.all()
     |> Enum.filter(fn item ->
       case item.metadata do

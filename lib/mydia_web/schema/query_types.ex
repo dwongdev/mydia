@@ -8,6 +8,7 @@ defmodule MydiaWeb.Schema.QueryTypes do
   alias MydiaWeb.Schema.Resolvers.BrowseResolver
   alias MydiaWeb.Schema.Resolvers.DiscoveryResolver
   alias MydiaWeb.Schema.Resolvers.SearchResolver
+  alias MydiaWeb.Schema.Resolvers.ApiKeyResolver
 
   # Node interface for global node resolution with hierarchical navigation
   interface :node do
@@ -138,6 +139,22 @@ defmodule MydiaWeb.Schema.QueryTypes do
       arg(:types, list_of(:media_type))
       arg(:first, :integer, default_value: 20)
       resolve(&SearchResolver.search/3)
+    end
+  end
+
+  # API key queries
+  object :api_key_queries do
+    @desc "List all API keys for the current user"
+    field :api_keys, list_of(:api_key) do
+      resolve(&ApiKeyResolver.list_api_keys/3)
+    end
+  end
+
+  # Device queries
+  object :device_queries do
+    @desc "List all devices for the current user"
+    field :devices, list_of(:remote_device) do
+      resolve(&MydiaWeb.Schema.Resolvers.DeviceResolver.list_devices/3)
     end
   end
 

@@ -56,12 +56,12 @@ defmodule Mydia.RemoteAccess do
     encrypted_blob = <<encrypted.nonce::64>> <> encrypted.ciphertext
 
     # Create the config with the keypair
+    # Note: relay_url is read from METADATA_RELAY_URL env var at runtime
     %Config{}
     |> Config.changeset(%{
       instance_id: instance_id,
       static_public_key: public_key,
       static_private_key_encrypted: encrypted_blob,
-      relay_url: "https://relay.mydia.app",
       enabled: false
     })
     |> Repo.insert()
@@ -250,16 +250,32 @@ defmodule Mydia.RemoteAccess do
   Revokes a device, preventing future access.
   """
   def revoke_device(device) do
-    device
-    |> RemoteDevice.revoke_changeset()
-    |> Repo.update()
+    case device
+         |> RemoteDevice.revoke_changeset()
+         |> Repo.update() do
+      {:ok, updated_device} = result ->
+        # Publish device status change event
+        publish_device_event(updated_device, :revoked)
+        result
+
+      error ->
+        error
+    end
   end
 
   @doc """
   Deletes a device completely.
   """
   def delete_device(device) do
-    Repo.delete(device)
+    case Repo.delete(device) do
+      {:ok, deleted_device} = result ->
+        # Publish device status change event
+        publish_device_event(deleted_device, :deleted)
+        result
+
+      error ->
+        error
+    end
   end
 
   # Claim code management
@@ -430,5 +446,122 @@ defmodule Mydia.RemoteAccess do
       {:ok, %{connected: true, registered: true}} -> true
       _ -> false
     end
+  end
+
+  @doc """
+  Updates the instance's direct URLs and certificate fingerprint.
+  This should be called when the instance's reachable URLs or certificate changes.
+
+  ## Parameters
+
+  - `direct_urls` - List of direct URL strings
+  - `cert_fingerprint` - Certificate fingerprint (hex string with colons)
+  - `notify_relay?` - Whether to notify the relay service (default: true)
+
+  ## Examples
+
+      iex> update_direct_urls(["https://192-168-1-100.sslip.io:4000"], "A1:B2:C3:...", true)
+      {:ok, config}
+
+  """
+  def update_direct_urls(direct_urls, cert_fingerprint, notify_relay? \\ true)
+      when is_list(direct_urls) and is_binary(cert_fingerprint) do
+    # Update the config
+    with {:ok, config} <-
+           upsert_config(%{
+             direct_urls: direct_urls,
+             cert_fingerprint: cert_fingerprint
+           }) do
+      # Notify the relay connection if requested
+      if notify_relay? do
+        case Mydia.RemoteAccess.Relay.update_direct_urls(direct_urls) do
+          :ok -> {:ok, config}
+          error -> error
+        end
+      else
+        {:ok, config}
+      end
+    end
+  end
+
+  @doc """
+  Refreshes the instance's direct URLs by auto-detecting them.
+  This detects all available network interfaces and updates the stored URLs.
+
+  Returns {:ok, config} with the updated configuration, or {:error, reason}.
+
+  ## Examples
+
+      iex> refresh_direct_urls()
+      {:ok, %Config{direct_urls: ["https://192-168-1-100.sslip.io:4000"], ...}}
+
+  """
+  def refresh_direct_urls do
+    # Auto-detect direct URLs
+    direct_urls = Mydia.RemoteAccess.DirectUrls.detect_all()
+
+    # Ensure certificate exists and get fingerprint
+    case Mydia.RemoteAccess.Certificates.ensure_certificate() do
+      {:ok, _cert_path, _key_path, fingerprint} ->
+        update_direct_urls(direct_urls, fingerprint)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Updates the instance's direct URLs with the relay service.
+  This should be called when the instance's reachable URLs change
+  (e.g., after network configuration changes).
+
+  DEPRECATED: Use `update_direct_urls/3` instead.
+  """
+  def update_relay_urls(direct_urls) when is_list(direct_urls) do
+    # Update the config
+    with {:ok, _config} <- upsert_config(%{direct_urls: direct_urls}),
+         # Notify the relay connection
+         :ok <- Mydia.RemoteAccess.Relay.update_direct_urls(direct_urls) do
+      {:ok, direct_urls}
+    end
+  end
+
+  @doc """
+  Manually triggers a relay reconnection.
+  Useful for troubleshooting or forcing re-registration.
+  """
+  def reconnect_relay do
+    Mydia.RemoteAccess.Relay.reconnect()
+  end
+
+  # Subscription helpers
+
+  @doc """
+  Publishes a device status change event to GraphQL subscriptions.
+  """
+  def publish_device_event(device, event_type)
+      when event_type in [:connected, :disconnected, :revoked, :deleted] do
+    event_payload = %{
+      device: format_device_for_subscription(device),
+      event: event_type
+    }
+
+    Absinthe.Subscription.publish(
+      MydiaWeb.Endpoint,
+      event_payload,
+      device_status_changed: "device_status:#{device.user_id}"
+    )
+  end
+
+  # Format device struct for subscription payload
+  defp format_device_for_subscription(device) do
+    %{
+      id: device.id,
+      device_name: device.device_name,
+      platform: device.platform,
+      last_seen_at: device.last_seen_at,
+      revoked_at: device.revoked_at,
+      inserted_at: device.inserted_at
+    }
   end
 end

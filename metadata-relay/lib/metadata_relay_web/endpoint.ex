@@ -13,6 +13,10 @@ defmodule MetadataRelayWeb.Endpoint do
 
   socket("/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]])
 
+  # Relay WebSocket endpoints
+  socket("/relay/tunnel", MetadataRelayWeb.RelaySocket, websocket: true)
+  socket("/relay/client", MetadataRelayWeb.ClientTunnelSocket, websocket: true)
+
   # Serve at "/" the static files from "priv/static" directory.
   plug(Plug.Static,
     at: "/",

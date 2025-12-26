@@ -68,20 +68,20 @@ COPY config ./config
 COPY priv ./priv
 COPY lib ./lib
 COPY assets ./assets
-COPY clients ./clients
+COPY player ./player
 
 # Compile application
 RUN mix compile
 
 # Build Flutter web player
-RUN if [ -d "clients/player" ]; then \
-      cd clients/player && \
+RUN if [ -d "player" ]; then \
+      cd player && \
       flutter pub get && \
       flutter pub run build_runner build --delete-conflicting-outputs && \
       flutter build web --release --web-renderer canvaskit --base-href /player/ && \
-      mkdir -p ../../priv/static/player && \
-      cp -r build/web/* ../../priv/static/player/ && \
-      cd ../..; \
+      mkdir -p ../priv/static/player && \
+      cp -r build/web/* ../priv/static/player/ && \
+      cd ..; \
     fi
 
 # Build Phoenix assets
@@ -115,6 +115,7 @@ LABEL org.opencontainers.image.title="Mydia" \
 # Install runtime dependencies including LSIO-compatible tools
 # libpq is needed for PostgreSQL connections at runtime
 # sqlite provides the sqlite3 CLI for database inspection
+# openssl is needed for self-signed certificate generation
 RUN apk add --no-cache \
     sqlite \
     libpq \
@@ -124,7 +125,8 @@ RUN apk add --no-cache \
     fdk-aac \
     su-exec \
     tzdata \
-    shadow
+    shadow \
+    openssl
 
 # Create app user with default UID/GID (will be updated by entrypoint if needed)
 RUN addgroup -g 1000 mydia && \
@@ -160,8 +162,8 @@ ENV HOME=/app \
     PGID=1000 \
     TZ=UTC
 
-# Expose HTTP port
-EXPOSE 4000
+# Expose HTTP and HTTPS ports
+EXPOSE 4000 4443
 
 # Declare volumes following LSIO conventions
 VOLUME ["/config", "/data", "/media"]

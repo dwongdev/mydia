@@ -75,16 +75,18 @@ ${YELLOW}User Management:${NC}
   user reset-password <id> [--password=P]
                        Reset a user's password
 
-${YELLOW}Flutter Player (Docker):${NC}
+${YELLOW}Player (Flutter in Docker):${NC}
   flutter <args>       Run any flutter command in Docker container
   player setup         Install deps and run code generation
   player build         Build and copy web assets to Phoenix
-  player shell         Open shell in Flutter container
-  player logs          Follow Flutter dev server logs
-  player restart       Restart Flutter container (hot restart)
+  player hot           Start player in hot restart mode (port 3000)
+  player shell         Open shell in player container
+  player logs          Follow player build output
+  player restart       Restart player container
 
-Flutter hot reload is automatic! The dev server starts with './dev up -d'.
-Edit files in clients/player/lib/ and changes appear in browser instantly.
+${YELLOW}Player Development Modes:${NC}
+  Default (watch): Rebuilds on file change, access at http://localhost:4000/player
+  Hot restart:     Run './dev player hot' for instant updates at http://localhost:3000
 
 ${YELLOW}Docker Compose Commands:${NC}
   exec <service> <cmd> Execute command in running service
@@ -103,6 +105,7 @@ ${YELLOW}Examples:${NC}
   ./dev user list                # List all users
   ./dev user add me@example.com myuser --password=secret123 --role=admin
   ./dev user reset-password admin --password=newpassword
+  ./dev player hot               # Start Flutter with hot restart
   ./dev player build             # Build Flutter web assets for prod
   ./dev player logs              # Follow Flutter dev server logs
 
@@ -208,47 +211,56 @@ case "$COMMAND" in
     # Flutter commands (runs in Docker container)
     flutter)
         echo -e "${GREEN}Running flutter command in Docker container...${NC}"
-        docker compose exec flutter flutter "$@" || \
-            docker compose run --rm flutter flutter "$@"
+        docker compose exec player flutter "$@" || \
+            docker compose run --rm player flutter "$@"
         ;;
 
     player)
         case "$1" in
             logs)
-                echo -e "${GREEN}Following Flutter dev server logs...${NC}"
-                docker compose logs -f flutter
+                echo -e "${GREEN}Following player build logs...${NC}"
+                docker compose logs -f player
                 ;;
             build)
-                echo -e "${GREEN}Building Flutter web assets...${NC}"
-                docker compose exec flutter flutter build web --base-href /player/ || \
-                    docker compose run --rm flutter flutter build web --base-href /player/
+                echo -e "${GREEN}Building player web assets...${NC}"
+                docker compose exec player flutter build web --base-href /player/ || \
+                    docker compose run --rm player flutter build web --base-href /player/
                 echo -e "${GREEN}Copying assets to priv/static/player...${NC}"
                 rm -rf priv/static/player
                 mkdir -p priv/static/player
-                cp -r clients/player/build/web/* priv/static/player/
-                echo -e "${GREEN}Flutter web assets built successfully!${NC}"
+                cp -r player/build/web/* priv/static/player/
+                echo -e "${GREEN}Player web assets built successfully!${NC}"
+                ;;
+            hot)
+                echo -e "${GREEN}Starting player in hot restart mode...${NC}"
+                # Stop existing player container if running
+                docker compose stop player 2>/dev/null || true
+                # Rebuild to ensure latest Dockerfile changes
+                docker compose build player
+                # Start with hot reload mode
+                PLAYER_DEV_MODE=hot docker compose up player
                 ;;
             setup)
-                echo -e "${GREEN}Setting up Flutter project (pub get + build_runner)...${NC}"
-                docker compose exec flutter flutter pub get || \
-                    docker compose run --rm flutter flutter pub get
-                docker compose exec flutter flutter pub run build_runner build --delete-conflicting-outputs || \
-                    docker compose run --rm flutter flutter pub run build_runner build --delete-conflicting-outputs
-                echo -e "${GREEN}Flutter project setup complete!${NC}"
+                echo -e "${GREEN}Setting up player project (pub get + build_runner)...${NC}"
+                docker compose exec player flutter pub get || \
+                    docker compose run --rm player flutter pub get
+                docker compose exec player flutter pub run build_runner build --delete-conflicting-outputs || \
+                    docker compose run --rm player flutter pub run build_runner build --delete-conflicting-outputs
+                echo -e "${GREEN}Player project setup complete!${NC}"
                 ;;
             shell)
-                echo -e "${GREEN}Opening shell in Flutter container...${NC}"
-                docker compose exec flutter bash || \
-                    docker compose run --rm flutter bash
+                echo -e "${GREEN}Opening shell in player container...${NC}"
+                docker compose exec player bash || \
+                    docker compose run --rm player bash
                 ;;
             restart)
-                echo -e "${GREEN}Restarting Flutter dev server...${NC}"
-                docker compose restart flutter
-                echo -e "${GREEN}Flutter dev server restarted. Follow logs with: ./dev player logs${NC}"
+                echo -e "${GREEN}Restarting player dev server...${NC}"
+                docker compose restart player
+                echo -e "${GREEN}Player dev server restarted. Follow logs with: ./dev player logs${NC}"
                 ;;
             *)
                 echo -e "${RED}Error: Unknown player command: $1${NC}"
-                echo "Usage: ./dev player <logs|build|setup|shell|restart>"
+                echo "Usage: ./dev player <logs|build|hot|setup|shell|restart>"
                 exit 1
                 ;;
         esac

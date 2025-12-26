@@ -132,4 +132,66 @@ defmodule MydiaWeb.Schema.CommonTypes do
     field :permissions, non_null(list_of(non_null(:string))),
       description: "List of granted permissions"
   end
+
+  @desc "API key for programmatic access"
+  object :api_key do
+    field :id, non_null(:id), description: "API key ID"
+    field :name, non_null(:string), description: "User-given name"
+    field :key_prefix, non_null(:string), description: "Key prefix for identification"
+
+    field :permissions, non_null(list_of(non_null(:string))),
+      description: "List of granted permissions"
+
+    field :last_used_at, :datetime, description: "Last time the key was used"
+    field :expires_at, :datetime, description: "Optional expiration timestamp"
+    field :revoked_at, :datetime, description: "Revocation timestamp"
+    field :inserted_at, non_null(:datetime), description: "Creation timestamp"
+  end
+
+  @desc "Result of creating an API key"
+  object :create_api_key_result do
+    field :api_key, non_null(:api_key), description: "The created API key"
+    field :key, non_null(:string), description: "The plain API key (shown only once)"
+  end
+
+  @desc "Input for login mutation"
+  input_object :login_input do
+    field :username, non_null(:string), description: "Username or email"
+    field :password, non_null(:string), description: "User password"
+    field :device_id, non_null(:string), description: "Unique device identifier"
+    field :device_name, non_null(:string), description: "Human-readable device name"
+    field :platform, non_null(:string), description: "Platform (ios, android, web)"
+  end
+
+  @desc "Result of login mutation"
+  object :login_result do
+    field :token, non_null(:string), description: "JWT authentication token"
+
+    field :user, non_null(:user), description: "Authenticated user information"
+    field :expires_in, non_null(:integer), description: "Token expiration in seconds"
+  end
+
+  @desc "User information"
+  object :user do
+    field :id, non_null(:id), description: "User ID"
+    field :username, :string, description: "Username"
+    field :email, :string, description: "Email address"
+    field :display_name, :string, description: "Display name"
+  end
+
+  @desc "A remote device paired to a user account"
+  object :remote_device do
+    field :id, non_null(:id), description: "Device ID"
+    field :device_name, non_null(:string), description: "Human-readable device name"
+    field :platform, non_null(:string), description: "Platform (ios, android, web)"
+    field :last_seen_at, :datetime, description: "Last time device was active"
+    field :is_revoked, non_null(:boolean), description: "Whether device has been revoked"
+    field :created_at, non_null(:datetime), description: "When device was paired"
+  end
+
+  @desc "Result of revoking a device"
+  object :revoke_device_result do
+    field :success, non_null(:boolean), description: "Whether the revoke operation succeeded"
+    field :device, :remote_device, description: "The revoked device"
+  end
 end

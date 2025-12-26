@@ -1,7 +1,10 @@
 defmodule Mydia.RemoteAccess.Config do
   @moduledoc """
   Schema for remote access instance configuration.
-  Stores the instance identity and relay service configuration.
+  Stores the instance identity for remote access.
+
+  Note: The relay URL is read from the METADATA_RELAY_URL environment variable
+  at runtime via `Mydia.Metadata.metadata_relay_url/0`, not stored in the database.
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -13,9 +16,9 @@ defmodule Mydia.RemoteAccess.Config do
     field :instance_id, :string
     field :static_public_key, :binary
     field :static_private_key_encrypted, :binary
-    field :relay_url, :string
     field :enabled, :boolean, default: false
-    field :direct_urls, :string
+    field :direct_urls, {:array, :string}, default: []
+    field :cert_fingerprint, :string
 
     timestamps(type: :utc_datetime)
   end
@@ -29,18 +32,16 @@ defmodule Mydia.RemoteAccess.Config do
       :instance_id,
       :static_public_key,
       :static_private_key_encrypted,
-      :relay_url,
       :enabled,
-      :direct_urls
+      :direct_urls,
+      :cert_fingerprint
     ])
     |> validate_required([
       :instance_id,
       :static_public_key,
-      :static_private_key_encrypted,
-      :relay_url
+      :static_private_key_encrypted
     ])
     |> validate_length(:instance_id, min: 1, max: 255)
-    |> validate_format(:relay_url, ~r/^https?:\/\/.+/, message: "must be a valid URL")
     |> unique_constraint(:instance_id)
   end
 

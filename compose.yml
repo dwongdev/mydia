@@ -64,29 +64,24 @@ services:
       start_period: 40s
       retries: 3
 
-  flutter:
-    image: ghcr.io/cirruslabs/flutter:stable
-    container_name: mydia_flutter
-    working_dir: /app/clients/player
+  player:
+    build:
+      context: player
+      dockerfile: Dockerfile.dev
+    container_name: mydia_player
     environment:
-      PUB_CACHE: /app/clients/player/.pub-cache
-    volumes:
-      - .:/app
-      - flutter_pub_cache:/app/clients/player/.pub-cache
+      PUB_CACHE: /app/player/.pub-cache
+      # Set to 'hot' for hot restart mode, 'watch' for file-watch rebuild mode
+      PLAYER_DEV_MODE: ${PLAYER_DEV_MODE:-watch}
     ports:
       - "3000:3000"
-    # Flutter web dev with file watching, auto-rebuild, and live reload
-    command: ["bash", "-c", "set -e; apt-get update -qq && apt-get install -y -qq inotify-tools > /dev/null 2>&1; flutter pub get; echo 'Initial Flutter web build...'; flutter build web --profile --dart-define=Dart2jsOptimization=O0 --base-href /player/ 2>&1; RELOAD_TRIGGER=/tmp/reload_trigger; echo 0 > $$RELOAD_TRIGGER; inject_livereload() { if [ -f build/web/index.html ]; then sed -i 's|</body>|<script>(function(){var es=new EventSource(\"http://\"+location.hostname+\":3000/livereload\");es.onmessage=function(){location.reload()};es.onerror=function(){es.close()}})();</script></body>|' build/web/index.html; fi; }; sync_to_phoenix() { rm -rf /app/priv/static/player && mkdir -p /app/priv/static/player && cp -r build/web/* /app/priv/static/player/; }; inject_livereload; sync_to_phoenix; python3 scripts/livereload_server.py & sleep 2; echo ''; echo '================================================='; echo 'Flutter dev server ready with LIVE RELOAD!'; echo 'Edit files and browser will refresh automatically'; echo 'Files synced to priv/static/player/'; echo '================================================='; echo ''; while true; do inotifywait -r -e modify,create,delete --exclude '\\.dart_tool|build|\\.git' lib/ 2>/dev/null; echo ''; echo '>>> File change detected, rebuilding...'; if flutter build web --profile --dart-define=Dart2jsOptimization=O0 --base-href /player/ 2>&1; then inject_livereload; sync_to_phoenix; echo '>>> Build complete! Synced to Phoenix. Reloading browser...'; date +%s > $$RELOAD_TRIGGER; else echo '>>> Build FAILED - check errors above'; fi; done"]
+    volumes:
+      - .:/app
+      - player_pub_cache:/app/player/.pub-cache
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
-      interval: 30s
-      timeout: 3s
-      start_period: 120s
-      retries: 3
 
 volumes:
-  flutter_pub_cache:
+  player_pub_cache:
     driver: local
   # Named volumes for caching
   build_cache:

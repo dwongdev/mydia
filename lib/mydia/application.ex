@@ -38,6 +38,7 @@ defmodule Mydia.Application do
         Mydia.Streaming.HlsSessionSupervisor,
         Mydia.CrashReporter.Queue,
         Mydia.RemoteAccess.ClaimRateLimiter,
+        Mydia.Accounts.ApiKeyRateLimiter,
         {Registry, keys: :unique, name: Mydia.DynamicSupervisorRegistry},
         {DynamicSupervisor,
          name: {:via, Registry, {Mydia.DynamicSupervisorRegistry, :relay}}, strategy: :one_for_one}

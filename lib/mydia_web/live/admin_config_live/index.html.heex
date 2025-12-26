@@ -144,56 +144,12 @@
         <% end %>
         <%!-- Remote Access Tab --%>
         <%= if @active_tab == "remote_access" do %>
-          <div class="p-6 space-y-6">
-            <div class="prose max-w-none mb-6">
-              <p class="text-base-content/70">
-                Configure remote access to allow mobile apps and external devices to connect to your Mydia instance.
-              </p>
-            </div>
-
-            <div class="grid gap-6 md:grid-cols-2">
-              <%!-- Remote Access Settings Card --%>
-              <a
-                href="/admin/settings/remote-access"
-                class="card bg-base-200 hover:bg-base-300 transition-colors cursor-pointer"
-              >
-                <div class="card-body">
-                  <div class="flex items-center gap-4">
-                    <div class="bg-primary/10 p-3 rounded-lg">
-                      <.icon name="hero-signal" class="w-8 h-8 text-primary" />
-                    </div>
-                    <div class="flex-1">
-                      <h3 class="card-title text-lg">Remote Access Settings</h3>
-                      <p class="text-base-content/70 text-sm">
-                        Enable remote access, view connection details, and generate pairing codes for new devices.
-                      </p>
-                    </div>
-                    <.icon name="hero-chevron-right" class="w-5 h-5 text-base-content/50" />
-                  </div>
-                </div>
-              </a>
-
-              <%!-- Connected Devices Card --%>
-              <a
-                href="/admin/devices"
-                class="card bg-base-200 hover:bg-base-300 transition-colors cursor-pointer"
-              >
-                <div class="card-body">
-                  <div class="flex items-center gap-4">
-                    <div class="bg-secondary/10 p-3 rounded-lg">
-                      <.icon name="hero-device-phone-mobile" class="w-8 h-8 text-secondary" />
-                    </div>
-                    <div class="flex-1">
-                      <h3 class="card-title text-lg">Connected Devices</h3>
-                      <p class="text-base-content/70 text-sm">
-                        View and manage devices that have been paired with your Mydia instance.
-                      </p>
-                    </div>
-                    <.icon name="hero-chevron-right" class="w-5 h-5 text-base-content/50" />
-                  </div>
-                </div>
-              </a>
-            </div>
+          <div class="p-6">
+            <.live_component
+              module={MydiaWeb.AdminConfigLive.RemoteAccessComponent}
+              id="remote-access"
+              current_user={@current_user}
+            />
           </div>
         <% end %>
       </div>

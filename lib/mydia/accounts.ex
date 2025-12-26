@@ -212,7 +212,8 @@ defmodule Mydia.Accounts do
   end
 
   @doc """
-  Verifies an API key and returns the associated user.
+  Verifies an API key and returns the associated user and API key.
+  Returns {:error, reason} if the key is invalid, expired, or revoked.
   """
   def verify_api_key(key) when is_binary(key) do
     # Find all API keys and verify against them
@@ -222,7 +223,8 @@ defmodule Mydia.Accounts do
     |> preload(:user)
     |> Repo.all()
     |> Enum.find(fn api_key ->
-      not_expired?(api_key) and Argon2.verify_pass(key, api_key.key_hash)
+      not_revoked?(api_key) and not_expired?(api_key) and
+        Argon2.verify_pass(key, api_key.key_hash)
     end)
     |> case do
       nil ->
@@ -231,7 +233,7 @@ defmodule Mydia.Accounts do
       api_key ->
         # Update last used timestamp
         update_api_key_last_used(api_key)
-        {:ok, api_key.user}
+        {:ok, api_key.user, api_key}
     end
   end
 
@@ -240,15 +242,28 @@ defmodule Mydia.Accounts do
   @doc """
   Creates an API key for a user.
   Returns {:ok, api_key, plain_key} where plain_key is the unhashed key to show to the user.
+
+  ## Options
+    - `:name` - User-given name for the key (required)
+    - `:permissions` - List of permissions (defaults to ["read", "write"])
+    - `:expires_at` - Optional expiration datetime
   """
   def create_api_key(user_id, attrs \\ %{}) do
-    # Generate a random API key
+    # Generate API key with mydia_ak_ prefix
     plain_key = generate_api_key()
+
+    # Extract the prefix for storage (first 8 chars after mydia_ak_)
+    key_prefix = extract_key_prefix(plain_key)
+
+    # Default permissions to read and write
+    permissions = Map.get(attrs, :permissions, ["read", "write"])
 
     attrs_with_key =
       attrs
       |> Map.put(:user_id, user_id)
       |> Map.put(:key, plain_key)
+      |> Map.put(:key_prefix, key_prefix)
+      |> Map.put(:permissions, permissions)
 
     case %ApiKey{}
          |> ApiKey.changeset(attrs_with_key)
@@ -259,6 +274,15 @@ defmodule Mydia.Accounts do
       {:error, changeset} ->
         {:error, changeset}
     end
+  end
+
+  @doc """
+  Revokes an API key, preventing future use.
+  """
+  def revoke_api_key(%ApiKey{} = api_key) do
+    api_key
+    |> ApiKey.revoke_changeset()
+    |> Repo.update()
   end
 
   @doc """
@@ -290,15 +314,52 @@ defmodule Mydia.Accounts do
     DateTime.compare(DateTime.utc_now(), expires_at) == :lt
   end
 
+  defp not_revoked?(%ApiKey{revoked_at: nil}), do: true
+  defp not_revoked?(%ApiKey{revoked_at: _}), do: false
+
   defp update_api_key_last_used(api_key) do
     api_key
     |> ApiKey.used_changeset()
     |> Repo.update()
   end
 
-  # Generate a random API key (32 bytes = 256 bits of entropy)
+  # Generate a random API key with mydia_ak_ prefix
+  # Format: mydia_ak_ + 32 random alphanumeric chars
   defp generate_api_key do
-    :crypto.strong_rand_bytes(32)
-    |> Base.url_encode64(padding: false)
+    random_part =
+      :crypto.strong_rand_bytes(24)
+      |> Base.encode64()
+      |> binary_part(0, 32)
+      |> String.replace(~r/[^A-Za-z0-9]/, "")
+      |> String.slice(0, 32)
+
+    # Ensure we have exactly 32 alphanumeric chars
+    random_part =
+      if String.length(random_part) < 32 do
+        # Pad with more random chars if needed
+        padding =
+          :crypto.strong_rand_bytes(32)
+          |> Base.encode64()
+          |> String.replace(~r/[^A-Za-z0-9]/, "")
+
+        (random_part <> padding)
+        |> String.slice(0, 32)
+      else
+        random_part
+      end
+
+    "mydia_ak_#{random_part}"
+  end
+
+  # Extract key prefix for display (mydia_ak_ + first 8 chars)
+  defp extract_key_prefix(key) do
+    case String.split(key, "_", parts: 3) do
+      ["mydia", "ak", rest] ->
+        "mydia_ak_#{String.slice(rest, 0, 8)}"
+
+      _other ->
+        # Fallback for unexpected format
+        String.slice(key, 0, 17)
+    end
   end
 end

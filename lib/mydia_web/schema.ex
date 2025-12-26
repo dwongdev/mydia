@@ -29,14 +29,20 @@ defmodule MydiaWeb.Schema do
     import_fields(:browse_queries)
     import_fields(:discovery_queries)
     import_fields(:search_queries)
+    import_fields(:api_key_queries)
+    import_fields(:device_queries)
   end
 
   mutation do
     import_fields(:playback_mutations)
     import_fields(:remote_access_mutations)
+    import_fields(:api_key_mutations)
+    import_fields(:auth_mutations)
+    import_fields(:device_mutations)
   end
 
   subscription do
     import_fields(:playback_subscriptions)
+    import_fields(:device_subscriptions)
   end
 end

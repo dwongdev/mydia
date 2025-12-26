@@ -153,7 +153,9 @@ defmodule MydiaWeb.RemoteAccessSettingsLive.IndexTest do
     end
 
     test "displays relay URL", %{view: view} do
-      assert has_element?(view, "input[value*='relay.mydia.app']")
+      # Relay URL comes from METADATA_RELAY_URL env var
+      expected_url = Mydia.Metadata.metadata_relay_url()
+      assert has_element?(view, "input[value='#{expected_url}']")
     end
 
     test "displays QR code", %{view: view} do

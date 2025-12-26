@@ -1,0 +1,114 @@
+defmodule Mydia.Accounts.ApiKeyRateLimiterTest do
+  use ExUnit.Case, async: false
+
+  alias Mydia.Accounts.ApiKeyRateLimiter
+
+  setup do
+    # Start the rate limiter if it's not already running
+    case Process.whereis(ApiKeyRateLimiter) do
+      nil -> start_supervised!(ApiKeyRateLimiter)
+      _pid -> :ok
+    end
+
+    # Clean up any previous test data
+    ApiKeyRateLimiter.reset_rate_limit("test-ip-1")
+    ApiKeyRateLimiter.reset_rate_limit("test-ip-2")
+
+    :ok
+  end
+
+  describe "check_rate_limit/1" do
+    test "allows requests when no previous attempts" do
+      assert :ok = ApiKeyRateLimiter.check_rate_limit("192.168.1.1")
+    end
+
+    test "allows requests under the limit" do
+      ip = "192.168.1.2"
+
+      # Make 9 failed attempts (limit is 10)
+      for _i <- 1..9 do
+        ApiKeyRateLimiter.record_failed_attempt(ip)
+      end
+
+      assert :ok = ApiKeyRateLimiter.check_rate_limit(ip)
+    end
+
+    test "blocks requests after exceeding limit" do
+      ip = "192.168.1.3"
+
+      # Make 10 failed attempts (max limit)
+      for _i <- 1..10 do
+        ApiKeyRateLimiter.record_failed_attempt(ip)
+      end
+
+      assert {:error, :rate_limited} = ApiKeyRateLimiter.check_rate_limit(ip)
+    end
+
+    test "different IPs are tracked independently" do
+      # IP1 makes 10 attempts
+      for _i <- 1..10 do
+        ApiKeyRateLimiter.record_failed_attempt("192.168.1.4")
+      end
+
+      # IP1 should be blocked
+      assert {:error, :rate_limited} = ApiKeyRateLimiter.check_rate_limit("192.168.1.4")
+
+      # IP2 should still be allowed
+      assert :ok = ApiKeyRateLimiter.check_rate_limit("192.168.1.5")
+    end
+  end
+
+  describe "record_failed_attempt/1" do
+    test "records failed attempts" do
+      ip = "192.168.1.6"
+
+      assert :ok = ApiKeyRateLimiter.check_rate_limit(ip)
+
+      # Record one failed attempt
+      ApiKeyRateLimiter.record_failed_attempt(ip)
+
+      # Should still be allowed (under limit)
+      assert :ok = ApiKeyRateLimiter.check_rate_limit(ip)
+    end
+
+    test "increments attempt counter" do
+      ip = "192.168.1.7"
+
+      # Record 10 attempts
+      for _i <- 1..10 do
+        ApiKeyRateLimiter.record_failed_attempt(ip)
+      end
+
+      # Should now be blocked
+      assert {:error, :rate_limited} = ApiKeyRateLimiter.check_rate_limit(ip)
+    end
+  end
+
+  describe "reset_rate_limit/1" do
+    test "resets the rate limit for an IP" do
+      ip = "192.168.1.8"
+
+      # Make 10 failed attempts
+      for _i <- 1..10 do
+        ApiKeyRateLimiter.record_failed_attempt(ip)
+      end
+
+      # Should be blocked
+      assert {:error, :rate_limited} = ApiKeyRateLimiter.check_rate_limit(ip)
+
+      # Reset the limit
+      ApiKeyRateLimiter.reset_rate_limit(ip)
+
+      # Should now be allowed
+      assert :ok = ApiKeyRateLimiter.check_rate_limit(ip)
+    end
+  end
+
+  describe "cleanup_expired/0" do
+    test "removes expired entries" do
+      # This test would require mocking time or waiting for the window to expire
+      # For now, just verify the function can be called without error
+      assert :ok = ApiKeyRateLimiter.cleanup_expired()
+    end
+  end
+end

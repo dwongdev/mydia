@@ -84,11 +84,5 @@ defmodule MydiaWeb.Endpoint do
   plug Plug.Head
   plug Plug.Session, @session_options
 
-  # In dev mode, proxy /player/* to Flutter dev server with auth injection
-  # Must be after Plug.Session so we can read the auth token from session
-  if code_reloading? do
-    plug MydiaWeb.Plugs.FlutterDevProxy
-  end
-
   plug MydiaWeb.Router
 end

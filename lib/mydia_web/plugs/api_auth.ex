@@ -30,15 +30,32 @@ defmodule MydiaWeb.Plugs.ApiAuth do
         conn
 
       api_key ->
-        case Accounts.verify_api_key(api_key) do
-          {:ok, user} ->
-            # Store user in the connection for later use
-            Guardian.Plug.put_current_resource(conn, user)
+        ip_address = get_ip_address(conn)
 
-          {:error, :invalid_key} ->
+        # Check rate limit
+        case Mydia.Accounts.ApiKeyRateLimiter.check_rate_limit(ip_address) do
+          :ok ->
+            case Accounts.verify_api_key(api_key) do
+              {:ok, user, _api_key_record} ->
+                # Reset rate limit on successful authentication
+                Mydia.Accounts.ApiKeyRateLimiter.reset_rate_limit(ip_address)
+                # Store user in the connection for later use
+                Guardian.Plug.put_current_resource(conn, user)
+
+              {:error, :invalid_key} ->
+                # Record failed attempt
+                Mydia.Accounts.ApiKeyRateLimiter.record_failed_attempt(ip_address)
+
+                conn
+                |> put_status(401)
+                |> json(%{error: "Unauthorized", message: "Invalid API key"})
+                |> halt()
+            end
+
+          {:error, :rate_limited} ->
             conn
-            |> put_status(401)
-            |> json(%{error: "Unauthorized", message: "Invalid API key"})
+            |> put_status(429)
+            |> json(%{error: "Too Many Requests", message: "Rate limit exceeded"})
             |> halt()
         end
     end
@@ -56,6 +73,15 @@ defmodule MydiaWeb.Plugs.ApiAuth do
           %{"api_key" => key} -> key
           _ -> nil
         end
+    end
+  end
+
+  defp get_ip_address(conn) do
+    # Get the remote IP address from the connection
+    case conn.remote_ip do
+      {a, b, c, d} -> "#{a}.#{b}.#{c}.#{d}"
+      {a, b, c, d, e, f, g, h} -> "#{a}:#{b}:#{c}:#{d}:#{e}:#{f}:#{g}:#{h}"
+      _ -> "unknown"
     end
   end
 end

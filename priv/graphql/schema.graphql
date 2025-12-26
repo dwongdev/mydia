@@ -40,6 +40,12 @@ type RootQueryType {
 
   "Search across movies and TV shows"
   search(query: String!, types: [MediaType], first: Int): SearchResults
+
+  "List all API keys for the current user"
+  apiKeys: [ApiKey]
+
+  "List all devices for the current user"
+  devices: [RemoteDevice]
 }
 
 type RootMutationType {
@@ -69,11 +75,74 @@ type RootMutationType {
 
   "Refresh a media access token before it expires"
   refreshMediaToken(token: String!): MediaToken
+
+  "Create a new API key for the current user"
+  createApiKey(name: String!, permissions: [String!], expiresAt: DateTime): CreateApiKeyResult
+
+  "Revoke an API key"
+  revokeApiKey(id: ID!): ApiKey
+
+  "Delete an API key"
+  deleteApiKey(id: ID!): Boolean
+
+  "Login with username\/password and device information"
+  login(input: LoginInput!): LoginResult
+
+  "Revoke a device"
+  revokeDevice(id: ID!): RevokeDeviceResult
 }
 
 type RootSubscriptionType {
   "Subscribe to playback progress updates for a specific content item"
   progressUpdated(nodeId: ID!): Progress
+
+  "Subscribe to device status changes for a user"
+  deviceStatusChanged(userId: ID!): DeviceStatusEvent
+}
+
+"Device status change event"
+type DeviceStatusEvent {
+  "The device that changed status"
+  device: Device!
+
+  "The type of status change"
+  event: DeviceEventType!
+}
+
+"Remote device information"
+type Device {
+  "Device ID"
+  id: ID!
+
+  "User-friendly device name"
+  deviceName: String!
+
+  "Platform (ios, android, web)"
+  platform: String!
+
+  "Last time device connected"
+  lastSeenAt: DateTime
+
+  "Revocation timestamp if revoked"
+  revokedAt: DateTime
+
+  "Initial pairing timestamp"
+  insertedAt: DateTime!
+}
+
+"Type of device status event"
+enum DeviceEventType {
+  "Device connected"
+  CONNECTED
+
+  "Device disconnected (no heartbeat)"
+  DISCONNECTED
+
+  "Device was revoked by user"
+  REVOKED
+
+  "Device was deleted"
+  DELETED
 }
 
 "A node that can be fetched by global ID with hierarchical navigation"
@@ -511,6 +580,117 @@ type MediaToken {
 
   "List of granted permissions"
   permissions: [String!]!
+}
+
+"API key for programmatic access"
+type ApiKey {
+  "API key ID"
+  id: ID!
+
+  "User-given name"
+  name: String!
+
+  "Key prefix for identification"
+  keyPrefix: String!
+
+  "List of granted permissions"
+  permissions: [String!]!
+
+  "Last time the key was used"
+  lastUsedAt: DateTime
+
+  "Optional expiration timestamp"
+  expiresAt: DateTime
+
+  "Revocation timestamp"
+  revokedAt: DateTime
+
+  "Creation timestamp"
+  insertedAt: DateTime!
+}
+
+"Result of creating an API key"
+type CreateApiKeyResult {
+  "The created API key"
+  apiKey: ApiKey!
+
+  "The plain API key (shown only once)"
+  key: String!
+}
+
+"Input for login mutation"
+input LoginInput {
+  "Username or email"
+  username: String!
+
+  "User password"
+  password: String!
+
+  "Unique device identifier"
+  deviceId: String!
+
+  "Human-readable device name"
+  deviceName: String!
+
+  "Platform (ios, android, web)"
+  platform: String!
+}
+
+"Result of login mutation"
+type LoginResult {
+  "JWT authentication token"
+  token: String!
+
+  "Authenticated user information"
+  user: User!
+
+  "Token expiration in seconds"
+  expiresIn: Int!
+}
+
+"User information"
+type User {
+  "User ID"
+  id: ID!
+
+  "Username"
+  username: String
+
+  "Email address"
+  email: String
+
+  "Display name"
+  displayName: String
+}
+
+"A remote device paired to a user account"
+type RemoteDevice {
+  "Device ID"
+  id: ID!
+
+  "Human-readable device name"
+  deviceName: String!
+
+  "Platform (ios, android, web)"
+  platform: String!
+
+  "Last time device was active"
+  lastSeenAt: DateTime
+
+  "Whether device has been revoked"
+  isRevoked: Boolean!
+
+  "When device was paired"
+  createdAt: DateTime!
+}
+
+"Result of revoking a device"
+type RevokeDeviceResult {
+  "Whether the revoke operation succeeded"
+  success: Boolean!
+
+  "The revoked device"
+  device: RemoteDevice
 }
 
 "Media content types"

@@ -9,4 +9,7 @@ end
 
 Ecto.Migrator.run(MetadataRelay.Repo, :up, all: true)
 
+# Set sandbox mode for database transactions
+Ecto.Adapters.SQL.Sandbox.mode(MetadataRelay.Repo, :manual)
+
 ExUnit.start()

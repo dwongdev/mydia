@@ -209,6 +209,41 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     end
   end
 
+  # Remote Access Component handlers
+  @impl true
+  def handle_info({:remote_access_countdown_tick, component_id}, socket) do
+    # Schedule the tick and update the component
+    Process.send_after(self(), {:remote_access_do_countdown_tick, component_id}, 1000)
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:remote_access_do_countdown_tick, component_id}, socket) do
+    send_update(MydiaWeb.AdminConfigLive.RemoteAccessComponent,
+      id: component_id,
+      countdown_tick: true
+    )
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:remote_access_refresh_relay, component_id}, socket) do
+    # Give the relay a moment to reconnect, then update the component
+    Process.send_after(self(), {:remote_access_do_refresh_relay, component_id}, 1000)
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:remote_access_do_refresh_relay, component_id}, socket) do
+    send_update(MydiaWeb.AdminConfigLive.RemoteAccessComponent,
+      id: component_id,
+      refresh_relay: true
+    )
+
+    {:noreply, socket}
+  end
+
   @impl true
   def handle_event("change_tab", %{"tab" => tab}, socket) do
     {:noreply, push_patch(socket, to: ~p"/admin/config?tab=#{tab}")}
@@ -2208,6 +2243,20 @@ defmodule MydiaWeb.AdminConfigLive.Index do
          |> assign(:testing_media_server_connection, false)
          |> put_flash(:error, "Connection test timed out after 10 seconds")}
     end
+  end
+
+  # Test event to verify LiveView events are working
+  def handle_event("test_parent_event", _params, socket) do
+    require Logger
+    Logger.warning("TEST_PARENT_EVENT RECEIVED!")
+    {:noreply, put_flash(socket, :info, "Test event received!")}
+  end
+
+  # Catch-all for debugging unknown events
+  def handle_event(event, params, socket) do
+    require Logger
+    Logger.warning("UNKNOWN EVENT in AdminConfigLive: #{event}, params: #{inspect(params)}")
+    {:noreply, socket}
   end
 
   ## Private Functions

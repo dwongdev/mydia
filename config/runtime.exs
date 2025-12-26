@@ -143,6 +143,13 @@ if config_env() == :prod do
         |> List.to_tuple()
     end
 
+  # HTTPS port configuration
+  # Use 4443 to avoid conflict with metadata-relay on 4001
+  https_port = String.to_integer(System.get_env("HTTPS_PORT") || "4443")
+
+  # Generate or load self-signed certificate for direct HTTPS access
+  {:ok, cert_path, key_path, _fingerprint} = Mydia.RemoteAccess.Certificates.ensure_certificate()
+
   config :mydia, MydiaWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [
@@ -152,6 +159,14 @@ if config_env() == :prod do
       # for details about using IPv6 vs IPv4 and loopback vs public addresses.
       ip: ip_tuple,
       port: port
+    ],
+    https: [
+      # HTTPS endpoint using self-signed certificate
+      ip: ip_tuple,
+      port: https_port,
+      cipher_suite: :strong,
+      certfile: cert_path,
+      keyfile: key_path
     ],
     secret_key_base: secret_key_base,
     check_origin: check_origin
@@ -237,6 +252,42 @@ if config_env() == :prod do
     playback_enabled: playback_enabled,
     cardigann_enabled: cardigann_enabled,
     import_lists_enabled: import_lists_enabled
+
+  # Helper function for safe integer parsing
+  parse_integer = fn value, default ->
+    case value do
+      nil -> default
+      str when is_binary(str) ->
+        case Integer.parse(str) do
+          {int, _} -> int
+          :error -> default
+        end
+    end
+  end
+
+  # External port override (used for sslip.io URL generation)
+  # Default to HTTPS port for secure direct URLs in production
+  external_port = parse_integer.(System.get_env("EXTERNAL_PORT"), https_port)
+
+  # Manual external URL override
+  external_url = System.get_env("EXTERNAL_URL")
+
+  # Additional direct URLs (comma-separated list)
+  additional_direct_urls =
+    case System.get_env("ADDITIONAL_DIRECT_URLS") do
+      nil -> []
+      "" -> []
+      urls -> String.split(urls, ",", trim: true)
+    end
+
+  # Data directory for certificate storage
+  data_dir = System.get_env("MYDIA_DATA_DIR") || "priv/data"
+
+  config :mydia, :direct_urls,
+    external_port: external_port,
+    external_url: external_url,
+    additional_direct_urls: additional_direct_urls,
+    data_dir: data_dir
 end
 
 # FlareSolverr configuration (all environments)

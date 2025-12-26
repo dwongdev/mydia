@@ -17,12 +17,14 @@ defmodule MetadataRelay.Application do
       [
         # Database repository
         MetadataRelay.Repo,
-        # PubSub for Phoenix LiveView
+        # PubSub for Phoenix LiveView and relay
         {Phoenix.PubSub, name: MetadataRelay.PubSub},
         # Cache adapter (Redis or in-memory)
         {cache_adapter, cache_opts},
         # Rate limiter for crash reports
-        MetadataRelay.RateLimiter
+        MetadataRelay.RateLimiter,
+        # Relay claim cleanup process
+        MetadataRelay.Relay.Cleanup
       ] ++
         maybe_tvdb_auth() ++
         maybe_opensubtitles_auth() ++

@@ -151,6 +151,9 @@ defmodule MydiaWeb.DeviceChannel do
             |> assign(:authenticated, true)
             |> assign(:handshake_state, final_state)
 
+          # Publish device connected event
+          Mydia.RemoteAccess.publish_device_event(device, :connected)
+
           # Send the device keypair and tokens to the client
           # The keypair is sent over the encrypted Noise channel
           {:reply,
@@ -214,6 +217,9 @@ defmodule MydiaWeb.DeviceChannel do
         |> assign(:authenticated, true)
         |> assign(:handshake_state, final_state)
 
+      # Publish device connected event
+      Mydia.RemoteAccess.publish_device_event(updated_device, :connected)
+
       # Send success response with server's handshake message and token
       {:reply,
        {:ok,
@@ -248,5 +254,21 @@ defmodule MydiaWeb.DeviceChannel do
   @impl true
   def handle_in(_event, _payload, socket) do
     {:reply, {:error, %{reason: "unknown_event"}}, socket}
+  end
+
+  @impl true
+  def terminate(_reason, socket) do
+    # Publish disconnected event if device was authenticated
+    if socket.assigns[:authenticated] && socket.assigns[:device_id] do
+      case Mydia.RemoteAccess.get_device(socket.assigns.device_id) do
+        nil ->
+          :ok
+
+        device ->
+          Mydia.RemoteAccess.publish_device_event(device, :disconnected)
+      end
+    end
+
+    :ok
   end
 end

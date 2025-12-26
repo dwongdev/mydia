@@ -6,7 +6,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-PLAYER_DIR="$PROJECT_ROOT/clients/player"
+PLAYER_DIR="$PROJECT_ROOT/player"
 STATIC_DIR="$PROJECT_ROOT/priv/static/player"
 
 # Check if player directory exists

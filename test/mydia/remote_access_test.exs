@@ -2,7 +2,7 @@ defmodule Mydia.RemoteAccessTest do
   use Mydia.DataCase
 
   alias Mydia.RemoteAccess
-  alias Mydia.RemoteAccess.{Config, PairingClaim}
+  alias Mydia.RemoteAccess.{Config, PairingClaim, RemoteDevice}
   alias Mydia.Accounts
 
   describe "initialize_keypair/0" do
@@ -22,9 +22,6 @@ defmodule Mydia.RemoteAccessTest do
 
       assert config.instance_id =~
                ~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-
-      # Verify relay URL is set
-      assert config.relay_url == "https://relay.mydia.app"
 
       # Verify enabled is false by default
       refute config.enabled
@@ -131,7 +128,6 @@ defmodule Mydia.RemoteAccessTest do
           instance_id: instance_id,
           static_public_key: public_key_direct,
           static_private_key_encrypted: encrypted_blob,
-          relay_url: "https://relay.mydia.app",
           enabled: false
         })
 
@@ -535,6 +531,59 @@ defmodule Mydia.RemoteAccessTest do
       {:ok, used_claim} = RemoteAccess.consume_claim_code(claim.code, device.id)
 
       refute PairingClaim.valid?(used_claim)
+    end
+  end
+
+  describe "publish_device_event/2" do
+    setup do
+      user = create_user()
+      device = create_device(user.id)
+      %{user: user, device: device}
+    end
+
+    test "publishes device connected event", %{device: device} do
+      # This should not raise an error
+      assert :ok = RemoteAccess.publish_device_event(device, :connected)
+    end
+
+    test "publishes device disconnected event", %{device: device} do
+      assert :ok = RemoteAccess.publish_device_event(device, :disconnected)
+    end
+
+    test "publishes device revoked event", %{device: device} do
+      assert :ok = RemoteAccess.publish_device_event(device, :revoked)
+    end
+
+    test "publishes device deleted event", %{device: device} do
+      assert :ok = RemoteAccess.publish_device_event(device, :deleted)
+    end
+  end
+
+  describe "revoke_device/1" do
+    setup do
+      user = create_user()
+      device = create_device(user.id)
+      %{user: user, device: device}
+    end
+
+    test "revokes device and publishes event", %{device: device} do
+      assert {:ok, revoked_device} = RemoteAccess.revoke_device(device)
+      assert revoked_device.revoked_at != nil
+      assert RemoteDevice.revoked?(revoked_device)
+    end
+  end
+
+  describe "delete_device/1" do
+    setup do
+      user = create_user()
+      device = create_device(user.id)
+      %{user: user, device: device}
+    end
+
+    test "deletes device and publishes event", %{device: device} do
+      assert {:ok, deleted_device} = RemoteAccess.delete_device(device)
+      assert deleted_device.id == device.id
+      assert RemoteAccess.get_device(device.id) == nil
     end
   end
 

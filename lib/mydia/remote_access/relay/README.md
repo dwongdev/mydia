@@ -79,11 +79,12 @@ The relay service uses JSON messages over WebSocket:
 
 ## Configuration
 
-The relay service URL is stored in the `remote_access_config` table:
+The relay service URL is stored in the `remote_access_config` table and is configured via the `METADATA_RELAY_URL` environment variable:
 
 ```elixir
-# Default relay URL (set during initialization)
-relay_url: "https://relay.mydia.app"
+# Relay URL is set from METADATA_RELAY_URL during initialization
+# The remote access relay is part of the metadata-relay service
+relay_url: Mydia.Metadata.metadata_relay_url()
 ```
 
 The URL is automatically converted to WebSocket format (https:// → wss://).

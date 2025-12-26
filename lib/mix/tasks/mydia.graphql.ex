@@ -42,7 +42,7 @@ defmodule Mix.Tasks.Mydia.Graphql do
   @shortdoc "GraphQL schema management and validation"
 
   @server_schema_path "priv/graphql/schema.graphql"
-  @client_graphql_dir "clients/player/lib/graphql"
+  @client_graphql_dir "player/lib/graphql"
 
   @impl Mix.Task
   def run(args) do

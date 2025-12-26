@@ -10,6 +10,7 @@ defmodule MetadataRelay.Router do
   alias MetadataRelay.Music.Handler, as: MusicHandler
   alias MetadataRelay.OpenLibrary.Handler, as: OpenLibraryHandler
   alias MetadataRelay.OpenSubtitles.Handler, as: SubtitlesHandler
+  alias MetadataRelay.Relay.Handler, as: RelayHandler
 
   plug(Plug.Logger)
   plug(Plug.Parsers, parsers: [:urlencoded, :json], json_decoder: Jason)
@@ -273,6 +274,54 @@ defmodule MetadataRelay.Router do
   get "/openlibrary/authors/:id" do
     params = extract_query_params(conn)
     handle_openlibrary_request(conn, fn -> OpenLibraryHandler.get_author(id, params) end)
+  end
+
+  # ============================================================================
+  # Relay API - Remote Access
+  # ============================================================================
+
+  # Register new instance
+  post "/relay/instances" do
+    handle_relay_request(conn, fn -> RelayHandler.register_instance(conn.body_params) end)
+  end
+
+  # Update instance heartbeat/presence
+  put "/relay/instances/:id/heartbeat" do
+    with {:ok, _instance_id} <- verify_relay_auth(conn, id) do
+      handle_relay_request(conn, fn ->
+        RelayHandler.update_heartbeat(id, conn.body_params)
+      end)
+    else
+      {:error, :unauthorized} ->
+        send_unauthorized(conn)
+    end
+  end
+
+  # Create claim code
+  post "/relay/instances/:id/claim" do
+    with {:ok, _instance_id} <- verify_relay_auth(conn, id) do
+      handle_relay_request(conn, fn ->
+        RelayHandler.create_claim(id, conn.body_params)
+      end)
+    else
+      {:error, :unauthorized} ->
+        send_unauthorized(conn)
+    end
+  end
+
+  # Redeem claim code
+  post "/relay/claim/:code" do
+    handle_relay_request(conn, fn -> RelayHandler.redeem_claim(code) end)
+  end
+
+  # Consume claim (after successful pairing)
+  post "/relay/claim/consume" do
+    handle_relay_request(conn, fn -> RelayHandler.consume_claim(conn.body_params) end)
+  end
+
+  # Get connection info
+  get "/relay/instances/:id/connect" do
+    handle_relay_request(conn, fn -> RelayHandler.get_connection_info(id) end)
   end
 
   # 404 catch-all
@@ -622,5 +671,64 @@ defmodule MetadataRelay.Router do
       {:error, reason} ->
         send_resp(conn, 500, inspect(reason))
     end
+  end
+
+  # Relay request handler
+  defp handle_relay_request(conn, handler_fn) do
+    case handler_fn.() do
+      {:ok, body} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(200, Jason.encode!(body))
+
+      {:error, :not_found} ->
+        error_response = %{error: "Not found", message: "Resource not found"}
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(404, Jason.encode!(error_response))
+
+      {:error, {:validation, message}} ->
+        error_response = %{error: "Validation error", message: message}
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(400, Jason.encode!(error_response))
+
+      {:error, reason} ->
+        error_response = %{error: "Internal server error", message: inspect(reason)}
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(500, Jason.encode!(error_response))
+    end
+  end
+
+  # Verify relay authentication token
+  defp verify_relay_auth(conn, expected_instance_id) do
+    case get_req_header(conn, "authorization") do
+      ["Bearer " <> token] ->
+        case MetadataRelay.Relay.verify_instance_token(token) do
+          {:ok, instance_id} when instance_id == expected_instance_id ->
+            {:ok, instance_id}
+
+          {:ok, _other_instance_id} ->
+            {:error, :unauthorized}
+
+          {:error, _reason} ->
+            {:error, :unauthorized}
+        end
+
+      _ ->
+        {:error, :unauthorized}
+    end
+  end
+
+  defp send_unauthorized(conn) do
+    error_response = %{error: "Unauthorized", message: "Invalid or missing authentication token"}
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(401, Jason.encode!(error_response))
   end
 end

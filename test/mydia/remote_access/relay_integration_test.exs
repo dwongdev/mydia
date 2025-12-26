@@ -30,7 +30,6 @@ defmodule Mydia.RemoteAccess.RelayIntegrationTest do
       # Step 1: Initialize keypair (creates config but disabled)
       {:ok, config} = RemoteAccess.initialize_keypair()
       assert config.enabled == false
-      assert config.relay_url == "https://relay.mydia.app"
       assert config.instance_id != nil
       assert config.static_public_key != nil
 
@@ -45,20 +44,6 @@ defmodule Mydia.RemoteAccess.RelayIntegrationTest do
       # Step 4: Disable remote access
       {:ok, disabled_config} = RemoteAccess.toggle_remote_access(false)
       assert disabled_config.enabled == false
-    end
-
-    test "custom relay URL configuration" do
-      {:ok, _config} = RemoteAccess.initialize_keypair()
-
-      # Update relay URL
-      custom_url = "https://custom-relay.example.com"
-      {:ok, updated} = RemoteAccess.upsert_config(%{relay_url: custom_url})
-      assert updated.relay_url == custom_url
-
-      # Enable and verify config
-      {:ok, enabled} = RemoteAccess.toggle_remote_access(true)
-      assert enabled.enabled == true
-      assert enabled.relay_url == custom_url
     end
   end
 end

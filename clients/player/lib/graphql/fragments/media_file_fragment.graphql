@@ -1,0 +1,12 @@
+fragment MediaFileFragment on MediaFile {
+  id
+  resolution
+  codec
+  audioCodec
+  hdrFormat
+  size
+  bitrate
+  directPlaySupported
+  streamUrl
+  directPlayUrl
+}

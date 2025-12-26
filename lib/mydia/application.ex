@@ -36,17 +36,24 @@ defmodule Mydia.Application do
         Mydia.Hooks.Manager,
         {Registry, keys: :unique, name: Mydia.Streaming.HlsSessionRegistry},
         Mydia.Streaming.HlsSessionSupervisor,
-        Mydia.CrashReporter.Queue
+        Mydia.CrashReporter.Queue,
+        Mydia.RemoteAccess.ClaimRateLimiter,
+        {Registry, keys: :unique, name: Mydia.DynamicSupervisorRegistry},
+        {DynamicSupervisor,
+         name: {:via, Registry, {Mydia.DynamicSupervisorRegistry, :relay}}, strategy: :one_for_one}
       ] ++
         client_health_children() ++
         indexer_health_children() ++
+        relay_children() ++
         oban_children() ++
         oidc_children() ++
         [
           # Start a worker by calling: Mydia.Worker.start_link(arg)
           # {Mydia.Worker, arg},
           # Start to serve requests, typically the last entry
-          MydiaWeb.Endpoint
+          MydiaWeb.Endpoint,
+          # Absinthe subscriptions must start after the Endpoint
+          {Absinthe.Subscription, MydiaWeb.Endpoint}
         ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
@@ -64,6 +71,8 @@ defmodule Mydia.Application do
       Mydia.Indexers.register_adapters()
       # Register metadata provider adapters
       Mydia.Metadata.register_providers()
+      # Start relay service if remote access is enabled (requires Repo to be running)
+      start_relay_if_enabled()
       # Ensure default quality profiles exist (skip in test environment)
       if Application.get_env(:mydia, :start_health_monitors, true) do
         ensure_default_quality_profiles()
@@ -103,6 +112,41 @@ defmodule Mydia.Application do
       [Mydia.Indexers.Health]
     else
       []
+    end
+  end
+
+  defp relay_children do
+    # Relay is started dynamically after supervisor starts (see start_relay_if_enabled/0)
+    # This avoids querying the database before Repo is started
+    []
+  end
+
+  # Start relay service dynamically after supervisor starts
+  defp start_relay_if_enabled do
+    # Only start relay service if remote access is enabled
+    # Skip in test environment to avoid connection attempts during tests
+    if Application.get_env(:mydia, :start_health_monitors, true) do
+      case Mydia.RemoteAccess.get_config() do
+        nil ->
+          :ok
+
+        config ->
+          if config.enabled do
+            # Start relay under the main supervisor
+            case DynamicSupervisor.start_child(
+                   {:via, Registry, {Mydia.DynamicSupervisorRegistry, :relay}},
+                   Mydia.RemoteAccess.Relay
+                 ) do
+              {:ok, _pid} -> :ok
+              {:error, {:already_started, _pid}} -> :ok
+              {:error, reason} -> {:error, reason}
+            end
+          else
+            :ok
+          end
+      end
+    else
+      :ok
     end
   end
 
@@ -173,17 +217,7 @@ defmodule Mydia.Application do
   end
 
   defp load_config! do
-    # Only load runtime config in non-dev/test environments
-    # or if explicitly enabled via environment variable
-    # In releases, Mix is not available, so we check for RELEASE_NAME
-    env = if Code.ensure_loaded?(Mix), do: Mix.env(), else: :prod
-
-    if env in [:prod, :staging] or System.get_env("LOAD_RUNTIME_CONFIG") == "true" do
-      Mydia.Config.Loader.load!()
-    else
-      # In dev/test, use schema defaults to avoid interfering with Mix config
-      Mydia.Config.Schema.defaults()
-    end
+    Mydia.Config.Loader.load!()
   end
 
   defp ensure_default_quality_profiles do

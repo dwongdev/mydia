@@ -1,0 +1,34 @@
+mutation MarkMovieWatched($movieId: ID!) {
+  markMovieWatched(movieId: $movieId) {
+    id
+    title
+  }
+}
+
+mutation MarkMovieUnwatched($movieId: ID!) {
+  markMovieUnwatched(movieId: $movieId) {
+    id
+    title
+  }
+}
+
+mutation MarkEpisodeWatched($episodeId: ID!) {
+  markEpisodeWatched(episodeId: $episodeId) {
+    id
+    title
+  }
+}
+
+mutation MarkEpisodeUnwatched($episodeId: ID!) {
+  markEpisodeUnwatched(episodeId: $episodeId) {
+    id
+    title
+  }
+}
+
+mutation MarkSeasonWatched($showId: ID!, $seasonNumber: Int!) {
+  markSeasonWatched(showId: $showId, seasonNumber: $seasonNumber) {
+    id
+    title
+  }
+}

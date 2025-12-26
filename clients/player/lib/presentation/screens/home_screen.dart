@@ -1,0 +1,549 @@
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import '../widgets/content_rail.dart';
+import '../widgets/shimmer_card.dart';
+import '../../core/theme/colors.dart';
+import 'home/home_controller.dart';
+
+class HomeScreen extends ConsumerWidget {
+  const HomeScreen({super.key});
+
+  void _handleItemTap(BuildContext context, String id, String type) {
+    final normalizedType = type.toLowerCase();
+    if (normalizedType == 'movie') {
+      context.go('/movie/$id');
+    } else if (normalizedType == 'tv_show' || normalizedType == 'show') {
+      context.go('/show/$id');
+    } else if (normalizedType == 'episode') {
+      context.go('/episode/$id');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final homeData = ref.watch(homeControllerProvider);
+
+    return Scaffold(
+      extendBodyBehindAppBar: true,
+      appBar: _ModernAppBar(),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await ref.read(homeControllerProvider.notifier).refresh();
+        },
+        child: homeData.when(
+          loading: () => _buildShimmerLoading(),
+          error: (error, stackTrace) => _buildErrorView(context, error, ref),
+          data: (data) {
+            if (data.isEmpty) {
+              return _buildEmptyState(context);
+            }
+
+            return CustomScrollView(
+              slivers: [
+                // Hero section with featured content
+                if (data.continueWatching.isNotEmpty ||
+                    data.recentlyAdded.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: Builder(builder: (context) {
+                      if (data.continueWatching.isNotEmpty) {
+                        final item = data.continueWatching.first;
+                        return _HeroSection(
+                          item: item,
+                          onTap: () => _handleItemTap(context, item.id, item.type),
+                        );
+                      } else {
+                        final item = data.recentlyAdded.first;
+                        return _HeroSection(
+                          item: item,
+                          onTap: () => _handleItemTap(context, item.id, item.type),
+                        );
+                      }
+                    }),
+                  ),
+
+                // Content rails
+                SliverList(
+                  delegate: SliverChildListDelegate([
+                    if (data.continueWatching.isNotEmpty)
+                      ContentRail(
+                        title: 'Continue Watching',
+                        items: data.continueWatching,
+                        showProgress: true,
+                        onItemTap: (id, type) =>
+                            _handleItemTap(context, id, type),
+                      ),
+                    if (data.recentlyAdded.isNotEmpty)
+                      ContentRail(
+                        title: 'Recently Added',
+                        items: data.recentlyAdded,
+                        onItemTap: (id, type) =>
+                            _handleItemTap(context, id, type),
+                      ),
+                    if (data.upNext.isNotEmpty)
+                      ContentRail(
+                        title: 'Up Next',
+                        items: data.upNext,
+                        showEpisodeInfo: true,
+                        onItemTap: (id, type) =>
+                            _handleItemTap(context, id, type),
+                      ),
+                    const SizedBox(height: 100), // Space for bottom nav
+                  ]),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildShimmerLoading() {
+    return ListView(
+      padding: const EdgeInsets.only(top: 100),
+      children: const [
+        _ShimmerHero(),
+        SizedBox(height: 24),
+        ShimmerRail(count: 5),
+        SizedBox(height: 16),
+        ShimmerRail(count: 5),
+        SizedBox(height: 16),
+        ShimmerRail(count: 5),
+      ],
+    );
+  }
+
+  Widget _buildErrorView(BuildContext context, Object error, WidgetRef ref) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppColors.error.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.wifi_off_rounded,
+                size: 48,
+                color: AppColors.error,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'Unable to connect',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Check your connection and try again',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+            FilledButton.icon(
+              onPressed: () {
+                ref.read(homeControllerProvider.notifier).refresh();
+              },
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Try Again'),
+              style: FilledButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.movie_filter_rounded,
+                size: 56,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'Your library awaits',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Add some movies and shows to start streaming',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ModernAppBar extends StatelessWidget implements PreferredSizeWidget {
+  @override
+  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: AppBar(
+          backgroundColor: AppColors.background.withValues(alpha: 0.8),
+          elevation: 0,
+          title: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [AppColors.primary, AppColors.secondary],
+                  ),
+                ),
+                child: const Icon(
+                  Icons.play_arrow_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Text(
+                'Mydia',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: -0.5,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            IconButton(
+              icon: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceVariant.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.search_rounded, size: 20),
+              ),
+              onPressed: () {
+                // TODO: Implement search
+              },
+              tooltip: 'Search',
+            ),
+            const SizedBox(width: 8),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HeroSection extends StatelessWidget {
+  final dynamic item;
+  final VoidCallback onTap;
+
+  const _HeroSection({
+    required this.item,
+    required this.onTap,
+  });
+
+  String? get _backdropUrl {
+    if (item.backdropUrl != null) return item.backdropUrl;
+    return item.posterUrl;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final heroHeight = size.height * 0.5;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        children: [
+          // Background image
+          SizedBox(
+            width: size.width,
+            height: heroHeight,
+            child: _backdropUrl != null
+                ? CachedNetworkImage(
+                    imageUrl: _backdropUrl!,
+                    fit: BoxFit.cover,
+                    placeholder: (context, url) => Container(
+                      color: AppColors.surface,
+                    ),
+                    errorWidget: (context, url, error) => Container(
+                      color: AppColors.surface,
+                      child: const Icon(
+                        Icons.movie_rounded,
+                        size: 64,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  )
+                : Container(
+                    color: AppColors.surface,
+                    child: const Icon(
+                      Icons.movie_rounded,
+                      size: 64,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+          ),
+
+          // Gradient overlays
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    AppColors.background.withValues(alpha: 0.4),
+                    Colors.transparent,
+                    AppColors.background.withValues(alpha: 0.9),
+                    AppColors.background,
+                  ],
+                  stops: const [0.0, 0.3, 0.7, 1.0],
+                ),
+              ),
+            ),
+          ),
+
+          // Content overlay
+          Positioned(
+            left: 20,
+            right: 20,
+            bottom: 24,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Featured badge
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text(
+                    'FEATURED',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Title
+                Text(
+                  item.title,
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    shadows: [
+                      Shadow(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        blurRadius: 8,
+                      ),
+                    ],
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 8),
+
+                // Subtitle/info
+                if (item.showTitle != null)
+                  Text(
+                    item.showTitle!,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                  ),
+
+                const SizedBox(height: 16),
+
+                // Action buttons
+                Row(
+                  children: [
+                    // Play button
+                    FilledButton.icon(
+                      onPressed: onTap,
+                      icon: const Icon(Icons.play_arrow_rounded),
+                      label: const Text('Play'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 14,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+
+                    // More info button
+                    OutlinedButton.icon(
+                      onPressed: onTap,
+                      icon: const Icon(Icons.info_outline_rounded, size: 20),
+                      label: const Text('More Info'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 14,
+                        ),
+                        side: BorderSide(
+                          color: AppColors.textSecondary.withValues(alpha: 0.5),
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ShimmerHero extends StatelessWidget {
+  const _ShimmerHero();
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final heroHeight = size.height * 0.5;
+
+    return Container(
+      width: size.width,
+      height: heroHeight,
+      color: AppColors.surface,
+      child: Stack(
+        children: [
+          // Shimmer effect
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    AppColors.background.withValues(alpha: 0.4),
+                    Colors.transparent,
+                    AppColors.background.withValues(alpha: 0.9),
+                    AppColors.background,
+                  ],
+                  stops: const [0.0, 0.3, 0.7, 1.0],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 20,
+            right: 20,
+            bottom: 24,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 80,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: AppColors.shimmerBase,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  width: 200,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: AppColors.shimmerBase,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  width: 120,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: AppColors.shimmerBase,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Container(
+                      width: 100,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: AppColors.shimmerBase,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Container(
+                      width: 120,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: AppColors.shimmerBase,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

@@ -1185,9 +1185,10 @@ defmodule Mydia.Settings do
   compatible with LibraryPath but without database IDs.
   """
   def list_library_paths(opts \\ []) do
-    # Get database library paths
+    # Get database library paths (exclude disabled paths)
     db_paths =
       LibraryPath
+      |> where([l], l.disabled == false or is_nil(l.disabled))
       |> maybe_preload(opts[:preload])
       |> order_by([l], desc: l.monitored, asc: l.path)
       |> Repo.all()

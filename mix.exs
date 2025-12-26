@@ -78,10 +78,14 @@ defmodule Mydia.MixProject do
       {:bcrypt_elixir, "~> 3.0"},
       # Password hashing for API keys
       {:argon2_elixir, "~> 4.0"},
+      # Noise Protocol for secure device pairing
+      {:decibel, "~> 0.2.4"},
 
       # HTTP Clients
       {:finch, "~> 0.16"},
       {:req, "~> 0.4"},
+      # WebSocket client for relay connections
+      {:websockex, "~> 0.4.3"},
 
       # Utilities
       {:elixir_uuid, "~> 1.2"},
@@ -92,6 +96,7 @@ defmodule Mydia.MixProject do
       {:sweet_xml, "~> 0.7"},
       {:floki, "~> 0.36"},
       {:nimble_parsec, "~> 1.4"},
+      {:eqrcode, "~> 0.1.10"},
 
       # Telemetry & Monitoring
       {:telemetry_metrics, "~> 1.0"},
@@ -103,6 +108,13 @@ defmodule Mydia.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
+
+      # GraphQL
+      {:absinthe, "~> 1.7"},
+      {:absinthe_plug, "~> 1.5"},
+      {:absinthe_phoenix, "~> 2.0"},
+      {:dataloader, "~> 2.0"},
+      {:absinthe_relay, "~> 1.5"},
 
       # Development & Testing
       {:ex_machina, "~> 2.8", only: :test},

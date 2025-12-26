@@ -1,0 +1,175 @@
+defmodule MydiaWeb.Schema.QueryTypes do
+  @moduledoc """
+  GraphQL query type definitions.
+  """
+
+  use Absinthe.Schema.Notation
+
+  alias MydiaWeb.Schema.Resolvers.BrowseResolver
+  alias MydiaWeb.Schema.Resolvers.DiscoveryResolver
+  alias MydiaWeb.Schema.Resolvers.SearchResolver
+
+  # Node interface for global node resolution with hierarchical navigation
+  interface :node do
+    description("A node that can be fetched by global ID with hierarchical navigation")
+
+    field :id, non_null(:id), description: "Global node ID"
+    field :parent, :node, description: "Parent node in the hierarchy"
+
+    field :children, :node_connection do
+      arg(:first, :integer, default_value: 20)
+      arg(:after, :string)
+    end
+
+    field :ancestors, list_of(:node), description: "Full path from root to this node"
+    field :is_playable, non_null(:boolean), description: "Whether this node can be played"
+
+    resolve_type(fn
+      %{type: "movie"}, _ -> :movie
+      %{type: "tv_show"}, _ -> :tv_show
+      %{season_number: _, episode_number: _}, _ -> :episode
+      %{season_number: _, episode_count: _}, _ -> :season
+      %{path: _, monitored: _}, _ -> :library_path
+      _, _ -> nil
+    end)
+  end
+
+  # Connection type for node children pagination
+  @desc "Edge for node connection"
+  object :node_edge do
+    field :node, non_null(:node)
+    field :cursor, non_null(:string)
+  end
+
+  @desc "Connection for paginated node children"
+  object :node_connection do
+    field :edges, non_null(list_of(non_null(:node_edge)))
+    field :page_info, non_null(:page_info)
+    field :total_count, non_null(:integer)
+  end
+
+  # Browse queries - for navigating the library
+  object :browse_queries do
+    @desc "Get any node by its global ID"
+    field :node, :node do
+      arg(:id, non_null(:id))
+      resolve(&BrowseResolver.get_node/3)
+    end
+
+    @desc "List all library paths"
+    field :libraries, list_of(:library_path) do
+      resolve(&BrowseResolver.list_libraries/3)
+    end
+
+    @desc "Get a movie by ID"
+    field :movie, :movie do
+      arg(:id, non_null(:id))
+      resolve(&BrowseResolver.get_movie/3)
+    end
+
+    @desc "Get a TV show by ID"
+    field :tv_show, :tv_show do
+      arg(:id, non_null(:id))
+      resolve(&BrowseResolver.get_tv_show/3)
+    end
+
+    @desc "Get an episode by ID"
+    field :episode, :episode do
+      arg(:id, non_null(:id))
+      resolve(&BrowseResolver.get_episode/3)
+    end
+
+    @desc "List all movies with pagination"
+    field :movies, :movie_connection do
+      arg(:first, :integer, default_value: 20)
+      arg(:after, :string)
+      arg(:sort, :sort_input)
+      arg(:category, :media_category)
+      resolve(&BrowseResolver.list_movies/3)
+    end
+
+    @desc "List all TV shows with pagination"
+    field :tv_shows, :tv_show_connection do
+      arg(:first, :integer, default_value: 20)
+      arg(:after, :string)
+      arg(:sort, :sort_input)
+      arg(:category, :media_category)
+      resolve(&BrowseResolver.list_tv_shows/3)
+    end
+
+    @desc "Get episodes for a specific season of a TV show"
+    field :season_episodes, list_of(:episode) do
+      arg(:show_id, non_null(:id))
+      arg(:season_number, non_null(:integer))
+      resolve(&BrowseResolver.list_season_episodes/3)
+    end
+  end
+
+  # Discovery queries - for home screen rails
+  object :discovery_queries do
+    @desc "Get items the user is currently watching (in-progress)"
+    field :continue_watching, list_of(:continue_watching_item) do
+      arg(:first, :integer, default_value: 10)
+      arg(:after, :string)
+      resolve(&DiscoveryResolver.continue_watching/3)
+    end
+
+    @desc "Get recently added content"
+    field :recently_added, list_of(:recently_added_item) do
+      arg(:first, :integer, default_value: 20)
+      arg(:after, :string)
+      arg(:types, list_of(:media_type))
+      resolve(&DiscoveryResolver.recently_added/3)
+    end
+
+    @desc "Get next episodes to watch across all TV shows"
+    field :up_next, list_of(:up_next_item) do
+      arg(:first, :integer, default_value: 10)
+      arg(:after, :string)
+      resolve(&DiscoveryResolver.up_next/3)
+    end
+  end
+
+  # Search queries
+  object :search_queries do
+    @desc "Search across movies and TV shows"
+    field :search, :search_results do
+      arg(:query, non_null(:string))
+      arg(:types, list_of(:media_type))
+      arg(:first, :integer, default_value: 20)
+      resolve(&SearchResolver.search/3)
+    end
+  end
+
+  # Discovery item types
+  @desc "An item in the continue watching rail"
+  object :continue_watching_item do
+    field :id, non_null(:id)
+    field :type, non_null(:media_type)
+    field :title, non_null(:string)
+    field :artwork, :artwork
+    field :progress, non_null(:progress)
+
+    @desc "For episodes, includes show context"
+    field :show_title, :string
+    field :season_number, :integer
+    field :episode_number, :integer
+  end
+
+  @desc "An item in the recently added rail"
+  object :recently_added_item do
+    field :id, non_null(:id)
+    field :type, non_null(:media_type)
+    field :title, non_null(:string)
+    field :year, :integer
+    field :artwork, :artwork
+    field :added_at, non_null(:datetime)
+  end
+
+  @desc "An item in the up next rail (next episode to watch)"
+  object :up_next_item do
+    field :episode, non_null(:episode)
+    field :show, non_null(:tv_show)
+    field :progress_state, non_null(:string), description: "One of: continue, next, start"
+  end
+end

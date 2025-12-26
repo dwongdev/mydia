@@ -16,6 +16,12 @@ defmodule MydiaWeb.Router do
     plug :fetch_session
   end
 
+  pipeline :graphql do
+    plug :accepts, ["json"]
+    plug :fetch_session
+    plug MydiaWeb.Plugs.AbsintheContext
+  end
+
   # Authentication pipeline - verifies JWT tokens from session or header
   pipeline :auth do
     plug MydiaWeb.Plugs.AuthPipeline
@@ -70,6 +76,14 @@ defmodule MydiaWeb.Router do
 
     # Logout
     get "/logout", AuthController, :logout
+  end
+
+  # Flutter player web app (authenticated)
+  scope "/", MydiaWeb do
+    pipe_through [:browser, :auth, :require_authenticated]
+
+    get "/player", PlayerController, :index
+    get "/player/*path", PlayerController, :index
   end
 
   # Authenticated LiveView routes
@@ -141,6 +155,8 @@ defmodule MydiaWeb.Router do
       live "/jobs", JobsLive.Index, :index
       live "/requests", AdminRequestsLive.Index, :index
       live "/users", AdminUsersLive.Index, :index
+      live "/devices", AdminDevicesLive.Index, :index
+      live "/settings/remote-access", RemoteAccessSettingsLive.Index, :index
     end
   end
 
@@ -186,6 +202,10 @@ defmodule MydiaWeb.Router do
     post "/playback/episode/:id", PlaybackController, :update_episode
     post "/playback/file/:id", PlaybackController, :update_file
 
+    # Thumbnails
+    get "/media/:id/thumbnails.vtt", ThumbnailController, :show_vtt
+    get "/media/:id/thumbnails.jpg", ThumbnailController, :show_sprite
+
     # HLS streaming
     post "/hls/start", HlsController, :start_session
     delete "/hls/:session_id", HlsController, :terminate_session
@@ -206,6 +226,51 @@ defmodule MydiaWeb.Router do
     put "/config/:key", ConfigController, :update
     delete "/config/:key", ConfigController, :delete
     post "/config/test-connection", ConfigController, :test_connection
+  end
+
+  # GraphQL API - authenticated with JWT or API key
+  scope "/api/graphql" do
+    pipe_through [:graphql, :api_auth, :require_authenticated]
+
+    forward "/", Absinthe.Plug,
+      schema: MydiaWeb.Schema,
+      analyze_complexity: true,
+      max_complexity: 200
+  end
+
+  # GraphiQL interface for development
+  if Application.compile_env(:mydia, :dev_routes) do
+    scope "/api" do
+      pipe_through [:graphql, :api_auth, :require_authenticated]
+
+      forward "/graphiql", Absinthe.Plug.GraphiQL,
+        schema: MydiaWeb.Schema,
+        interface: :playground
+    end
+  end
+
+  # API v2 routes - authenticated with JWT or API key
+  scope "/api/v2", MydiaWeb.Api.V2 do
+    pipe_through [:api, :api_auth, :require_authenticated]
+
+    # Browse endpoints
+    get "/browse/movies", BrowseController, :list_movies
+    get "/browse/movies/:id", BrowseController, :show_movie
+    get "/browse/tv", BrowseController, :list_tv_shows
+    get "/browse/tv/:id", BrowseController, :show_tv_show
+    get "/browse/tv/:id/seasons/:season", BrowseController, :list_season_episodes
+
+    # Discovery endpoints
+    get "/discover/continue", DiscoverController, :continue_watching
+    get "/discover/recent", DiscoverController, :recent
+    get "/discover/up_next", DiscoverController, :up_next
+
+    # Search
+    get "/search", SearchController, :index
+
+    # Subtitles
+    get "/subtitles/:type/:id", SubtitleController, :index
+    get "/subtitles/:type/:id/:track", SubtitleController, :show
   end
 
   # Enable LiveDashboard in development

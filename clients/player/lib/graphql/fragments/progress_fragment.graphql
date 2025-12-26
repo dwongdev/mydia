@@ -1,0 +1,7 @@
+fragment ProgressFragment on Progress {
+  positionSeconds
+  durationSeconds
+  percentage
+  watched
+  lastWatchedAt
+}

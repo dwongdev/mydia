@@ -1,0 +1,34 @@
+targets:
+  $default:
+    builders:
+      riverpod_generator:
+        generate_for:
+          - lib/**/*.dart
+        options:
+          # Riverpod generator options
+
+      graphql_codegen:
+        enabled: true
+        options:
+          # Path to the GraphQL schema file (symlink to shared server schema)
+          schema: lib/graphql/schema.graphql
+
+          # Generate typed queries, mutations, and fragments
+          queries_glob: lib/graphql/**/*.graphql
+
+          # Output directory for generated code
+          output_dir: lib/graphql/generated
+
+          # Naming conventions
+          naming_scheme: pathedWithFields
+
+          # Generate nullable fields as optional
+          nullable_fields: true
+
+          # Additional options
+          add_query_prefix: false
+          scalar_mapping:
+            - graphql_type: DateTime
+              dart_type: DateTime
+            - graphql_type: Date
+              dart_type: DateTime

@@ -75,6 +75,17 @@ ${YELLOW}User Management:${NC}
   user reset-password <id> [--password=P]
                        Reset a user's password
 
+${YELLOW}Flutter Player (Docker):${NC}
+  flutter <args>       Run any flutter command in Docker container
+  player setup         Install deps and run code generation
+  player build         Build and copy web assets to Phoenix
+  player shell         Open shell in Flutter container
+  player logs          Follow Flutter dev server logs
+  player restart       Restart Flutter container (hot restart)
+
+Flutter hot reload is automatic! The dev server starts with './dev up -d'.
+Edit files in clients/player/lib/ and changes appear in browser instantly.
+
 ${YELLOW}Docker Compose Commands:${NC}
   exec <service> <cmd> Execute command in running service
   run <service> <cmd>  Run one-off command in new container
@@ -92,6 +103,8 @@ ${YELLOW}Examples:${NC}
   ./dev user list                # List all users
   ./dev user add me@example.com myuser --password=secret123 --role=admin
   ./dev user reset-password admin --password=newpassword
+  ./dev player build             # Build Flutter web assets for prod
+  ./dev player logs              # Follow Flutter dev server logs
 
 Any other command will be forwarded directly to docker compose.
 
@@ -190,6 +203,55 @@ case "$COMMAND" in
             exit 1
         fi
         run_in_container mix mydia.user "$@"
+        ;;
+
+    # Flutter commands (runs in Docker container)
+    flutter)
+        echo -e "${GREEN}Running flutter command in Docker container...${NC}"
+        docker compose exec flutter flutter "$@" || \
+            docker compose run --rm flutter flutter "$@"
+        ;;
+
+    player)
+        case "$1" in
+            logs)
+                echo -e "${GREEN}Following Flutter dev server logs...${NC}"
+                docker compose logs -f flutter
+                ;;
+            build)
+                echo -e "${GREEN}Building Flutter web assets...${NC}"
+                docker compose exec flutter flutter build web --base-href /player/ || \
+                    docker compose run --rm flutter flutter build web --base-href /player/
+                echo -e "${GREEN}Copying assets to priv/static/player...${NC}"
+                rm -rf priv/static/player
+                mkdir -p priv/static/player
+                cp -r clients/player/build/web/* priv/static/player/
+                echo -e "${GREEN}Flutter web assets built successfully!${NC}"
+                ;;
+            setup)
+                echo -e "${GREEN}Setting up Flutter project (pub get + build_runner)...${NC}"
+                docker compose exec flutter flutter pub get || \
+                    docker compose run --rm flutter flutter pub get
+                docker compose exec flutter flutter pub run build_runner build --delete-conflicting-outputs || \
+                    docker compose run --rm flutter flutter pub run build_runner build --delete-conflicting-outputs
+                echo -e "${GREEN}Flutter project setup complete!${NC}"
+                ;;
+            shell)
+                echo -e "${GREEN}Opening shell in Flutter container...${NC}"
+                docker compose exec flutter bash || \
+                    docker compose run --rm flutter bash
+                ;;
+            restart)
+                echo -e "${GREEN}Restarting Flutter dev server...${NC}"
+                docker compose restart flutter
+                echo -e "${GREEN}Flutter dev server restarted. Follow logs with: ./dev player logs${NC}"
+                ;;
+            *)
+                echo -e "${RED}Error: Unknown player command: $1${NC}"
+                echo "Usage: ./dev player <logs|build|setup|shell|restart>"
+                exit 1
+                ;;
+        esac
         ;;
 
     # Forward everything else to docker compose

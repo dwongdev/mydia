@@ -1,5 +1,6 @@
 defmodule MydiaWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :mydia
+  use Absinthe.Phoenix.Endpoint
 
   # The session will be stored in the cookie and signed,
   # this means its contents can be read but not tampered with.
@@ -24,6 +25,16 @@ defmodule MydiaWeb.Endpoint do
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
+
+  # WebSocket for device reconnection
+  socket "/ws", MydiaWeb.UserSocket,
+    websocket: true,
+    longpoll: false
+
+  # WebSocket for GraphQL subscriptions
+  socket "/api/graphql/socket", Absinthe.Phoenix.Socket,
+    websocket: true,
+    longpoll: false
 
   # Serve at "/" the static files from "priv/static" directory.
   #
@@ -72,5 +83,12 @@ defmodule MydiaWeb.Endpoint do
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options
+
+  # In dev mode, proxy /player/* to Flutter dev server with auth injection
+  # Must be after Plug.Session so we can read the auth token from session
+  if code_reloading? do
+    plug MydiaWeb.Plugs.FlutterDevProxy
+  end
+
   plug MydiaWeb.Router
 end

@@ -98,6 +98,17 @@ defmodule MydiaWeb.Layouts do
             </div>
           </div>
           
+    <!-- Player launch button -->
+          <div class="px-4 pt-4">
+            <a
+              href="/player"
+              class="btn btn-primary btn-block gap-2"
+            >
+              <.icon name="hero-play-circle-solid" class="w-5 h-5" /> Open Player
+              <.icon name="hero-arrow-top-right-on-square" class="w-4 h-4 opacity-70" />
+            </a>
+          </div>
+          
     <!-- Navigation menu -->
           <nav class="flex-1 overflow-y-auto">
             <ul class="menu w-full space-y-1 px-2 py-4">
@@ -470,15 +481,15 @@ defmodule MydiaWeb.Layouts do
               <.icon name="hero-arrow-down-tray" class="w-6 h-6" />
               <span class="text-xs mt-1">Downloads</span>
             </.link>
-          <% end %>
 
-          <.link
-            navigate="/activity"
-            class="flex flex-col items-center justify-center min-w-[60px] min-h-[60px] rounded-lg hover:bg-base-300 transition-colors"
-          >
-            <.icon name="hero-clock" class="w-6 h-6" />
-            <span class="text-xs mt-1">Activity</span>
-          </.link>
+            <a
+              href="/player"
+              class="flex flex-col items-center justify-center min-w-[60px] min-h-[60px] rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+            >
+              <.icon name="hero-play-circle-solid" class="w-6 h-6" />
+              <span class="text-xs mt-1">Player</span>
+            </a>
+          <% end %>
         </div>
       </div>
     </nav>

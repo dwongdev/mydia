@@ -1,0 +1,184 @@
+<Layouts.app {assigns}>
+  <div class="max-w-4xl mx-auto">
+    <!-- Page header -->
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold mb-2">Remote Access Settings</h1>
+      <p class="text-base-content/70">
+        Configure remote access to your Mydia instance and generate pairing codes for mobile devices.
+      </p>
+    </div>
+    
+<!-- Remote Access Toggle Card -->
+    <div class="card bg-base-100 shadow-xl mb-6">
+      <div class="card-body">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="card-title">Enable Remote Access</h2>
+            <p class="text-sm text-base-content/70">
+              Allow devices to connect to this instance remotely
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            class="toggle toggle-primary"
+            checked={@config && @config.enabled}
+            phx-click="toggle_remote_access"
+            phx-value-enabled={!(@config && @config.enabled)}
+          />
+        </div>
+      </div>
+    </div>
+
+    <%= if @config do %>
+      <!-- Instance Information Card -->
+      <div class="card bg-base-100 shadow-xl mb-6">
+        <div class="card-body">
+          <h2 class="card-title mb-4">Instance Information</h2>
+          
+<!-- Instance ID -->
+          <div class="mb-4">
+            <label class="label">
+              <span class="label-text font-medium">Instance ID</span>
+            </label>
+            <div class="flex gap-2">
+              <input
+                type="text"
+                class="input input-bordered flex-1 font-mono text-sm"
+                value={@config.instance_id}
+                readonly
+              />
+            </div>
+          </div>
+          
+<!-- Public Key -->
+          <div class="mb-4">
+            <label class="label">
+              <span class="label-text font-medium">Public Key</span>
+            </label>
+            <div class="flex gap-2">
+              <input
+                type="text"
+                class="input input-bordered flex-1 font-mono text-sm"
+                value={Base.encode64(@config.static_public_key)}
+                readonly
+              />
+              <button
+                class="btn btn-square btn-outline"
+                phx-click="copy_public_key"
+                onclick={"navigator.clipboard.writeText('#{Base.encode64(@config.static_public_key)}')"}
+                title="Copy public key"
+              >
+                <.icon name="hero-clipboard" class="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+          
+<!-- Relay URL -->
+          <div class="mb-4">
+            <label class="label">
+              <span class="label-text font-medium">Relay URL</span>
+            </label>
+            <input
+              type="text"
+              class="input input-bordered w-full"
+              value={@config.relay_url || "wss://relay.mydia.app"}
+              readonly
+            />
+          </div>
+          
+<!-- QR Code -->
+          <%= if qr_svg = generate_qr_code(@config) do %>
+            <div class="mt-4">
+              <label class="label">
+                <span class="label-text font-medium">QR Code</span>
+              </label>
+              <div class="flex justify-center p-4 bg-white rounded-lg">
+                {Phoenix.HTML.raw(qr_svg)}
+              </div>
+              <p class="text-xs text-base-content/70 mt-2 text-center">
+                Scan this QR code with your mobile app to automatically configure connection
+              </p>
+            </div>
+          <% end %>
+        </div>
+      </div>
+      
+<!-- Pairing Code Card -->
+      <%= if @config.enabled do %>
+        <div class="card bg-base-100 shadow-xl">
+          <div class="card-body">
+            <h2 class="card-title mb-4">Device Pairing</h2>
+            <p class="text-sm text-base-content/70 mb-4">
+              Generate a temporary pairing code to link a new device to your account.
+              The code expires after 5 minutes.
+            </p>
+
+            <%= if @claim_code do %>
+              <!-- Active Claim Code Display -->
+              <div class="alert alert-info mb-4">
+                <div class="flex-1">
+                  <div class="flex flex-col items-center gap-2 w-full">
+                    <span class="text-sm font-medium">Your Pairing Code</span>
+                    <div class="flex items-center gap-2 w-full justify-center">
+                      <code class="text-3xl font-bold tracking-wider">{@claim_code}</code>
+                      <button
+                        class="btn btn-square btn-sm btn-ghost"
+                        phx-click="copy_claim_code"
+                        onclick={"navigator.clipboard.writeText('#{@claim_code}')"}
+                        title="Copy code"
+                      >
+                        <.icon name="hero-clipboard" class="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div class="flex items-center gap-2 text-sm">
+                      <.icon name="hero-clock" class="w-4 h-4" />
+                      <span>
+                        Expires in: <strong>{format_countdown(@countdown_seconds)}</strong>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex justify-center">
+                <button class="btn btn-outline btn-sm" phx-click="generate_claim_code">
+                  <.icon name="hero-arrow-path" class="w-4 h-4" /> Generate New Code
+                </button>
+              </div>
+            <% else %>
+              <!-- Generate Button -->
+              <div class="flex justify-center">
+                <button class="btn btn-primary" phx-click="generate_claim_code">
+                  <.icon name="hero-plus-circle" class="w-5 h-5" /> Generate Pairing Code
+                </button>
+              </div>
+            <% end %>
+
+            <div class="divider"></div>
+
+            <div class="text-sm text-base-content/70">
+              <p class="font-medium mb-2">How to pair a device:</p>
+              <ol class="list-decimal list-inside space-y-1">
+                <li>Open the Mydia app on your device</li>
+                <li>Navigate to "Add Server" or "Pair Device"</li>
+                <li>Enter the pairing code shown above</li>
+                <li>Wait for the device to connect and authenticate</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+      <% end %>
+    <% else %>
+      <!-- No Config Warning -->
+      <div class="alert alert-warning">
+        <.icon name="hero-exclamation-triangle" class="w-5 h-5" />
+        <div>
+          <h3 class="font-bold">Remote Access Not Configured</h3>
+          <div class="text-sm">
+            Enable remote access above to initialize the keypair and start pairing devices.
+          </div>
+        </div>
+      </div>
+    <% end %>
+  </div>
+</Layouts.app>

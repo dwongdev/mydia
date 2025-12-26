@@ -20,6 +20,8 @@ defmodule Mydia.Media do
     - `:monitored` - Filter by monitored status (true/false)
     - `:category` - Filter by category (atom or string, e.g., :anime_movie or "anime_movie")
     - `:library_path_type` - Filter by library path type (:adult, :music, :books, etc.)
+    - `:search` - Search by title (case-insensitive substring match)
+    - `:added_since` - Filter to items inserted after this DateTime
     - `:preload` - List of associations to preload
   """
   def list_media_items(opts \\ []) do
@@ -1225,6 +1227,13 @@ defmodule Mydia.Media do
       {:library_path_type, library_type}, query ->
         filter_by_library_path_type(query, library_type)
 
+      {:search, search_term}, query when is_binary(search_term) ->
+        search_pattern = "%#{search_term}%"
+        where(query, [m], ilike(m.title, ^search_pattern))
+
+      {:added_since, datetime}, query ->
+        where(query, [m], m.inserted_at >= ^datetime)
+
       _other, query ->
         query
     end)
@@ -1680,5 +1689,132 @@ defmodule Mydia.Media do
     diff = DateTime.diff(now, media_item.seasons_refreshed_at, :second)
 
     diff < threshold_seconds
+  end
+
+  ## Favorites
+
+  alias Mydia.Media.UserFavorite
+
+  @doc """
+  Checks if a media item is favorited by a user.
+
+  ## Examples
+
+      iex> is_favorite?(user_id, media_item_id)
+      true
+
+      iex> is_favorite?(user_id, non_favorited_media_item_id)
+      false
+
+  """
+  def is_favorite?(user_id, media_item_id) do
+    from(f in UserFavorite,
+      where: f.user_id == ^user_id and f.media_item_id == ^media_item_id
+    )
+    |> Repo.exists?()
+  end
+
+  @doc """
+  Adds a media item to user favorites.
+
+  Returns {:ok, favorite} on success or {:error, changeset} on failure.
+
+  ## Examples
+
+      iex> add_favorite(user_id, media_item_id)
+      {:ok, %UserFavorite{}}
+
+      iex> add_favorite(user_id, already_favorited_id)
+      {:error, %Ecto.Changeset{}}
+
+  """
+  def add_favorite(user_id, media_item_id) do
+    %UserFavorite{}
+    |> UserFavorite.changeset(%{user_id: user_id, media_item_id: media_item_id})
+    |> Repo.insert()
+  end
+
+  @doc """
+  Removes a media item from user favorites.
+
+  Returns {:ok, favorite} on success or {:error, :not_found} if not favorited.
+
+  ## Examples
+
+      iex> remove_favorite(user_id, media_item_id)
+      {:ok, %UserFavorite{}}
+
+      iex> remove_favorite(user_id, non_favorited_id)
+      {:error, :not_found}
+
+  """
+  def remove_favorite(user_id, media_item_id) do
+    case Repo.get_by(UserFavorite, user_id: user_id, media_item_id: media_item_id) do
+      nil ->
+        {:error, :not_found}
+
+      favorite ->
+        Repo.delete(favorite)
+    end
+  end
+
+  @doc """
+  Toggles favorite status for a media item.
+
+  If the item is favorited, it removes it. If not favorited, it adds it.
+
+  Returns {:ok, :added} or {:ok, :removed} on success.
+
+  ## Examples
+
+      iex> toggle_favorite(user_id, media_item_id)
+      {:ok, :added}
+
+      iex> toggle_favorite(user_id, media_item_id)
+      {:ok, :removed}
+
+  """
+  def toggle_favorite(user_id, media_item_id) do
+    case Repo.get_by(UserFavorite, user_id: user_id, media_item_id: media_item_id) do
+      nil ->
+        case add_favorite(user_id, media_item_id) do
+          {:ok, _favorite} -> {:ok, :added}
+          {:error, changeset} -> {:error, changeset}
+        end
+
+      favorite ->
+        case Repo.delete(favorite) do
+          {:ok, _} -> {:ok, :removed}
+          {:error, changeset} -> {:error, changeset}
+        end
+    end
+  end
+
+  @doc """
+  Lists all favorites for a user.
+
+  ## Options
+    - `:preload` - List of associations to preload on media_items
+
+  ## Examples
+
+      iex> list_user_favorites(user_id)
+      [%UserFavorite{}, ...]
+
+      iex> list_user_favorites(user_id, preload: [:media_files])
+      [%UserFavorite{media_item: %MediaItem{media_files: [...]}, ...}, ...]
+
+  """
+  def list_user_favorites(user_id, opts \\ []) do
+    query = from(f in UserFavorite, where: f.user_id == ^user_id)
+
+    query =
+      if opts[:preload] do
+        from(f in query, preload: [media_item: ^opts[:preload]])
+      else
+        from(f in query, preload: [:media_item])
+      end
+
+    Repo.all(query)
   end
 end

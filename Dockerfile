@@ -10,6 +10,7 @@ ARG DATABASE_TYPE=sqlite
 
 # Install build dependencies
 # postgresql16-dev is needed for postgrex compilation
+# Flutter build dependencies: bash, git, curl, unzip, xz
 RUN apk add --no-cache \
     build-base \
     git \
@@ -20,7 +21,10 @@ RUN apk add --no-cache \
     curl \
     ffmpeg-dev \
     fdk-aac-dev \
-    pkgconfig
+    pkgconfig \
+    bash \
+    unzip \
+    xz
 
 # Set build environment
 ENV MIX_ENV=prod
@@ -29,6 +33,17 @@ ENV DATABASE_TYPE=${DATABASE_TYPE}
 # Install Hex and Rebar
 RUN mix local.hex --force && \
     mix local.rebar --force
+
+# Install Flutter SDK
+ARG FLUTTER_VERSION=3.24.0
+ENV FLUTTER_HOME=/usr/local/flutter
+ENV PATH="${FLUTTER_HOME}/bin:${PATH}"
+
+RUN curl -fsSL https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz -o flutter.tar.xz && \
+    tar xf flutter.tar.xz -C /usr/local && \
+    rm flutter.tar.xz && \
+    flutter config --no-analytics && \
+    flutter --version
 
 # Create app directory
 WORKDIR /app
@@ -53,11 +68,23 @@ COPY config ./config
 COPY priv ./priv
 COPY lib ./lib
 COPY assets ./assets
+COPY clients ./clients
 
 # Compile application
 RUN mix compile
 
-# Build assets
+# Build Flutter web player
+RUN if [ -d "clients/player" ]; then \
+      cd clients/player && \
+      flutter pub get && \
+      flutter pub run build_runner build --delete-conflicting-outputs && \
+      flutter build web --release --web-renderer canvaskit --base-href /player/ && \
+      mkdir -p ../../priv/static/player && \
+      cp -r build/web/* ../../priv/static/player/ && \
+      cd ../..; \
+    fi
+
+# Build Phoenix assets
 RUN cd assets && \
     npm ci --prefix . --progress=false --no-audit --loglevel=error && \
     cd .. && \

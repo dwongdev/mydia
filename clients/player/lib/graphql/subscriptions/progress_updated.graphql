@@ -1,0 +1,5 @@
+subscription ProgressUpdated($nodeId: ID!) {
+  progressUpdated(nodeId: $nodeId) {
+    ...ProgressFragment
+  }
+}

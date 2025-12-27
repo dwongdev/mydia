@@ -43,5 +43,13 @@ defmodule MetadataRelayWeb.Endpoint do
   plug(Plug.MethodOverride)
   plug(Plug.Head)
   plug(Plug.Session, @session_options)
+
+  # CORS support for browser-based clients
+  plug(Corsica,
+    origins: "*",
+    allow_headers: ["content-type", "authorization", "x-request-id"],
+    allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  )
+
   plug(MetadataRelayWeb.Router)
 end

@@ -283,11 +283,44 @@ defmodule Mydia.RemoteAccess do
   @doc """
   Generates a new pairing claim code for a user.
   The code expires after 5 minutes.
+
+  This function:
+  1. Creates a local claim record in the database
+  2. Registers the claim with the relay service (if connected)
+
+  Returns {:ok, claim} if successful, {:error, reason} otherwise.
+  If relay registration fails, the local claim is rolled back.
   """
   def generate_claim_code(user_id) do
-    %PairingClaim{}
-    |> PairingClaim.create_changeset(%{user_id: user_id})
-    |> Repo.insert()
+    # Create the local claim first to get the generated code
+    case %PairingClaim{}
+         |> PairingClaim.create_changeset(%{user_id: user_id})
+         |> Repo.insert() do
+      {:ok, claim} ->
+        # Register with the relay service
+        case Mydia.RemoteAccess.Relay.create_claim(user_id, claim.code, 300) do
+          :ok ->
+            {:ok, claim}
+
+          {:error, :not_running} ->
+            # Relay not running - delete local claim and return error
+            Repo.delete(claim)
+            {:error, :relay_not_connected}
+
+          {:error, :timeout} ->
+            # Relay didn't respond - delete local claim and return error
+            Repo.delete(claim)
+            {:error, :relay_timeout}
+
+          {:error, reason} ->
+            # Other relay error - delete local claim and return error
+            Repo.delete(claim)
+            {:error, {:relay_error, reason}}
+        end
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
   end
 
   @doc """

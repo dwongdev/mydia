@@ -87,6 +87,21 @@ defmodule MydiaWeb.RemoteAccessSettingsLive.Index do
          |> assign(:countdown_seconds, max(0, seconds))
          |> put_flash(:info, "Pairing code generated")}
 
+      {:error, :relay_not_connected} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Failed to generate pairing code: relay service not connected")}
+
+      {:error, :relay_timeout} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Failed to generate pairing code: relay service timeout")}
+
+      {:error, {:relay_error, _reason}} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Failed to generate pairing code: relay service error")}
+
       {:error, _changeset} ->
         {:noreply,
          socket

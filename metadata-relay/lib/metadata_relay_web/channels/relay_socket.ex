@@ -18,6 +18,7 @@ defmodule MetadataRelayWeb.RelaySocket do
   - Heartbeat: `{"type": "ping"}` / `{"type": "pong"}`
   - URL Update: `{"type": "update_urls", "direct_urls": [...]}`
   - Relay Message: `{"type": "relay_message", "session_id": "...", "payload": "base64"}`
+  - Create Claim: `{"type": "create_claim", "user_id": "...", "code": "XXXX-YYYY", "ttl_seconds": 300}`
   """
 
   @behaviour Phoenix.Socket.Transport
@@ -36,6 +37,7 @@ defmodule MetadataRelayWeb.RelaySocket do
 
   @impl true
   def connect(_state) do
+    Logger.info("Relay socket connect callback called")
     # Start unregistered - instance must send register message first
     {:ok,
      %{
@@ -48,6 +50,7 @@ defmodule MetadataRelayWeb.RelaySocket do
 
   @impl true
   def init(state) do
+    Logger.info("Relay socket init callback called")
     # Start heartbeat timeout timer
     timer = Process.send_after(self(), :heartbeat_timeout, @heartbeat_timeout)
     {:ok, %{state | heartbeat_timer: timer}}
@@ -55,12 +58,14 @@ defmodule MetadataRelayWeb.RelaySocket do
 
   @impl true
   def handle_in({text, _opts}, state) when is_binary(text) do
+    Logger.debug("Relay socket received message: #{inspect(String.slice(text, 0, 200))}")
+
     case Jason.decode(text) do
       {:ok, message} ->
         handle_message(message, state)
 
-      {:error, _reason} ->
-        Logger.warning("Invalid JSON received from relay socket")
+      {:error, reason} ->
+        Logger.warning("Invalid JSON received from relay socket: #{inspect(reason)}")
         {:ok, state}
     end
   end
@@ -104,7 +109,7 @@ defmodule MetadataRelayWeb.RelaySocket do
 
   @impl true
   def terminate(reason, state) do
-    Logger.info("Relay socket terminated: #{inspect(reason)}, instance: #{state.instance_id}")
+    Logger.info("Relay socket terminated: #{inspect(reason)}, instance: #{state.instance_id}, state: #{inspect(state)}")
 
     # Mark instance as offline
     if state.instance_id do
@@ -200,6 +205,37 @@ defmodule MetadataRelayWeb.RelaySocket do
       :error ->
         Logger.warning("Invalid base64 payload in relay message")
         {:ok, state}
+    end
+  end
+
+  defp handle_message(%{"type" => "create_claim"} = msg, state) do
+    if state.registered and state.instance do
+      user_id = msg["user_id"]
+      code = msg["code"]
+      ttl = msg["ttl_seconds"] || 300
+
+      # Create claim with the code provided by Mydia instance
+      case Relay.create_claim(state.instance, user_id, code: code, ttl_seconds: ttl) do
+        {:ok, claim} ->
+          Logger.info("Claim created for instance #{state.instance_id}: #{claim.code}")
+
+          response =
+            Jason.encode!(%{
+              type: "claim_created",
+              code: claim.code,
+              expires_at: DateTime.to_iso8601(claim.expires_at)
+            })
+
+          {:reply, :ok, {:text, response}, state}
+
+        {:error, reason} ->
+          Logger.warning("Failed to create claim: #{inspect(reason)}")
+          error = Jason.encode!(%{type: "error", message: "Failed to create claim"})
+          {:reply, :error, {:text, error}, state}
+      end
+    else
+      error = Jason.encode!(%{type: "error", message: "Not registered"})
+      {:reply, :error, {:text, error}, state}
     end
   end
 

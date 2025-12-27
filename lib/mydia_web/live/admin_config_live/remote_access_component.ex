@@ -129,12 +129,13 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
       </div>
 
       <%= if @ra_config && @ra_config.enabled do %>
-        <%!-- Pair New Device Section --%>
-        <div class="card bg-base-200">
-          <div class="card-body">
-            <h3 class="font-semibold text-lg mb-2">Pair New Device</h3>
+        <%!-- Pair New Device Section - only shown when relay is connected --%>
+        <%= if @relay_status && @relay_status.connected do %>
+          <div class="card bg-base-200">
+            <div class="card-body">
+              <h3 class="font-semibold text-lg mb-2">Pair New Device</h3>
 
-            <%= if @claim_code do %>
+              <%= if @claim_code do %>
               <%!-- Active Pairing Code --%>
               <div class="flex flex-col items-center py-6">
                 <p class="text-sm text-base-content/70 mb-4">
@@ -186,6 +187,7 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
             <% end %>
           </div>
         </div>
+        <% end %>
 
         <%!-- Connected Devices --%>
         <div class="card bg-base-200">
@@ -196,7 +198,13 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
               <div class="text-center py-8 text-base-content/60">
                 <.icon name="hero-device-phone-mobile" class="w-12 h-12 mx-auto mb-3 opacity-40" />
                 <p>No devices paired yet</p>
-                <p class="text-sm mt-1">Generate a pairing code above to connect your first device</p>
+                <p class="text-sm mt-1">
+                  <%= if @relay_status && @relay_status.connected do %>
+                    Generate a pairing code above to connect your first device
+                  <% else %>
+                    Fix relay connection above to start pairing devices
+                  <% end %>
+                </p>
               </div>
             <% else %>
               <div class="space-y-3">
@@ -530,6 +538,21 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
          |> assign(:claim_expires_at, expires_at)
          |> assign(:countdown_seconds, max(0, seconds))
          |> put_flash(:info, "Pairing code generated")}
+
+      {:error, :relay_not_connected} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Failed to generate pairing code: relay service not connected")}
+
+      {:error, :relay_timeout} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Failed to generate pairing code: relay service timeout")}
+
+      {:error, {:relay_error, _reason}} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Failed to generate pairing code: relay service error")}
 
       {:error, _changeset} ->
         {:noreply,

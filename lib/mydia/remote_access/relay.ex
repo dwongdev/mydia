@@ -144,6 +144,46 @@ defmodule Mydia.RemoteAccess.Relay do
     safe_cast(pid, {:send_relay_message, session_id, payload})
   end
 
+  @doc """
+  Registers a claim code with the relay service.
+
+  This allows remote clients to redeem the claim code through the relay
+  to discover and connect to this instance.
+
+  ## Parameters
+  - pid: The relay process (default: __MODULE__)
+  - user_id: The user ID associated with this claim
+  - code: The claim code (e.g., "ABCD-1234")
+  - ttl_seconds: Time-to-live in seconds (default: 300)
+
+  Returns :ok if the claim was registered, {:error, reason} otherwise.
+  """
+  def create_claim(pid \\ __MODULE__, user_id, code, ttl_seconds \\ 300) do
+    # Subscribe to get the confirmation
+    topic = "relay:claim:#{code}"
+    Phoenix.PubSub.subscribe(Mydia.PubSub, topic)
+
+    # Send the request
+    case safe_cast(pid, {:create_claim, user_id, code, ttl_seconds}) do
+      :ok ->
+        # Wait for confirmation with timeout
+        receive do
+          {:claim_created, ^code, _expires_at} ->
+            Phoenix.PubSub.unsubscribe(Mydia.PubSub, topic)
+            :ok
+        after
+          5_000 ->
+            Phoenix.PubSub.unsubscribe(Mydia.PubSub, topic)
+            Logger.warning("Timeout waiting for claim confirmation from relay")
+            {:error, :timeout}
+        end
+
+      error ->
+        Phoenix.PubSub.unsubscribe(Mydia.PubSub, topic)
+        error
+    end
+  end
+
   # Safely casts a message to the WebSockex process, returning an error if the process isn't running.
   defp safe_cast(pid, message) do
     try do
@@ -166,6 +206,20 @@ defmodule Mydia.RemoteAccess.Relay do
   def handle_connect(_conn, state) do
     Logger.info("Connected to relay service at #{state.relay_url}")
 
+    # Schedule registration to be sent immediately
+    send(self(), :send_registration)
+
+    # Schedule first heartbeat
+    timer = Process.send_after(self(), :heartbeat, @heartbeat_interval)
+
+    # Reset reconnect delay on successful connection
+    state = %{state | heartbeat_timer: timer, reconnect_delay: @initial_reconnect_delay}
+
+    {:ok, state}
+  end
+
+  @impl WebSockex
+  def handle_info(:send_registration, state) do
     # Send registration message with direct URLs
     registration_msg =
       Jason.encode!(%{
@@ -175,13 +229,24 @@ defmodule Mydia.RemoteAccess.Relay do
         direct_urls: state.direct_urls
       })
 
-    # Schedule first heartbeat
+    Logger.info("Sending registration message to relay")
+
+    {:reply, {:text, registration_msg}, state}
+  end
+
+  def handle_info(:heartbeat, state) do
+    # Send heartbeat ping
+    msg = Jason.encode!(%{type: "ping"})
+
+    # Schedule next heartbeat
+    if state.heartbeat_timer do
+      Process.cancel_timer(state.heartbeat_timer)
+    end
+
     timer = Process.send_after(self(), :heartbeat, @heartbeat_interval)
+    state = %{state | heartbeat_timer: timer}
 
-    # Reset reconnect delay on successful connection
-    state = %{state | heartbeat_timer: timer, reconnect_delay: @initial_reconnect_delay}
-
-    {:ok, state, {:text, registration_msg}}
+    {:reply, {:text, msg}, state}
   end
 
   @impl WebSockex
@@ -247,19 +312,22 @@ defmodule Mydia.RemoteAccess.Relay do
   end
 
   @impl WebSockex
-  def handle_info(:heartbeat, state) do
-    # Send heartbeat ping
-    msg = Jason.encode!(%{type: "ping"})
+  def handle_cast({:create_claim, user_id, code, ttl_seconds}, state) do
+    if state.registered do
+      msg =
+        Jason.encode!(%{
+          type: "create_claim",
+          user_id: user_id,
+          code: code,
+          ttl_seconds: ttl_seconds
+        })
 
-    # Schedule next heartbeat
-    if state.heartbeat_timer do
-      Process.cancel_timer(state.heartbeat_timer)
+      Logger.info("Sending create_claim request to relay for code: #{code}")
+      {:reply, {:text, msg}, state}
+    else
+      Logger.warning("Cannot create claim: not registered with relay")
+      {:ok, state}
     end
-
-    timer = Process.send_after(self(), :heartbeat, @heartbeat_interval)
-    state = %{state | heartbeat_timer: timer}
-
-    {:reply, {:text, msg}, state}
   end
 
   @impl WebSockex
@@ -374,6 +442,22 @@ defmodule Mydia.RemoteAccess.Relay do
     {:ok, state}
   end
 
+  defp handle_relay_message(
+         %{"type" => "claim_created", "code" => code, "expires_at" => expires_at},
+         state
+       ) do
+    Logger.info("Claim registered with relay: #{code}")
+
+    # Broadcast to anyone waiting for this claim confirmation
+    Phoenix.PubSub.broadcast(
+      Mydia.PubSub,
+      "relay:claim:#{code}",
+      {:claim_created, code, expires_at}
+    )
+
+    {:ok, state}
+  end
+
   defp handle_relay_message(msg, state) do
     Logger.debug("Unhandled relay message: #{inspect(msg)}")
     {:ok, state}
@@ -394,20 +478,26 @@ defmodule Mydia.RemoteAccess.Relay do
   end
 
   defp normalize_relay_url(url) do
-    # Convert http:// to ws:// and https:// to wss://
-    cond do
-      String.starts_with?(url, "https://") ->
-        String.replace(url, "https://", "wss://")
+    # Convert http:// to ws:// and https:// to wss://, then append /relay/tunnel path
+    base_url =
+      cond do
+        String.starts_with?(url, "https://") ->
+          String.replace(url, "https://", "wss://")
 
-      String.starts_with?(url, "http://") ->
-        String.replace(url, "http://", "ws://")
+        String.starts_with?(url, "http://") ->
+          String.replace(url, "http://", "ws://")
 
-      String.starts_with?(url, "ws://") or String.starts_with?(url, "wss://") ->
-        url
+        String.starts_with?(url, "ws://") or String.starts_with?(url, "wss://") ->
+          url
 
-      true ->
-        # Default to wss:// if no protocol specified
-        "wss://#{url}"
-    end
+        true ->
+          # Default to wss:// if no protocol specified
+          "wss://#{url}"
+      end
+
+    # Append the relay tunnel WebSocket path
+    base_url
+    |> String.trim_trailing("/")
+    |> Kernel.<>("/relay/tunnel/websocket")
   end
 end

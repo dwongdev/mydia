@@ -206,8 +206,8 @@
         </div>
       </div>
 
-      <%!-- Pairing Code Card --%>
-      <%= if @config.enabled do %>
+      <%!-- Pairing Code Card - only shown when relay is connected --%>
+      <%= if @config.enabled && @relay_status && @relay_status.connected do %>
         <div class="card bg-base-100 shadow-xl mb-6">
           <div class="card-body">
             <h2 class="card-title mb-4">Device Pairing</h2>

@@ -5,6 +5,9 @@ defmodule Mydia.RemoteAccess do
   """
 
   import Ecto.Query, warn: false
+
+  require Logger
+
   alias Mydia.Repo
   alias Mydia.RemoteAccess.{Config, PairingClaim, RemoteDevice}
 
@@ -285,41 +288,42 @@ defmodule Mydia.RemoteAccess do
   The code expires after 5 minutes.
 
   This function:
-  1. Creates a local claim record in the database
-  2. Registers the claim with the relay service (if connected)
+  1. Requests a claim code from the relay service
+  2. Creates a local claim record with the returned code
 
   Returns {:ok, claim} if successful, {:error, reason} otherwise.
-  If relay registration fails, the local claim is rolled back.
   """
   def generate_claim_code(user_id) do
-    # Create the local claim first to get the generated code
-    case %PairingClaim{}
-         |> PairingClaim.create_changeset(%{user_id: user_id})
-         |> Repo.insert() do
-      {:ok, claim} ->
-        # Register with the relay service
-        case Mydia.RemoteAccess.Relay.create_claim(user_id, claim.code, 300) do
-          :ok ->
-            {:ok, claim}
+    Logger.debug("Requesting pairing claim from relay for user_id=#{user_id}")
 
-          {:error, :not_running} ->
-            # Relay not running - delete local claim and return error
-            Repo.delete(claim)
-            {:error, :relay_not_connected}
+    # Request claim code from relay - it generates and returns the code
+    case Mydia.RemoteAccess.Relay.request_claim(user_id, 300) do
+      {:ok, code, expires_at_str} ->
+        Logger.debug("Received claim code from relay: #{code}")
 
-          {:error, :timeout} ->
-            # Relay didn't respond - delete local claim and return error
-            Repo.delete(claim)
-            {:error, :relay_timeout}
+        # Parse the expires_at from ISO8601 string
+        {:ok, expires_at, _} = DateTime.from_iso8601(expires_at_str)
 
-          {:error, reason} ->
-            # Other relay error - delete local claim and return error
-            Repo.delete(claim)
-            {:error, {:relay_error, reason}}
-        end
+        # Create local claim record with the code from relay
+        %PairingClaim{}
+        |> PairingClaim.changeset_with_code(%{
+          user_id: user_id,
+          code: code,
+          expires_at: expires_at
+        })
+        |> Repo.insert()
 
-      {:error, changeset} ->
-        {:error, changeset}
+      {:error, :not_running} ->
+        Logger.warning("Relay process not running")
+        {:error, :relay_not_connected}
+
+      {:error, :timeout} ->
+        Logger.warning("Relay request timed out")
+        {:error, :relay_timeout}
+
+      {:error, reason} ->
+        Logger.error("Relay request failed: #{inspect(reason)}")
+        {:error, {:relay_error, reason}}
     end
   end
 
@@ -565,6 +569,51 @@ defmodule Mydia.RemoteAccess do
   """
   def reconnect_relay do
     Mydia.RemoteAccess.Relay.reconnect()
+  end
+
+  @doc """
+  Starts the relay connection process.
+  Called when remote access is enabled.
+  Returns :ok if started successfully, {:error, reason} otherwise.
+  """
+  def start_relay do
+    case DynamicSupervisor.start_child(
+           {:via, Registry, {Mydia.DynamicSupervisorRegistry, :relay}},
+           Mydia.RemoteAccess.Relay
+         ) do
+      {:ok, _pid} ->
+        Logger.info("Relay service started")
+        :ok
+
+      {:error, {:already_started, _pid}} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Failed to start relay service: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Stops the relay connection process.
+  Called when remote access is disabled.
+  Returns :ok.
+  """
+  def stop_relay do
+    # Find the relay process
+    case Process.whereis(Mydia.RemoteAccess.Relay) do
+      nil ->
+        :ok
+
+      pid ->
+        DynamicSupervisor.terminate_child(
+          {:via, Registry, {Mydia.DynamicSupervisorRegistry, :relay}},
+          pid
+        )
+
+        Logger.info("Relay service stopped")
+        :ok
+    end
   end
 
   # Subscription helpers

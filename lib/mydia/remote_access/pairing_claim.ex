@@ -40,6 +40,18 @@ defmodule Mydia.RemoteAccess.PairingClaim do
   end
 
   @doc """
+  Changeset for creating a claim with a pre-generated code from the relay.
+  Used when the relay service generates the code.
+  """
+  def changeset_with_code(claim, attrs) do
+    claim
+    |> cast(attrs, [:user_id, :code, :expires_at])
+    |> validate_required([:user_id, :code, :expires_at])
+    |> foreign_key_constraint(:user_id)
+    |> unique_constraint(:code)
+  end
+
+  @doc """
   Changeset for consuming a claim (marking it as used).
   """
   def consume_changeset(claim, device_id) do

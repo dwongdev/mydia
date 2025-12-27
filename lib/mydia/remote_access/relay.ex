@@ -43,12 +43,14 @@ defmodule Mydia.RemoteAccess.Relay do
     case get_relay_config() do
       {:ok, config} ->
         # Read relay URL from environment variable, not database
-        url = Mydia.Metadata.metadata_relay_url()
+        base_url = Mydia.Metadata.metadata_relay_url()
         instance_id = config.instance_id
         public_key = config.static_public_key
 
         # Convert ws:// or wss:// URL format if needed
-        url = normalize_relay_url(url)
+        url = normalize_relay_url(base_url)
+
+        Logger.info("Starting relay connection to #{url} (from base: #{base_url})")
 
         # Get direct URLs from config
         direct_urls = Map.get(config, :direct_urls, [])
@@ -58,6 +60,7 @@ defmodule Mydia.RemoteAccess.Relay do
           public_key: public_key,
           relay_url: url,
           direct_urls: direct_urls,
+          connected: false,
           registered: false,
           heartbeat_timer: nil,
           reconnect_delay: @initial_reconnect_delay
@@ -85,12 +88,15 @@ defmodule Mydia.RemoteAccess.Relay do
   - :public_key - base64-encoded public key
   """
   def status(pid \\ __MODULE__) do
+    actual_pid = Process.whereis(pid)
+    Logger.debug("Relay.status: Process.whereis(#{inspect(pid)}) = #{inspect(actual_pid)}")
+
     try do
       state = :sys.get_state(pid)
 
       {:ok,
        %{
-         connected: true,
+         connected: state.connected,
          registered: state.registered,
          instance_id: state.instance_id,
          relay_url: state.relay_url,
@@ -98,9 +104,11 @@ defmodule Mydia.RemoteAccess.Relay do
        }}
     catch
       :exit, {:noproc, _} ->
+        Logger.debug("Relay.status: process not running")
         {:error, :not_running}
 
       :exit, {:timeout, _} ->
+        Logger.debug("Relay.status: timeout")
         {:error, :timeout}
     end
   end
@@ -145,40 +153,51 @@ defmodule Mydia.RemoteAccess.Relay do
   end
 
   @doc """
-  Registers a claim code with the relay service.
+  Requests a claim code from the relay service.
 
-  This allows remote clients to redeem the claim code through the relay
-  to discover and connect to this instance.
+  The relay generates the code and returns it. This allows remote clients
+  to redeem the claim code through the relay to discover and connect to this instance.
 
   ## Parameters
   - pid: The relay process (default: __MODULE__)
   - user_id: The user ID associated with this claim
-  - code: The claim code (e.g., "ABCD-1234")
   - ttl_seconds: Time-to-live in seconds (default: 300)
 
-  Returns :ok if the claim was registered, {:error, reason} otherwise.
+  Returns {:ok, code, expires_at} if successful, {:error, reason} otherwise.
   """
-  def create_claim(pid \\ __MODULE__, user_id, code, ttl_seconds \\ 300) do
-    # Subscribe to get the confirmation
-    topic = "relay:claim:#{code}"
+  def request_claim(pid \\ __MODULE__, user_id, ttl_seconds \\ 300) do
+    Logger.debug("Relay.request_claim: user_id=#{user_id}, ttl=#{ttl_seconds}s")
+
+    # Generate a unique request ID to match the response
+    request_id = :erlang.unique_integer([:positive]) |> Integer.to_string()
+
+    # Subscribe to get the response
+    topic = "relay:claim_response:#{request_id}"
     Phoenix.PubSub.subscribe(Mydia.PubSub, topic)
 
-    # Send the request
-    case safe_cast(pid, {:create_claim, user_id, code, ttl_seconds}) do
+    case safe_cast(pid, {:request_claim, user_id, ttl_seconds, request_id}) do
       :ok ->
-        # Wait for confirmation with timeout
+        Logger.debug("Relay.request_claim: request sent, waiting for response (5s timeout)")
+
         receive do
-          {:claim_created, ^code, _expires_at} ->
+          {:claim_created, code, expires_at} ->
+            Logger.debug("Relay.request_claim: received code #{code} from relay")
             Phoenix.PubSub.unsubscribe(Mydia.PubSub, topic)
-            :ok
+            {:ok, code, expires_at}
         after
           5_000 ->
             Phoenix.PubSub.unsubscribe(Mydia.PubSub, topic)
-            Logger.warning("Timeout waiting for claim confirmation from relay")
+            Logger.warning("Relay.request_claim: timeout after 5s waiting for response")
             {:error, :timeout}
         end
 
-      error ->
+      {:error, :not_running} = error ->
+        Logger.warning("Relay.request_claim: WebSocket process not running")
+        Phoenix.PubSub.unsubscribe(Mydia.PubSub, topic)
+        error
+
+      {:error, reason} = error ->
+        Logger.warning("Relay.request_claim: failed to send request - #{inspect(reason)}")
         Phoenix.PubSub.unsubscribe(Mydia.PubSub, topic)
         error
     end
@@ -212,8 +231,8 @@ defmodule Mydia.RemoteAccess.Relay do
     # Schedule first heartbeat
     timer = Process.send_after(self(), :heartbeat, @heartbeat_interval)
 
-    # Reset reconnect delay on successful connection
-    state = %{state | heartbeat_timer: timer, reconnect_delay: @initial_reconnect_delay}
+    # Reset reconnect delay on successful connection, mark as connected
+    state = %{state | connected: true, heartbeat_timer: timer, reconnect_delay: @initial_reconnect_delay}
 
     {:ok, state}
   end
@@ -312,20 +331,20 @@ defmodule Mydia.RemoteAccess.Relay do
   end
 
   @impl WebSockex
-  def handle_cast({:create_claim, user_id, code, ttl_seconds}, state) do
+  def handle_cast({:request_claim, user_id, ttl_seconds, request_id}, state) do
     if state.registered do
       msg =
         Jason.encode!(%{
           type: "create_claim",
           user_id: user_id,
-          code: code,
-          ttl_seconds: ttl_seconds
+          ttl_seconds: ttl_seconds,
+          request_id: request_id
         })
 
-      Logger.info("Sending create_claim request to relay for code: #{code}")
+      Logger.info("Sending create_claim request to relay (request_id: #{request_id})")
       {:reply, {:text, msg}, state}
     else
-      Logger.warning("Cannot create claim: not registered with relay")
+      Logger.warning("Cannot request claim: not registered with relay")
       {:ok, state}
     end
   end
@@ -345,8 +364,8 @@ defmodule Mydia.RemoteAccess.Relay do
 
     Logger.info("Attempting to reconnect to relay in #{delay}ms...")
 
-    # Update state for next connection
-    state = %{state | registered: false, heartbeat_timer: nil, reconnect_delay: next_delay}
+    # Update state for next connection - mark as disconnected
+    state = %{state | connected: false, registered: false, heartbeat_timer: nil, reconnect_delay: next_delay}
 
     {:reconnect, delay, state}
   end
@@ -443,15 +462,22 @@ defmodule Mydia.RemoteAccess.Relay do
   end
 
   defp handle_relay_message(
-         %{"type" => "claim_created", "code" => code, "expires_at" => expires_at},
+         %{"type" => "claim_created", "code" => code, "expires_at" => expires_at} = msg,
          state
        ) do
-    Logger.info("Claim registered with relay: #{code}")
+    Logger.info("Claim created by relay: #{code}")
 
-    # Broadcast to anyone waiting for this claim confirmation
+    # Use request_id if present, otherwise fall back to code-based topic
+    topic =
+      case msg["request_id"] do
+        nil -> "relay:claim:#{code}"
+        request_id -> "relay:claim_response:#{request_id}"
+      end
+
+    # Broadcast to anyone waiting for this claim response
     Phoenix.PubSub.broadcast(
       Mydia.PubSub,
-      "relay:claim:#{code}",
+      topic,
       {:claim_created, code, expires_at}
     )
 

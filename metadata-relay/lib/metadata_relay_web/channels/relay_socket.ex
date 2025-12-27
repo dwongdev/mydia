@@ -211,11 +211,11 @@ defmodule MetadataRelayWeb.RelaySocket do
   defp handle_message(%{"type" => "create_claim"} = msg, state) do
     if state.registered and state.instance do
       user_id = msg["user_id"]
-      code = msg["code"]
       ttl = msg["ttl_seconds"] || 300
+      request_id = msg["request_id"]
 
-      # Create claim with the code provided by Mydia instance
-      case Relay.create_claim(state.instance, user_id, code: code, ttl_seconds: ttl) do
+      # Create claim - relay generates the code
+      case Relay.create_claim(state.instance, user_id, ttl_seconds: ttl) do
         {:ok, claim} ->
           Logger.info("Claim created for instance #{state.instance_id}: #{claim.code}")
 
@@ -223,7 +223,8 @@ defmodule MetadataRelayWeb.RelaySocket do
             Jason.encode!(%{
               type: "claim_created",
               code: claim.code,
-              expires_at: DateTime.to_iso8601(claim.expires_at)
+              expires_at: DateTime.to_iso8601(claim.expires_at),
+              request_id: request_id
             })
 
           {:reply, :ok, {:text, response}, state}

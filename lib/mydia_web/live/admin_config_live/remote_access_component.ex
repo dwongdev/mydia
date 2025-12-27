@@ -9,6 +9,8 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
 
   alias Mydia.RemoteAccess
 
+  require Logger
+
   @impl true
   def update(%{countdown_tick: true} = _assigns, socket) do
     # Handle countdown tick from parent
@@ -28,6 +30,7 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
       |> assign_new(:claim_code, fn -> nil end)
       |> assign_new(:claim_expires_at, fn -> nil end)
       |> assign_new(:countdown_seconds, fn -> 0 end)
+      |> assign_new(:pairing_error, fn -> nil end)
       |> assign_new(:show_revoke_modal, fn -> false end)
       |> assign_new(:selected_device, fn -> nil end)
       |> assign_new(:show_delete_modal, fn -> false end)
@@ -58,24 +61,14 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
         <div class="card-body">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-4">
+              <% relay_ready = @ra_config && @ra_config.enabled && @relay_status && @relay_status.connected && @relay_status.registered %>
               <div class={[
                 "w-12 h-12 rounded-full flex items-center justify-center",
-                if(@ra_config && @ra_config.enabled && @relay_status && @relay_status.connected,
-                  do: "bg-success/20",
-                  else: "bg-base-300"
-                )
+                if(relay_ready, do: "bg-success/20", else: "bg-base-300")
               ]}>
                 <.icon
-                  name={
-                    if @ra_config && @ra_config.enabled && @relay_status && @relay_status.connected,
-                      do: "hero-signal",
-                      else: "hero-signal-slash"
-                  }
-                  class={
-                    if @ra_config && @ra_config.enabled && @relay_status && @relay_status.connected,
-                      do: "w-6 h-6 text-success",
-                      else: "w-6 h-6 text-base-content/40"
-                  }
+                  name={if relay_ready, do: "hero-signal", else: "hero-signal-slash"}
+                  class={if relay_ready, do: "w-6 h-6 text-success", else: "w-6 h-6 text-base-content/40"}
                 />
               </div>
               <div>
@@ -84,10 +77,14 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                   <%= cond do %>
                     <% !@ra_config || !@ra_config.enabled -> %>
                       Disabled - mobile apps cannot connect
-                    <% @relay_status && @relay_status.connected -> %>
+                    <% @relay_status && @relay_status.connected && @relay_status.registered -> %>
                       <span class="text-success">Connected and ready for devices</span>
+                    <% @relay_status && @relay_status.connected -> %>
+                      <span class="text-warning">Connected but not registered</span>
+                    <% @relay_status -> %>
+                      <span class="text-warning">Connecting to relay...</span>
                     <% true -> %>
-                      <span class="text-warning">Enabled but not connected</span>
+                      <span class="text-error">Relay process not running</span>
                   <% end %>
                 </p>
               </div>
@@ -129,64 +126,74 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
       </div>
 
       <%= if @ra_config && @ra_config.enabled do %>
-        <%!-- Pair New Device Section - only shown when relay is connected --%>
-        <%= if @relay_status && @relay_status.connected do %>
+        <%!-- Pair New Device Section - only shown when relay is connected and registered --%>
+        <%= if @relay_status && @relay_status.connected && @relay_status.registered do %>
           <div class="card bg-base-200">
             <div class="card-body">
               <h3 class="font-semibold text-lg mb-2">Pair New Device</h3>
 
               <%= if @claim_code do %>
-              <%!-- Active Pairing Code --%>
-              <div class="flex flex-col items-center py-6">
-                <p class="text-sm text-base-content/70 mb-4">
-                  Enter this code in your mobile app
-                </p>
-                <div class="flex items-center gap-3 mb-3">
-                  <code class="text-4xl font-bold tracking-[0.3em] bg-base-300 px-6 py-3 rounded-lg">
-                    {@claim_code}
-                  </code>
+                <%!-- Active Pairing Code --%>
+                <div class="flex flex-col items-center py-6">
+                  <p class="text-sm text-base-content/70 mb-4">
+                    Enter this code in your mobile app
+                  </p>
+                  <div class="flex items-center gap-3 mb-3">
+                    <code class="text-4xl font-bold tracking-[0.3em] bg-base-300 px-6 py-3 rounded-lg">
+                      {@claim_code}
+                    </code>
+                    <button
+                      class="btn btn-ghost btn-sm"
+                      phx-click="copy_claim_code"
+                      phx-target={@myself}
+                      onclick={"navigator.clipboard.writeText('#{@claim_code}')"}
+                      title="Copy code"
+                    >
+                      <.icon name="hero-clipboard" class="w-5 h-5" />
+                    </button>
+                  </div>
+                  <div class="flex items-center gap-2 text-sm text-base-content/60">
+                    <.icon name="hero-clock" class="w-4 h-4" />
+                    <span>Expires in {format_countdown(@countdown_seconds)}</span>
+                  </div>
+                </div>
+
+                <div class="flex justify-center">
                   <button
+                    id="regenerate-pairing-code-btn"
                     class="btn btn-ghost btn-sm"
-                    phx-click="copy_claim_code"
+                    phx-click="generate_claim_code"
                     phx-target={@myself}
-                    onclick={"navigator.clipboard.writeText('#{@claim_code}')"}
-                    title="Copy code"
+                    phx-disable-with="Generating..."
                   >
-                    <.icon name="hero-clipboard" class="w-5 h-5" />
+                    Generate new code
                   </button>
                 </div>
-                <div class="flex items-center gap-2 text-sm text-base-content/60">
-                  <.icon name="hero-clock" class="w-4 h-4" />
-                  <span>Expires in {format_countdown(@countdown_seconds)}</span>
+              <% else %>
+                <%!-- Generate Code Prompt --%>
+                <div class="flex flex-col items-center py-6">
+                  <%= if @pairing_error do %>
+                    <div class="alert alert-error mb-4 max-w-md">
+                      <.icon name="hero-exclamation-circle" class="w-5 h-5" />
+                      <span>{@pairing_error}</span>
+                    </div>
+                  <% end %>
+                  <p class="text-sm text-base-content/70 mb-4 text-center max-w-md">
+                    Generate a temporary code to link your phone or tablet to this server
+                  </p>
+                  <button
+                    id="generate-pairing-code-btn"
+                    class="btn btn-primary"
+                    phx-click="generate_claim_code"
+                    phx-target={@myself}
+                    phx-disable-with="Generating..."
+                  >
+                    <.icon name="hero-qr-code" class="w-5 h-5" /> Generate Pairing Code
+                  </button>
                 </div>
-              </div>
-
-              <div class="flex justify-center">
-                <button
-                  class="btn btn-ghost btn-sm"
-                  phx-click="generate_claim_code"
-                  phx-target={@myself}
-                >
-                  Generate new code
-                </button>
-              </div>
-            <% else %>
-              <%!-- Generate Code Prompt --%>
-              <div class="flex flex-col items-center py-6">
-                <p class="text-sm text-base-content/70 mb-4 text-center max-w-md">
-                  Generate a temporary code to link your phone or tablet to this server
-                </p>
-                <button
-                  class="btn btn-primary"
-                  phx-click="generate_claim_code"
-                  phx-target={@myself}
-                >
-                  <.icon name="hero-qr-code" class="w-5 h-5" /> Generate Pairing Code
-                </button>
-              </div>
-            <% end %>
+              <% end %>
+            </div>
           </div>
-        </div>
         <% end %>
 
         <%!-- Connected Devices --%>
@@ -199,7 +206,7 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                 <.icon name="hero-device-phone-mobile" class="w-12 h-12 mx-auto mb-3 opacity-40" />
                 <p>No devices paired yet</p>
                 <p class="text-sm mt-1">
-                  <%= if @relay_status && @relay_status.connected do %>
+                  <%= if @relay_status && @relay_status.connected && @relay_status.registered do %>
                     Generate a pairing code above to connect your first device
                   <% else %>
                     Fix relay connection above to start pairing devices
@@ -496,7 +503,8 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
     config = socket.assigns.ra_config
 
     with {:ok, socket} <- maybe_initialize_keypair(socket, config, enabled),
-         {:ok, updated_config} <- RemoteAccess.toggle_remote_access(enabled) do
+         {:ok, updated_config} <- RemoteAccess.toggle_remote_access(enabled),
+         :ok <- maybe_start_or_stop_relay(enabled) do
       {:noreply,
        socket
        |> assign(:ra_config, updated_config)
@@ -513,6 +521,12 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
          socket
          |> put_flash(:error, "Remote access not configured. Please try again.")}
 
+      {:error, :remote_access_not_configured} ->
+        {:noreply,
+         socket
+         |> load_relay_status()
+         |> put_flash(:error, "Failed to start relay: remote access not fully configured")}
+
       {:error, _changeset} ->
         {:noreply,
          socket
@@ -521,44 +535,8 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
   end
 
   def handle_event("generate_claim_code", _params, socket) do
-    user_id = socket.assigns.current_user.id
-
-    case RemoteAccess.generate_claim_code(user_id) do
-      {:ok, claim} ->
-        expires_at = claim.expires_at
-        now = DateTime.utc_now()
-        seconds = DateTime.diff(expires_at, now, :second)
-
-        # Schedule the first countdown tick via the parent LiveView
-        send(self(), {:remote_access_countdown_tick, socket.assigns.id})
-
-        {:noreply,
-         socket
-         |> assign(:claim_code, claim.code)
-         |> assign(:claim_expires_at, expires_at)
-         |> assign(:countdown_seconds, max(0, seconds))
-         |> put_flash(:info, "Pairing code generated")}
-
-      {:error, :relay_not_connected} ->
-        {:noreply,
-         socket
-         |> put_flash(:error, "Failed to generate pairing code: relay service not connected")}
-
-      {:error, :relay_timeout} ->
-        {:noreply,
-         socket
-         |> put_flash(:error, "Failed to generate pairing code: relay service timeout")}
-
-      {:error, {:relay_error, _reason}} ->
-        {:noreply,
-         socket
-         |> put_flash(:error, "Failed to generate pairing code: relay service error")}
-
-      {:error, _changeset} ->
-        {:noreply,
-         socket
-         |> put_flash(:error, "Failed to generate pairing code")}
-    end
+    Logger.debug("Generate claim code button clicked")
+    {:noreply, do_generate_claim_code(socket)}
   end
 
   def handle_event("copy_claim_code", _params, socket) do
@@ -708,24 +686,33 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
   end
 
   def handle_event("reconnect_relay", _params, socket) do
-    case RemoteAccess.reconnect_relay() do
+    # First, try to start the relay if it's not running
+    case RemoteAccess.start_relay() do
       :ok ->
         # Request refresh via parent
         send(self(), {:remote_access_refresh_relay, socket.assigns.id})
 
         {:noreply,
          socket
-         |> put_flash(:info, "Relay reconnection initiated")}
+         |> load_relay_status()
+         |> put_flash(:info, "Relay connection initiated")}
 
-      {:error, :not_running} ->
+      {:error, :remote_access_not_configured} ->
         {:noreply,
          socket
-         |> put_flash(:error, "Relay service is not running. Check configuration and restart.")}
+         |> put_flash(:error, "Remote access is not fully configured")}
 
-      {:error, _reason} ->
+      {:error, :remote_access_disabled} ->
         {:noreply,
          socket
-         |> put_flash(:error, "Failed to reconnect relay")}
+         |> put_flash(:error, "Remote access is disabled")}
+
+      {:error, reason} ->
+        Logger.error("Failed to start relay: #{inspect(reason)}")
+
+        {:noreply,
+         socket
+         |> put_flash(:error, "Failed to connect to relay service")}
     end
   end
 
@@ -759,6 +746,63 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
     end
   end
 
+  ## Claim code generation (called from parent via send_update)
+
+  def do_generate_claim_code(socket) do
+    user_id = socket.assigns.current_user.id
+    relay_status = socket.assigns.relay_status
+    Logger.debug("Generating pairing code for user #{user_id}, relay_status=#{inspect(relay_status)}")
+
+    case RemoteAccess.generate_claim_code(user_id) do
+      {:ok, claim} ->
+        Logger.info("Pairing code generated successfully: #{claim.code}")
+        expires_at = claim.expires_at
+        now = DateTime.utc_now()
+        seconds = DateTime.diff(expires_at, now, :second)
+
+        # Schedule the first countdown tick via the parent LiveView
+        send(self(), {:remote_access_countdown_tick, socket.assigns.id})
+
+        socket
+        |> assign(:pairing_error, nil)
+        |> assign(:claim_code, claim.code)
+        |> assign(:claim_expires_at, expires_at)
+        |> assign(:countdown_seconds, max(0, seconds))
+
+      {:error, :relay_not_connected} ->
+        Logger.warning("Failed to generate pairing code: relay service not connected")
+
+        assign(
+          socket,
+          :pairing_error,
+          "Relay service is not connected. Check your relay configuration."
+        )
+
+      {:error, :relay_timeout} ->
+        Logger.warning("Failed to generate pairing code: relay service timeout after 5s")
+
+        assign(
+          socket,
+          :pairing_error,
+          "Relay service did not respond in time. Please try again."
+        )
+
+      {:error, {:relay_error, reason}} ->
+        Logger.error("Failed to generate pairing code: relay error - #{inspect(reason)}")
+
+        assign(
+          socket,
+          :pairing_error,
+          "Relay service error. Please try again later."
+        )
+
+      {:error, changeset} ->
+        Logger.error("Failed to generate pairing code: database error - #{inspect(changeset)}")
+
+        assign(socket, :pairing_error, "Database error. Please try again.")
+    end
+  end
+
   ## Private Helpers
 
   defp maybe_initialize_keypair(socket, nil, true) do
@@ -772,6 +816,9 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
   end
 
   defp maybe_initialize_keypair(socket, _config, _enabled), do: {:ok, socket}
+
+  defp maybe_start_or_stop_relay(true), do: RemoteAccess.start_relay()
+  defp maybe_start_or_stop_relay(false), do: RemoteAccess.stop_relay()
 
   defp format_errors(%Ecto.Changeset{} = changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->

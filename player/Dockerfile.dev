@@ -51,13 +51,12 @@ case "$MODE" in
         # Run Flutter web server with hot restart support
         exec flutter run -d web-server \
             --web-port=3000 \
-            --web-hostname=0.0.0.0 \
-            --web-renderer=auto
+            --web-hostname=0.0.0.0
         ;;
 
     watch)
         echo 'Initial Flutter web build...'
-        flutter build web --profile --dart-define=Dart2jsOptimization=O0 --base-href /player/
+        flutter build web --profile --no-web-resources-cdn --no-wasm-dry-run --dart-define=Dart2jsOptimization=O0 --base-href /player/
         rm -rf /app/priv/static/player
         mkdir -p /app/priv/static/player
         cp -r build/web/* /app/priv/static/player/
@@ -74,10 +73,10 @@ case "$MODE" in
         echo ''
 
         while true; do
-            inotifywait -r -e modify,create,delete --exclude '\.dart_tool|build|\.git' lib/ 2>/dev/null
+            inotifywait -r -e modify,create,delete --exclude '\.dart_tool|build|\.git|\.tmp|\.g\.dart' lib/ 2>/dev/null
             echo ''
             echo '>>> File change detected, rebuilding...'
-            if flutter build web --profile --dart-define=Dart2jsOptimization=O0 --base-href /player/ 2>&1; then
+            if flutter build web --profile --no-web-resources-cdn --dart-define=Dart2jsOptimization=O0 --base-href /player/ 2>&1; then
                 rm -rf /app/priv/static/player
                 mkdir -p /app/priv/static/player
                 cp -r build/web/* /app/priv/static/player/

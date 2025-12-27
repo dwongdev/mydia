@@ -282,7 +282,11 @@ defmodule MetadataRelay.Router do
 
   # Register new instance
   post "/relay/instances" do
-    handle_relay_request(conn, fn -> RelayHandler.register_instance(conn.body_params) end)
+    with :ok <- check_relay_rate_limit(conn, limit: 10, window_ms: 60_000) do
+      handle_relay_request(conn, fn -> RelayHandler.register_instance(conn.body_params) end)
+    else
+      {:error, :rate_limited} -> send_rate_limited(conn, 60)
+    end
   end
 
   # Update instance heartbeat/presence
@@ -311,17 +315,32 @@ defmodule MetadataRelay.Router do
 
   # Redeem claim code
   post "/relay/claim/:code" do
-    handle_relay_request(conn, fn -> RelayHandler.redeem_claim(code) end)
+    with :ok <- check_relay_rate_limit(conn, limit: 5, window_ms: 60_000) do
+      handle_relay_request(conn, fn -> RelayHandler.redeem_claim(code) end)
+    else
+      {:error, :rate_limited} -> send_rate_limited(conn, 60)
+    end
   end
 
   # Consume claim (after successful pairing)
   post "/relay/claim/consume" do
-    handle_relay_request(conn, fn -> RelayHandler.consume_claim(conn.body_params) end)
+    with {:ok, instance_id} <- verify_relay_auth_from_claim(conn) do
+      handle_relay_request(conn, fn ->
+        RelayHandler.consume_claim(instance_id, conn.body_params)
+      end)
+    else
+      {:error, :unauthorized} ->
+        send_unauthorized(conn)
+    end
   end
 
   # Get connection info
   get "/relay/instances/:id/connect" do
-    handle_relay_request(conn, fn -> RelayHandler.get_connection_info(id) end)
+    with :ok <- check_relay_rate_limit(conn, limit: 30, window_ms: 60_000) do
+      handle_relay_request(conn, fn -> RelayHandler.get_connection_info(id) end)
+    else
+      {:error, :rate_limited} -> send_rate_limited(conn, 60)
+    end
   end
 
   # 404 catch-all
@@ -724,11 +743,69 @@ defmodule MetadataRelay.Router do
     end
   end
 
+  # Verify relay authentication token without checking instance_id
+  # Returns the instance_id from the token for further validation
+  defp verify_relay_auth_from_claim(conn) do
+    case get_req_header(conn, "authorization") do
+      ["Bearer " <> token] ->
+        case MetadataRelay.Relay.verify_instance_token(token) do
+          {:ok, instance_id} ->
+            {:ok, instance_id}
+
+          {:error, _reason} ->
+            {:error, :unauthorized}
+        end
+
+      _ ->
+        {:error, :unauthorized}
+    end
+  end
+
   defp send_unauthorized(conn) do
     error_response = %{error: "Unauthorized", message: "Invalid or missing authentication token"}
 
     conn
     |> put_resp_content_type("application/json")
     |> send_resp(401, Jason.encode!(error_response))
+  end
+
+  # Rate limiting helpers
+
+  defp check_relay_rate_limit(conn, opts) do
+    client_ip = get_client_ip(conn)
+    # Normalize path to group all similar requests together
+    normalized_path = normalize_relay_path(conn.request_path)
+    key = "relay:#{normalized_path}:#{client_ip}"
+
+    case MetadataRelay.RateLimiter.check_rate_limit(key, opts) do
+      {:ok, _remaining} -> :ok
+      {:error, :rate_limited} -> {:error, :rate_limited}
+    end
+  end
+
+  defp normalize_relay_path("/relay/instances/" <> rest) do
+    case String.split(rest, "/") do
+      [_id, "connect"] -> "/relay/instances/:id/connect"
+      _ -> "/relay/instances"
+    end
+  end
+
+  defp normalize_relay_path("/relay/claim/" <> _code) do
+    "/relay/claim/:code"
+  end
+
+  defp normalize_relay_path(path), do: path
+
+  defp send_rate_limited(conn, retry_after_seconds) do
+    error_response = %{
+      error: "rate_limited",
+      message: "Too many requests. Please try again later.",
+      retry_after: retry_after_seconds
+    }
+
+    conn
+    |> put_resp_header("retry-after", to_string(retry_after_seconds))
+    |> put_resp_content_type("application/json")
+    |> send_resp(429, Jason.encode!(error_response))
   end
 end

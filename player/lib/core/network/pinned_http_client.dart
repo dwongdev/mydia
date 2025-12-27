@@ -1,7 +1,6 @@
 import 'dart:io';
 
-import 'package:crypto/crypto.dart';
-
+import 'cert_verifier.dart';
 import '../auth/cert_storage.dart';
 
 /// HTTP client factory that creates clients with certificate pinning.
@@ -9,24 +8,57 @@ import '../auth/cert_storage.dart';
 /// This enables secure connections to Mydia instances using self-signed
 /// certificates by verifying the certificate fingerprint matches the
 /// stored fingerprint from the initial pairing or first connection.
+///
+/// ## Usage Patterns
+///
+/// ### Pattern 1: Pinned connection (fingerprint already trusted)
+/// ```dart
+/// final client = await PinnedHttpClient.createClient('https://mydia.example.com');
+/// // Client will reject any certificate that doesn't match stored fingerprint
+/// ```
+///
+/// ### Pattern 2: First-time connection with TOFU
+/// ```dart
+/// final client = await PinnedHttpClient.createClient(
+///   'https://mydia.example.com',
+///   allowUnknown: true, // Accept on first connection
+/// );
+/// // After connection succeeds, verify and store fingerprint
+/// ```
+///
+/// ### Pattern 3: Pre-verified fingerprint (recommended)
+/// ```dart
+/// // Before creating client, verify certificate separately
+/// final verifier = CertVerifier();
+/// // ... get certificate somehow (e.g., from initial handshake)
+/// final result = await verifier.verifyCertificate(cert, instanceId);
+/// if (result.verified || userAcceptsTrust) {
+///   await verifier.trustCertificate(cert, instanceId);
+///   final client = await PinnedHttpClient.createClient(instanceId);
+/// }
+/// ```
 class PinnedHttpClient {
   final CertStorage _certStorage = CertStorage();
 
-  /// Create an HTTP client with certificate pinning for an instance.
+  /// Creates an HTTP client with certificate pinning for an instance.
   ///
-  /// The [instanceId] is used to look up the stored certificate fingerprint.
-  /// If a fingerprint is stored, the client will only accept certificates
-  /// that match that fingerprint. If no fingerprint is stored, the client
-  /// will accept any certificate (useful for initial pairing).
+  /// The [instanceId] is used to look up the stored certificate fingerprint,
+  /// typically the server URL (e.g., 'https://mydia.example.com').
   ///
-  /// The [onUnknownCertificate] callback is called when a certificate is
-  /// encountered that doesn't match the stored fingerprint. It receives
-  /// the certificate and its computed fingerprint. The callback should
-  /// return `true` to trust the certificate or `false` to reject it.
+  /// If [allowUnknown] is true, the client will accept certificates on
+  /// first connection (when no fingerprint is stored). This is useful for
+  /// initial pairing. The caller should verify the certificate fingerprint
+  /// after the connection and store it using [CertVerifier.trustCertificate].
+  ///
+  /// If [allowUnknown] is false (default), the client will reject any
+  /// certificate that doesn't match a stored fingerprint.
+  ///
+  /// **Security Note:** Only set [allowUnknown] to true during initial
+  /// pairing when you will verify the fingerprint through another channel
+  /// (e.g., TOFU dialog). For normal connections, leave it false.
   Future<HttpClient> createClient(
     String instanceId, {
-    Future<bool> Function(X509Certificate cert, String fingerprint)?
-        onUnknownCertificate,
+    bool allowUnknown = false,
   }) async {
     final storedFingerprint = await _certStorage.getFingerprint(instanceId);
 
@@ -35,65 +67,39 @@ class PinnedHttpClient {
       return _verifyCertificate(
         cert,
         storedFingerprint,
-        onUnknownCertificate,
+        allowUnknown,
       );
     };
 
     return client;
   }
 
-  /// Verify a certificate against the stored fingerprint.
+  /// Verifies a certificate against the stored fingerprint.
   ///
   /// Returns `true` if the certificate should be trusted, `false` otherwise.
   bool _verifyCertificate(
     X509Certificate cert,
     String? storedFingerprint,
-    Future<bool> Function(X509Certificate cert, String fingerprint)?
-        onUnknownCertificate,
+    bool allowUnknown,
   ) {
-    final fingerprint = _computeFingerprint(cert);
+    final fingerprint = CertVerifier.computeFingerprint(cert);
 
     if (storedFingerprint == null) {
-      // No stored fingerprint - this is the first connection.
-      // Call the callback if provided, otherwise reject.
-      if (onUnknownCertificate != null) {
-        // Note: badCertificateCallback must be synchronous, so we can't
-        // await the callback. The callback should handle storing the
-        // fingerprint asynchronously and return immediately.
-        // For now, we'll accept the certificate on first connect and
-        // let the calling code handle the trust decision.
-        return true;
-      }
-      return false;
+      // No stored fingerprint - first connection
+      return allowUnknown;
     }
 
     // Verify the fingerprint matches
     return fingerprint == storedFingerprint;
   }
 
-  /// Compute the SHA-256 fingerprint of a certificate.
+  /// Computes the SHA-256 fingerprint of a certificate.
   ///
   /// Returns the fingerprint as a lowercase hex string with colons
   /// separating each byte (e.g., "aa:bb:cc:dd:...").
-  String _computeFingerprint(X509Certificate cert) {
-    final der = cert.der;
-    final digest = sha256.convert(der);
-    final hex = digest.bytes
-        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
-        .join(':');
-    return hex;
-  }
-
-  /// Compute the fingerprint of a certificate (synchronous version).
   ///
-  /// This is exposed as a public method so the calling code can compute
-  /// the fingerprint to display in the trust dialog.
+  /// This is a convenience wrapper around [CertVerifier.computeFingerprint].
   static String computeFingerprint(X509Certificate cert) {
-    final der = cert.der;
-    final digest = sha256.convert(der);
-    final hex = digest.bytes
-        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
-        .join(':');
-    return hex;
+    return CertVerifier.computeFingerprint(cert);
   }
 }

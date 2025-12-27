@@ -4,8 +4,9 @@ import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'movie_detail_controller.dart';
 import '../../widgets/quality_selector.dart';
-import '../../widgets/download_dialog.dart';
+import '../../widgets/quality_download_dialog.dart';
 import '../../../core/downloads/download_providers.dart';
+import '../../../core/downloads/download_job_providers.dart';
 import '../../../domain/models/download.dart';
 import '../../../core/theme/colors.dart';
 
@@ -274,37 +275,73 @@ class MovieDetailScreen extends ConsumerWidget {
                   );
                 }
               } else {
-                // Show download dialog
-                final selectedFile = await showDownloadDialog(
+                // Show quality download dialog for progressive downloads
+                final selectedResolution = await showQualityDownloadDialog(
                   context,
-                  files: movie.files,
+                  contentType: 'movie',
+                  contentId: movie.id,
                   title: movie.title,
                 );
 
-                if (selectedFile != null) {
-                  final manager = ref.read(downloadManagerProvider);
-                  final downloadUrl = selectedFile.directPlaySupported
-                      ? selectedFile.directPlayUrl
-                      : selectedFile.streamUrl;
+                if (selectedResolution != null && context.mounted) {
+                  final downloadService = ref.read(downloadJobServiceProvider);
+                  final downloadManager = ref.read(downloadManagerProvider);
 
-                  if (downloadUrl != null) {
-                    await manager.startDownload(
-                      mediaId: movie.id,
-                      title: movie.title,
-                      downloadUrl: downloadUrl,
-                      quality: selectedFile.displayQuality,
-                      mediaType: MediaType.movie,
-                      posterUrl: movie.artwork.posterUrl,
-                      fileSize: selectedFile.size,
-                    );
-
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Download started'),
-                          duration: Duration(seconds: 2),
-                        ),
+                  if (downloadService != null) {
+                    try {
+                      // Start progressive download using the service
+                      await downloadManager.startProgressiveDownload(
+                        mediaId: movie.id,
+                        title: movie.title,
+                        contentType: 'movie',
+                        resolution: selectedResolution,
+                        mediaType: MediaType.movie,
+                        posterUrl: movie.artwork.posterUrl,
+                        getDownloadUrl: (jobId) async {
+                          return await downloadService.getDownloadUrl(jobId);
+                        },
+                        prepareDownload: () async {
+                          final status = await downloadService.prepareDownload(
+                            contentType: 'movie',
+                            id: movie.id,
+                            resolution: selectedResolution,
+                          );
+                          return (
+                            jobId: status.jobId,
+                            status: status.status.name,
+                            progress: status.progress,
+                            fileSize: status.currentFileSize,
+                          );
+                        },
+                        getJobStatus: (jobId) async {
+                          final status =
+                              await downloadService.getJobStatus(jobId);
+                          return (
+                            status: status.status.name,
+                            progress: status.progress,
+                            fileSize: status.currentFileSize,
+                            error: status.error,
+                          );
+                        },
                       );
+
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Download started'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Failed to start download: $e'),
+                            backgroundColor: AppColors.error,
+                          ),
+                        );
+                      }
                     }
                   }
                 }

@@ -19,18 +19,6 @@ if config_env() != :test do
     http: [port: port],
     server: true
 
-  # Relay token secret (required for production)
-  relay_token_secret =
-    System.get_env("RELAY_TOKEN_SECRET") ||
-      if config_env() == :prod do
-        raise "RELAY_TOKEN_SECRET environment variable is required in production"
-      else
-        "dev-secret-change-in-prod"
-      end
-
-  config :metadata_relay,
-    relay_token_secret: relay_token_secret
-
   if config_env() == :prod do
     # API keys from environment
     tmdb_api_key = System.get_env("TMDB_API_KEY")

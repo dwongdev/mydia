@@ -55,7 +55,9 @@ defmodule Mydia.Streaming.HlsSession do
       :temp_dir,
       :last_activity,
       :timeout_ref,
-      :playlist_path
+      :playlist_path,
+      ready: false,
+      ready_waiters: []
     ]
 
     @type t :: %__MODULE__{
@@ -68,7 +70,9 @@ defmodule Mydia.Streaming.HlsSession do
             temp_dir: String.t(),
             last_activity: DateTime.t(),
             timeout_ref: reference() | nil,
-            playlist_path: String.t() | nil
+            playlist_path: String.t() | nil,
+            ready: boolean(),
+            ready_waiters: list()
           }
   end
 
@@ -133,6 +137,29 @@ defmodule Mydia.Streaming.HlsSession do
   """
   def stop(pid) do
     GenServer.stop(pid, :normal)
+  end
+
+  @doc """
+  Waits for the session to be ready (FFmpeg has written the first playlist).
+
+  Returns `:ok` when ready, or `{:error, :timeout}` if the timeout is reached.
+  Default timeout is 30 seconds.
+  """
+  @spec await_ready(pid(), timeout()) :: :ok | {:error, :timeout}
+  def await_ready(pid, timeout \\ 30_000) do
+    GenServer.call(pid, :await_ready, timeout)
+  catch
+    :exit, {:timeout, _} -> {:error, :timeout}
+  end
+
+  @doc """
+  Notifies the session that FFmpeg has written the first playlist.
+
+  This is called by the FFmpeg transcoder when it detects the playlist file.
+  """
+  @spec notify_ready(pid()) :: :ok
+  def notify_ready(pid) do
+    GenServer.cast(pid, :notify_ready)
   end
 
   ## Server Callbacks
@@ -246,6 +273,16 @@ defmodule Mydia.Streaming.HlsSession do
     {:reply, {:ok, state.playlist_path}, state}
   end
 
+  def handle_call(:await_ready, _from, %{ready: true} = state) do
+    # Already ready, reply immediately
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:await_ready, from, state) do
+    # Not ready yet, add to waiters list (we'll reply when ready)
+    {:noreply, %{state | ready_waiters: [from | state.ready_waiters]}}
+  end
+
   @impl true
   def handle_cast(:heartbeat, state) do
     state = update_activity(state)
@@ -254,6 +291,22 @@ defmodule Mydia.Streaming.HlsSession do
 
   def handle_cast({:cache_playlist_path, path}, state) do
     {:noreply, %{state | playlist_path: path}}
+  end
+
+  def handle_cast(:notify_ready, %{ready: true} = state) do
+    # Already notified, ignore duplicate
+    {:noreply, state}
+  end
+
+  def handle_cast(:notify_ready, state) do
+    Logger.info("Session #{state.session_id} is ready (playlist available)")
+
+    # Reply to all waiters
+    Enum.each(state.ready_waiters, fn from ->
+      GenServer.reply(from, :ok)
+    end)
+
+    {:noreply, %{state | ready: true, ready_waiters: []}}
   end
 
   @impl true
@@ -312,10 +365,16 @@ defmodule Mydia.Streaming.HlsSession do
     absolute_path = Mydia.Library.MediaFile.absolute_path(media_file)
     Logger.info("Starting FFmpeg backend for #{absolute_path}")
 
+    # Capture self() to notify when FFmpeg is ready
+    session_pid = self()
+
     case FfmpegHlsTranscoder.start_transcoding(
            input_path: absolute_path,
            output_dir: temp_dir,
            media_file: media_file,
+           on_ready: fn ->
+             __MODULE__.notify_ready(session_pid)
+           end,
            on_complete: fn ->
              Logger.info("FFmpeg transcoding completed for #{absolute_path}")
            end,

@@ -1549,4 +1549,154 @@ defmodule Mydia.Downloads do
   end
 
   defp extract_magnet_from_html(_), do: {:error, :no_magnet_found}
+
+  ## Transcode Job Management
+
+  alias Mydia.Downloads.TranscodeJob
+
+  @doc """
+  Gets or creates a transcode job for a media file and resolution.
+
+  If a job already exists, returns it. Otherwise creates a new job with "pending" status.
+
+  ## Examples
+
+      iex> get_or_create_job(media_file_id, "1080p")
+      {:ok, %TranscodeJob{status: "pending"}}
+  """
+  def get_or_create_job(media_file_id, resolution) do
+    case Repo.get_by(TranscodeJob, media_file_id: media_file_id, resolution: resolution) do
+      nil ->
+        %TranscodeJob{}
+        |> TranscodeJob.changeset(%{
+          media_file_id: media_file_id,
+          resolution: resolution,
+          status: "pending",
+          progress: 0.0
+        })
+        |> Repo.insert()
+
+      job ->
+        {:ok, job}
+    end
+  end
+
+  @doc """
+  Gets a cached transcode for a media file and resolution.
+
+  Returns the transcode job only if it's in "ready" status, nil otherwise.
+
+  ## Examples
+
+      iex> get_cached_transcode(media_file_id, "720p")
+      %TranscodeJob{status: "ready", output_path: "/path/to/file"}
+
+      iex> get_cached_transcode(media_file_id, "480p")
+      nil
+  """
+  def get_cached_transcode(media_file_id, resolution) do
+    TranscodeJob
+    |> where([j], j.media_file_id == ^media_file_id)
+    |> where([j], j.resolution == ^resolution)
+    |> where([j], j.status == "ready")
+    |> Repo.one()
+  end
+
+  @doc """
+  Updates the progress of a transcode job.
+
+  Also sets the status to "transcoding" and records the start time if not already set.
+
+  ## Examples
+
+      iex> update_job_progress(job, 0.5)
+      {:ok, %TranscodeJob{progress: 0.5, status: "transcoding"}}
+  """
+  def update_job_progress(%TranscodeJob{} = job, progress) do
+    attrs = %{
+      progress: progress,
+      status: "transcoding"
+    }
+
+    attrs =
+      if is_nil(job.started_at) do
+        Map.put(attrs, :started_at, DateTime.utc_now())
+      else
+        attrs
+      end
+
+    job
+    |> TranscodeJob.changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Marks a transcode job as complete.
+
+  Sets status to "ready", records completion time, and stores output path and file size.
+
+  ## Examples
+
+      iex> complete_job(job, "/path/to/output.mp4", 1024000)
+      {:ok, %TranscodeJob{status: "ready", completed_at: ~U[...]}}
+  """
+  def complete_job(%TranscodeJob{} = job, output_path, file_size) do
+    job
+    |> TranscodeJob.changeset(%{
+      status: "ready",
+      progress: 1.0,
+      output_path: output_path,
+      file_size: file_size,
+      completed_at: DateTime.utc_now(),
+      last_accessed_at: DateTime.utc_now()
+    })
+    |> Repo.update()
+  end
+
+  @doc """
+  Marks a transcode job as failed.
+
+  Sets status to "failed" and records the error message.
+
+  ## Examples
+
+      iex> fail_job(job, "FFmpeg error: invalid codec")
+      {:ok, %TranscodeJob{status: "failed", error: "FFmpeg error: invalid codec"}}
+  """
+  def fail_job(%TranscodeJob{} = job, error_message) do
+    job
+    |> TranscodeJob.changeset(%{
+      status: "failed",
+      error: error_message
+    })
+    |> Repo.update()
+  end
+
+  @doc """
+  Updates the last_accessed_at timestamp for a transcode job.
+
+  Used to track usage for cache eviction purposes.
+
+  ## Examples
+
+      iex> touch_last_accessed(job)
+      {:ok, %TranscodeJob{last_accessed_at: ~U[...]}}
+  """
+  def touch_last_accessed(%TranscodeJob{} = job) do
+    job
+    |> TranscodeJob.changeset(%{last_accessed_at: DateTime.utc_now()})
+    |> Repo.update()
+  end
+
+  @doc """
+  Deletes a transcode job.
+
+  ## Examples
+
+      iex> delete_job(job)
+      {:ok, %TranscodeJob{}}
+  """
+  def delete_job(%TranscodeJob{} = job) do
+    Repo.delete(job)
+  end
 end

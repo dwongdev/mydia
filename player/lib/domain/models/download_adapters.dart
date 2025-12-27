@@ -27,13 +27,19 @@ class DownloadTaskAdapter extends TypeAdapter<DownloadTask> {
       error: fields[11] as String?,
       createdAt: fields[12] as DateTime,
       completedAt: fields[13] as DateTime?,
+      // Progressive download fields (added in v2)
+      transcodeJobId: fields[14] as String?,
+      transcodeProgress: fields[15] as double? ?? 0.0,
+      downloadProgress: fields[16] as double? ?? 0.0,
+      isProgressive: fields[17] as bool? ?? false,
+      downloadedBytes: fields[18] as int?,
     );
   }
 
   @override
   void write(BinaryWriter writer, DownloadTask obj) {
     writer
-      ..writeByte(14)
+      ..writeByte(19) // Updated field count
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -61,7 +67,18 @@ class DownloadTaskAdapter extends TypeAdapter<DownloadTask> {
       ..writeByte(12)
       ..write(obj.createdAt)
       ..writeByte(13)
-      ..write(obj.completedAt);
+      ..write(obj.completedAt)
+      // Progressive download fields
+      ..writeByte(14)
+      ..write(obj.transcodeJobId)
+      ..writeByte(15)
+      ..write(obj.transcodeProgress)
+      ..writeByte(16)
+      ..write(obj.downloadProgress)
+      ..writeByte(17)
+      ..write(obj.isProgressive)
+      ..writeByte(18)
+      ..write(obj.downloadedBytes);
   }
 }
 

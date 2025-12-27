@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/config/web_config.dart';
 import '../../core/layout/breakpoints.dart';
 import '../../core/theme/colors.dart';
 
@@ -54,6 +55,7 @@ class _AppShellState extends ConsumerState<AppShell> {
   @override
   Widget build(BuildContext context) {
     final selectedIndex = _getSelectedIndex();
+    final showBackToMydia = isEmbedMode;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -66,6 +68,7 @@ class _AppShellState extends ConsumerState<AppShell> {
                 _DesktopSidebar(
                   selectedIndex: selectedIndex,
                   onItemTapped: _onItemTapped,
+                  showBackToMydia: showBackToMydia,
                 ),
                 Expanded(child: widget.child),
               ],
@@ -74,7 +77,17 @@ class _AppShellState extends ConsumerState<AppShell> {
         }
 
         return Scaffold(
-          body: widget.child,
+          body: Stack(
+            children: [
+              widget.child,
+              if (showBackToMydia)
+                Positioned(
+                  top: MediaQuery.of(context).padding.top + 8,
+                  left: 8,
+                  child: const _BackToMydiaButton(compact: true),
+                ),
+            ],
+          ),
           bottomNavigationBar: _ModernBottomNav(
             selectedIndex: selectedIndex,
             onItemTapped: _onItemTapped,
@@ -89,10 +102,12 @@ class _AppShellState extends ConsumerState<AppShell> {
 class _DesktopSidebar extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onItemTapped;
+  final bool showBackToMydia;
 
   const _DesktopSidebar({
     required this.selectedIndex,
     required this.onItemTapped,
+    this.showBackToMydia = false,
   });
 
   @override
@@ -115,9 +130,16 @@ class _DesktopSidebar extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Back to Mydia link (shown in embed mode)
+                if (showBackToMydia)
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(12, 12, 12, 0),
+                    child: _BackToMydiaButton(),
+                  ),
                 // Logo header
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
+                  padding: EdgeInsets.fromLTRB(
+                      20, showBackToMydia ? 16 : 24, 20, 32),
                   child: Row(
                     children: [
                       Container(
@@ -465,6 +487,110 @@ class _NavItemState extends State<_NavItem> with SingleTickerProviderStateMixin 
                       : AppColors.textSecondary,
                 ),
                 child: Text(widget.label),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Button to navigate back to the main Mydia app.
+/// Shown when the player is running in embed mode.
+class _BackToMydiaButton extends StatefulWidget {
+  final bool compact;
+
+  const _BackToMydiaButton({this.compact = false});
+
+  @override
+  State<_BackToMydiaButton> createState() => _BackToMydiaButtonState();
+}
+
+class _BackToMydiaButtonState extends State<_BackToMydiaButton> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.compact) {
+      // Compact floating button for mobile
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: navigateToMydiaApp,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.surface.withValues(alpha: 0.9),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: AppColors.divider.withValues(alpha: 0.3),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.2),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.arrow_back_rounded,
+                  size: 18,
+                  color: AppColors.textSecondary,
+                ),
+                SizedBox(width: 6),
+                Text(
+                  'Back to Mydia',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Full sidebar button
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTap: navigateToMydiaApp,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: _isHovered
+                ? AppColors.surfaceVariant.withValues(alpha: 0.5)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.arrow_back_rounded,
+                size: 20,
+                color: _isHovered ? AppColors.primary : AppColors.textSecondary,
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Back to Mydia',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color:
+                      _isHovered ? AppColors.textPrimary : AppColors.textSecondary,
+                ),
               ),
             ],
           ),

@@ -79,7 +79,6 @@ jobs:
         run: |
           flutter build web \
             --release \
-            --web-renderer canvaskit \
             --base-href /player/
 
       - name: Upload web build artifact

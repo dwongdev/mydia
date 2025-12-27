@@ -23,8 +23,13 @@ MydiaWebConfig? getWebConfig() {
     }
 
     final authenticated = (authenticatedVal as JSBoolean).toDart;
+    final embedModeVal = config['embedMode'];
+    final embedMode = !embedModeVal.isUndefinedOrNull
+        ? (embedModeVal as JSBoolean).toDart
+        : false;
+
     if (!authenticated) {
-      return const MydiaWebConfig(authenticated: false);
+      return MydiaWebConfig(authenticated: false, embedMode: embedMode);
     }
 
     final tokenVal = config['token'];
@@ -40,6 +45,7 @@ MydiaWebConfig? getWebConfig() {
           ? (usernameVal as JSString).toDart
           : null,
       serverUrl: getOriginUrl(),
+      embedMode: embedMode,
     );
   } catch (e) {
     // If parsing fails, return null
@@ -56,5 +62,15 @@ String? getOriginUrl() {
     return web.window.location.origin;
   } catch (e) {
     return null;
+  }
+}
+
+/// Navigate to the main Mydia app.
+void navigateToMydiaApp() {
+  try {
+    final origin = web.window.location.origin;
+    web.window.location.href = origin;
+  } catch (_) {
+    // Ignore navigation errors
   }
 }

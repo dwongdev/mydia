@@ -8,6 +8,7 @@ defmodule Mydia.Factory do
   alias Mydia.Media.{MediaItem, Episode}
   alias Mydia.Library.MediaFile
   alias Mydia.Downloads.Download
+  alias Mydia.Settings.LibraryPath
 
   def media_item_factory do
     %MediaItem{
@@ -55,6 +56,15 @@ defmodule Mydia.Factory do
       download_client_id: Ecto.UUID.generate(),
       download_client: "transmission",
       indexer: "test-indexer"
+    }
+  end
+
+  def library_path_factory do
+    %LibraryPath{
+      path: sequence(:library_path, &"/media/library#{&1}"),
+      type: :movies,
+      monitored: true,
+      scan_interval: 3600
     }
   end
 end

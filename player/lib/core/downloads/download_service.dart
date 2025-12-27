@@ -44,6 +44,15 @@ abstract class DownloadDatabase {
   Future<void> close();
 }
 
+/// Callback for progressive download progress updates.
+typedef ProgressiveDownloadCallback = void Function({
+  required String jobId,
+  required double transcodeProgress,
+  required double downloadProgress,
+  required String status,
+  String? error,
+});
+
 /// Abstract interface for the download service/manager.
 abstract class DownloadService {
   Stream<DownloadTask> get progressStream;
@@ -56,6 +65,29 @@ abstract class DownloadService {
     required MediaType mediaType,
     String? posterUrl,
     int? fileSize,
+  });
+
+  /// Start a progressive download that transcodes on the server.
+  ///
+  /// [mediaId] - The media item ID
+  /// [title] - Display title for the download
+  /// [contentType] - Either "movie" or "episode"
+  /// [resolution] - Quality preset ("1080p", "720p", "480p")
+  /// [mediaType] - MediaType.movie or MediaType.episode
+  /// [posterUrl] - Optional poster image URL
+  /// [getDownloadUrl] - Async function to get authenticated download URL
+  /// [prepareDownload] - Async function to prepare download job on server
+  /// [getJobStatus] - Async function to poll job status
+  Future<DownloadTask> startProgressiveDownload({
+    required String mediaId,
+    required String title,
+    required String contentType,
+    required String resolution,
+    required MediaType mediaType,
+    String? posterUrl,
+    required Future<String> Function(String jobId) getDownloadUrl,
+    required Future<({String jobId, String status, double progress, int? fileSize})> Function() prepareDownload,
+    required Future<({String status, double progress, int? fileSize, String? error})> Function(String jobId) getJobStatus,
   });
 
   Future<void> pauseDownload(String taskId);

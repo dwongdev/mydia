@@ -55,7 +55,7 @@ defmodule MydiaWeb.PlayerController do
     case Guardian.Plug.current_resource(conn) do
       nil ->
         # No authenticated user
-        %{authenticated: false}
+        %{authenticated: false, embedMode: true}
 
       user ->
         # Get the token from session (check both Guardian default key and legacy key)
@@ -68,7 +68,8 @@ defmodule MydiaWeb.PlayerController do
           authenticated: true,
           token: token,
           userId: user.id,
-          username: user.username
+          username: user.username,
+          embedMode: true
         }
     end
   end

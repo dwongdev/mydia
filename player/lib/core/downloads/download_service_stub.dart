@@ -98,6 +98,21 @@ class _StubDownloadService implements DownloadService {
   }
 
   @override
+  Future<DownloadTask> startProgressiveDownload({
+    required String mediaId,
+    required String title,
+    required String contentType,
+    required String resolution,
+    required MediaType mediaType,
+    String? posterUrl,
+    required Future<String> Function(String jobId) getDownloadUrl,
+    required Future<({String jobId, String status, double progress, int? fileSize})> Function() prepareDownload,
+    required Future<({String status, double progress, int? fileSize, String? error})> Function(String jobId) getJobStatus,
+  }) async {
+    throw UnsupportedError('Downloads are not supported');
+  }
+
+  @override
   Future<void> pauseDownload(String taskId) async {}
 
   @override

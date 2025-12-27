@@ -30,7 +30,6 @@ flutter pub run build_runner build --delete-conflicting-outputs
 echo "Building web release..."
 flutter build web \
   --release \
-  --web-renderer canvaskit \
   --base-href /player/
 
 # Copy to Phoenix static directory

@@ -13,8 +13,9 @@ defmodule MydiaWeb.Api.HlsController do
   """
   def master_playlist(conn, %{"session_id" => session_id}) do
     with {:ok, user_id} <- get_user_id(conn),
-         {:ok, pid} <- find_session_by_id(session_id, user_id) do
-      # Try cached path first, then discover
+         {:ok, pid} <- find_session_by_id(session_id, user_id),
+         :ok <- HlsSession.await_ready(pid, 30_000) do
+      # Session is ready - get the playlist path
       file_path =
         case HlsSession.get_playlist_path(pid) do
           {:ok, nil} ->
@@ -64,9 +65,14 @@ defmodule MydiaWeb.Api.HlsController do
 
       case file_path do
         nil ->
+          # This shouldn't happen after await_ready succeeds, but handle gracefully
+          Logger.warning(
+            "Playlist file not found after await_ready succeeded for session #{session_id}"
+          )
+
           conn
-          |> put_status(:not_found)
-          |> json(%{error: "Master playlist not ready yet, please retry"})
+          |> put_status(:internal_server_error)
+          |> json(%{error: "Playlist file unexpectedly missing"})
 
         path ->
           case File.read(path) do
@@ -97,6 +103,13 @@ defmodule MydiaWeb.Api.HlsController do
         conn
         |> put_status(:not_found)
         |> json(%{error: "HLS session not found"})
+
+      {:error, :timeout} ->
+        Logger.warning("Timeout waiting for HLS session #{session_id} to be ready")
+
+        conn
+        |> put_status(:service_unavailable)
+        |> json(%{error: "Transcoding initialization timeout, please try again"})
 
       {:error, reason} ->
         Logger.error("Error serving master playlist: #{inspect(reason)}")

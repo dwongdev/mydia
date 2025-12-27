@@ -22,6 +22,8 @@ void main() {
           mediaToken: 'token-456',
           devicePublicKey: Uint8List(32),
           devicePrivateKey: Uint8List(32),
+          serverPublicKey: Uint8List(32),
+          directUrls: ['https://example.com'],
         );
         final result = PairingResult.success(credentials);
         expect(result.success, isTrue);
@@ -45,6 +47,11 @@ void main() {
           mediaToken: 'token-xyz',
           devicePublicKey: Uint8List(32),
           devicePrivateKey: Uint8List(32),
+          serverPublicKey: Uint8List(32),
+          directUrls: ['https://mydia.example.com', 'https://192.168.1.100:4000'],
+          certFingerprint: 'AA:BB:CC:DD:EE:FF',
+          instanceName: 'My Mydia',
+          instanceId: 'instance-123',
         );
 
         expect(credentials.serverUrl, equals('https://mydia.example.com'));
@@ -52,6 +59,11 @@ void main() {
         expect(credentials.mediaToken, equals('token-xyz'));
         expect(credentials.devicePublicKey.length, equals(32));
         expect(credentials.devicePrivateKey.length, equals(32));
+        expect(credentials.serverPublicKey.length, equals(32));
+        expect(credentials.directUrls.length, equals(2));
+        expect(credentials.certFingerprint, equals('AA:BB:CC:DD:EE:FF'));
+        expect(credentials.instanceName, equals('My Mydia'));
+        expect(credentials.instanceId, equals('instance-123'));
       });
     });
   });

@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metadata-relay-config
+  namespace: metadata-relay
+  labels:
+    app.kubernetes.io/name: metadata-relay
+    app.kubernetes.io/component: relay-service
+data:
+  # Application configuration
+  PORT: "4001"
+  PHX_HOST: "relay.mydia.dev"
+  MIX_ENV: "prod"
+
+  # Database configuration
+  SQLITE_DB_PATH: "/data/metadata_relay.db"
+
+  # Optional: Redis cache (if not set, uses in-memory cache)
+  # REDIS_URL: "redis://redis:6379"

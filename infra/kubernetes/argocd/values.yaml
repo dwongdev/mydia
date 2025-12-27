@@ -1,0 +1,108 @@
+# ArgoCD Helm Chart Values
+# Optimized for Hetzner CX21 (2 vCPU, 2GB RAM)
+# Purpose: GitOps deployment automation for metadata-relay service
+
+# Global settings
+global:
+  # Single replica for all components to minimize resource usage
+  # on small server (2GB RAM total)
+  replicas: 1
+
+# Redis - In-memory cache for ArgoCD
+redis:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# Controller - Monitors cluster and reconciles application state
+controller:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Server - API and UI
+server:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  # Run server in insecure mode (TLS terminated at ingress level)
+  extraArgs:
+    - --insecure
+
+  # Ingress configuration for argocd.mydia.dev
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    annotations:
+      # Use cert-manager for TLS certificate provisioning
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      # Force HTTPS redirect
+      traefik.ingress.kubernetes.io/redirect-entry-point: https
+      traefik.ingress.kubernetes.io/redirect-permanent: "true"
+    hosts:
+      - argocd.mydia.dev
+    tls:
+      - secretName: argocd-server-tls
+        hosts:
+          - argocd.mydia.dev
+    # Use HTTPS backend protocol even though server runs with --insecure
+    # This tells Traefik to connect to backend over HTTPS
+    https: false
+
+# Repo Server - Manages git repository connections and manifest generation
+repoServer:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# Dex - OAuth2/OIDC authentication (disabled to save resources)
+dex:
+  enabled: false
+
+# Notifications controller - Manages notification delivery (disabled to save resources)
+notifications:
+  enabled: false
+
+# ApplicationSet controller - Manages ApplicationSet CRD (disabled to save resources)
+# Re-enable if you plan to use ApplicationSets for multi-environment deployments
+applicationSet:
+  enabled: false
+  # If enabled later, use minimal resources:
+  # replicas: 1
+  # resources:
+  #   requests:
+  #     cpu: 50m
+  #     memory: 64Mi
+  #   limits:
+  #     cpu: 100m
+  #     memory: 128Mi
+
+# Configs
+configs:
+  # Repository credentials and other config can be added here
+  # or managed through ArgoCD UI after deployment
+  params:
+    # Disable TLS on ArgoCD server since Traefik handles it
+    server.insecure: true

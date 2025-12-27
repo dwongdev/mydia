@@ -101,17 +101,29 @@ defmodule Mydia.RemoteAccess.Certificates do
     subject = "/C=US/O=Mydia/CN=Mydia Self-Signed"
 
     # Generate private key and self-signed certificate in one command
-    {output, exit_code} = System.cmd("openssl", [
-      "req",
-      "-x509",
-      "-newkey", "rsa:2048",
-      "-keyout", key_path,
-      "-out", cert_path,
-      "-sha256",
-      "-days", "3650",  # 10 years
-      "-nodes",  # Don't encrypt the private key
-      "-subj", subject
-    ], stderr_to_stdout: true)
+    {output, exit_code} =
+      System.cmd(
+        "openssl",
+        [
+          "req",
+          "-x509",
+          "-newkey",
+          "rsa:2048",
+          "-keyout",
+          key_path,
+          "-out",
+          cert_path,
+          "-sha256",
+          # 10 years
+          "-days",
+          "3650",
+          # Don't encrypt the private key
+          "-nodes",
+          "-subj",
+          subject
+        ],
+        stderr_to_stdout: true
+      )
 
     if exit_code != 0 do
       Logger.error("Failed to generate certificate: #{output}")

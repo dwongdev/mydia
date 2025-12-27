@@ -4,11 +4,12 @@ This guide shows how to use the certificate pinning implementation for secure co
 
 ## Overview
 
-The certificate pinning implementation consists of three main components:
+The certificate pinning implementation consists of four main components:
 
 1. **CertStorage** (`lib/core/auth/cert_storage.dart`) - Stores certificate fingerprints securely
-2. **PinnedHttpClient** (`lib/core/network/pinned_http_client.dart`) - Creates HTTP clients with certificate validation
-3. **CertTrustDialog** (`lib/presentation/widgets/cert_trust_dialog.dart`) - Shows TOFU dialog for first connections
+2. **CertVerifier** (`lib/core/network/cert_verifier.dart`) - Verifies certificates and manages fingerprints
+3. **PinnedHttpClient** (`lib/core/network/pinned_http_client.dart`) - Creates HTTP clients with certificate validation
+4. **CertTrustDialog** (`lib/presentation/widgets/cert_trust_dialog.dart`) - Shows TOFU dialog for first connections
 
 ## Basic Usage
 

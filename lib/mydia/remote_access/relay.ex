@@ -310,36 +310,39 @@ defmodule Mydia.RemoteAccess.Relay do
   defp handle_relay_message(
          %{
            "type" => "connection",
-           "session_id" => session_id,
-           "client_public_key" => client_key
-         },
+           "session_id" => session_id
+         } = msg,
          state
        ) do
     Logger.info("Received relayed connection request: session_id=#{session_id}")
 
-    # Decode client public key
-    case Base.decode64(client_key) do
-      {:ok, client_public_key} ->
-        # Handle incoming relayed connection by notifying the relay tunnel supervisor
-        # The tunnel will establish a bidirectional connection between the relay and DeviceChannel
-        Logger.info(
-          "Accepting relayed connection from client (session: #{session_id}, key: #{byte_size(client_public_key)} bytes)"
-        )
+    # Client public key is optional - it will be established during Noise handshake
+    client_public_key =
+      case msg["client_public_key"] do
+        nil ->
+          <<>>
 
-        # Broadcast relay connection event to the tunnel supervisor
-        # The tunnel will handle the Noise handshake and forward messages to DeviceChannel
-        Phoenix.PubSub.broadcast(
-          Mydia.PubSub,
-          "relay:connections",
-          {:relay_connection, session_id, client_public_key, self()}
-        )
+        "" ->
+          <<>>
 
-        {:ok, state}
+        client_key ->
+          case Base.decode64(client_key) do
+            {:ok, key} -> key
+            :error -> <<>>
+          end
+      end
 
-      :error ->
-        Logger.warning("Invalid client public key in connection request")
-        {:ok, state}
-    end
+    # Broadcast relay connection event to the tunnel supervisor
+    # The tunnel will handle the Noise handshake and forward messages to DeviceChannel
+    Logger.info("Accepting relayed connection from client (session: #{session_id})")
+
+    Phoenix.PubSub.broadcast(
+      Mydia.PubSub,
+      "relay:connections",
+      {:relay_connection, session_id, client_public_key, self()}
+    )
+
+    {:ok, state}
   end
 
   defp handle_relay_message(

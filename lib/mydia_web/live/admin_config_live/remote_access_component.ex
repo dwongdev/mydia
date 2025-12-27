@@ -103,14 +103,6 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                 phx-target={@myself}
                 phx-value-enabled={to_string(!(@ra_config && @ra_config.enabled))}
               />
-              <%!-- Test button without phx-target to verify events work --%>
-              <button
-                type="button"
-                class="btn btn-xs btn-primary"
-                phx-click="test_parent_event"
-              >
-                (test parent)
-              </button>
             </div>
           </div>
 
@@ -128,7 +120,8 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                 </button>
               </div>
               <p class="text-xs text-base-content/60 mt-2">
-                Unable to connect to relay at <code class="font-mono bg-base-300 px-1 rounded">{@relay_url}</code>
+                Unable to connect to relay at
+                <code class="font-mono bg-base-300 px-1 rounded">{@relay_url}</code>
               </p>
             </div>
           <% end %>
@@ -490,12 +483,8 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
 
   @impl true
   def handle_event("toggle_remote_access", params, socket) do
-    require Logger
-    Logger.warning("toggle_remote_access called with params: #{inspect(params)}")
-    Logger.warning("ra_config: #{inspect(socket.assigns.ra_config)}")
     enabled_str = Map.get(params, "enabled", "false")
     enabled = enabled_str == "true"
-    Logger.warning("Parsed enabled: #{enabled}")
     config = socket.assigns.ra_config
 
     with {:ok, socket} <- maybe_initialize_keypair(socket, config, enabled),
@@ -719,13 +708,6 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
 
   def handle_event("toggle_advanced", _params, socket) do
     {:noreply, assign(socket, :show_advanced, !socket.assigns.show_advanced)}
-  end
-
-  # Catch-all for debugging unknown events
-  def handle_event(event, params, socket) do
-    require Logger
-    Logger.warning("UNKNOWN EVENT in RemoteAccessComponent: #{event}, params: #{inspect(params)}")
-    {:noreply, socket}
   end
 
   ## Countdown update (called from parent via send_update)

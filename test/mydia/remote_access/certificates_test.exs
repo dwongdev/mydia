@@ -77,9 +77,10 @@ defmodule Mydia.RemoteAccess.CertificatesTest do
       # OpenSSL generates PKCS#8 format by default (BEGIN PRIVATE KEY)
       # Can also be PKCS#1 format (BEGIN RSA PRIVATE KEY)
       assert String.contains?(key_pem, "BEGIN PRIVATE KEY") or
-        String.contains?(key_pem, "BEGIN RSA PRIVATE KEY")
+               String.contains?(key_pem, "BEGIN RSA PRIVATE KEY")
+
       assert String.contains?(key_pem, "END PRIVATE KEY") or
-        String.contains?(key_pem, "END RSA PRIVATE KEY")
+               String.contains?(key_pem, "END RSA PRIVATE KEY")
 
       # Verify it can be decoded
       decoded = :public_key.pem_decode(key_pem)
@@ -125,6 +126,7 @@ defmodule Mydia.RemoteAccess.CertificatesTest do
       # Each segment should be 2 hex characters
       segments = String.split(fingerprint, ":")
       assert length(segments) == 32
+
       Enum.each(segments, fn segment ->
         assert String.length(segment) == 2
         assert String.match?(segment, ~r/^[0-9A-F]{2}$/)

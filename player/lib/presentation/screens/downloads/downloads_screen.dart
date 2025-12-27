@@ -335,6 +335,41 @@ class DownloadsScreen extends ConsumerWidget {
     WidgetRef ref,
     DownloadTask task,
   ) {
+    // Determine status display for progressive downloads
+    final isTranscoding = task.isProgressive &&
+        task.downloadStatus == DownloadStatus.transcoding;
+    final isProgressiveDownloading = task.isProgressive &&
+        task.downloadStatus == DownloadStatus.downloading &&
+        task.transcodeProgress < 1.0;
+    final isPaused = task.downloadStatus == DownloadStatus.paused;
+
+    // Choose status icon and color based on state
+    IconData statusIcon;
+    Color statusColor;
+    String statusText;
+
+    if (isPaused) {
+      statusIcon = Icons.pause_rounded;
+      statusColor = AppColors.warning;
+      statusText = 'Paused';
+    } else if (isTranscoding) {
+      statusIcon = Icons.sync_rounded;
+      statusColor = AppColors.accent;
+      statusText = 'Preparing ${(task.transcodeProgress * 100).toStringAsFixed(0)}%';
+    } else if (isProgressiveDownloading) {
+      statusIcon = Icons.downloading_rounded;
+      statusColor = AppColors.primary;
+      statusText = 'Preparing & Downloading';
+    } else {
+      statusIcon = Icons.downloading_rounded;
+      statusColor = AppColors.primary;
+      statusText = 'Downloading';
+    }
+
+    // Progress value to show
+    final progressValue =
+        task.isProgressive ? task.combinedProgress : task.progress;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
@@ -342,7 +377,7 @@ class DownloadsScreen extends ConsumerWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: AppColors.primary.withValues(alpha: 0.3),
+          color: statusColor.withValues(alpha: 0.3),
         ),
       ),
       child: Column(
@@ -372,6 +407,49 @@ class DownloadsScreen extends ConsumerWidget {
                   ],
                 ),
               ),
+              // Pause/Resume button for progressive downloads
+              if (task.isProgressive && !isPaused)
+                Material(
+                  color: AppColors.surfaceVariant.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(8),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () async {
+                      final manager = ref.read(downloadManagerProvider);
+                      await manager.pauseDownload(task.id);
+                    },
+                    child: const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: Icon(
+                        Icons.pause_rounded,
+                        size: 18,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+                ),
+              if (task.isProgressive && isPaused)
+                Material(
+                  color: AppColors.primary.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () async {
+                      final manager = ref.read(downloadManagerProvider);
+                      await manager.resumeDownload(task.id);
+                    },
+                    child: const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: Icon(
+                        Icons.play_arrow_rounded,
+                        size: 18,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ),
+                ),
+              const SizedBox(width: 8),
+              // Cancel button
               Material(
                 color: AppColors.surfaceVariant.withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(8),
@@ -394,35 +472,73 @@ class DownloadsScreen extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 16),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: task.progress,
-              minHeight: 6,
-              backgroundColor: AppColors.surfaceVariant,
-              valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
+          // Progress bar - for progressive downloads, show both transcode and download
+          if (task.isProgressive) ...[
+            _buildProgressiveProgressBar(task),
+          ] else ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: task.progress,
+                minHeight: 6,
+                backgroundColor: AppColors.surfaceVariant,
+                valueColor:
+                    const AlwaysStoppedAnimation<Color>(AppColors.primary),
+              ),
             ),
-          ),
+          ],
           const SizedBox(height: 8),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              Icon(statusIcon, size: 14, color: statusColor),
+              const SizedBox(width: 6),
               Text(
-                task.progressDisplay,
+                statusText,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.textSecondary,
+                      color: statusColor,
+                      fontWeight: FontWeight.w500,
                     ),
               ),
+              const Spacer(),
               Text(
-                '${(task.progress * 100).toStringAsFixed(0)}%',
+                '${(progressValue * 100).toStringAsFixed(0)}%',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.primary,
+                      color: statusColor,
                       fontWeight: FontWeight.w600,
                     ),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  /// Builds a stacked progress bar for progressive downloads.
+  /// Shows transcode progress as background, download progress as foreground.
+  Widget _buildProgressiveProgressBar(DownloadTask task) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(4),
+      child: SizedBox(
+        height: 6,
+        child: Stack(
+          children: [
+            // Background
+            Container(color: AppColors.surfaceVariant),
+            // Transcode progress (background layer)
+            FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: task.transcodeProgress.clamp(0.0, 1.0),
+              child: Container(color: AppColors.accent.withValues(alpha: 0.4)),
+            ),
+            // Download progress (foreground layer)
+            FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: task.downloadProgress.clamp(0.0, 1.0),
+              child: Container(color: AppColors.primary),
+            ),
+          ],
+        ),
       ),
     );
   }

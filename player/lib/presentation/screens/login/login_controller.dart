@@ -2,6 +2,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../core/graphql/graphql_provider.dart';
 import '../../../core/channels/pairing_service.dart';
 import '../../../core/auth/device_info_service.dart';
+import '../../../core/relay/relay_service.dart';
 
 part 'login_controller.g.dart';
 
@@ -67,7 +68,7 @@ class LoginState {
     );
   }
 
-  factory LoginState.initial() => const LoginState();
+  factory LoginState.initial() => const LoginState(mode: ConnectionMode.claimCode);
 }
 
 @riverpod
@@ -92,7 +93,9 @@ class LoginController extends _$LoginController {
   /// 2. Get the instance's direct URLs and public key
   /// 3. Connect to the instance and submit the claim code
   /// 4. Store credentials and complete pairing
-  Future<void> pairWithClaimCode(String claimCode) async {
+  ///
+  /// If [relayUrl] is provided, uses that instead of the default relay.
+  Future<void> pairWithClaimCode(String claimCode, {String? relayUrl}) async {
     state = state.copyWith(
       isLoading: true,
       error: null,
@@ -101,7 +104,11 @@ class LoginController extends _$LoginController {
     );
 
     try {
-      final pairingService = PairingService();
+      // Create relay service with custom URL if provided
+      final relayService = relayUrl != null && relayUrl.isNotEmpty
+          ? RelayService(relayUrl: relayUrl)
+          : null;
+      final pairingService = PairingService(relayService: relayService);
       final deviceInfo = DeviceInfoService();
       final deviceName = await deviceInfo.getDeviceName();
 

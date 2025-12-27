@@ -112,11 +112,16 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   defp is_ipv4?(_), do: false
 
   # Validates that an IP address is suitable for public access
-  defp valid_ip?({127, _, _, _}), do: false  # Loopback
-  defp valid_ip?({169, 254, _, _}), do: false  # Link-local
-  defp valid_ip?({172, 17, _, _}), do: false  # Docker bridge
+  # Loopback
+  defp valid_ip?({127, _, _, _}), do: false
+  # Link-local
+  defp valid_ip?({169, 254, _, _}), do: false
+  # Docker bridge
+  defp valid_ip?({172, 17, _, _}), do: false
+
   defp valid_ip?({a, b, c, d})
-    when is_integer(a) and is_integer(b) and is_integer(c) and is_integer(d),
-    do: true
+       when is_integer(a) and is_integer(b) and is_integer(c) and is_integer(d),
+       do: true
+
   defp valid_ip?(_), do: false
 end

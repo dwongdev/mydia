@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metadata-relay
+  namespace: metadata-relay
+  labels:
+    app.kubernetes.io/name: metadata-relay
+    app.kubernetes.io/component: relay-service
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # Use Recreate because we have a single PVC that can't be shared
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: metadata-relay
+      app.kubernetes.io/component: relay-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: metadata-relay
+        app.kubernetes.io/component: relay-service
+    spec:
+      containers:
+        - name: metadata-relay
+          image: ghcr.io/arosenfeld/mydia-metadata-relay:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 4001
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: metadata-relay-config
+            - secretRef:
+                name: metadata-relay-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: metadata-relay-data

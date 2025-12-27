@@ -218,23 +218,34 @@ defmodule MetadataRelay.Relay do
   Called after successful device pairing.
 
   ## Parameters
+  - `authenticated_instance_id` - The instance_id from the authentication token
   - `claim_id` - The claim ID to consume
   - `device_id` - The device ID that consumed the claim
 
   Returns `{:ok, claim}` or `{:error, reason}`.
   """
-  def consume_claim(claim_id, device_id) do
-    case Repo.get(Claim, claim_id) do
+  def consume_claim(authenticated_instance_id, claim_id, device_id) do
+    query =
+      from c in Claim,
+        where: c.id == ^claim_id,
+        preload: [:instance]
+
+    case Repo.one(query) do
       nil ->
         {:error, :not_found}
 
       claim ->
-        if Claim.consumed?(claim) do
-          {:error, :already_consumed}
-        else
-          claim
-          |> Claim.consume_changeset(device_id)
-          |> Repo.update()
+        cond do
+          claim.instance.instance_id != authenticated_instance_id ->
+            {:error, :unauthorized}
+
+          Claim.consumed?(claim) ->
+            {:error, :already_consumed}
+
+          true ->
+            claim
+            |> Claim.consume_changeset(device_id)
+            |> Repo.update()
         end
     end
   end
@@ -360,6 +371,11 @@ defmodule MetadataRelay.Relay do
   defp token_expired?(_), do: true
 
   defp get_token_secret do
-    Application.get_env(:metadata_relay, :relay_token_secret, "dev-secret-change-in-prod")
+    # Derive relay token secret from the app's secret_key_base
+    # No separate secret needed - uses the same one Phoenix uses
+    secret_key_base =
+      Application.get_env(:metadata_relay, MetadataRelayWeb.Endpoint)[:secret_key_base]
+
+    Plug.Crypto.KeyGenerator.generate(secret_key_base, "relay instance tokens", length: 32)
   end
 end

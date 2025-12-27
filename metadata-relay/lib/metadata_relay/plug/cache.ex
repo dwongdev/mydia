@@ -37,6 +37,12 @@ defmodule MetadataRelay.Plug.Cache do
   end
 
   @impl true
+  def call(%Plug.Conn{method: "GET", request_path: "/relay" <> _rest} = conn, _opts) do
+    # Skip caching for relay endpoints (dynamic data, rate limited)
+    conn
+  end
+
+  @impl true
   def call(%Plug.Conn{method: "GET"} = conn, _opts) do
     cache_key = build_cache_key(conn)
 

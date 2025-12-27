@@ -36,6 +36,7 @@ defmodule Mydia.RemoteAccess.DirectUrlRefresherTest do
 
       # Simulate refresh by detecting URLs and updating config
       direct_urls = Mydia.RemoteAccess.DirectUrls.detect_all()
+
       {:ok, _cert_path, _key_path, fingerprint} =
         Mydia.RemoteAccess.Certificates.ensure_certificate()
 
@@ -58,6 +59,7 @@ defmodule Mydia.RemoteAccess.DirectUrlRefresherTest do
 
       # Simulate refresh
       direct_urls = Mydia.RemoteAccess.DirectUrls.detect_all()
+
       {:ok, _cert_path, _key_path, fingerprint} =
         Mydia.RemoteAccess.Certificates.ensure_certificate()
 
@@ -149,7 +151,8 @@ defmodule Mydia.RemoteAccess.DirectUrlRefresherTest do
         external_port: 4000,
         external_url: "https://mydia.example.com:443",
         additional_direct_urls: [
-          "https://mydia.example.com:443", # Duplicate
+          # Duplicate
+          "https://mydia.example.com:443",
           "https://vpn.mydia.local:4000"
         ]
       )

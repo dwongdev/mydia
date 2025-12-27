@@ -85,9 +85,8 @@ class RelayService {
   final String _relayUrl;
   final http.Client _httpClient;
 
-  // Default relay URL - in dev environment, the relay is at metadata-relay:4001
-  // In production, this should be configurable
-  static const _defaultRelayUrl = 'http://metadata-relay:4001';
+  // Default relay URL - production relay service
+  static const _defaultRelayUrl = 'https://relay.mydia.dev';
 
   /// Looks up a claim code and returns instance connection info.
   ///

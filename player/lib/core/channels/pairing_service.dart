@@ -17,6 +17,7 @@ import 'channel_service.dart';
 import '../crypto/noise_service.dart';
 import '../auth/auth_storage.dart';
 import '../relay/relay_service.dart';
+import '../connection/connection_manager.dart';
 
 /// Storage keys for pairing credentials.
 abstract class _StorageKeys {
@@ -25,6 +26,11 @@ abstract class _StorageKeys {
   static const mediaToken = 'pairing_media_token';
   static const devicePublicKey = 'pairing_device_public_key';
   static const devicePrivateKey = 'pairing_device_private_key';
+  static const directUrls = 'pairing_direct_urls';
+  static const certFingerprint = 'pairing_cert_fingerprint';
+  static const instanceName = 'pairing_instance_name';
+  static const serverPublicKey = 'server_public_key';
+  static const instanceId = 'instance_id';
 }
 
 /// Result of a pairing operation.
@@ -65,12 +71,32 @@ class PairingCredentials {
   /// The device's private key (32 bytes).
   final Uint8List devicePrivateKey;
 
+  /// The server's static public key (32 bytes).
+  final Uint8List serverPublicKey;
+
+  /// Direct URLs for connecting to the instance.
+  final List<String> directUrls;
+
+  /// Certificate fingerprint for TLS validation.
+  final String? certFingerprint;
+
+  /// Instance name (friendly identifier).
+  final String? instanceName;
+
+  /// Instance ID for relay connections.
+  final String? instanceId;
+
   const PairingCredentials({
     required this.serverUrl,
     required this.deviceId,
     required this.mediaToken,
     required this.devicePublicKey,
     required this.devicePrivateKey,
+    required this.serverPublicKey,
+    required this.directUrls,
+    this.certFingerprint,
+    this.instanceName,
+    this.instanceId,
   });
 }
 
@@ -112,15 +138,18 @@ class PairingService {
     NoiseService? noiseService,
     AuthStorage? authStorage,
     RelayService? relayService,
+    ConnectionManager? connectionManager,
   })  : _channelService = channelService ?? ChannelService(),
         _noiseService = noiseService ?? NoiseService(),
         _authStorage = authStorage ?? getAuthStorage(),
-        _relayService = relayService ?? RelayService();
+        _relayService = relayService ?? RelayService(),
+        _connectionManager = connectionManager;
 
   final ChannelService _channelService;
   final NoiseService _noiseService;
   final AuthStorage _authStorage;
   final RelayService _relayService;
+  final ConnectionManager? _connectionManager;
 
   /// Pairs this device using only a claim code.
   ///
@@ -194,12 +223,31 @@ class PairingService {
       }
       final channel = joinResult.data!;
 
-      // Step 4: Perform Noise_NK handshake (currently stubbed)
+      // Step 4: Perform Noise_NK handshake
       onStatusUpdate?.call('Establishing secure connection...');
       final noiseSession =
           await _noiseService.startPairingHandshake(serverPublicKey);
-      // Suppress unused variable warning - handshake is stubbed
-      noiseSession;
+
+      // Send handshake message to server
+      final handshakeMessage = await noiseSession.writeHandshakeMessage();
+      final handshakeResult = await _channelService.sendPairingHandshake(
+        channel,
+        handshakeMessage,
+      );
+
+      if (!handshakeResult.success) {
+        await _channelService.disconnect();
+        return PairingResult.error(
+            handshakeResult.error ?? 'Handshake failed');
+      }
+
+      // Process server's handshake response
+      await noiseSession.readHandshakeMessage(handshakeResult.data!);
+
+      if (!noiseSession.isComplete) {
+        await _channelService.disconnect();
+        return PairingResult.error('Handshake incomplete');
+      }
 
       // Step 5: Submit claim code
       onStatusUpdate?.call('Submitting claim code...');
@@ -226,6 +274,11 @@ class PairingService {
         mediaToken: response.mediaToken,
         devicePublicKey: response.devicePublicKey,
         devicePrivateKey: response.devicePrivateKey,
+        serverPublicKey: serverPublicKey,
+        directUrls: claimInfo.directUrls,
+        certFingerprint: null, // TODO: Add cert_fingerprint to relay response
+        instanceName: null, // TODO: Add instance_name to relay response
+        instanceId: claimInfo.instanceId,
       );
 
       await _storeCredentials(credentials);
@@ -233,6 +286,12 @@ class PairingService {
       // Step 7: Mark claim as consumed on relay
       onStatusUpdate?.call('Finalizing...');
       await _relayService.consumeClaim(claimInfo.claimId, response.deviceId);
+
+      // Step 8: Attempt to switch to direct connection
+      if (_connectionManager != null && credentials.directUrls.isNotEmpty) {
+        onStatusUpdate?.call('Testing direct connection...');
+        await _attemptDirectConnection(credentials);
+      }
 
       return PairingResult.success(credentials);
     } catch (e) {
@@ -280,27 +339,26 @@ class PairingService {
       final channel = joinResult.data!;
 
       // Step 3: Perform Noise_NK handshake
-      // Note: NoiseService currently has stub implementation
-      // When full implementation is ready, this will work
       final noiseSession =
           await _noiseService.startPairingHandshake(serverPublicKey);
 
-      // TODO: Once NoiseService is fully implemented, generate and send handshake message
-      // For now, we'll create a placeholder handshake exchange
-      // In a real implementation:
-      // final firstMessage = await noiseSession.writeHandshakeMessage();
-      // final handshakeResult = await _channelService.sendPairingHandshake(channel, firstMessage);
-      // if (!handshakeResult.success) {
-      //   await _channelService.disconnect();
-      //   return PairingResult.error(handshakeResult.error ?? 'Handshake failed');
-      // }
-      // await noiseSession.readHandshakeMessage(handshakeResult.data!);
+      // Generate and send handshake message
+      final firstMessage = await noiseSession.writeHandshakeMessage();
+      final handshakeResult =
+          await _channelService.sendPairingHandshake(channel, firstMessage);
+      if (!handshakeResult.success) {
+        await _channelService.disconnect();
+        return PairingResult.error(
+            handshakeResult.error ?? 'Handshake failed');
+      }
 
-      // TEMPORARY: For testing without full Noise implementation
-      // We'll skip the handshake and go straight to claim code submission
-      // This will fail on the server side, but demonstrates the flow
-      // Suppress unused variable warning
-      noiseSession;
+      // Process server's handshake response
+      await noiseSession.readHandshakeMessage(handshakeResult.data!);
+
+      if (!noiseSession.isComplete) {
+        await _channelService.disconnect();
+        return PairingResult.error('Handshake incomplete');
+      }
 
       // Step 4: Submit claim code
       final claimResult = await _channelService.submitClaimCode(
@@ -326,6 +384,11 @@ class PairingService {
         mediaToken: response.mediaToken,
         devicePublicKey: response.devicePublicKey,
         devicePrivateKey: response.devicePrivateKey,
+        serverPublicKey: serverPublicKey,
+        directUrls: [serverUrl], // Use serverUrl as the only direct URL
+        certFingerprint: null, // Not available in direct pairing
+        instanceName: null, // Not available in direct pairing
+        instanceId: null, // Not available in direct pairing
       );
 
       await _storeCredentials(credentials);
@@ -347,13 +410,34 @@ class PairingService {
     final publicKeyB64 = await _authStorage.read(_StorageKeys.devicePublicKey);
     final privateKeyB64 =
         await _authStorage.read(_StorageKeys.devicePrivateKey);
+    final serverPublicKeyB64 =
+        await _authStorage.read(_StorageKeys.serverPublicKey);
+    final directUrlsJson = await _authStorage.read(_StorageKeys.directUrls);
+    final certFingerprint =
+        await _authStorage.read(_StorageKeys.certFingerprint);
+    final instanceName = await _authStorage.read(_StorageKeys.instanceName);
+    final instanceId = await _authStorage.read(_StorageKeys.instanceId);
 
     if (serverUrl == null ||
         deviceId == null ||
         mediaToken == null ||
         publicKeyB64 == null ||
-        privateKeyB64 == null) {
+        privateKeyB64 == null ||
+        serverPublicKeyB64 == null) {
       return null;
+    }
+
+    // Parse direct URLs from JSON, fallback to serverUrl if not available
+    List<String> directUrls = [serverUrl];
+    if (directUrlsJson != null) {
+      try {
+        final decoded = jsonDecode(directUrlsJson);
+        if (decoded is List) {
+          directUrls = decoded.cast<String>();
+        }
+      } catch (e) {
+        // If parsing fails, use fallback
+      }
     }
 
     return PairingCredentials(
@@ -362,6 +446,11 @@ class PairingService {
       mediaToken: mediaToken,
       devicePublicKey: _base64ToBytes(publicKeyB64),
       devicePrivateKey: _base64ToBytes(privateKeyB64),
+      serverPublicKey: _base64ToBytes(serverPublicKeyB64),
+      directUrls: directUrls,
+      certFingerprint: certFingerprint,
+      instanceName: instanceName,
+      instanceId: instanceId,
     );
   }
 
@@ -374,6 +463,11 @@ class PairingService {
     await _authStorage.delete(_StorageKeys.mediaToken);
     await _authStorage.delete(_StorageKeys.devicePublicKey);
     await _authStorage.delete(_StorageKeys.devicePrivateKey);
+    await _authStorage.delete(_StorageKeys.serverPublicKey);
+    await _authStorage.delete(_StorageKeys.directUrls);
+    await _authStorage.delete(_StorageKeys.certFingerprint);
+    await _authStorage.delete(_StorageKeys.instanceName);
+    await _authStorage.delete(_StorageKeys.instanceId);
   }
 
   /// Checks if this device is currently paired.
@@ -382,7 +476,54 @@ class PairingService {
     return credentials != null;
   }
 
+  /// Gets the stored connection type preference.
+  ///
+  /// Returns 'direct', 'relay', or null if no preference is stored.
+  /// This can be used by the UI to show the user how they're connected.
+  Future<String?> getConnectionType() async {
+    return await _authStorage.read('connection_last_type');
+  }
+
+  /// Gets the last successful direct URL.
+  ///
+  /// Returns the URL if a direct connection was previously successful,
+  /// or null if relay was used or no connection has been made.
+  Future<String?> getLastDirectUrl() async {
+    return await _authStorage.read('connection_last_url');
+  }
+
   // Private helpers
+
+  /// Attempts to establish a direct connection after pairing.
+  ///
+  /// This validates that the direct URLs work and stores the connection
+  /// preference for future sessions. If direct connection fails, we silently
+  /// fall back to relay on the next connection attempt.
+  Future<void> _attemptDirectConnection(PairingCredentials credentials) async {
+    final connectionManager = _connectionManager;
+    if (connectionManager == null) return;
+
+    try {
+      // Try to connect directly using ConnectionManager
+      final result = await connectionManager.connect(
+        directUrls: credentials.directUrls,
+        instanceId: credentials.instanceId ?? '',
+        certFingerprint: credentials.certFingerprint,
+        relayUrl: null, // Don't fall back to relay during this test
+      );
+
+      if (result.success && result.isDirect) {
+        // Direct connection successful!
+        // ConnectionManager has already stored the preference
+        // Close the ChannelService connection if still open
+        await _channelService.disconnect();
+      }
+      // If failed, silently continue - we'll use relay fallback on next connection
+    } catch (e) {
+      // Ignore errors - this is just a test connection
+      // The user can still connect via relay on next app launch
+    }
+  }
 
   Future<void> _storeCredentials(PairingCredentials credentials) async {
     await _authStorage.write(_StorageKeys.serverUrl, credentials.serverUrl);
@@ -396,6 +537,32 @@ class PairingService {
       _StorageKeys.devicePrivateKey,
       _bytesToBase64(credentials.devicePrivateKey),
     );
+    await _authStorage.write(
+      _StorageKeys.serverPublicKey,
+      _bytesToBase64(credentials.serverPublicKey),
+    );
+    await _authStorage.write(
+      _StorageKeys.directUrls,
+      jsonEncode(credentials.directUrls),
+    );
+    if (credentials.certFingerprint != null) {
+      await _authStorage.write(
+        _StorageKeys.certFingerprint,
+        credentials.certFingerprint!,
+      );
+    }
+    if (credentials.instanceName != null) {
+      await _authStorage.write(
+        _StorageKeys.instanceName,
+        credentials.instanceName!,
+      );
+    }
+    if (credentials.instanceId != null) {
+      await _authStorage.write(
+        _StorageKeys.instanceId,
+        credentials.instanceId!,
+      );
+    }
   }
 
   String _detectPlatform() {

@@ -38,8 +38,8 @@ defmodule Mydia.RemoteAccess.DirectUrlsTest do
 
       # Should not contain 127.x.x.x addresses
       refute Enum.any?(urls, fn url ->
-        String.contains?(url, "127-")
-      end)
+               String.contains?(url, "127-")
+             end)
     end
 
     test "filters out link-local addresses" do
@@ -47,8 +47,8 @@ defmodule Mydia.RemoteAccess.DirectUrlsTest do
 
       # Should not contain 169.254.x.x addresses
       refute Enum.any?(urls, fn url ->
-        String.contains?(url, "169-254-")
-      end)
+               String.contains?(url, "169-254-")
+             end)
     end
 
     test "filters out docker bridge addresses" do
@@ -56,8 +56,8 @@ defmodule Mydia.RemoteAccess.DirectUrlsTest do
 
       # Should not contain 172.17.x.x addresses
       refute Enum.any?(urls, fn url ->
-        String.contains?(url, "172-17-")
-      end)
+               String.contains?(url, "172-17-")
+             end)
     end
   end
 
@@ -115,7 +115,8 @@ defmodule Mydia.RemoteAccess.DirectUrlsTest do
         external_port: 4000,
         external_url: "https://example.com:443",
         additional_direct_urls: [
-          "https://example.com:443",  # Duplicate of external_url
+          # Duplicate of external_url
+          "https://example.com:443",
           "https://custom.example.com:443"
         ]
       )

@@ -357,6 +357,11 @@ config :mydia, Mydia.CrashReporter.Queue,
   # Maximum total retry duration: 24 hours
   max_retry_duration: 24 * 60 * 60
 
+# Configure downloads and transcoding
+config :mydia, :downloads,
+  transcode_cache_dir: "priv/data/transcodes",
+  max_concurrent_transcodes: 2
+
 # Configure Logger backends for crash reporting
 # The crash reporter backend will automatically capture errors when enabled
 config :logger,

@@ -256,7 +256,9 @@ if config_env() == :prod do
   # Helper function for safe integer parsing
   parse_integer = fn value, default ->
     case value do
-      nil -> default
+      nil ->
+        default
+
       str when is_binary(str) ->
         case Integer.parse(str) do
           {int, _} -> int

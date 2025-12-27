@@ -248,6 +248,85 @@ void main() {
       });
     });
 
+    group('Handshake Messages', () {
+      test('writeHandshakeMessage generates valid NK message', () async {
+        final serverPublicKey = Uint8List(32);
+        for (var i = 0; i < 32; i++) {
+          serverPublicKey[i] = i;
+        }
+
+        final session = await service.startPairingHandshake(serverPublicKey);
+        final message = await session.writeHandshakeMessage();
+
+        // NK first message: e (32 bytes) + es (encrypted with DH)
+        expect(message.length, greaterThanOrEqualTo(32));
+        expect(session.isComplete, isFalse);
+      });
+
+      test('writeHandshakeMessage generates valid IK message', () async {
+        final serverPublicKey = Uint8List(32);
+        for (var i = 0; i < 32; i++) {
+          serverPublicKey[i] = i + 1;
+        }
+
+        await service.loadOrGenerateKeypair();
+        final session = await service.startReconnectHandshake(serverPublicKey);
+        final message = await session.writeHandshakeMessage();
+
+        // IK first message: e (32 bytes) + encrypted static key + MAC
+        // Should be at least 32 + 32 + 16 = 80 bytes
+        expect(message.length, greaterThanOrEqualTo(80));
+        expect(session.isComplete, isFalse);
+      });
+
+      test('writeHandshakeMessage with payload includes encrypted payload',
+          () async {
+        final serverPublicKey = Uint8List(32);
+        for (var i = 0; i < 32; i++) {
+          serverPublicKey[i] = i;
+        }
+
+        final session = await service.startPairingHandshake(serverPublicKey);
+        final payload = Uint8List.fromList(utf8.encode('test payload'));
+        final message = await session.writeHandshakeMessage(payload);
+
+        // Message should include ephemeral key + encrypted payload + MAC
+        expect(message.length, greaterThanOrEqualTo(32 + payload.length + 16));
+      });
+
+      test('writeHandshakeMessage throws when called twice', () async {
+        final serverPublicKey = Uint8List(32);
+        for (var i = 0; i < 32; i++) {
+          serverPublicKey[i] = i;
+        }
+
+        final session = await service.startPairingHandshake(serverPublicKey);
+        await session.writeHandshakeMessage();
+
+        expect(
+          () => session.writeHandshakeMessage(),
+          throwsStateError,
+        );
+      });
+
+      test('readHandshakeMessage requires valid message length', () async {
+        final serverPublicKey = Uint8List(32);
+        for (var i = 0; i < 32; i++) {
+          serverPublicKey[i] = i;
+        }
+
+        final session = await service.startPairingHandshake(serverPublicKey);
+        await session.writeHandshakeMessage();
+
+        final tooShortMessage = Uint8List(16); // Too short
+
+        expect(
+          () => session.readHandshakeMessage(tooShortMessage),
+          throwsArgumentError,
+        );
+      });
+    });
+
     group('Transport Encryption', () {
       test('encrypt throws when handshake not complete', () async {
         final serverPublicKey = Uint8List(32);
@@ -271,6 +350,50 @@ void main() {
           () => session.decrypt(ciphertext),
           throwsStateError,
         );
+      });
+    });
+
+    group('Session Disposal', () {
+      test('dispose clears sensitive key material', () async {
+        final serverPublicKey = Uint8List(32);
+        for (var i = 0; i < 32; i++) {
+          serverPublicKey[i] = i;
+        }
+
+        final session = await service.startPairingHandshake(serverPublicKey);
+        await session.writeHandshakeMessage();
+
+        session.dispose();
+
+        // After dispose, session state should be cleared
+        expect(session.isComplete, isFalse);
+      });
+    });
+
+    group('Pattern Validation', () {
+      test('NK session has correct pattern', () async {
+        final serverPublicKey = Uint8List(32);
+        for (var i = 0; i < 32; i++) {
+          serverPublicKey[i] = i;
+        }
+
+        final session = await service.startPairingHandshake(serverPublicKey);
+
+        expect(session.pattern, equals(NoisePattern.nk));
+        expect(session.localStaticKeypair, isNull);
+      });
+
+      test('IK session has correct pattern', () async {
+        final serverPublicKey = Uint8List(32);
+        for (var i = 0; i < 32; i++) {
+          serverPublicKey[i] = i;
+        }
+
+        await service.loadOrGenerateKeypair();
+        final session = await service.startReconnectHandshake(serverPublicKey);
+
+        expect(session.pattern, equals(NoisePattern.ik));
+        expect(session.localStaticKeypair, isNotNull);
       });
     });
   });

@@ -14,6 +14,7 @@ class MydiaWebConfig {
   final String? userId;
   final String? username;
   final String? serverUrl;
+  final bool embedMode;
 
   const MydiaWebConfig({
     required this.authenticated,
@@ -21,6 +22,7 @@ class MydiaWebConfig {
     this.userId,
     this.username,
     this.serverUrl,
+    this.embedMode = false,
   });
 
   /// Check if this config has valid auth data.
@@ -40,3 +42,26 @@ bool get isWebPlatform => impl.isWebPlatform;
 ///
 /// Returns null on non-web platforms.
 String? getOriginUrl() => impl.getOriginUrl();
+
+/// Check if running in embed mode (served from /player).
+///
+/// In embed mode, the player should show a link back to the main Mydia app.
+bool get isEmbedMode {
+  final config = getWebConfig();
+  return config?.embedMode ?? false;
+}
+
+/// Get the URL to the main Mydia app.
+///
+/// Returns the origin URL without the /player path.
+String? getMydiaAppUrl() {
+  final origin = getOriginUrl();
+  if (origin == null) return null;
+  return origin;
+}
+
+/// Navigate to the main Mydia app.
+///
+/// On web, this navigates the browser to the main app URL.
+/// On non-web platforms, this is a no-op.
+void navigateToMydiaApp() => impl.navigateToMydiaApp();

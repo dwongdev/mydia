@@ -1,0 +1,32 @@
+# Metadata Relay Infrastructure Configuration
+# Copy this file to config.yaml and fill in your values
+
+# Cloudflare Configuration
+# Create API token at: https://dash.cloudflare.com/profile/api-tokens
+# Required permissions: Zone:DNS:Edit
+cloudflare_api_token: "your-cloudflare-api-token"
+
+# Find Zone ID at: Cloudflare Dashboard > Select domain > Overview (right sidebar)
+cloudflare_zone_id: "your-cloudflare-zone-id"
+
+# Domain Configuration
+domain_name: "mydia.dev"
+relay_subdomain: "relay"
+argocd_subdomain: "argocd"
+
+# Application Secrets
+# Generate with: openssl rand -hex 32
+relay_secret_key_base: "generate-with-openssl-rand-hex-32"
+
+# TVDB API key from: https://thetvdb.com/dashboard/account/apikeys
+relay_tvdb_api_key: "your-tvdb-api-key"
+
+# TMDB API key from: https://www.themoviedb.org/settings/api
+relay_tmdb_api_key: "your-tmdb-api-key"
+
+# SSH Configuration
+ssh_public_key_path: "~/.ssh/id_ed25519.pub"
+
+# VPS Configuration (populated automatically after first deploy)
+vps_name: ""
+vps_ip: ""

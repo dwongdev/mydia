@@ -75,6 +75,11 @@ void main() {
       );
 
       expect(
+        StreamingStrategyService.getStrategyDescription(StreamingStrategy.remux),
+        equals('Remux (fMP4)'),
+      );
+
+      expect(
         StreamingStrategyService.getStrategyDescription(StreamingStrategy.hlsCopy),
         equals('HLS (Stream Copy)'),
       );
@@ -83,6 +88,27 @@ void main() {
         StreamingStrategyService.getStrategyDescription(StreamingStrategy.transcode),
         equals('HLS (Transcoded)'),
       );
+    });
+
+    test('buildStreamUrl handles remux strategy', () {
+      const serverUrl = 'https://example.com';
+      const fileId = 'test-file-123';
+
+      final url = StreamingStrategyService.buildStreamUrl(
+        serverUrl: serverUrl,
+        fileId: fileId,
+        strategy: StreamingStrategy.remux,
+      );
+
+      expect(url, equals('https://example.com/api/v1/stream/file/test-file-123?strategy=REMUX'));
+    });
+
+    test('fromValue parses strategy strings correctly', () {
+      expect(StreamingStrategy.fromValue('DIRECT_PLAY'), equals(StreamingStrategy.directPlay));
+      expect(StreamingStrategy.fromValue('REMUX'), equals(StreamingStrategy.remux));
+      expect(StreamingStrategy.fromValue('HLS_COPY'), equals(StreamingStrategy.hlsCopy));
+      expect(StreamingStrategy.fromValue('TRANSCODE'), equals(StreamingStrategy.transcode));
+      expect(StreamingStrategy.fromValue('INVALID'), isNull);
     });
   });
 }

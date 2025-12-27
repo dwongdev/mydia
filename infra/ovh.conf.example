@@ -1,0 +1,27 @@
+# OVHcloud API Configuration
+# Copy this file to ovh.conf and fill in your values
+#
+# Create API credentials at:
+#   US: https://api.us.ovhcloud.com/createToken/
+#   EU: https://eu.api.ovh.com/createToken/
+#   CA: https://ca.api.ovh.com/createToken/
+#
+# Required permissions:
+#   GET    /vps/*
+#   POST   /vps/*
+#   PUT    /vps/*
+#   GET    /order/*
+#   POST   /order/*
+#   GET    /me/*
+
+[default]
+; Endpoint depends on your OVH region:
+;   ovh-eu     - Europe
+;   ovh-us     - United States
+;   ovh-ca     - Canada
+endpoint=ovh-us
+
+[ovh-us]
+application_key=your_application_key
+application_secret=your_application_secret
+consumer_key=your_consumer_key

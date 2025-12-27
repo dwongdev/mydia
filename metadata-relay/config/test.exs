@@ -14,7 +14,3 @@ config :metadata_relay, MetadataRelay.Repo,
   database: Path.expand("../metadata_relay_test.db", __DIR__),
   pool_size: 5,
   pool: Ecto.Adapters.SQL.Sandbox
-
-# Use a static token secret for tests
-config :metadata_relay,
-  relay_token_secret: "test-secret-for-testing-only"

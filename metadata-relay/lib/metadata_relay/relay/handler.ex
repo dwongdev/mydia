@@ -182,11 +182,11 @@ defmodule MetadataRelay.Relay.Handler do
   }
   ```
   """
-  def consume_claim(params) do
+  def consume_claim(authenticated_instance_id, params) do
     claim_id = params["claim_id"]
     device_id = params["device_id"]
 
-    case Relay.consume_claim(claim_id, device_id) do
+    case Relay.consume_claim(authenticated_instance_id, claim_id, device_id) do
       {:ok, _claim} ->
         {:ok, %{status: "consumed"}}
 
@@ -195,6 +195,9 @@ defmodule MetadataRelay.Relay.Handler do
 
       {:error, :already_consumed} ->
         {:error, {:validation, "Claim code has already been consumed"}}
+
+      {:error, :unauthorized} ->
+        {:error, {:validation, "Only the instance that created the claim can consume it"}}
     end
   end
 

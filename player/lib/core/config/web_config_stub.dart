@@ -11,3 +11,6 @@ bool get isWebPlatform => false;
 
 /// Non-web platforms don't have an origin URL.
 String? getOriginUrl() => null;
+
+/// No-op on non-web platforms.
+void navigateToMydiaApp() {}

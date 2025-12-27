@@ -5,8 +5,9 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../domain/models/episode.dart';
 import '../../domain/models/download.dart';
 import '../../core/downloads/download_providers.dart';
+import '../../core/downloads/download_job_providers.dart';
 import '../../core/theme/colors.dart';
-import 'download_dialog.dart';
+import 'quality_download_dialog.dart';
 import 'quality_badge.dart';
 
 class EpisodeCard extends ConsumerStatefulWidget {
@@ -433,48 +434,89 @@ class _EpisodeCardState extends ConsumerState<EpisodeCard>
         );
       }
     } else if (widget.episode.files.isNotEmpty) {
-      final selectedFile = await showDownloadDialog(
+      // Show quality download dialog for progressive downloads
+      final selectedResolution = await showQualityDownloadDialog(
         context,
-        files: widget.episode.files,
+        contentType: 'episode',
+        contentId: widget.episode.id,
         title: '${widget.showTitle} - ${widget.episode.episodeCode}',
       );
 
-      if (selectedFile != null && context.mounted) {
-        final manager = ref.read(downloadManagerProvider);
-        final downloadUrl = selectedFile.directPlaySupported
-            ? selectedFile.directPlayUrl
-            : selectedFile.streamUrl;
+      if (selectedResolution != null && context.mounted) {
+        final downloadService = ref.read(downloadJobServiceProvider);
+        final downloadManager = ref.read(downloadManagerProvider);
 
-        if (downloadUrl != null) {
-          await manager.startDownload(
-            mediaId: widget.episode.id,
-            title:
-                '${widget.showTitle} - ${widget.episode.episodeCode}: ${widget.episode.title}',
-            downloadUrl: downloadUrl,
-            quality: selectedFile.displayQuality,
-            mediaType: MediaType.episode,
-            posterUrl: widget.episode.thumbnailUrl,
-            fileSize: selectedFile.size,
-          );
-
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Row(
-                  children: [
-                    Icon(Icons.download_rounded, color: Colors.white, size: 20),
-                    SizedBox(width: 12),
-                    Text('Download started'),
-                  ],
-                ),
-                backgroundColor: AppColors.primary,
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                duration: const Duration(seconds: 2),
-              ),
+        if (downloadService != null) {
+          try {
+            // Start progressive download using the service
+            await downloadManager.startProgressiveDownload(
+              mediaId: widget.episode.id,
+              title:
+                  '${widget.showTitle} - ${widget.episode.episodeCode}: ${widget.episode.title}',
+              contentType: 'episode',
+              resolution: selectedResolution,
+              mediaType: MediaType.episode,
+              posterUrl: widget.episode.thumbnailUrl,
+              getDownloadUrl: (jobId) async {
+                return await downloadService.getDownloadUrl(jobId);
+              },
+              prepareDownload: () async {
+                final status = await downloadService.prepareDownload(
+                  contentType: 'episode',
+                  id: widget.episode.id,
+                  resolution: selectedResolution,
+                );
+                return (
+                  jobId: status.jobId,
+                  status: status.status.name,
+                  progress: status.progress,
+                  fileSize: status.currentFileSize,
+                );
+              },
+              getJobStatus: (jobId) async {
+                final status = await downloadService.getJobStatus(jobId);
+                return (
+                  status: status.status.name,
+                  progress: status.progress,
+                  fileSize: status.currentFileSize,
+                  error: status.error,
+                );
+              },
             );
+
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Row(
+                    children: [
+                      Icon(Icons.download_rounded,
+                          color: Colors.white, size: 20),
+                      SizedBox(width: 12),
+                      Text('Download started'),
+                    ],
+                  ),
+                  backgroundColor: AppColors.primary,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            }
+          } catch (e) {
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Failed to start download: $e'),
+                  backgroundColor: AppColors.error,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              );
+            }
           }
         }
       }

@@ -1,0 +1,31 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: metadata-relay
+  namespace: metadata-relay
+  labels:
+    app.kubernetes.io/name: metadata-relay
+    app.kubernetes.io/component: relay-service
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # external-dns will automatically create DNS records for this ingress
+    external-dns.alpha.kubernetes.io/hostname: relay.mydia.dev
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - relay.mydia.dev
+      secretName: metadata-relay-tls
+  rules:
+    - host: relay.mydia.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: metadata-relay
+                port:
+                  name: http

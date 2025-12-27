@@ -36,6 +36,8 @@ defmodule Mydia.Application do
         Mydia.Hooks.Manager,
         {Registry, keys: :unique, name: Mydia.Streaming.HlsSessionRegistry},
         Mydia.Streaming.HlsSessionSupervisor,
+        {Registry, keys: :unique, name: Mydia.Downloads.TranscodeRegistry},
+        Mydia.Downloads.JobManager,
         Mydia.CrashReporter.Queue,
         Mydia.RemoteAccess.ClaimRateLimiter,
         Mydia.Accounts.ApiKeyRateLimiter,
@@ -119,7 +121,8 @@ defmodule Mydia.Application do
   defp relay_children do
     # Relay is started dynamically after supervisor starts (see start_relay_if_enabled/0)
     # This avoids querying the database before Repo is started
-    []
+    # RelayTunnel supervisor is always started to handle incoming tunneled connections
+    [Mydia.RemoteAccess.RelayTunnel]
   end
 
   # Start relay service dynamically after supervisor starts

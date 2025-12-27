@@ -78,7 +78,7 @@ RUN if [ -d "player" ]; then \
       cd player && \
       flutter pub get && \
       flutter pub run build_runner build --delete-conflicting-outputs && \
-      flutter build web --release --web-renderer canvaskit --base-href /player/ && \
+      flutter build web --release --base-href /player/ && \
       mkdir -p ../priv/static/player && \
       cp -r build/web/* ../priv/static/player/ && \
       cd ..; \

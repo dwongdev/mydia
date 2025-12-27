@@ -160,7 +160,7 @@ defmodule MetadataRelay.RelayTest do
       {:ok, instance} = create_instance()
       {:ok, _} = Relay.set_online(instance)
       {:ok, claim} = Relay.create_claim(instance, "user-1")
-      {:ok, _} = Relay.consume_claim(claim.id, "device-1")
+      {:ok, _} = Relay.consume_claim(instance.instance_id, claim.id, "device-1")
 
       assert {:error, :already_consumed} = Relay.redeem_claim(claim.code)
     end
@@ -173,13 +173,13 @@ defmodule MetadataRelay.RelayTest do
     end
   end
 
-  describe "consume_claim/2" do
-    test "marks claim as consumed" do
+  describe "consume_claim/3" do
+    test "marks claim as consumed when authenticated instance matches" do
       {:ok, instance} = create_instance()
       {:ok, claim} = Relay.create_claim(instance, "user-1")
       device_id = "device-#{System.unique_integer()}"
 
-      assert {:ok, consumed} = Relay.consume_claim(claim.id, device_id)
+      assert {:ok, consumed} = Relay.consume_claim(instance.instance_id, claim.id, device_id)
       assert consumed.consumed_at != nil
       assert consumed.consumed_by_device_id == device_id
     end
@@ -187,9 +187,32 @@ defmodule MetadataRelay.RelayTest do
     test "returns error when already consumed" do
       {:ok, instance} = create_instance()
       {:ok, claim} = Relay.create_claim(instance, "user-1")
-      {:ok, _} = Relay.consume_claim(claim.id, "device-1")
+      {:ok, _} = Relay.consume_claim(instance.instance_id, claim.id, "device-1")
 
-      assert {:error, :already_consumed} = Relay.consume_claim(claim.id, "device-2")
+      assert {:error, :already_consumed} =
+               Relay.consume_claim(instance.instance_id, claim.id, "device-2")
+    end
+
+    test "returns error when authenticated instance does not match claim owner" do
+      {:ok, instance1} = create_instance()
+      {:ok, instance2} = create_instance()
+      {:ok, claim} = Relay.create_claim(instance1, "user-1")
+      device_id = "device-#{System.unique_integer()}"
+
+      # Try to consume claim with wrong instance credentials
+      assert {:error, :unauthorized} = Relay.consume_claim(instance2.instance_id, claim.id, device_id)
+
+      # Verify claim was not consumed
+      refreshed_claim = Repo.get(MetadataRelay.Relay.Claim, claim.id)
+      assert refreshed_claim.consumed_at == nil
+    end
+
+    test "returns error when claim does not exist" do
+      {:ok, instance} = create_instance()
+      fake_claim_id = Ecto.UUID.generate()
+
+      assert {:error, :not_found} =
+               Relay.consume_claim(instance.instance_id, fake_claim_id, "device-1")
     end
   end
 

@@ -7,6 +7,8 @@ enum DownloadStatus {
   failed,
   paused,
   cancelled,
+  /// Transcoding in progress on server
+  transcoding,
 }
 
 enum MediaType {
@@ -58,6 +60,22 @@ class DownloadTask {
   @HiveField(13)
   final DateTime? completedAt;
 
+  // Progressive download fields
+  @HiveField(14)
+  final String? transcodeJobId;
+
+  @HiveField(15)
+  final double transcodeProgress;
+
+  @HiveField(16)
+  final double downloadProgress;
+
+  @HiveField(17)
+  final bool isProgressive;
+
+  @HiveField(18)
+  final int? downloadedBytes;
+
   const DownloadTask({
     required this.id,
     required this.mediaId,
@@ -73,6 +91,12 @@ class DownloadTask {
     this.error,
     required this.createdAt,
     this.completedAt,
+    // Progressive download fields
+    this.transcodeJobId,
+    this.transcodeProgress = 0.0,
+    this.downloadProgress = 0.0,
+    this.isProgressive = false,
+    this.downloadedBytes,
   });
 
   DownloadStatus get downloadStatus {
@@ -89,8 +113,47 @@ class DownloadTask {
         return DownloadStatus.paused;
       case 'cancelled':
         return DownloadStatus.cancelled;
+      case 'transcoding':
+        return DownloadStatus.transcoding;
       default:
         return DownloadStatus.pending;
+    }
+  }
+
+  /// Combined progress for progressive downloads.
+  /// For progressive downloads, this weights transcode and download progress.
+  double get combinedProgress {
+    if (!isProgressive) {
+      return progress;
+    }
+    // Weight: 30% transcode, 70% download (download is the slower operation)
+    return (transcodeProgress * 0.3) + (downloadProgress * 0.7);
+  }
+
+  /// Status display text for progressive downloads.
+  String get statusDisplay {
+    if (!isProgressive) {
+      return status;
+    }
+
+    switch (downloadStatus) {
+      case DownloadStatus.transcoding:
+        return 'Preparing ${(transcodeProgress * 100).toStringAsFixed(0)}%';
+      case DownloadStatus.downloading:
+        if (transcodeProgress < 1.0) {
+          return 'Preparing & Downloading';
+        }
+        return 'Downloading ${(downloadProgress * 100).toStringAsFixed(0)}%';
+      case DownloadStatus.completed:
+        return 'Completed';
+      case DownloadStatus.failed:
+        return 'Failed';
+      case DownloadStatus.paused:
+        return 'Paused';
+      case DownloadStatus.cancelled:
+        return 'Cancelled';
+      case DownloadStatus.pending:
+        return 'Pending';
     }
   }
 
@@ -113,6 +176,11 @@ class DownloadTask {
     String? error,
     DateTime? createdAt,
     DateTime? completedAt,
+    String? transcodeJobId,
+    double? transcodeProgress,
+    double? downloadProgress,
+    bool? isProgressive,
+    int? downloadedBytes,
   }) {
     return DownloadTask(
       id: id ?? this.id,
@@ -129,6 +197,11 @@ class DownloadTask {
       error: error ?? this.error,
       createdAt: createdAt ?? this.createdAt,
       completedAt: completedAt ?? this.completedAt,
+      transcodeJobId: transcodeJobId ?? this.transcodeJobId,
+      transcodeProgress: transcodeProgress ?? this.transcodeProgress,
+      downloadProgress: downloadProgress ?? this.downloadProgress,
+      isProgressive: isProgressive ?? this.isProgressive,
+      downloadedBytes: downloadedBytes ?? this.downloadedBytes,
     );
   }
 

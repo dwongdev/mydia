@@ -214,6 +214,13 @@ defmodule MydiaWeb.Router do
     get "/hls/:session_id/:track_id/:segment", HlsController, :segment
     # Support FFmpeg's flat structure (segments in root directory)
     get "/hls/:session_id/:segment", HlsController, :root_segment
+
+    # Media downloads
+    get "/download/:content_type/:id/options", DownloadController, :options
+    post "/download/:content_type/:id/prepare", DownloadController, :prepare
+    get "/download/job/:job_id/status", DownloadController, :job_status
+    delete "/download/job/:job_id", DownloadController, :cancel_job
+    get "/download/job/:job_id/file", DownloadController, :download_file
   end
 
   # API routes - admin only

@@ -23,6 +23,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _claimCodeController = TextEditingController();
+  final _relayUrlController = TextEditingController();
   final _serverUrlFocus = FocusNode();
   final _usernameFocus = FocusNode();
   final _passwordFocus = FocusNode();
@@ -30,6 +31,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
   bool _isLoadingSavedUrl = true;
   bool _obscurePassword = true;
+  bool _showAdvanced = false;
+  bool _showDirectConnection = false;
 
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -84,6 +87,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     _usernameController.dispose();
     _passwordController.dispose();
     _claimCodeController.dispose();
+    _relayUrlController.dispose();
     _serverUrlFocus.dispose();
     _usernameFocus.dispose();
     _passwordFocus.dispose();
@@ -114,7 +118,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     if (code.isEmpty) return;
 
     final controller = ref.read(loginControllerProvider.notifier);
-    await controller.pairWithClaimCode(code);
+    final customRelayUrl = _relayUrlController.text.trim();
+    await controller.pairWithClaimCode(
+      code,
+      relayUrl: customRelayUrl.isNotEmpty ? customRelayUrl : null,
+    );
 
     if (mounted) {
       final state = ref.read(loginControllerProvider);
@@ -122,19 +130,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         context.go('/');
       }
     }
-  }
-
-  void _selectClaimCodeMode() {
-    ref.read(loginControllerProvider.notifier).setMode(ConnectionMode.claimCode);
-    _claimCodeController.clear();
-  }
-
-  void _selectDirectMode() {
-    ref.read(loginControllerProvider.notifier).setMode(ConnectionMode.direct);
-  }
-
-  void _goBack() {
-    ref.read(loginControllerProvider.notifier).goBackToSelection();
   }
 
   @override
@@ -196,14 +191,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   }
 
   Widget _buildContent(LoginState loginState, bool isCompact) {
-    switch (loginState.mode) {
-      case ConnectionMode.selection:
-        return _buildModeSelectionCard(isCompact);
-      case ConnectionMode.claimCode:
-        return _buildClaimCodeCard(loginState, isCompact);
-      case ConnectionMode.direct:
-        return _buildDirectConnectionCard(loginState, isCompact);
-    }
+    // Always show the claim code card which now contains
+    // the direct connection form as an expandable section
+    return _buildClaimCodeCard(loginState, isCompact);
   }
 
   Widget _buildBackgroundDecoration() {
@@ -301,182 +291,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     );
   }
 
-  // ===== MODE SELECTION =====
-  Widget _buildModeSelectionCard(bool isCompact) {
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 360),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-          child: Container(
-            padding: EdgeInsets.all(isCompact ? 20 : 24),
-            decoration: BoxDecoration(
-              color: AppColors.surface.withValues(alpha: 0.6),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: AppColors.border.withValues(alpha: 0.2),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Welcome',
-                  style: TextStyle(
-                    fontSize: isCompact ? 20 : 22,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Connect to your Mydia server',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: AppColors.textSecondary.withValues(alpha: 0.7),
-                  ),
-                ),
-                SizedBox(height: isCompact ? 24 : 32),
-
-                // Claim Code Button (Primary)
-                _buildModeButton(
-                  onPressed: _selectClaimCodeMode,
-                  icon: Icons.qr_code_rounded,
-                  title: 'Enter Claim Code',
-                  subtitle: 'Get a code from your server admin',
-                  isPrimary: true,
-                ),
-
-                const SizedBox(height: 16),
-
-                // Divider with "or"
-                Row(
-                  children: [
-                    Expanded(
-                      child: Container(
-                        height: 1,
-                        color: AppColors.border.withValues(alpha: 0.2),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text(
-                        'or',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: AppColors.textSecondary.withValues(alpha: 0.6),
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: Container(
-                        height: 1,
-                        color: AppColors.border.withValues(alpha: 0.2),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 16),
-
-                // Direct Connection Button (Secondary)
-                _buildModeButton(
-                  onPressed: _selectDirectMode,
-                  icon: Icons.dns_outlined,
-                  title: 'Direct Connection',
-                  subtitle: 'Advanced: Enter server URL directly',
-                  isPrimary: false,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildModeButton({
-    required VoidCallback onPressed,
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required bool isPrimary,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: isPrimary
-                ? AppColors.primary.withValues(alpha: 0.1)
-                : AppColors.surfaceVariant.withValues(alpha: 0.3),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isPrimary
-                  ? AppColors.primary.withValues(alpha: 0.3)
-                  : AppColors.border.withValues(alpha: 0.15),
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: isPrimary
-                      ? AppColors.primary.withValues(alpha: 0.15)
-                      : AppColors.surfaceVariant.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  icon,
-                  color: isPrimary ? AppColors.primary : AppColors.textSecondary,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: isPrimary ? AppColors.primary : AppColors.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textSecondary.withValues(alpha: 0.7),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(
-                Icons.arrow_forward_ios_rounded,
-                size: 14,
-                color: isPrimary
-                    ? AppColors.primary.withValues(alpha: 0.6)
-                    : AppColors.textSecondary.withValues(alpha: 0.4),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   // ===== CLAIM CODE ENTRY =====
   Widget _buildClaimCodeCard(LoginState loginState, bool isCompact) {
     return Container(
@@ -498,42 +312,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Back button and title
-                Row(
-                  children: [
-                    IconButton(
-                      onPressed: loginState.isLoading ? null : _goBack,
-                      icon: const Icon(Icons.arrow_back_rounded),
-                      iconSize: 20,
-                      color: AppColors.textSecondary,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(
-                        minWidth: 32,
-                        minHeight: 32,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Enter Claim Code',
-                        style: TextStyle(
-                          fontSize: isCompact ? 18 : 20,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                  ],
+                // Title
+                Text(
+                  'Enter Claim Code',
+                  style: TextStyle(
+                    fontSize: isCompact ? 18 : 20,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
                 ),
                 const SizedBox(height: 4),
-                Padding(
-                  padding: const EdgeInsets.only(left: 40),
-                  child: Text(
-                    'Ask your server admin for a claim code',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textSecondary.withValues(alpha: 0.7),
-                    ),
+                Text(
+                  'Ask your server admin for a claim code',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textSecondary.withValues(alpha: 0.7),
                   ),
                 ),
                 SizedBox(height: isCompact ? 20 : 24),
@@ -547,17 +340,238 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   _buildProgressIndicator(loginState),
                 ],
 
-                if (loginState.error != null) ...[
+                if (loginState.error != null && loginState.mode != ConnectionMode.direct) ...[
                   const SizedBox(height: 14),
                   _buildErrorMessage(loginState.error!),
                 ],
 
+                const SizedBox(height: 16),
+                _buildAdvancedSettings(loginState),
+
                 SizedBox(height: isCompact ? 20 : 24),
                 _buildClaimCodeButton(loginState),
+
+                // Direct Connection expandable section
+                const SizedBox(height: 24),
+                _buildDirectConnectionSection(loginState, isCompact),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildDirectConnectionSection(LoginState loginState, bool isCompact) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Divider with "or"
+        Row(
+          children: [
+            Expanded(
+              child: Container(
+                height: 1,
+                color: AppColors.border.withValues(alpha: 0.2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'or',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textSecondary.withValues(alpha: 0.6),
+                ),
+              ),
+            ),
+            Expanded(
+              child: Container(
+                height: 1,
+                color: AppColors.border.withValues(alpha: 0.2),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+
+        // Direct Connection toggle
+        GestureDetector(
+          onTap: loginState.isLoading
+              ? null
+              : () {
+                  setState(() => _showDirectConnection = !_showDirectConnection);
+                  // Switch mode for proper error handling
+                  if (_showDirectConnection) {
+                    ref.read(loginControllerProvider.notifier).setMode(ConnectionMode.direct);
+                  } else {
+                    ref.read(loginControllerProvider.notifier).setMode(ConnectionMode.claimCode);
+                  }
+                },
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceVariant.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: AppColors.border.withValues(alpha: 0.15),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceVariant.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.dns_outlined,
+                    color: AppColors.textSecondary,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Direct Connection',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Advanced: Enter server URL directly',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textSecondary.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  _showDirectConnection
+                      ? Icons.keyboard_arrow_up_rounded
+                      : Icons.keyboard_arrow_down_rounded,
+                  size: 20,
+                  color: AppColors.textSecondary.withValues(alpha: 0.6),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        // Expandable direct connection form
+        if (_showDirectConnection) ...[
+          const SizedBox(height: 16),
+          _buildDirectConnectionForm(loginState, isCompact),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildDirectConnectionForm(LoginState loginState, bool isCompact) {
+    return Form(
+      key: _formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_isLoadingSavedUrl)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+            )
+          else ...[
+            _buildTextField(
+              controller: _serverUrlController,
+              focusNode: _serverUrlFocus,
+              label: 'Server URL',
+              hint: 'https://mydia.example.com',
+              icon: Icons.dns_outlined,
+              enabled: !loginState.isLoading,
+              keyboardType: TextInputType.url,
+              textInputAction: TextInputAction.next,
+              onFieldSubmitted: (_) => _usernameFocus.requestFocus(),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Please enter a server URL';
+                }
+                if (!value.startsWith('http://') &&
+                    !value.startsWith('https://')) {
+                  return 'URL must start with http:// or https://';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 14),
+            _buildTextField(
+              controller: _usernameController,
+              focusNode: _usernameFocus,
+              label: 'Username',
+              icon: Icons.person_outline_rounded,
+              enabled: !loginState.isLoading,
+              textInputAction: TextInputAction.next,
+              onFieldSubmitted: (_) => _passwordFocus.requestFocus(),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Please enter a username';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 14),
+            _buildTextField(
+              controller: _passwordController,
+              focusNode: _passwordFocus,
+              label: 'Password',
+              icon: Icons.lock_outline_rounded,
+              enabled: !loginState.isLoading,
+              obscureText: _obscurePassword,
+              textInputAction: TextInputAction.done,
+              onFieldSubmitted: (_) => _handleLogin(),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _obscurePassword
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                  color: AppColors.textSecondary,
+                  size: 18,
+                ),
+                onPressed: () {
+                  setState(() => _obscurePassword = !_obscurePassword);
+                },
+              ),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Please enter a password';
+                }
+                return null;
+              },
+            ),
+            if (loginState.error != null && loginState.mode == ConnectionMode.direct) ...[
+              const SizedBox(height: 14),
+              _buildErrorMessage(loginState.error!),
+            ],
+            SizedBox(height: isCompact ? 20 : 24),
+            _buildLoginButton(loginState),
+          ],
+        ],
       ),
     );
   }
@@ -686,163 +700,92 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     );
   }
 
-  // ===== DIRECT CONNECTION =====
-  Widget _buildDirectConnectionCard(LoginState loginState, bool isCompact) {
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 360),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-          child: Container(
-            padding: EdgeInsets.all(isCompact ? 20 : 24),
-            decoration: BoxDecoration(
-              color: AppColors.surface.withValues(alpha: 0.6),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: AppColors.border.withValues(alpha: 0.2),
+  Widget _buildAdvancedSettings(LoginState loginState) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Toggle button
+        GestureDetector(
+          onTap: loginState.isLoading
+              ? null
+              : () => setState(() => _showAdvanced = !_showAdvanced),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                _showAdvanced
+                    ? Icons.keyboard_arrow_down_rounded
+                    : Icons.keyboard_arrow_right_rounded,
+                size: 18,
+                color: AppColors.textSecondary.withValues(alpha: 0.6),
               ),
-            ),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Back button and title
-                  Row(
-                    children: [
-                      IconButton(
-                        onPressed: loginState.isLoading ? null : _goBack,
-                        icon: const Icon(Icons.arrow_back_rounded),
-                        iconSize: 20,
-                        color: AppColors.textSecondary,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(
-                          minWidth: 32,
-                          minHeight: 32,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Direct Connection',
-                          style: TextStyle(
-                            fontSize: isCompact ? 18 : 20,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Padding(
-                    padding: const EdgeInsets.only(left: 40),
-                    child: Text(
-                      'Enter your server details',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppColors.textSecondary.withValues(alpha: 0.7),
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: isCompact ? 20 : 24),
+              const SizedBox(width: 4),
+              Text(
+                'Advanced',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textSecondary.withValues(alpha: 0.6),
+                ),
+              ),
+            ],
+          ),
+        ),
 
-                  if (_isLoadingSavedUrl)
-                    const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(
-                        child: SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: AppColors.primary,
-                          ),
-                        ),
-                      ),
-                    )
-                  else ...[
-                    _buildTextField(
-                      controller: _serverUrlController,
-                      focusNode: _serverUrlFocus,
-                      label: 'Server URL',
-                      hint: 'https://mydia.example.com',
-                      icon: Icons.dns_outlined,
-                      enabled: !loginState.isLoading,
-                      keyboardType: TextInputType.url,
-                      textInputAction: TextInputAction.next,
-                      onFieldSubmitted: (_) => _usernameFocus.requestFocus(),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter a server URL';
-                        }
-                        if (!value.startsWith('http://') &&
-                            !value.startsWith('https://')) {
-                          return 'URL must start with http:// or https://';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 14),
-                    _buildTextField(
-                      controller: _usernameController,
-                      focusNode: _usernameFocus,
-                      label: 'Username',
-                      icon: Icons.person_outline_rounded,
-                      enabled: !loginState.isLoading,
-                      textInputAction: TextInputAction.next,
-                      onFieldSubmitted: (_) => _passwordFocus.requestFocus(),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter a username';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 14),
-                    _buildTextField(
-                      controller: _passwordController,
-                      focusNode: _passwordFocus,
-                      label: 'Password',
-                      icon: Icons.lock_outline_rounded,
-                      enabled: !loginState.isLoading,
-                      obscureText: _obscurePassword,
-                      textInputAction: TextInputAction.done,
-                      onFieldSubmitted: (_) => _handleLogin(),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscurePassword
-                              ? Icons.visibility_outlined
-                              : Icons.visibility_off_outlined,
-                          color: AppColors.textSecondary,
-                          size: 18,
-                        ),
-                        onPressed: () {
-                          setState(() => _obscurePassword = !_obscurePassword);
-                        },
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter a password';
-                        }
-                        return null;
-                      },
-                    ),
-                    if (loginState.error != null) ...[
-                      const SizedBox(height: 14),
-                      _buildErrorMessage(loginState.error!),
-                    ],
-                    SizedBox(height: isCompact ? 20 : 24),
-                    _buildLoginButton(loginState),
-                  ],
-                ],
+        // Expandable content
+        if (_showAdvanced) ...[
+          const SizedBox(height: 12),
+          Text(
+            'Self-hosted relay URL',
+            style: TextStyle(
+              fontSize: 11,
+              color: AppColors.textSecondary.withValues(alpha: 0.7),
+            ),
+          ),
+          const SizedBox(height: 6),
+          TextFormField(
+            controller: _relayUrlController,
+            enabled: !loginState.isLoading,
+            keyboardType: TextInputType.url,
+            style: const TextStyle(fontSize: 13, color: AppColors.textPrimary),
+            decoration: InputDecoration(
+              hintText: 'https://relay.mydia.dev',
+              hintStyle: TextStyle(
+                color: AppColors.textDisabled.withValues(alpha: 0.4),
+                fontSize: 13,
+              ),
+              filled: true,
+              fillColor: AppColors.surfaceVariant.withValues(alpha: 0.3),
+              isDense: true,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide.none,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(
+                  color: AppColors.border.withValues(alpha: 0.1),
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide:
+                    BorderSide(color: AppColors.primary.withValues(alpha: 0.5)),
               ),
             ),
           ),
-        ),
-      ),
+          const SizedBox(height: 6),
+          Text(
+            'Leave empty to use the default relay service',
+            style: TextStyle(
+              fontSize: 10,
+              color: AppColors.textSecondary.withValues(alpha: 0.5),
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      ],
     );
   }
 
@@ -983,12 +926,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   }
 
   Widget _buildFooter(LoginState loginState) {
-    final icon = loginState.mode == ConnectionMode.claimCode
-        ? Icons.lock_rounded
-        : Icons.shield_outlined;
-    final text = loginState.mode == ConnectionMode.claimCode
-        ? 'End-to-end encrypted'
-        : 'Secure connection';
+    final showEncrypted = !_showDirectConnection ||
+        loginState.mode == ConnectionMode.claimCode ||
+        loginState.mode == ConnectionMode.selection;
+    final icon = showEncrypted ? Icons.lock_rounded : Icons.shield_outlined;
+    final text = showEncrypted ? 'End-to-end encrypted' : 'Secure connection';
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,

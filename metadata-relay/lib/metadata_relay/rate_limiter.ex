@@ -20,10 +20,18 @@ defmodule MetadataRelay.RateLimiter do
   Check if a request from the given identifier should be allowed.
 
   Returns `{:ok, remaining}` if allowed, `{:error, :rate_limited}` if blocked.
+
+  ## Options
+
+  - `:limit` - Maximum number of requests allowed (default: #{@max_requests})
+  - `:window_ms` - Time window in milliseconds (default: #{@window_ms})
   """
-  def check_rate_limit(identifier) do
+  def check_rate_limit(identifier, opts \\ []) do
+    max_requests = Keyword.get(opts, :limit, @max_requests)
+    window_ms = Keyword.get(opts, :window_ms, @window_ms)
+
     now = System.monotonic_time(:millisecond)
-    window_start = now - @window_ms
+    window_start = now - window_ms
 
     # Clean up old entries for all identifiers
     :ets.select_delete(@table_name, [
@@ -36,11 +44,11 @@ defmodule MetadataRelay.RateLimiter do
         {{identifier, :"$1", :"$2"}, [{:>=, :"$2", window_start}], [true]}
       ])
 
-    if count < @max_requests do
+    if count < max_requests do
       # Insert with unique key: {identifier, request_id, timestamp}
       request_id = :erlang.unique_integer([:monotonic])
       :ets.insert(@table_name, {identifier, request_id, now})
-      {:ok, @max_requests - count - 1}
+      {:ok, max_requests - count - 1}
     else
       {:error, :rate_limited}
     end

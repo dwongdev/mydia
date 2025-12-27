@@ -5,6 +5,9 @@ enum StreamingStrategy {
   /// Direct playback without transcoding (requires compatible codecs)
   directPlay('DIRECT_PLAY'),
 
+  /// Remux to fMP4 container without re-encoding (same codecs, different container)
+  remux('REMUX'),
+
   /// HLS streaming with codec copy (no transcoding)
   hlsCopy('HLS_COPY'),
 
@@ -13,6 +16,16 @@ enum StreamingStrategy {
 
   const StreamingStrategy(this.value);
   final String value;
+
+  /// Parse a strategy from its string value
+  static StreamingStrategy? fromValue(String value) {
+    for (final strategy in StreamingStrategy.values) {
+      if (strategy.value == value) {
+        return strategy;
+      }
+    }
+    return null;
+  }
 
   @override
   String toString() => value;
@@ -77,6 +90,8 @@ class StreamingStrategyService {
     switch (strategy) {
       case StreamingStrategy.directPlay:
         return 'Direct Play';
+      case StreamingStrategy.remux:
+        return 'Remux (fMP4)';
       case StreamingStrategy.hlsCopy:
         return 'HLS (Stream Copy)';
       case StreamingStrategy.transcode:

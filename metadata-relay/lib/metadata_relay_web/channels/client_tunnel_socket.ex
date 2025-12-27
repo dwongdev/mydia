@@ -109,6 +109,15 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
 
           state = reset_timeout(state)
 
+          # Notify the instance about the incoming connection
+          # Instance needs to know: session_id and client public key (if available)
+          # For now, we send a connection notification - handshake will happen via messages
+          Phoenix.PubSub.broadcast(
+            MetadataRelay.PubSub,
+            "relay:instance:#{instance_id}",
+            {:relay_connection, state.session_id, <<>>}
+          )
+
           response =
             Jason.encode!(%{
               type: "connected",
@@ -154,6 +163,13 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
           )
 
           state = reset_timeout(state)
+
+          # Notify the instance about the incoming connection
+          Phoenix.PubSub.broadcast(
+            MetadataRelay.PubSub,
+            "relay:instance:#{info.instance_id}",
+            {:relay_connection, state.session_id, <<>>}
+          )
 
           response =
             Jason.encode!(%{

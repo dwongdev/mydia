@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: metadata-relay
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  # Note: secret.yaml must be created from secret.yaml.example
+  # and applied separately
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: mydia
+    includeSelectors: true

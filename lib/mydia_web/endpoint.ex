@@ -84,5 +84,12 @@ defmodule MydiaWeb.Endpoint do
   plug Plug.Head
   plug Plug.Session, @session_options
 
+  # CORS support for cross-origin API requests (standalone player, native apps)
+  # Must be before the router so OPTIONS preflight requests are handled before authentication
+  plug Corsica,
+    origins: "*",
+    allow_headers: ["content-type", "authorization", "x-request-id"],
+    allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+
   plug MydiaWeb.Router
 end

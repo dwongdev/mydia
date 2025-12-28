@@ -235,9 +235,11 @@ defmodule MydiaWeb.Router do
     post "/config/test-connection", ConfigController, :test_connection
   end
 
-  # GraphQL API - authenticated with JWT or API key
+  # GraphQL API - authentication handled at resolver level
+  # The :api_auth pipeline populates current_user if a valid JWT/API key is provided
+  # Individual resolvers check for authentication and return :unauthorized if needed
   scope "/api/graphql" do
-    pipe_through [:graphql, :api_auth, :require_authenticated]
+    pipe_through [:graphql, :api_auth]
 
     forward "/", Absinthe.Plug,
       schema: MydiaWeb.Schema,
@@ -248,7 +250,7 @@ defmodule MydiaWeb.Router do
   # GraphiQL interface for development
   if Application.compile_env(:mydia, :dev_routes) do
     scope "/api" do
-      pipe_through [:graphql, :api_auth, :require_authenticated]
+      pipe_through [:graphql, :api_auth]
 
       forward "/graphiql", Absinthe.Plug.GraphiQL,
         schema: MydiaWeb.Schema,

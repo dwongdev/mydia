@@ -109,6 +109,9 @@ defmodule Mydia.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
 
+      # CORS support for cross-origin API requests (standalone player)
+      {:corsica, "~> 2.1"},
+
       # GraphQL
       {:absinthe, "~> 1.7"},
       {:absinthe_plug, "~> 1.5"},

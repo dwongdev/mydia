@@ -61,14 +61,18 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
         <div class="card-body">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-4">
-              <% relay_ready = @ra_config && @ra_config.enabled && @relay_status && @relay_status.connected && @relay_status.registered %>
+              <% relay_ready =
+                @ra_config && @ra_config.enabled && @relay_status && @relay_status.connected &&
+                  @relay_status.registered %>
               <div class={[
                 "w-12 h-12 rounded-full flex items-center justify-center",
                 if(relay_ready, do: "bg-success/20", else: "bg-base-300")
               ]}>
                 <.icon
                   name={if relay_ready, do: "hero-signal", else: "hero-signal-slash"}
-                  class={if relay_ready, do: "w-6 h-6 text-success", else: "w-6 h-6 text-base-content/40"}
+                  class={
+                    if relay_ready, do: "w-6 h-6 text-success", else: "w-6 h-6 text-base-content/40"
+                  }
                 />
               </div>
               <div>
@@ -751,7 +755,10 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
   def do_generate_claim_code(socket) do
     user_id = socket.assigns.current_user.id
     relay_status = socket.assigns.relay_status
-    Logger.debug("Generating pairing code for user #{user_id}, relay_status=#{inspect(relay_status)}")
+
+    Logger.debug(
+      "Generating pairing code for user #{user_id}, relay_status=#{inspect(relay_status)}"
+    )
 
     case RemoteAccess.generate_claim_code(user_id) do
       {:ok, claim} ->

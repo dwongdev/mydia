@@ -3,6 +3,10 @@ defmodule Mydia.RemoteAccess.Relay do
   GenServer that maintains a WebSocket connection to the metadata-relay service
   for NAT traversal when direct connections fail.
 
+  This module uses a GenServer wrapper around WebSockex to provide reliable
+  process registration. The GenServer is registered with a stable name while
+  the WebSockex process runs internally without name registration.
+
   This module:
   - Registers the instance with the relay service on startup
   - Maintains a persistent connection with heartbeat/keep-alive
@@ -19,23 +23,13 @@ defmodule Mydia.RemoteAccess.Relay do
   - Incoming connection: `{"type": "connection", "session_id": "uuid", "client_public_key": "base64"}`
   """
 
-  use WebSockex
+  use GenServer
   require Logger
 
   alias Mydia.RemoteAccess
 
   # Heartbeat interval: 30 seconds
   @heartbeat_interval 30_000
-
-  # Explicit child_spec to ensure proper naming when started by DynamicSupervisor
-  def child_spec(opts) do
-    %{
-      id: __MODULE__,
-      start: {__MODULE__, :start_link, [opts]},
-      type: :worker,
-      restart: :permanent
-    }
-  end
 
   # Reconnect intervals with exponential backoff (in milliseconds)
   @initial_reconnect_delay 1_000
@@ -50,48 +44,26 @@ defmodule Mydia.RemoteAccess.Relay do
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
 
+    # Validate config before starting GenServer
     case get_relay_config() do
-      {:ok, config} ->
-        # Read relay URL from environment variable, not database
-        base_url = Mydia.Metadata.metadata_relay_url()
-        instance_id = config.instance_id
-        public_key = config.static_public_key
+      {:ok, _config} ->
+        GenServer.start_link(__MODULE__, opts, name: name)
 
-        # Convert ws:// or wss:// URL format if needed
-        url = normalize_relay_url(base_url)
-
-        Logger.info("Starting relay connection to #{url}")
-
-        # Get direct URLs from config
-        direct_urls = Map.get(config, :direct_urls, [])
-
-        state = %{
-          instance_id: instance_id,
-          public_key: public_key,
-          relay_url: url,
-          direct_urls: direct_urls,
-          connected: false,
-          registered: false,
-          heartbeat_timer: nil,
-          reconnect_delay: @initial_reconnect_delay
-        }
-
-        # Check if already registered to prevent duplicate starts during hot-reload
-        case Process.whereis(name) do
-          nil ->
-            WebSockex.start_link(url, __MODULE__, state, name: name)
-
-          existing_pid ->
-            Logger.debug("Relay already running at #{inspect(existing_pid)}, skipping start")
-            {:error, {:already_started, existing_pid}}
-        end
-
-      {:error, :not_configured} ->
-        {:error, :remote_access_not_configured}
-
-      {:error, :disabled} ->
-        {:error, :remote_access_disabled}
+      {:error, reason} ->
+        {:error, reason}
     end
+  end
+
+  @doc """
+  Returns a specification to start this module under a supervisor.
+  """
+  def child_spec(opts) do
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [opts]},
+      type: :worker,
+      restart: :permanent
+    }
   end
 
   @doc """
@@ -105,28 +77,14 @@ defmodule Mydia.RemoteAccess.Relay do
   - :relay_url - string
   - :public_key - base64-encoded public key
   """
-  def status(pid \\ __MODULE__) do
-    actual_pid = Process.whereis(pid)
-    Logger.debug("Relay.status: Process.whereis(#{inspect(pid)}) = #{inspect(actual_pid)}")
-
+  def status(server \\ __MODULE__) do
     try do
-      state = :sys.get_state(pid)
-
-      {:ok,
-       %{
-         connected: state.connected,
-         registered: state.registered,
-         instance_id: state.instance_id,
-         relay_url: state.relay_url,
-         public_key: Base.encode64(state.public_key)
-       }}
+      GenServer.call(server, :status)
     catch
       :exit, {:noproc, _} ->
-        Logger.debug("Relay.status: process not running")
         {:error, :not_running}
 
       :exit, {:timeout, _} ->
-        Logger.debug("Relay.status: timeout")
         {:error, :timeout}
     end
   end
@@ -135,8 +93,13 @@ defmodule Mydia.RemoteAccess.Relay do
   Sends a manual ping to verify the connection.
   Returns :ok or {:error, reason}.
   """
-  def ping(pid \\ __MODULE__) do
-    safe_cast(pid, :ping)
+  def ping(server \\ __MODULE__) do
+    try do
+      GenServer.cast(server, :ping)
+    catch
+      :exit, {:noproc, _} ->
+        {:error, :not_running}
+    end
   end
 
   @doc """
@@ -144,16 +107,26 @@ defmodule Mydia.RemoteAccess.Relay do
   This should be called when the instance's reachable URLs change.
   Returns :ok or {:error, reason}.
   """
-  def update_direct_urls(pid \\ __MODULE__, direct_urls) when is_list(direct_urls) do
-    safe_cast(pid, {:update_urls, direct_urls})
+  def update_direct_urls(server \\ __MODULE__, direct_urls) when is_list(direct_urls) do
+    try do
+      GenServer.cast(server, {:update_urls, direct_urls})
+    catch
+      :exit, {:noproc, _} ->
+        {:error, :not_running}
+    end
   end
 
   @doc """
   Manually triggers reconnection to the relay service.
   Returns :ok or {:error, reason}.
   """
-  def reconnect(pid \\ __MODULE__) do
-    safe_cast(pid, :reconnect)
+  def reconnect(server \\ __MODULE__) do
+    try do
+      GenServer.cast(server, :reconnect)
+    catch
+      :exit, {:noproc, _} ->
+        {:error, :not_running}
+    end
   end
 
   @doc """
@@ -166,8 +139,13 @@ defmodule Mydia.RemoteAccess.Relay do
 
   Returns :ok or {:error, reason}.
   """
-  def send_relay_message(pid \\ __MODULE__, session_id, payload) when is_binary(payload) do
-    safe_cast(pid, {:send_relay_message, session_id, payload})
+  def send_relay_message(server \\ __MODULE__, session_id, payload) when is_binary(payload) do
+    try do
+      GenServer.cast(server, {:send_relay_message, session_id, payload})
+    catch
+      :exit, {:noproc, _} ->
+        {:error, :not_running}
+    end
   end
 
   @doc """
@@ -177,180 +155,94 @@ defmodule Mydia.RemoteAccess.Relay do
   to redeem the claim code through the relay to discover and connect to this instance.
 
   ## Parameters
-  - pid: The relay process (default: __MODULE__)
   - user_id: The user ID associated with this claim
   - ttl_seconds: Time-to-live in seconds (default: 300)
 
   Returns {:ok, code, expires_at} if successful, {:error, reason} otherwise.
   """
-  def request_claim(pid \\ __MODULE__, user_id, ttl_seconds \\ 300) do
-    Logger.debug("Relay.request_claim: user_id=#{user_id}, ttl=#{ttl_seconds}s")
-
-    # Generate a unique request ID to match the response
-    request_id = :erlang.unique_integer([:positive]) |> Integer.to_string()
-
-    # Subscribe to get the response
-    topic = "relay:claim_response:#{request_id}"
-    Phoenix.PubSub.subscribe(Mydia.PubSub, topic)
-
-    case safe_cast(pid, {:request_claim, user_id, ttl_seconds, request_id}) do
-      :ok ->
-        Logger.debug("Relay.request_claim: request sent, waiting for response (5s timeout)")
-
-        receive do
-          {:claim_created, code, expires_at} ->
-            Logger.debug("Relay.request_claim: received code #{code} from relay")
-            Phoenix.PubSub.unsubscribe(Mydia.PubSub, topic)
-            {:ok, code, expires_at}
-        after
-          5_000 ->
-            Phoenix.PubSub.unsubscribe(Mydia.PubSub, topic)
-            Logger.warning("Relay.request_claim: timeout after 5s waiting for response")
-            {:error, :timeout}
-        end
-
-      {:error, :not_running} = error ->
-        Logger.warning("Relay.request_claim: WebSocket process not running")
-        Phoenix.PubSub.unsubscribe(Mydia.PubSub, topic)
-        error
-
-      {:error, reason} = error ->
-        Logger.warning("Relay.request_claim: failed to send request - #{inspect(reason)}")
-        Phoenix.PubSub.unsubscribe(Mydia.PubSub, topic)
-        error
-    end
+  def request_claim(user_id, ttl_seconds \\ 300) do
+    request_claim(__MODULE__, user_id, ttl_seconds)
   end
 
-  # Safely casts a message to the WebSockex process, returning an error if the process isn't running.
-  defp safe_cast(pid, message) do
+  @doc """
+  Requests a claim code from a specific relay server.
+
+  See `request_claim/2` for details.
+  """
+  def request_claim(server, user_id, ttl_seconds) do
+    Logger.debug("Relay.request_claim: user_id=#{user_id}, ttl=#{ttl_seconds}s")
+
     try do
-      WebSockex.cast(pid, message)
-    rescue
-      ArgumentError ->
-        {:error, :not_running}
+      GenServer.call(server, {:request_claim, user_id, ttl_seconds}, 10_000)
     catch
       :exit, {:noproc, _} ->
+        Logger.warning("Relay.request_claim: GenServer not running")
         {:error, :not_running}
 
       :exit, {:timeout, _} ->
+        Logger.warning("Relay.request_claim: GenServer call timeout")
         {:error, :timeout}
     end
   end
 
-  # WebSockex Callbacks
+  # GenServer Callbacks
 
-  @impl WebSockex
-  def handle_connect(_conn, state) do
-    Logger.info("Connected to relay service at #{state.relay_url}")
+  @impl GenServer
+  def init(_opts) do
+    # Config is already validated in start_link, but we need to fetch it again
+    {:ok, config} = get_relay_config()
 
-    # Schedule registration to be sent immediately
-    send(self(), :send_registration)
+    # Read relay URL from environment variable, not database
+    base_url = Mydia.Metadata.metadata_relay_url()
+    instance_id = config.instance_id
+    public_key = config.static_public_key
 
-    # Schedule first heartbeat
-    timer = Process.send_after(self(), :heartbeat, @heartbeat_interval)
+    # Convert ws:// or wss:// URL format if needed
+    url = normalize_relay_url(base_url)
 
-    # Reset reconnect delay on successful connection, mark as connected
-    state = %{state | connected: true, heartbeat_timer: timer, reconnect_delay: @initial_reconnect_delay}
+    # Get direct URLs from config
+    direct_urls = Map.get(config, :direct_urls, [])
+
+    state = %{
+      instance_id: instance_id,
+      public_key: public_key,
+      relay_url: url,
+      direct_urls: direct_urls,
+      connected: false,
+      registered: false,
+      ws_pid: nil,
+      heartbeat_timer: nil,
+      reconnect_delay: @initial_reconnect_delay,
+      pending_claims: %{}
+    }
+
+    Logger.info("Relay GenServer starting, will connect to #{url}")
+
+    # Start WebSocket connection asynchronously
+    send(self(), :connect)
 
     {:ok, state}
   end
 
-  @impl WebSockex
-  def handle_info(:send_registration, state) do
-    # Send registration message with direct URLs
-    registration_msg =
-      Jason.encode!(%{
-        type: "register",
-        instance_id: state.instance_id,
-        public_key: Base.encode64(state.public_key),
-        direct_urls: state.direct_urls
-      })
+  @impl GenServer
+  def handle_call(:status, _from, state) do
+    status = %{
+      connected: state.connected,
+      registered: state.registered,
+      instance_id: state.instance_id,
+      relay_url: state.relay_url,
+      public_key: Base.encode64(state.public_key)
+    }
 
-    Logger.info("Sending registration message to relay")
-
-    {:reply, {:text, registration_msg}, state}
+    {:reply, {:ok, status}, state}
   end
 
-  def handle_info(:heartbeat, state) do
-    # Send heartbeat ping
-    msg = Jason.encode!(%{type: "ping"})
+  @impl GenServer
+  def handle_call({:request_claim, user_id, ttl_seconds}, from, state) do
+    if state.registered and state.ws_pid do
+      # Generate a unique request ID to match the response
+      request_id = :erlang.unique_integer([:positive]) |> Integer.to_string()
 
-    # Schedule next heartbeat
-    if state.heartbeat_timer do
-      Process.cancel_timer(state.heartbeat_timer)
-    end
-
-    timer = Process.send_after(self(), :heartbeat, @heartbeat_interval)
-    state = %{state | heartbeat_timer: timer}
-
-    {:reply, {:text, msg}, state}
-  end
-
-  @impl WebSockex
-  def handle_frame({:text, msg}, state) do
-    case Jason.decode(msg) do
-      {:ok, data} ->
-        handle_relay_message(data, state)
-
-      {:error, reason} ->
-        Logger.warning("Failed to decode relay message: #{inspect(reason)}")
-        {:ok, state}
-    end
-  end
-
-  @impl WebSockex
-  def handle_frame({:ping, _}, state) do
-    {:reply, :pong, state}
-  end
-
-  @impl WebSockex
-  def handle_frame(_frame, state) do
-    {:ok, state}
-  end
-
-  @impl WebSockex
-  def handle_cast(:ping, state) do
-    msg = Jason.encode!(%{type: "ping"})
-    {:reply, {:text, msg}, state}
-  end
-
-  @impl WebSockex
-  def handle_cast({:update_urls, direct_urls}, state) do
-    # Update state with new URLs
-    state = %{state | direct_urls: direct_urls}
-
-    # Send URL update message to relay
-    msg =
-      Jason.encode!(%{
-        type: "update_urls",
-        direct_urls: direct_urls
-      })
-
-    {:reply, {:text, msg}, state}
-  end
-
-  @impl WebSockex
-  def handle_cast(:reconnect, state) do
-    Logger.info("Manual reconnection requested")
-    {:close, state}
-  end
-
-  @impl WebSockex
-  def handle_cast({:send_relay_message, session_id, payload}, state) do
-    # Encode and send message back through the relay
-    msg =
-      Jason.encode!(%{
-        type: "relay_message",
-        session_id: session_id,
-        payload: Base.encode64(payload)
-      })
-
-    {:reply, {:text, msg}, state}
-  end
-
-  @impl WebSockex
-  def handle_cast({:request_claim, user_id, ttl_seconds, request_id}, state) do
-    if state.registered do
       msg =
         Jason.encode!(%{
           type: "create_claim",
@@ -359,44 +251,179 @@ defmodule Mydia.RemoteAccess.Relay do
           request_id: request_id
         })
 
-      Logger.info("Sending create_claim request to relay (request_id: #{request_id})")
-      {:reply, {:text, msg}, state}
+      case WebSockex.send_frame(state.ws_pid, {:text, msg}) do
+        :ok ->
+          Logger.info("Sent create_claim request to relay (request_id: #{request_id})")
+          # Store the pending request to reply later
+          pending = Map.put(state.pending_claims, request_id, from)
+          {:noreply, %{state | pending_claims: pending}}
+
+        {:error, reason} ->
+          Logger.warning("Failed to send claim request: #{inspect(reason)}")
+          {:reply, {:error, :send_failed}, state}
+      end
     else
-      Logger.warning("Cannot request claim: not registered with relay")
-      {:ok, state}
+      Logger.warning(
+        "Cannot request claim: not registered with relay (connected: #{state.connected}, registered: #{state.registered})"
+      )
+
+      {:reply, {:error, :not_registered}, state}
     end
   end
 
-  @impl WebSockex
-  def handle_disconnect(%{reason: reason}, state) do
-    Logger.warning("Disconnected from relay service: #{inspect(reason)}")
-
-    # Cancel heartbeat timer
-    if state.heartbeat_timer do
-      Process.cancel_timer(state.heartbeat_timer)
+  @impl GenServer
+  def handle_cast(:ping, state) do
+    if state.ws_pid do
+      msg = Jason.encode!(%{type: "ping"})
+      WebSockex.send_frame(state.ws_pid, {:text, msg})
     end
 
-    # Calculate reconnect delay with exponential backoff
-    delay = min(state.reconnect_delay, @max_reconnect_delay)
-    next_delay = min(state.reconnect_delay * 2, @max_reconnect_delay)
-
-    Logger.info("Attempting to reconnect to relay in #{delay}ms...")
-
-    # Update state for next connection - mark as disconnected
-    state = %{state | connected: false, registered: false, heartbeat_timer: nil, reconnect_delay: next_delay}
-
-    {:reconnect, delay, state}
+    {:noreply, state}
   end
 
-  @impl WebSockex
+  @impl GenServer
+  def handle_cast({:update_urls, direct_urls}, state) do
+    state = %{state | direct_urls: direct_urls}
+
+    if state.ws_pid do
+      msg = Jason.encode!(%{type: "update_urls", direct_urls: direct_urls})
+      WebSockex.send_frame(state.ws_pid, {:text, msg})
+    end
+
+    {:noreply, state}
+  end
+
+  @impl GenServer
+  def handle_cast(:reconnect, state) do
+    Logger.info("Manual reconnection requested")
+    state = disconnect(state)
+    send(self(), :connect)
+    {:noreply, state}
+  end
+
+  @impl GenServer
+  def handle_cast({:send_relay_message, session_id, payload}, state) do
+    if state.ws_pid do
+      msg =
+        Jason.encode!(%{
+          type: "relay_message",
+          session_id: session_id,
+          payload: Base.encode64(payload)
+        })
+
+      WebSockex.send_frame(state.ws_pid, {:text, msg})
+    end
+
+    {:noreply, state}
+  end
+
+  @impl GenServer
+  def handle_info(:connect, state) do
+    Logger.info("Connecting to relay service at #{state.relay_url}")
+
+    case Mydia.RemoteAccess.Relay.WebSocket.start_link(
+           url: state.relay_url,
+           parent: self()
+         ) do
+      {:ok, ws_pid} ->
+        # Monitor the WebSocket process
+        Process.monitor(ws_pid)
+        Logger.info("WebSocket process started: #{inspect(ws_pid)}")
+        {:noreply, %{state | ws_pid: ws_pid, reconnect_delay: @initial_reconnect_delay}}
+
+      {:error, reason} ->
+        Logger.warning("Failed to start WebSocket: #{inspect(reason)}")
+        schedule_reconnect(state)
+        {:noreply, state}
+    end
+  end
+
+  @impl GenServer
+  def handle_info(:heartbeat, state) do
+    if state.ws_pid and state.connected do
+      msg = Jason.encode!(%{type: "ping"})
+      WebSockex.send_frame(state.ws_pid, {:text, msg})
+    end
+
+    # Schedule next heartbeat
+    timer = Process.send_after(self(), :heartbeat, @heartbeat_interval)
+    {:noreply, %{state | heartbeat_timer: timer}}
+  end
+
+  @impl GenServer
+  def handle_info(:send_registration, state) do
+    if state.ws_pid do
+      registration_msg =
+        Jason.encode!(%{
+          type: "register",
+          instance_id: state.instance_id,
+          public_key: Base.encode64(state.public_key),
+          direct_urls: state.direct_urls
+        })
+
+      Logger.info("Sending registration message to relay")
+      WebSockex.send_frame(state.ws_pid, {:text, registration_msg})
+    end
+
+    {:noreply, state}
+  end
+
+  @impl GenServer
+  def handle_info({:ws_connected, ws_pid}, state) when ws_pid == state.ws_pid do
+    Logger.info("Connected to relay service at #{state.relay_url}")
+
+    # Send registration
+    send(self(), :send_registration)
+
+    # Start heartbeat
+    timer = Process.send_after(self(), :heartbeat, @heartbeat_interval)
+
+    {:noreply, %{state | connected: true, heartbeat_timer: timer}}
+  end
+
+  @impl GenServer
+  def handle_info({:ws_frame, ws_pid, {:text, msg}}, state) when ws_pid == state.ws_pid do
+    case Jason.decode(msg) do
+      {:ok, data} ->
+        state = handle_relay_message(data, state)
+        {:noreply, state}
+
+      {:error, reason} ->
+        Logger.warning("Failed to decode relay message: #{inspect(reason)}")
+        {:noreply, state}
+    end
+  end
+
+  @impl GenServer
+  def handle_info({:ws_disconnected, ws_pid, reason}, state) when ws_pid == state.ws_pid do
+    Logger.warning("WebSocket disconnected: #{inspect(reason)}")
+    state = handle_disconnect(state)
+    {:noreply, state}
+  end
+
+  @impl GenServer
+  def handle_info({:DOWN, _ref, :process, ws_pid, reason}, state) when ws_pid == state.ws_pid do
+    Logger.warning("WebSocket process died: #{inspect(reason)}")
+    state = handle_disconnect(state)
+    {:noreply, state}
+  end
+
+  @impl GenServer
+  def handle_info({:DOWN, _ref, :process, _pid, _reason}, state) do
+    # Ignore DOWN messages for other processes
+    {:noreply, state}
+  end
+
+  @impl GenServer
+  def handle_info(msg, state) do
+    Logger.debug("Relay received unexpected message: #{inspect(msg)}")
+    {:noreply, state}
+  end
+
+  @impl GenServer
   def terminate(reason, state) do
-    Logger.info("Relay connection terminated: #{inspect(reason)}")
-
-    # Cancel heartbeat timer
-    if state.heartbeat_timer do
-      Process.cancel_timer(state.heartbeat_timer)
-    end
-
+    Logger.info("Relay GenServer terminating: #{inspect(reason)}")
+    disconnect(state)
     :ok
   end
 
@@ -404,12 +431,12 @@ defmodule Mydia.RemoteAccess.Relay do
 
   defp handle_relay_message(%{"type" => "registered"}, state) do
     Logger.info("Successfully registered with relay service")
-    {:ok, %{state | registered: true}}
+    %{state | registered: true}
   end
 
   defp handle_relay_message(%{"type" => "pong"}, state) do
     # Heartbeat acknowledged
-    {:ok, state}
+    state
   end
 
   defp handle_relay_message(
@@ -438,7 +465,6 @@ defmodule Mydia.RemoteAccess.Relay do
       end
 
     # Broadcast relay connection event to the tunnel supervisor
-    # The tunnel will handle the Noise handshake and forward messages to DeviceChannel
     Logger.info("Accepting relayed connection from client (session: #{session_id})")
 
     Phoenix.PubSub.broadcast(
@@ -447,7 +473,7 @@ defmodule Mydia.RemoteAccess.Relay do
       {:relay_connection, session_id, client_public_key, self()}
     )
 
-    {:ok, state}
+    state
   end
 
   defp handle_relay_message(
@@ -459,24 +485,22 @@ defmodule Mydia.RemoteAccess.Relay do
       {:ok, payload} ->
         Logger.debug("Forwarding relay message for session #{session_id}")
 
-        # Broadcast to the specific session's tunnel
         Phoenix.PubSub.broadcast(
           Mydia.PubSub,
           "relay:session:#{session_id}",
           {:relay_message, payload}
         )
 
-        {:ok, state}
-
       :error ->
         Logger.warning("Invalid payload in relay message")
-        {:ok, state}
     end
+
+    state
   end
 
   defp handle_relay_message(%{"type" => "error", "message" => error_msg}, state) do
     Logger.error("Relay service error: #{error_msg}")
-    {:ok, state}
+    state
   end
 
   defp handle_relay_message(
@@ -485,38 +509,94 @@ defmodule Mydia.RemoteAccess.Relay do
        ) do
     Logger.info("Claim created by relay: #{code}")
 
-    # Use request_id if present, otherwise fall back to code-based topic
-    topic =
-      case msg["request_id"] do
-        nil -> "relay:claim:#{code}"
-        request_id -> "relay:claim_response:#{request_id}"
-      end
+    # Find and reply to the pending request
+    case msg["request_id"] do
+      nil ->
+        # Legacy: broadcast to topic
+        Phoenix.PubSub.broadcast(
+          Mydia.PubSub,
+          "relay:claim:#{code}",
+          {:claim_created, code, expires_at}
+        )
 
-    # Broadcast to anyone waiting for this claim response
-    Phoenix.PubSub.broadcast(
-      Mydia.PubSub,
-      topic,
-      {:claim_created, code, expires_at}
-    )
+        state
 
-    {:ok, state}
+      request_id ->
+        case Map.pop(state.pending_claims, request_id) do
+          {nil, _pending} ->
+            Logger.warning("Received claim_created for unknown request_id: #{request_id}")
+            state
+
+          {from, pending} ->
+            GenServer.reply(from, {:ok, code, expires_at})
+            %{state | pending_claims: pending}
+        end
+    end
   end
 
   defp handle_relay_message(msg, state) do
     Logger.debug("Unhandled relay message: #{inspect(msg)}")
-    {:ok, state}
+    state
+  end
+
+  defp handle_disconnect(state) do
+    # Cancel heartbeat timer
+    if state.heartbeat_timer do
+      Process.cancel_timer(state.heartbeat_timer)
+    end
+
+    # Reply to any pending claims with error
+    Enum.each(state.pending_claims, fn {_request_id, from} ->
+      GenServer.reply(from, {:error, :disconnected})
+    end)
+
+    # Calculate reconnect delay with exponential backoff
+    schedule_reconnect(state)
+
+    %{
+      state
+      | connected: false,
+        registered: false,
+        ws_pid: nil,
+        heartbeat_timer: nil,
+        pending_claims: %{}
+    }
+  end
+
+  defp disconnect(state) do
+    # Stop WebSocket if running
+    if state.ws_pid and Process.alive?(state.ws_pid) do
+      Process.exit(state.ws_pid, :shutdown)
+    end
+
+    # Cancel heartbeat timer
+    if state.heartbeat_timer do
+      Process.cancel_timer(state.heartbeat_timer)
+    end
+
+    %{state | connected: false, registered: false, ws_pid: nil, heartbeat_timer: nil}
+  end
+
+  defp schedule_reconnect(state) do
+    delay = min(state.reconnect_delay, @max_reconnect_delay)
+    next_delay = min(state.reconnect_delay * 2, @max_reconnect_delay)
+
+    Logger.info("Scheduling reconnect to relay in #{delay}ms...")
+    Process.send_after(self(), :connect, delay)
+
+    %{state | reconnect_delay: next_delay}
   end
 
   defp get_relay_config do
     case RemoteAccess.get_config() do
       nil ->
-        {:error, :not_configured}
+        {:error, :remote_access_not_configured}
 
       config ->
         if config.enabled do
           {:ok, config}
         else
-          {:error, :disabled}
+          {:error, :remote_access_disabled}
         end
     end
   end

@@ -136,14 +136,19 @@ defmodule Mydia.Application do
 
         config ->
           if config.enabled do
-            # Start relay under the main supervisor
-            case DynamicSupervisor.start_child(
-                   {:via, Registry, {Mydia.DynamicSupervisorRegistry, :relay}},
-                   Mydia.RemoteAccess.Relay
-                 ) do
-              {:ok, _pid} -> :ok
-              {:error, {:already_started, _pid}} -> :ok
-              {:error, reason} -> {:error, reason}
+            # Check if relay is already running (prevents duplicate starts)
+            if Process.whereis(Mydia.RemoteAccess.Relay) do
+              :ok
+            else
+              # Start relay under the main supervisor
+              case DynamicSupervisor.start_child(
+                     {:via, Registry, {Mydia.DynamicSupervisorRegistry, :relay}},
+                     Mydia.RemoteAccess.Relay
+                   ) do
+                {:ok, _pid} -> :ok
+                {:error, {:already_started, _pid}} -> :ok
+                {:error, reason} -> {:error, reason}
+              end
             end
           else
             :ok

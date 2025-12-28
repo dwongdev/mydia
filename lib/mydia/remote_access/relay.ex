@@ -27,6 +27,16 @@ defmodule Mydia.RemoteAccess.Relay do
   # Heartbeat interval: 30 seconds
   @heartbeat_interval 30_000
 
+  # Explicit child_spec to ensure proper naming when started by DynamicSupervisor
+  def child_spec(opts) do
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [opts]},
+      type: :worker,
+      restart: :permanent
+    }
+  end
+
   # Reconnect intervals with exponential backoff (in milliseconds)
   @initial_reconnect_delay 1_000
   @max_reconnect_delay 60_000
@@ -50,7 +60,7 @@ defmodule Mydia.RemoteAccess.Relay do
         # Convert ws:// or wss:// URL format if needed
         url = normalize_relay_url(base_url)
 
-        Logger.info("Starting relay connection to #{url} (from base: #{base_url})")
+        Logger.info("Starting relay connection to #{url}")
 
         # Get direct URLs from config
         direct_urls = Map.get(config, :direct_urls, [])
@@ -66,7 +76,15 @@ defmodule Mydia.RemoteAccess.Relay do
           reconnect_delay: @initial_reconnect_delay
         }
 
-        WebSockex.start_link(url, __MODULE__, state, name: name)
+        # Check if already registered to prevent duplicate starts during hot-reload
+        case Process.whereis(name) do
+          nil ->
+            WebSockex.start_link(url, __MODULE__, state, name: name)
+
+          existing_pid ->
+            Logger.debug("Relay already running at #{inspect(existing_pid)}, skipping start")
+            {:error, {:already_started, existing_pid}}
+        end
 
       {:error, :not_configured} ->
         {:error, :remote_access_not_configured}

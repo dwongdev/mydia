@@ -577,20 +577,25 @@ defmodule Mydia.RemoteAccess do
   Returns :ok if started successfully, {:error, reason} otherwise.
   """
   def start_relay do
-    case DynamicSupervisor.start_child(
-           {:via, Registry, {Mydia.DynamicSupervisorRegistry, :relay}},
-           Mydia.RemoteAccess.Relay
-         ) do
-      {:ok, _pid} ->
-        Logger.info("Relay service started")
-        :ok
+    # Check if already running to avoid duplicate processes
+    if Process.whereis(Mydia.RemoteAccess.Relay) do
+      :ok
+    else
+      case DynamicSupervisor.start_child(
+             {:via, Registry, {Mydia.DynamicSupervisorRegistry, :relay}},
+             Mydia.RemoteAccess.Relay
+           ) do
+        {:ok, _pid} ->
+          Logger.info("Relay service started")
+          :ok
 
-      {:error, {:already_started, _pid}} ->
-        :ok
+        {:error, {:already_started, _pid}} ->
+          :ok
 
-      {:error, reason} ->
-        Logger.error("Failed to start relay service: #{inspect(reason)}")
-        {:error, reason}
+        {:error, reason} ->
+          Logger.error("Failed to start relay service: #{inspect(reason)}")
+          {:error, reason}
+      end
     end
   end
 

@@ -200,8 +200,18 @@ defmodule Mydia.RemoteAccess.Relay do
     # Convert ws:// or wss:// URL format if needed
     url = normalize_relay_url(base_url)
 
-    # Get direct URLs from config
-    direct_urls = Map.get(config, :direct_urls, [])
+    # Get direct URLs from config, or auto-detect if empty
+    direct_urls =
+      case Map.get(config, :direct_urls, []) do
+        [] ->
+          Logger.info("No direct URLs configured, auto-detecting local IPs...")
+          Mydia.RemoteAccess.DirectUrls.detect_all()
+
+        urls ->
+          urls
+      end
+
+    Logger.info("Direct URLs for relay registration: #{inspect(direct_urls)}")
 
     state = %{
       instance_id: instance_id,
@@ -340,7 +350,7 @@ defmodule Mydia.RemoteAccess.Relay do
 
   @impl GenServer
   def handle_info(:heartbeat, state) do
-    if state.ws_pid and state.connected do
+    if state.ws_pid && state.connected do
       msg = Jason.encode!(%{type: "ping"})
       WebSockex.send_frame(state.ws_pid, {:text, msg})
     end
@@ -565,7 +575,7 @@ defmodule Mydia.RemoteAccess.Relay do
 
   defp disconnect(state) do
     # Stop WebSocket if running
-    if state.ws_pid and Process.alive?(state.ws_pid) do
+    if state.ws_pid && Process.alive?(state.ws_pid) do
       Process.exit(state.ws_pid, :shutdown)
     end
 

@@ -83,6 +83,7 @@ ${YELLOW}Player (Flutter in Docker):${NC}
   player shell         Open shell in player container
   player logs          Follow player build output
   player restart       Restart player container
+  player e2e           Run player E2E integration tests
 
 ${YELLOW}Player Development Modes:${NC}
   Default (watch): Rebuilds on file change, access at http://localhost:4000/player
@@ -258,9 +259,28 @@ case "$COMMAND" in
                 docker compose restart player
                 echo -e "${GREEN}Player dev server restarted. Follow logs with: ./dev player logs${NC}"
                 ;;
+            e2e)
+                echo -e "${GREEN}Running player E2E integration tests...${NC}"
+                echo ""
+                echo "This will:"
+                echo "  1. Build and start metadata-relay"
+                echo "  2. Build and start Mydia (E2E mode with test admin user)"
+                echo "  3. Start Selenium Chrome for browser automation"
+                echo "  4. Build Flutter web app and run integration tests"
+                echo ""
+                echo "Test flow: claim code → Noise handshake → device registration"
+                echo ""
+                # Build and run E2E tests
+                docker compose -f compose.player-e2e.yml build
+                docker compose -f compose.player-e2e.yml up --abort-on-container-exit --exit-code-from test
+                exit_code=$?
+                # Clean up
+                docker compose -f compose.player-e2e.yml down -v
+                exit $exit_code
+                ;;
             *)
                 echo -e "${RED}Error: Unknown player command: $1${NC}"
-                echo "Usage: ./dev player <logs|build|hot|setup|shell|restart>"
+                echo "Usage: ./dev player <logs|build|hot|setup|shell|restart|e2e>"
                 exit 1
                 ;;
         esac

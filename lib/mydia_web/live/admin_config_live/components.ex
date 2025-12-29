@@ -3040,43 +3040,23 @@ defmodule MydiaWeb.AdminConfigLive.Components do
 
   def media_servers_tab(assigns) do
     ~H"""
-    <div class="p-4 sm:p-6 space-y-6">
-      <%!-- Header --%>
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 class="text-xl font-bold flex items-center gap-3">
-            <div class="bg-primary/10 p-2 rounded-lg">
-              <.icon name="hero-server-stack" class="w-6 h-6 text-primary" />
-            </div>
-            Media Servers
-            <span class="badge badge-lg badge-ghost font-normal">{length(@media_servers)}</span>
-          </h2>
-          <p class="text-sm text-base-content/60 mt-1 ml-14">
-            Connect to Plex or Jellyfin for automatic library updates
-          </p>
-        </div>
-        <button class="btn btn-primary gap-2" phx-click="new_media_server">
-          <.icon name="hero-plus" class="w-5 h-5" /> Add Server
+    <div class="p-4 sm:p-6 space-y-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <h2 class="text-lg font-semibold flex items-center gap-2">
+          <.icon name="hero-server-stack" class="w-5 h-5 opacity-60" /> Media Servers
+          <span class="badge badge-ghost">{length(@media_servers)}</span>
+        </h2>
+        <button class="btn btn-sm btn-primary" phx-click="new_media_server">
+          <.icon name="hero-plus" class="w-4 h-4" /> New
         </button>
       </div>
 
       <%= if @media_servers == [] do %>
-        <%!-- Empty State --%>
-        <div class="card bg-base-200 border border-base-300">
-          <div class="card-body items-center text-center py-12">
-            <div class="bg-base-300 p-4 rounded-full mb-4">
-              <.icon name="hero-server-stack" class="w-12 h-12 text-base-content/40" />
-            </div>
-            <h3 class="card-title text-base-content/80">No Media Servers Configured</h3>
-            <p class="text-base-content/60 max-w-md">
-              Connect your Plex or Jellyfin server to automatically update libraries when new content is imported.
-            </p>
-            <div class="card-actions mt-4">
-              <button class="btn btn-primary gap-2" phx-click="new_media_server">
-                <.icon name="hero-plus" class="w-5 h-5" /> Add Your First Server
-              </button>
-            </div>
-          </div>
+        <div class="alert alert-info">
+          <.icon name="hero-information-circle" class="w-5 h-5" />
+          <span>
+            No media servers configured yet. Add Plex or Jellyfin to enable automatic library updates.
+          </span>
         </div>
       <% else %>
         <%!-- Server Cards Grid --%>

@@ -23,6 +23,33 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
     {:ok, load_relay_status(socket)}
   end
 
+  def update(%{port_check_result: status} = _assigns, socket) do
+    # Handle port check result from async task
+    {:ok, assign(socket, port_status: status, checking_port: false)}
+  end
+
+  def update(%{start_port_check: true} = _assigns, socket) do
+    # Start async port check
+    socket = assign(socket, checking_port: true)
+    public_addr = get_public_address()
+
+    if public_addr.ip do
+      component_id = socket.assigns.id
+      # Capture the parent LiveView pid before starting the task
+      parent_pid = self()
+
+      Task.start(fn ->
+        result = check_port_accessible(public_addr.ip, public_addr.port)
+        send(parent_pid, {:port_check_complete, component_id, result})
+      end)
+    else
+      # No public IP - mark as unknown immediately
+      send(self(), {:port_check_complete, socket.assigns.id, :unknown})
+    end
+
+    {:ok, socket}
+  end
+
   def update(assigns, socket) do
     socket =
       socket
@@ -38,6 +65,8 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
       |> assign_new(:show_add_url_modal, fn -> false end)
       |> assign_new(:new_url, fn -> "" end)
       |> assign_new(:show_advanced, fn -> false end)
+      |> assign_new(:port_status, fn -> :unknown end)
+      |> assign_new(:checking_port, fn -> false end)
       # Read relay URL from environment, not database
       |> assign(:relay_url, Mydia.Metadata.metadata_relay_url())
       |> load_config()
@@ -47,6 +76,8 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
     # Subscribe to claim expiry notifications on first mount
     if connected?(socket) and is_nil(assigns[:subscribed]) do
       Phoenix.PubSub.subscribe(Mydia.PubSub, "remote_access:claims")
+      # Trigger initial port check if enabled
+      send(self(), {:check_port_status, socket.assigns.id})
     end
 
     {:ok, assign(socket, :subscribed, true)}
@@ -54,260 +85,413 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
 
   @impl true
   def render(assigns) do
+    relay_ready =
+      assigns.ra_config && assigns.ra_config.enabled && assigns.relay_status &&
+        assigns.relay_status.connected && assigns.relay_status.registered
+
+    # Get local and public address info
+    local_addr = get_local_address()
+    public_addr = get_public_address()
+
+    assigns =
+      assigns
+      |> assign(:relay_ready, relay_ready)
+      |> assign(:local_addr, local_addr)
+      |> assign(:public_addr, public_addr)
+
     ~H"""
-    <div class="space-y-6">
-      <%!-- Main Toggle with Status --%>
-      <div class="card bg-base-200">
-        <div class="card-body">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-4">
-              <% relay_ready =
-                @ra_config && @ra_config.enabled && @relay_status && @relay_status.connected &&
-                  @relay_status.registered %>
-              <div class={[
-                "w-12 h-12 rounded-full flex items-center justify-center",
-                if(relay_ready, do: "bg-success/20", else: "bg-base-300")
-              ]}>
-                <.icon
-                  name={if relay_ready, do: "hero-signal", else: "hero-signal-slash"}
-                  class={
-                    if relay_ready, do: "w-6 h-6 text-success", else: "w-6 h-6 text-base-content/40"
-                  }
-                />
+    <div class="p-4 sm:p-6 space-y-6">
+      <%!-- Header with toggle --%>
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <h2 class="text-lg font-semibold flex items-center gap-2">
+          <.icon name="hero-signal" class="w-5 h-5 opacity-60" /> Remote Access
+          <%= if @ra_config && @ra_config.enabled do %>
+            <span class={[
+              "badge badge-sm",
+              if(@relay_ready, do: "badge-success", else: "badge-warning")
+            ]}>
+              <%= cond do %>
+                <% @relay_ready -> %>
+                  Connected
+                <% @relay_status && @relay_status.connected -> %>
+                  Registering...
+                <% @relay_status -> %>
+                  Connecting...
+                <% true -> %>
+                  Offline
+              <% end %>
+            </span>
+          <% else %>
+            <span class="badge badge-ghost badge-sm">Disabled</span>
+          <% end %>
+        </h2>
+        <label class="label cursor-pointer gap-3">
+          <span class="label-text text-sm">
+            {if @ra_config && @ra_config.enabled, do: "Enabled", else: "Disabled"}
+          </span>
+          <input
+            type="checkbox"
+            id="remote-access-toggle"
+            class="toggle toggle-primary"
+            checked={@ra_config && @ra_config.enabled}
+            phx-click="toggle_remote_access"
+            phx-target={@myself}
+            phx-value-enabled={to_string(!(@ra_config && @ra_config.enabled))}
+          />
+        </label>
+      </div>
+
+      <%!-- Prominent Connection Status Display --%>
+      <%= if @ra_config && @ra_config.enabled do %>
+        <div class="bg-base-200 rounded-box p-4 sm:p-5">
+          <div class="flex flex-col lg:flex-row lg:items-center gap-4">
+            <%!-- Connection Info --%>
+            <div class="flex-1 flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
+              <%!-- Local Address --%>
+              <div class="flex items-center gap-2">
+                <div class="w-8 h-8 rounded-full bg-base-300 flex items-center justify-center shrink-0">
+                  <.icon name="hero-home" class="w-4 h-4 opacity-60" />
+                </div>
+                <div>
+                  <div class="text-xs text-base-content/50 uppercase tracking-wide">Local</div>
+                  <div class="font-mono text-sm font-medium">
+                    <%= if @local_addr.ip do %>
+                      {@local_addr.ip}:{@local_addr.port}
+                    <% else %>
+                      <span class="text-base-content/50">Unknown</span>
+                    <% end %>
+                  </div>
+                </div>
               </div>
-              <div>
-                <h3 class="font-semibold text-lg">Remote Access</h3>
-                <p class="text-sm text-base-content/70">
-                  <%= cond do %>
-                    <% !@ra_config || !@ra_config.enabled -> %>
-                      Disabled - mobile apps cannot connect
-                    <% @relay_status && @relay_status.connected && @relay_status.registered -> %>
-                      <span class="text-success">Connected and ready for devices</span>
-                    <% @relay_status && @relay_status.connected -> %>
-                      <span class="text-warning">Connected but not registered</span>
-                    <% @relay_status -> %>
-                      <span class="text-warning">Connecting to relay...</span>
-                    <% true -> %>
-                      <span class="text-error">Relay process not running</span>
-                  <% end %>
-                </p>
+
+              <%!-- Arrow --%>
+              <div class="hidden sm:flex items-center text-base-content/30">
+                <.icon name="hero-arrows-right-left" class="w-5 h-5" />
+              </div>
+
+              <%!-- Public Address --%>
+              <div class="flex items-center gap-2">
+                <div class="w-8 h-8 rounded-full bg-base-300 flex items-center justify-center shrink-0">
+                  <.icon name="hero-globe-alt" class="w-4 h-4 opacity-60" />
+                </div>
+                <div>
+                  <div class="text-xs text-base-content/50 uppercase tracking-wide">Public</div>
+                  <div class="font-mono text-sm font-medium">
+                    <%= if @public_addr.ip do %>
+                      {@public_addr.ip}:{@public_addr.port}
+                    <% else %>
+                      <span class="text-base-content/50">Not detected</span>
+                    <% end %>
+                  </div>
+                </div>
               </div>
             </div>
-            <div class="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="remote-access-toggle"
-                class="toggle toggle-primary toggle-lg"
-                checked={@ra_config && @ra_config.enabled}
-                name="remote_access_enabled"
-                phx-click="toggle_remote_access"
-                phx-target={@myself}
-                phx-value-enabled={to_string(!(@ra_config && @ra_config.enabled))}
-              />
+
+            <%!-- Status Badge --%>
+            <div class="shrink-0 flex items-center gap-2">
+              <%= cond do %>
+                <% @checking_port -> %>
+                  <div class="flex items-center gap-2 px-4 py-2 rounded-full bg-base-300 border border-base-content/20">
+                    <span class="loading loading-spinner loading-xs"></span>
+                    <span class="font-semibold text-base-content/70 text-sm">Checking...</span>
+                  </div>
+                <% @port_status == :open -> %>
+                  <div class="flex items-center gap-2 px-4 py-2 rounded-full bg-success/10 border border-success/30">
+                    <span class="relative flex h-3 w-3">
+                      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75">
+                      </span>
+                      <span class="relative inline-flex rounded-full h-3 w-3 bg-success"></span>
+                    </span>
+                    <span class="font-semibold text-success text-sm">Fully Accessible</span>
+                  </div>
+                <% @port_status == :closed -> %>
+                  <div class="flex items-center gap-2 px-4 py-2 rounded-full bg-warning/10 border border-warning/30">
+                    <span class="w-3 h-3 rounded-full bg-warning"></span>
+                    <span class="font-semibold text-warning text-sm">Relay Only</span>
+                  </div>
+                <% not @relay_ready -> %>
+                  <div class={[
+                    "flex items-center gap-2 px-4 py-2 rounded-full border",
+                    if(@relay_status && @relay_status.connected,
+                      do: "bg-warning/10 border-warning/30",
+                      else: "bg-error/10 border-error/30"
+                    )
+                  ]}>
+                    <span class={[
+                      "w-3 h-3 rounded-full",
+                      if(@relay_status && @relay_status.connected, do: "bg-warning", else: "bg-error")
+                    ]}>
+                    </span>
+                    <span class={[
+                      "font-semibold text-sm",
+                      if(@relay_status && @relay_status.connected,
+                        do: "text-warning",
+                        else: "text-error"
+                      )
+                    ]}>
+                      <%= cond do %>
+                        <% @relay_status && @relay_status.connected -> %>
+                          Registering...
+                        <% @relay_status -> %>
+                          Connecting...
+                        <% true -> %>
+                          Relay Offline
+                      <% end %>
+                    </span>
+                  </div>
+                <% true -> %>
+                  <%!-- Unknown status - show neutral with check button --%>
+                  <div class="flex items-center gap-2 px-4 py-2 rounded-full bg-base-300 border border-base-content/20">
+                    <span class="w-3 h-3 rounded-full bg-base-content/30"></span>
+                    <span class="font-semibold text-base-content/70 text-sm">Unknown</span>
+                  </div>
+              <% end %>
+              <%!-- Refresh button --%>
+              <%= if @relay_ready and not @checking_port do %>
+                <button
+                  class="btn btn-ghost btn-sm btn-circle"
+                  phx-click="check_port"
+                  phx-target={@myself}
+                  title="Check accessibility"
+                >
+                  <.icon name="hero-arrow-path" class="w-4 h-4" />
+                </button>
+              <% end %>
             </div>
           </div>
 
-          <%!-- Reconnect hint when enabled but disconnected --%>
-          <%= if @ra_config && @ra_config.enabled && (!@relay_status || !@relay_status.connected) do %>
-            <div class="mt-4 p-3 bg-warning/10 rounded-lg">
-              <div class="flex items-center justify-between">
-                <span class="text-sm text-warning font-medium">Connection issue detected</span>
-                <button
-                  class="btn btn-sm btn-warning btn-outline"
-                  phx-click="reconnect_relay"
-                  phx-target={@myself}
-                >
-                  <.icon name="hero-arrow-path" class="w-4 h-4" /> Retry
-                </button>
-              </div>
-              <p class="text-xs text-base-content/60 mt-2">
-                Unable to connect to relay at
-                <code class="font-mono bg-base-300 px-1 rounded">{@relay_url}</code>
-              </p>
+          <%!-- Relay-only warning when port is not accessible --%>
+          <%= if @port_status == :closed do %>
+            <div class="mt-3 flex items-center gap-2 text-sm text-warning">
+              <.icon name="hero-exclamation-triangle" class="w-4 h-4 shrink-0" />
+              <span>
+                Media playback requires direct connection. Set up port forwarding to enable.
+              </span>
             </div>
           <% end %>
         </div>
-      </div>
+      <% end %>
+
+      <%!-- Connection warning when enabled but not connected --%>
+      <%= if @ra_config && @ra_config.enabled && (!@relay_status || !@relay_status.connected) do %>
+        <div class="alert alert-warning">
+          <.icon name="hero-exclamation-triangle" class="w-5 h-5" />
+          <div class="flex-1">
+            <span>Unable to connect to relay at </span>
+            <code class="font-mono text-xs">{@relay_url}</code>
+          </div>
+          <button
+            class="btn btn-sm btn-warning btn-outline"
+            phx-click="reconnect_relay"
+            phx-target={@myself}
+          >
+            <.icon name="hero-arrow-path" class="w-4 h-4" /> Retry
+          </button>
+        </div>
+      <% end %>
 
       <%= if @ra_config && @ra_config.enabled do %>
-        <%!-- Pair New Device Section - only shown when relay is connected and registered --%>
-        <%= if @relay_status && @relay_status.connected && @relay_status.registered do %>
-          <div class="card bg-base-200">
-            <div class="card-body">
-              <h3 class="font-semibold text-lg mb-2">Pair New Device</h3>
-
-              <%= if @claim_code do %>
-                <%!-- Active Pairing Code --%>
-                <div class="flex flex-col items-center py-6">
-                  <p class="text-sm text-base-content/70 mb-4">
-                    Enter this code in your mobile app
-                  </p>
-                  <div class="flex items-center gap-3 mb-3">
-                    <code class="text-4xl font-bold tracking-[0.3em] bg-base-300 px-6 py-3 rounded-lg">
-                      {@claim_code}
-                    </code>
-                    <button
-                      class="btn btn-ghost btn-sm"
-                      phx-click="copy_claim_code"
-                      phx-target={@myself}
-                      onclick={"navigator.clipboard.writeText('#{@claim_code}')"}
-                      title="Copy code"
-                    >
-                      <.icon name="hero-clipboard" class="w-5 h-5" />
-                    </button>
-                  </div>
-                  <div class="flex items-center gap-2 text-sm text-base-content/60">
-                    <.icon name="hero-clock" class="w-4 h-4" />
-                    <span>Expires in {format_countdown(@countdown_seconds)}</span>
-                  </div>
-                </div>
-
-                <div class="flex justify-center">
-                  <button
-                    id="regenerate-pairing-code-btn"
-                    class="btn btn-ghost btn-sm"
-                    phx-click="generate_claim_code"
-                    phx-target={@myself}
-                    phx-disable-with="Generating..."
-                  >
-                    Generate new code
-                  </button>
-                </div>
-              <% else %>
-                <%!-- Generate Code Prompt --%>
-                <div class="flex flex-col items-center py-6">
-                  <%= if @pairing_error do %>
-                    <div class="alert alert-error mb-4 max-w-md">
-                      <.icon name="hero-exclamation-circle" class="w-5 h-5" />
-                      <span>{@pairing_error}</span>
+        <%!-- Pair New Device - only shown when relay is ready --%>
+        <%= if @relay_ready do %>
+          <div class="space-y-3">
+            <h3 class="text-sm font-medium text-base-content/70 flex items-center gap-2">
+              <.icon name="hero-qr-code" class="w-4 h-4" /> Pair New Device
+            </h3>
+            <div class="bg-base-200 rounded-box p-4">
+              <div class="flex flex-col sm:flex-row gap-6 items-center sm:items-start">
+                <%!-- QR Code --%>
+                <%= if qr_svg = generate_qr_code(@ra_config, @relay_url) do %>
+                  <div class="shrink-0">
+                    <div class="p-2 bg-white rounded-lg">
+                      {Phoenix.HTML.raw(qr_svg)}
                     </div>
+                    <p class="text-xs text-base-content/50 mt-2 text-center">Scan with camera</p>
+                  </div>
+                <% end %>
+
+                <%!-- Pairing Code --%>
+                <div class="flex-1 text-center sm:text-left">
+                  <%= if @claim_code do %>
+                    <p class="text-sm text-base-content/60 mb-2">Or enter this code:</p>
+                    <div class="flex items-center gap-2 justify-center sm:justify-start">
+                      <code class="text-2xl font-bold tracking-[0.25em] bg-base-300 px-4 py-2 rounded-lg font-mono">
+                        {@claim_code}
+                      </code>
+                      <button
+                        class="btn btn-ghost btn-sm btn-square"
+                        phx-click="copy_claim_code"
+                        phx-target={@myself}
+                        onclick={"navigator.clipboard.writeText('#{@claim_code}')"}
+                        title="Copy"
+                      >
+                        <.icon name="hero-clipboard" class="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div class="flex items-center gap-2 mt-2 text-sm text-base-content/50 justify-center sm:justify-start">
+                      <.icon name="hero-clock" class="w-4 h-4" />
+                      <span>
+                        Expires in
+                        <span class="font-mono">{format_countdown(@countdown_seconds)}</span>
+                      </span>
+                    </div>
+                    <button
+                      id="regenerate-pairing-code-btn"
+                      class="btn btn-ghost btn-xs mt-2"
+                      phx-click="generate_claim_code"
+                      phx-target={@myself}
+                      phx-disable-with="..."
+                    >
+                      <.icon name="hero-arrow-path" class="w-3 h-3" /> New Code
+                    </button>
+                  <% else %>
+                    <%= if @pairing_error do %>
+                      <div class="alert alert-error alert-sm mb-3">
+                        <.icon name="hero-exclamation-circle" class="w-4 h-4" />
+                        <span class="text-sm">{@pairing_error}</span>
+                      </div>
+                    <% end %>
+                    <p class="text-sm text-base-content/60 mb-3">
+                      Generate a code to pair a new device.
+                    </p>
+                    <button
+                      id="generate-pairing-code-btn"
+                      class="btn btn-primary btn-sm"
+                      phx-click="generate_claim_code"
+                      phx-target={@myself}
+                      phx-disable-with="Generating..."
+                    >
+                      <.icon name="hero-key" class="w-4 h-4" /> Generate Code
+                    </button>
                   <% end %>
-                  <p class="text-sm text-base-content/70 mb-4 text-center max-w-md">
-                    Generate a temporary code to link your phone or tablet to this server
-                  </p>
-                  <button
-                    id="generate-pairing-code-btn"
-                    class="btn btn-primary"
-                    phx-click="generate_claim_code"
-                    phx-target={@myself}
-                    phx-disable-with="Generating..."
-                  >
-                    <.icon name="hero-qr-code" class="w-5 h-5" /> Generate Pairing Code
-                  </button>
                 </div>
-              <% end %>
+              </div>
             </div>
           </div>
         <% end %>
 
-        <%!-- Connected Devices --%>
-        <div class="card bg-base-200">
-          <div class="card-body">
-            <h3 class="font-semibold text-lg mb-4">Your Devices</h3>
+        <%!-- Devices Section --%>
+        <div class="space-y-3">
+          <h3 class="text-sm font-medium text-base-content/70 flex items-center gap-2">
+            <.icon name="hero-device-phone-mobile" class="w-4 h-4" /> Paired Devices
+            <span class="badge badge-ghost badge-sm">{length(@devices)}</span>
+          </h3>
 
-            <%= if @devices == [] do %>
-              <div class="text-center py-8 text-base-content/60">
-                <.icon name="hero-device-phone-mobile" class="w-12 h-12 mx-auto mb-3 opacity-40" />
-                <p>No devices paired yet</p>
-                <p class="text-sm mt-1">
-                  <%= if @relay_status && @relay_status.connected && @relay_status.registered do %>
-                    Generate a pairing code above to connect your first device
-                  <% else %>
-                    Fix relay connection above to start pairing devices
-                  <% end %>
-                </p>
-              </div>
-            <% else %>
-              <div class="space-y-3">
-                <%= for device <- @devices do %>
-                  <div class={[
-                    "flex items-center justify-between p-4 rounded-lg",
-                    if(RemoteAccess.RemoteDevice.revoked?(device),
-                      do: "bg-base-300/50 opacity-60",
-                      else: "bg-base-300"
-                    )
-                  ]}>
-                    <div class="flex items-center gap-4">
-                      <div class={[
-                        "w-10 h-10 rounded-full flex items-center justify-center",
-                        status_icon_class(device)
-                      ]}>
-                        <.icon name={platform_icon(device.platform)} class="w-5 h-5" />
+          <%= if @devices == [] do %>
+            <div class="alert">
+              <.icon name="hero-information-circle" class="w-5 h-5 opacity-60" />
+              <span>
+                No devices paired yet. Generate a pairing code above to connect your first device.
+              </span>
+            </div>
+          <% else %>
+            <div class="bg-base-200 rounded-box divide-y divide-base-300">
+              <%= for device <- @devices do %>
+                <div class={["p-3 sm:p-4", RemoteAccess.RemoteDevice.revoked?(device) && "opacity-50"]}>
+                  <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div class="flex-1 min-w-0">
+                      <div class="font-semibold flex items-center gap-2 flex-wrap">
+                        <.icon name={platform_icon(device.platform)} class="w-4 h-4 opacity-60" />
+                        {device.device_name}
+                        <%= if RemoteAccess.RemoteDevice.revoked?(device) do %>
+                          <span class="badge badge-error badge-xs">Revoked</span>
+                        <% end %>
                       </div>
-                      <div>
-                        <div class="font-medium">{device.device_name}</div>
-                        <div class="text-sm text-base-content/60">
-                          <%= cond do %>
-                            <% RemoteAccess.RemoteDevice.revoked?(device) -> %>
-                              <span class="text-error">Access revoked</span>
-                            <% is_recent_activity?(device.last_seen_at) -> %>
-                              Last active {format_relative_time(device.last_seen_at)}
-                            <% true -> %>
-                              Inactive since {format_datetime(device.last_seen_at)}
-                          <% end %>
-                        </div>
+                      <div class="text-xs opacity-60 mt-0.5">
+                        <%= cond do %>
+                          <% RemoteAccess.RemoteDevice.revoked?(device) -> %>
+                            Access revoked
+                          <% is_recent_activity?(device.last_seen_at) -> %>
+                            Last active {format_relative_time(device.last_seen_at)}
+                          <% true -> %>
+                            Inactive since {format_datetime(device.last_seen_at)}
+                        <% end %>
                       </div>
                     </div>
-                    <div class="dropdown dropdown-end">
-                      <label tabindex="0" class="btn btn-ghost btn-sm btn-circle">
-                        <.icon name="hero-ellipsis-vertical" class="w-5 h-5" />
-                      </label>
-                      <ul
-                        tabindex="0"
-                        class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-48"
-                      >
+                    <div class="flex items-center gap-2">
+                      <span class={[
+                        "badge badge-sm",
+                        if(is_recent_activity?(device.last_seen_at) && is_nil(device.revoked_at),
+                          do: "badge-success",
+                          else: "badge-ghost"
+                        )
+                      ]}>
+                        {if is_recent_activity?(device.last_seen_at) && is_nil(device.revoked_at),
+                          do: "Active",
+                          else: "Inactive"}
+                      </span>
+                      <div class="join">
                         <%= if is_nil(device.revoked_at) do %>
-                          <li>
-                            <button
-                              phx-click="open_revoke_modal"
-                              phx-target={@myself}
-                              phx-value-id={device.id}
-                              class="text-warning"
-                            >
-                              <.icon name="hero-no-symbol" class="w-4 h-4" /> Revoke Access
-                            </button>
-                          </li>
-                        <% end %>
-                        <li>
                           <button
-                            phx-click="open_delete_modal"
+                            class="btn btn-sm btn-ghost join-item"
+                            phx-click="open_revoke_modal"
                             phx-target={@myself}
                             phx-value-id={device.id}
-                            class="text-error"
+                            title="Revoke Access"
                           >
-                            <.icon name="hero-trash" class="w-4 h-4" /> Remove Device
+                            <.icon name="hero-no-symbol" class="w-4 h-4" />
                           </button>
-                        </li>
-                      </ul>
+                        <% end %>
+                        <button
+                          class="btn btn-sm btn-ghost join-item text-error"
+                          phx-click="open_delete_modal"
+                          phx-target={@myself}
+                          phx-value-id={device.id}
+                          title="Remove Device"
+                        >
+                          <.icon name="hero-trash" class="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
-                <% end %>
-              </div>
-            <% end %>
-          </div>
+                </div>
+              <% end %>
+            </div>
+          <% end %>
         </div>
 
-        <%!-- Advanced Settings (Collapsible) --%>
-        <div class="collapse collapse-arrow bg-base-200">
-          <input
-            type="checkbox"
-            checked={@show_advanced}
+        <%!-- Advanced Settings --%>
+        <div class="space-y-3">
+          <button
+            class="text-sm font-medium text-base-content/70 flex items-center gap-2 hover:text-base-content transition-colors"
             phx-click="toggle_advanced"
             phx-target={@myself}
-          />
-          <div class="collapse-title font-semibold">
-            Advanced Settings
-          </div>
-          <div class="collapse-content">
-            <div class="space-y-4 pt-2">
+          >
+            <.icon
+              name={if @show_advanced, do: "hero-chevron-down", else: "hero-chevron-right"}
+              class="w-4 h-4"
+            /> Advanced Settings
+          </button>
+
+          <%= if @show_advanced do %>
+            <div class="bg-base-200 rounded-box divide-y divide-base-300">
+              <%!-- Public Port --%>
+              <form phx-submit="update_public_port" phx-target={@myself} class="p-3 sm:p-4">
+                <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div class="flex-1 min-w-0">
+                    <div class="font-medium text-sm">Public Port</div>
+                    <div class="text-xs opacity-60">Override if external port differs (NAT)</div>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <input
+                      type="number"
+                      name="public_port"
+                      placeholder="Auto"
+                      class="input input-sm input-bordered w-24 text-center font-mono"
+                      value={@ra_config.public_port}
+                      min="1"
+                      max="65535"
+                    />
+                    <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                  </div>
+                </div>
+              </form>
+
               <%!-- Direct URLs --%>
-              <div>
-                <div class="flex items-center justify-between mb-2">
-                  <div>
-                    <p class="font-medium text-sm">Direct Connection URLs</p>
-                    <p class="text-xs text-base-content/60">
-                      Optional URLs for direct connections (bypassing relay)
-                    </p>
+              <div class="p-3 sm:p-4">
+                <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-2">
+                  <div class="flex-1 min-w-0">
+                    <div class="font-medium text-sm">Direct URLs</div>
+                    <div class="text-xs opacity-60">Bypass relay when on same network</div>
                   </div>
                   <button
                     class="btn btn-sm btn-ghost"
@@ -318,12 +502,12 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                   </button>
                 </div>
                 <%= if @ra_config.direct_urls && @ra_config.direct_urls != [] do %>
-                  <div class="space-y-1">
+                  <div class="space-y-1 mt-2">
                     <%= for url <- @ra_config.direct_urls do %>
                       <div class="flex items-center justify-between p-2 bg-base-300 rounded text-sm">
-                        <code class="font-mono text-xs">{url}</code>
+                        <code class="font-mono text-xs truncate">{url}</code>
                         <button
-                          class="btn btn-xs btn-ghost text-error"
+                          class="btn btn-xs btn-ghost text-error shrink-0"
                           phx-click="remove_direct_url"
                           phx-target={@myself}
                           phx-value-url={url}
@@ -334,17 +518,15 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                     <% end %>
                   </div>
                 <% else %>
-                  <p class="text-xs text-base-content/50 italic">No direct URLs configured</p>
+                  <p class="text-xs text-base-content/50 italic mt-2">None configured</p>
                 <% end %>
               </div>
 
-              <div class="divider my-2"></div>
-
-              <%!-- Technical Info --%>
-              <div>
-                <p class="font-medium text-sm mb-2">Connection Details</p>
-                <div class="grid gap-2 text-xs">
-                  <div class="flex justify-between p-2 bg-base-300 rounded">
+              <%!-- Connection Info --%>
+              <div class="p-3 sm:p-4">
+                <div class="font-medium text-sm mb-2">Connection Details</div>
+                <div class="grid gap-1.5 text-xs">
+                  <div class="flex justify-between items-center">
                     <span class="text-base-content/60">Instance ID</span>
                     <div class="flex items-center gap-1">
                       <code class="font-mono">{String.slice(@ra_config.instance_id, 0..11)}...</code>
@@ -358,40 +540,30 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                       </button>
                     </div>
                   </div>
-                  <div class="flex justify-between p-2 bg-base-300 rounded">
-                    <span class="text-base-content/60">Relay Server</span>
+                  <div class="flex justify-between items-center">
+                    <span class="text-base-content/60">Relay</span>
                     <code class="font-mono">{@relay_url}</code>
                   </div>
-                  <div class="flex justify-between p-2 bg-base-300 rounded">
+                  <div class="flex justify-between items-center">
                     <span class="text-base-content/60">Status</span>
-                    <span class={
-                      if @relay_status && @relay_status.registered,
-                        do: "text-success",
-                        else: "text-warning"
-                    }>
-                      {if @relay_status && @relay_status.registered,
-                        do: "Registered",
-                        else: "Not registered"}
+                    <span class={if(@relay_ready, do: "text-success", else: "text-warning")}>
+                      {if @relay_ready, do: "Registered", else: "Not registered"}
                     </span>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
+          <% end %>
         </div>
       <% else %>
-        <%!-- Disabled State Info --%>
-        <div class="card bg-base-200">
-          <div class="card-body text-center py-12">
-            <.icon
-              name="hero-device-phone-mobile"
-              class="w-16 h-16 mx-auto mb-4 text-base-content/30"
-            />
-            <h3 class="font-semibold text-lg mb-2">Connect from Anywhere</h3>
-            <p class="text-base-content/70 max-w-md mx-auto">
-              Enable remote access to use the Mydia mobile app on your phone or tablet,
-              even when you're away from home.
-            </p>
+        <%!-- Disabled state --%>
+        <div class="alert">
+          <.icon name="hero-device-phone-mobile" class="w-6 h-6 opacity-40" />
+          <div>
+            <div class="font-medium">Connect from Anywhere</div>
+            <div class="text-sm opacity-70">
+              Enable remote access to use the Mydia mobile app on your phone or tablet.
+            </div>
           </div>
         </div>
       <% end %>
@@ -401,22 +573,16 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
         <div class="modal modal-open">
           <div class="modal-box">
             <h3 class="font-bold text-lg mb-4">Revoke Access?</h3>
-            <p class="text-base-content/70 mb-4">
-              <strong>{@selected_device.device_name}</strong> will be disconnected and won't be able
-              to access your library until you pair it again.
+            <p class="text-base-content/70">
+              <strong>{@selected_device.device_name}</strong>
+              will be disconnected and won't be able to access your library until paired again.
             </p>
-
             <div class="modal-action">
-              <button
-                type="button"
-                phx-click="close_revoke_modal"
-                phx-target={@myself}
-                class="btn btn-ghost"
-              >
+              <button phx-click="close_revoke_modal" phx-target={@myself} class="btn btn-ghost">
                 Cancel
               </button>
               <button phx-click="submit_revoke" phx-target={@myself} class="btn btn-warning">
-                Revoke Access
+                Revoke
               </button>
             </div>
           </div>
@@ -429,22 +595,16 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
         <div class="modal modal-open">
           <div class="modal-box">
             <h3 class="font-bold text-lg mb-4">Remove Device?</h3>
-            <p class="text-base-content/70 mb-4">
-              <strong>{@device_to_delete.device_name}</strong> will be removed from your account.
-              You'll need to pair it again to reconnect.
+            <p class="text-base-content/70">
+              <strong>{@device_to_delete.device_name}</strong>
+              will be removed. You'll need to pair it again to reconnect.
             </p>
-
             <div class="modal-action">
-              <button
-                type="button"
-                phx-click="close_delete_modal"
-                phx-target={@myself}
-                class="btn btn-ghost"
-              >
+              <button phx-click="close_delete_modal" phx-target={@myself} class="btn btn-ghost">
                 Cancel
               </button>
               <button phx-click="submit_delete" phx-target={@myself} class="btn btn-error">
-                Remove Device
+                Remove
               </button>
             </div>
           </div>
@@ -458,27 +618,18 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
           <div class="modal-box">
             <h3 class="font-bold text-lg mb-4">Add Direct URL</h3>
             <p class="text-sm text-base-content/70 mb-4">
-              Add a URL where your server can be reached directly (e.g., when on the same network).
+              Add a URL where your server can be reached directly (e.g., on the same network).
             </p>
-
-            <div class="form-control">
-              <input
-                type="url"
-                placeholder="https://mydia.local:4000"
-                class="input input-bordered w-full"
-                value={@new_url}
-                phx-change="update_new_url"
-                phx-target={@myself}
-              />
-            </div>
-
+            <input
+              type="url"
+              placeholder="https://mydia.local:4000"
+              class="input input-bordered w-full"
+              value={@new_url}
+              phx-change="update_new_url"
+              phx-target={@myself}
+            />
             <div class="modal-action">
-              <button
-                type="button"
-                phx-click="close_add_url_modal"
-                phx-target={@myself}
-                class="btn btn-ghost"
-              >
+              <button phx-click="close_add_url_modal" phx-target={@myself} class="btn btn-ghost">
                 Cancel
               </button>
               <button
@@ -487,7 +638,7 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                 class="btn btn-primary"
                 disabled={@new_url == ""}
               >
-                Add URL
+                Add
               </button>
             </div>
           </div>
@@ -724,6 +875,43 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
     {:noreply, assign(socket, :show_advanced, !socket.assigns.show_advanced)}
   end
 
+  def handle_event("check_port", _params, socket) do
+    send(self(), {:check_port_status, socket.assigns.id})
+    {:noreply, assign(socket, checking_port: true)}
+  end
+
+  def handle_event("update_public_port", %{"public_port" => port_str}, socket) do
+    # Parse the port string, treating empty string as nil (clear the setting)
+    port =
+      case String.trim(port_str) do
+        "" -> nil
+        str -> String.to_integer(str)
+      end
+
+    case RemoteAccess.update_public_port(port) do
+      {:ok, _config} ->
+        {:noreply,
+         socket
+         |> load_config()
+         |> put_flash(:info, "Public port updated successfully")}
+
+      {:error, :invalid_port} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Invalid port number. Must be between 1 and 65535.")}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Failed to update public port")}
+    end
+  rescue
+    ArgumentError ->
+      {:noreply,
+       socket
+       |> put_flash(:error, "Invalid port number. Must be a valid integer.")}
+  end
+
   ## Countdown update (called from parent via send_update)
 
   def handle_countdown_tick(socket) do
@@ -886,19 +1074,6 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
   defp platform_icon("web"), do: "hero-computer-desktop"
   defp platform_icon(_), do: "hero-device-tablet"
 
-  defp status_icon_class(%RemoteAccess.RemoteDevice{revoked_at: revoked})
-       when not is_nil(revoked) do
-    "bg-error/20 text-error"
-  end
-
-  defp status_icon_class(%RemoteAccess.RemoteDevice{last_seen_at: last_seen}) do
-    if is_recent_activity?(last_seen) do
-      "bg-success/20 text-success"
-    else
-      "bg-base-content/10 text-base-content/50"
-    end
-  end
-
   defp format_relative_time(nil), do: "never"
 
   defp format_relative_time(%DateTime{} = dt) do
@@ -912,5 +1087,110 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
       diff_seconds < 604_800 -> "#{div(diff_seconds, 86400)} days ago"
       true -> format_datetime(dt)
     end
+  end
+
+  defp generate_qr_code(config, relay_url) do
+    if config && config.static_public_key do
+      # Build QR code content
+      content =
+        Jason.encode!(%{
+          instance_id: config.instance_id,
+          public_key: Base.encode64(config.static_public_key),
+          relay_url: relay_url
+        })
+
+      # Generate QR code as SVG
+      qr_code = EQRCode.encode(content)
+      EQRCode.svg(qr_code, width: 180)
+    else
+      nil
+    end
+  end
+
+  # Connection info helpers
+
+  defp get_local_address do
+    config = Application.get_env(:mydia, :direct_urls, [])
+    port = Keyword.get(config, :external_port, 4000)
+
+    case :inet.getifaddrs() do
+      {:ok, interfaces} ->
+        ip =
+          interfaces
+          |> Enum.flat_map(fn {_iface, props} ->
+            props
+            |> Enum.filter(fn {key, _} -> key == :addr end)
+            |> Enum.map(fn {:addr, addr} -> addr end)
+            |> Enum.filter(&valid_local_ip?/1)
+          end)
+          |> List.first()
+
+        case ip do
+          {a, b, c, d} -> %{ip: "#{a}.#{b}.#{c}.#{d}", port: port}
+          _ -> %{ip: nil, port: port}
+        end
+
+      {:error, _} ->
+        %{ip: nil, port: port}
+    end
+  end
+
+  defp get_public_address do
+    port = Mydia.RemoteAccess.DirectUrls.get_public_port()
+
+    case Mydia.RemoteAccess.DirectUrls.detect_public_ip() do
+      {:ok, ip} -> %{ip: ip, port: port}
+      {:error, _} -> %{ip: nil, port: port}
+    end
+  end
+
+  defp valid_local_ip?({127, _, _, _}), do: false
+  defp valid_local_ip?({169, 254, _, _}), do: false
+  defp valid_local_ip?({172, 17, _, _}), do: false
+
+  defp valid_local_ip?({a, b, c, d})
+       when is_integer(a) and is_integer(b) and is_integer(c) and is_integer(d) and
+              tuple_size({a, b, c, d}) == 4,
+       do: true
+
+  defp valid_local_ip?(_), do: false
+
+  # Check if port is accessible from the internet using portchecker.io
+  defp check_port_accessible(nil, _port), do: :unknown
+  defp check_port_accessible(_ip, nil), do: :unknown
+
+  defp check_port_accessible(ip, port) do
+    url = "https://portchecker.io/api/v1/query"
+
+    body =
+      Jason.encode!(%{
+        host: ip,
+        ports: [port]
+      })
+
+    case Req.post(url,
+           body: body,
+           headers: [{"content-type", "application/json"}],
+           receive_timeout: 10_000,
+           retry: false
+         ) do
+      {:ok, %Req.Response{status: 200, body: %{"check" => results}}} ->
+        # Results is a list like [%{"port" => 4000, "status" => true}]
+        case results do
+          [%{"status" => true} | _] -> :open
+          [%{"status" => false} | _] -> :closed
+          _ -> :unknown
+        end
+
+      {:ok, %Req.Response{body: body}} ->
+        Logger.debug("Port check unexpected response: #{inspect(body)}")
+        :unknown
+
+      {:error, reason} ->
+        Logger.debug("Port check failed: #{inspect(reason)}")
+        :unknown
+    end
+  rescue
+    _ -> :unknown
   end
 end

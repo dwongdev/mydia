@@ -1,5 +1,6 @@
 defmodule Mydia.RemoteAccess.DirectUrlsTest do
-  use ExUnit.Case, async: true
+  # Not async due to persistent_term cache and Application.put_env
+  use ExUnit.Case, async: false
 
   alias Mydia.RemoteAccess.DirectUrls
 
@@ -159,6 +160,158 @@ defmodule Mydia.RemoteAccess.DirectUrlsTest do
       urls = DirectUrls.detect_all()
 
       assert is_list(urls)
+    end
+  end
+
+  describe "detect_public_ip/0" do
+    setup do
+      # Save original config
+      original_config = Application.get_env(:mydia, :direct_urls, [])
+
+      # Clear cache before each test
+      DirectUrls.clear_public_ip_cache()
+
+      on_exit(fn ->
+        # Restore original config and clear cache
+        Application.put_env(:mydia, :direct_urls, original_config)
+        DirectUrls.clear_public_ip_cache()
+      end)
+
+      %{original_config: original_config}
+    end
+
+    test "returns {:ok, ip} when successful" do
+      # Enable public IP detection
+      Application.put_env(:mydia, :direct_urls, public_ip_enabled: true)
+
+      # This is an integration test - it makes real HTTP calls
+      # Skip in CI environments or when network is unavailable
+      case DirectUrls.detect_public_ip() do
+        {:ok, ip} ->
+          assert is_binary(ip)
+          # Validate IP format (should be parseable)
+          assert {:ok, _} = ip |> String.to_charlist() |> :inet.parse_address()
+
+        {:error, :all_services_failed} ->
+          # Network unavailable, skip assertion
+          :ok
+      end
+    end
+
+    test "returns {:error, :disabled} when public IP detection is disabled" do
+      Application.put_env(:mydia, :direct_urls, public_ip_enabled: false)
+
+      assert {:error, :disabled} = DirectUrls.detect_public_ip()
+    end
+
+    test "caches successful results" do
+      Application.put_env(:mydia, :direct_urls, public_ip_enabled: true)
+
+      # First call
+      result1 = DirectUrls.detect_public_ip()
+
+      # Second call should return the same result (cached)
+      result2 = DirectUrls.detect_public_ip()
+
+      assert result1 == result2
+    end
+  end
+
+  describe "detect_public_url/0" do
+    setup do
+      original_config = Application.get_env(:mydia, :direct_urls, [])
+      DirectUrls.clear_public_ip_cache()
+
+      on_exit(fn ->
+        Application.put_env(:mydia, :direct_urls, original_config)
+        DirectUrls.clear_public_ip_cache()
+      end)
+
+      %{original_config: original_config}
+    end
+
+    test "returns sslip.io URL on success" do
+      Application.put_env(:mydia, :direct_urls, public_ip_enabled: true, external_port: 4443)
+
+      case DirectUrls.detect_public_url() do
+        {:ok, url} ->
+          assert is_binary(url)
+          assert String.starts_with?(url, "https://")
+          assert String.contains?(url, ".sslip.io:")
+          assert String.ends_with?(url, ":4443")
+
+        {:error, :all_services_failed} ->
+          # Network unavailable, skip assertion
+          :ok
+      end
+    end
+
+    test "uses public_port when configured" do
+      Application.put_env(:mydia, :direct_urls,
+        public_ip_enabled: true,
+        external_port: 4443,
+        public_port: 8443
+      )
+
+      case DirectUrls.detect_public_url() do
+        {:ok, url} ->
+          # Should use public_port (8443) not external_port (4443)
+          assert String.ends_with?(url, ":8443")
+
+        {:error, :all_services_failed} ->
+          # Network unavailable, skip assertion
+          :ok
+      end
+    end
+
+    test "returns error when disabled" do
+      Application.put_env(:mydia, :direct_urls, public_ip_enabled: false)
+
+      assert {:error, :disabled} = DirectUrls.detect_public_url()
+    end
+  end
+
+  describe "clear_public_ip_cache/0" do
+    test "clears the cache successfully" do
+      # Just ensure it doesn't crash
+      assert :ok = DirectUrls.clear_public_ip_cache()
+    end
+
+    test "can be called multiple times" do
+      assert :ok = DirectUrls.clear_public_ip_cache()
+      assert :ok = DirectUrls.clear_public_ip_cache()
+    end
+  end
+
+  describe "get_public_port/0" do
+    setup do
+      original_config = Application.get_env(:mydia, :direct_urls, [])
+
+      on_exit(fn ->
+        Application.put_env(:mydia, :direct_urls, original_config)
+      end)
+
+      %{original_config: original_config}
+    end
+
+    test "returns env var public_port when set" do
+      Application.put_env(:mydia, :direct_urls, public_port: 8443, external_port: 4443)
+
+      # Environment variable takes precedence
+      assert DirectUrls.get_public_port() == 8443
+    end
+
+    test "falls back to external_port when public_port not in env" do
+      Application.put_env(:mydia, :direct_urls, external_port: 4443)
+
+      # Falls back to external_port
+      assert DirectUrls.get_public_port() == 4443
+    end
+
+    test "falls back to default 4000 when nothing configured" do
+      Application.put_env(:mydia, :direct_urls, [])
+
+      assert DirectUrls.get_public_port() == 4000
     end
   end
 end

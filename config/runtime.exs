@@ -267,9 +267,28 @@ if config_env() == :prod do
     end
   end
 
-  # External port override (used for sslip.io URL generation)
+  # External port override (used for sslip.io URL generation for local IPs)
   # Default to HTTPS port for secure direct URLs in production
   external_port = parse_integer.(System.get_env("EXTERNAL_PORT"), https_port)
+
+  # Public port override (used for sslip.io URL generation for public IP)
+  # Useful when your external port differs from internal port (e.g., NAT port forwarding)
+  # Falls back to external_port if not set
+  public_port =
+    case System.get_env("PUBLIC_PORT") do
+      nil -> nil
+      "" -> nil
+      value -> parse_integer.(value, nil)
+    end
+
+  # Enable/disable public IP detection via external services
+  # Default: true (enabled)
+  public_ip_enabled =
+    case System.get_env("PUBLIC_IP_ENABLED") do
+      "false" -> false
+      "0" -> false
+      _ -> true
+    end
 
   # Manual external URL override
   external_url = System.get_env("EXTERNAL_URL")
@@ -287,6 +306,8 @@ if config_env() == :prod do
 
   config :mydia, :direct_urls,
     external_port: external_port,
+    public_port: public_port,
+    public_ip_enabled: public_ip_enabled,
     external_url: external_url,
     additional_direct_urls: additional_direct_urls,
     data_dir: data_dir

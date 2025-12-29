@@ -85,8 +85,11 @@ class RelayService {
   final String _relayUrl;
   final http.Client _httpClient;
 
-  // Default relay URL - production relay service
-  static const _defaultRelayUrl = 'https://relay.mydia.dev';
+  // Default relay URL - can be overridden at build time via --dart-define=RELAY_URL=...
+  static const _defaultRelayUrl = String.fromEnvironment(
+    'RELAY_URL',
+    defaultValue: 'https://relay.mydia.dev',
+  );
 
   /// Looks up a claim code and returns instance connection info.
   ///

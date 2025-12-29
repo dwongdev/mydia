@@ -35,7 +35,7 @@ defmodule MetadataRelay.Relay do
     %Instance{}
     |> Instance.create_changeset(attrs)
     |> Repo.insert(
-      on_conflict: {:replace, [:public_key, :direct_urls, :updated_at]},
+      on_conflict: {:replace, [:public_key, :direct_urls, :public_ip, :updated_at]},
       conflict_target: :instance_id,
       returning: true
     )
@@ -180,9 +180,10 @@ defmodule MetadataRelay.Relay do
     code = normalize_claim_code(code)
 
     query =
-      from c in Claim,
+      from(c in Claim,
         where: c.code == ^code,
         preload: [:instance]
+      )
 
     case Repo.one(query) do
       nil ->
@@ -199,17 +200,83 @@ defmodule MetadataRelay.Relay do
           true ->
             instance = claim.instance
 
+            # Enrich direct_urls with public IP (Plex-like auto-discovery)
+            enriched_urls = build_enriched_urls(instance)
+
             {:ok,
              %{
                claim_id: claim.id,
                instance_id: instance.instance_id,
                public_key: Base.encode64(instance.public_key),
-               direct_urls: instance.direct_urls,
+               direct_urls: enriched_urls,
                online: instance.online,
                user_id: claim.user_id
              }}
         end
     end
+  end
+
+  # Builds enriched URL list by adding public IP URL to stored direct_urls
+  defp build_enriched_urls(instance) do
+    # Start with stored local URLs
+    local_urls = instance.direct_urls || []
+
+    # Extract port from existing URLs, default to 4000
+    port = extract_port_from_urls(local_urls)
+
+    # Build public URL if we have a detected public IP
+    public_url =
+      if instance.public_ip && is_valid_public_ip?(instance.public_ip) do
+        build_sslip_url(instance.public_ip, port)
+      end
+
+    # Combine: local URLs first (faster on LAN), public URL last
+    (local_urls ++ [public_url])
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+  end
+
+  # Extracts port number from the first URL that has one
+  defp extract_port_from_urls([url | rest]) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{port: port} when is_integer(port) -> port
+      _ -> extract_port_from_urls(rest)
+    end
+  end
+
+  defp extract_port_from_urls([_ | rest]), do: extract_port_from_urls(rest)
+  defp extract_port_from_urls([]), do: 4000
+
+  # Validates that an IP is a public IP (not loopback, private, or link-local)
+  defp is_valid_public_ip?(ip) when is_binary(ip) do
+    case String.split(ip, ".") do
+      [a, b, _, _] ->
+        {a_int, _} = Integer.parse(a)
+        {b_int, _} = Integer.parse(b)
+
+        # Loopback
+        # Private 10.x.x.x
+        # Private 172.16-31.x.x
+        # Private 192.168.x.x
+        # Link-local
+        not (a_int == 127 ||
+               a_int == 10 ||
+               (a_int == 172 && b_int >= 16 && b_int <= 31) ||
+               (a_int == 192 && b_int == 168) ||
+               (a_int == 169 && b_int == 254))
+
+      _ ->
+        false
+    end
+  end
+
+  defp is_valid_public_ip?(_), do: false
+
+  # Builds an sslip.io URL from an IP string
+  defp build_sslip_url(ip, port) when is_binary(ip) and is_integer(port) do
+    # Convert "203.0.113.50" to "203-0-113-50"
+    ip_dashed = String.replace(ip, ".", "-")
+    "https://#{ip_dashed}.sslip.io:#{port}"
   end
 
   @doc """
@@ -226,9 +293,10 @@ defmodule MetadataRelay.Relay do
   """
   def consume_claim(authenticated_instance_id, claim_id, device_id) do
     query =
-      from c in Claim,
+      from(c in Claim,
         where: c.id == ^claim_id,
         preload: [:instance]
+      )
 
     case Repo.one(query) do
       nil ->
@@ -265,8 +333,9 @@ defmodule MetadataRelay.Relay do
       |> DateTime.add(-max_age_seconds, :second)
 
     query =
-      from c in Claim,
+      from(c in Claim,
         where: c.expires_at < ^cutoff or (not is_nil(c.consumed_at) and c.consumed_at < ^cutoff)
+      )
 
     {count, _} = Repo.delete_all(query)
     count
@@ -287,22 +356,23 @@ defmodule MetadataRelay.Relay do
     now = DateTime.utc_now()
 
     query =
-      from c in Claim,
+      from(c in Claim,
         where: c.instance_id == ^instance.id,
         order_by: [desc: c.inserted_at]
+      )
 
     query =
       if include_expired do
         query
       else
-        from c in query, where: c.expires_at > ^now
+        from(c in query, where: c.expires_at > ^now)
       end
 
     query =
       if include_consumed do
         query
       else
-        from c in query, where: is_nil(c.consumed_at)
+        from(c in query, where: is_nil(c.consumed_at))
       end
 
     Repo.all(query)

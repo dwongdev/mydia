@@ -1,0 +1,194 @@
+# Docker Compose for Player E2E Integration Tests
+#
+# This runs the full stack with Flutter integration tests:
+# - metadata-relay: Relay service for NAT traversal
+# - mydia: Main application
+# - player: Flutter web app served via nginx
+# - chrome: Selenium Chrome for UI testing
+# - test: Flutter integration test runner
+#
+# Usage:
+#   docker compose -f compose.player-e2e.yml up --build --abort-on-container-exit
+#   docker compose -f compose.player-e2e.yml down -v
+
+services:
+  # ============================================
+  # Metadata Relay Service
+  # ============================================
+  relay:
+    build:
+      context: ./metadata-relay
+      dockerfile: Dockerfile
+    container_name: e2e_relay
+    environment:
+      PORT: "4001"
+      SQLITE_DB_PATH: /data/relay.db
+      # No API keys needed for E2E tests (not testing metadata fetching)
+    volumes:
+      - relay_data:/data
+    ports:
+      - "14001:4001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4001/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    networks:
+      - e2e
+
+  # ============================================
+  # Mydia Main Application
+  # ============================================
+  mydia:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+    container_name: e2e_mydia
+    environment:
+      # Phoenix config
+      PHX_HOST: mydia
+      PHX_SERVER: "true"
+      PORT: "4000"
+      HTTPS_PORT: "4443"
+      SECRET_KEY_BASE: "E2ETestSecretKeyBase123456789012345678901234567890123456789012345"
+      GUARDIAN_SECRET_KEY: "E2ETestGuardianSecretKey12345678901234567890123456789012345678"
+
+      # Database
+      DATABASE_PATH: /config/mydia.db
+      MIX_ENV: prod
+
+      # Relay connection
+      METADATA_RELAY_URL: "http://relay:4001"
+
+      # E2E test mode - auto-enable remote access
+      E2E_MODE: "true"
+      E2E_ADMIN_EMAIL: "admin@test.local"
+      E2E_ADMIN_PASSWORD: "testpassword123"
+
+      # Disable HTTPS origin checks for E2E
+      PHX_CHECK_ORIGIN: "false"
+
+      # Direct URLs config
+      EXTERNAL_PORT: "4443"
+      PUBLIC_IP_ENABLED: "false"
+    volumes:
+      - mydia_config:/config
+      - mydia_data:/data
+    ports:
+      - "14000:4000"
+      - "14443:4443"
+    depends_on:
+      relay:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 10
+    networks:
+      - e2e
+
+  # ============================================
+  # Flutter Web Player (served via nginx)
+  # ============================================
+  player:
+    build:
+      context: .
+      dockerfile: player/Dockerfile.e2e
+      args:
+        # Bake in the relay URL at build time
+        RELAY_URL: "http://relay:4001"
+        MYDIA_URL: "http://mydia:4000"
+    container_name: e2e_player
+    ports:
+      - "18080:80"
+    depends_on:
+      mydia:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    networks:
+      - e2e
+
+  # ============================================
+  # Selenium Chrome (for UI testing)
+  # ============================================
+  chrome:
+    image: selenium/standalone-chrome:131.0
+    container_name: e2e_chrome
+    shm_size: "2g"
+    environment:
+      SE_NODE_MAX_SESSIONS: "1"
+      SE_NODE_SESSION_TIMEOUT: "300"
+    ports:
+      - "14444:4444"
+      - "17900:7900"  # VNC for debugging
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4444/status"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    networks:
+      - e2e
+
+  # ============================================
+  # Flutter Integration Test Runner
+  # ============================================
+  # NOTE: Flutter's integration_test package has a limitation where it hardcodes
+  # localhost URLs when telling Chrome where to navigate. This makes Docker-based
+  # testing challenging. The test infrastructure below works for everything except
+  # the actual Flutter web driver connection.
+  #
+  # Options for running tests:
+  # 1. Run Chrome and tests on the same machine (not in Docker)
+  # 2. Use network_mode: host (requires no port conflicts)
+  # 3. Wait for Flutter to support custom WebDriver URLs
+  test:
+    build:
+      context: .
+      dockerfile: player/Dockerfile.test
+    container_name: e2e_test
+    environment:
+      # WebDriver configuration
+      CHROMEDRIVER_URL: "http://chrome:4444"
+
+      # App URL that Chrome should navigate to (Docker hostname)
+      TEST_HOST: "test"
+      WEB_PORT: "4040"
+
+      # Backend service URLs
+      MYDIA_URL: "http://mydia:4000"
+      RELAY_URL: "http://relay:4001"
+
+      # Test admin credentials
+      E2E_ADMIN_EMAIL: "admin@test.local"
+      E2E_ADMIN_PASSWORD: "testpassword123"
+    expose:
+      - "4040"
+    depends_on:
+      chrome:
+        condition: service_healthy
+      mydia:
+        condition: service_healthy
+    networks:
+      - e2e
+    # Test runner exits when done
+
+networks:
+  e2e:
+    driver: bridge
+
+volumes:
+  relay_data:
+    driver: local
+  mydia_config:
+    driver: local
+  mydia_data:
+    driver: local

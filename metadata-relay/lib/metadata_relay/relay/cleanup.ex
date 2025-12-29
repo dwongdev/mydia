@@ -67,8 +67,9 @@ defmodule MetadataRelay.Relay.Cleanup do
 
     # Find online instances that haven't sent a heartbeat recently
     query =
-      from i in Instance,
+      from(i in Instance,
         where: i.online == true and i.last_seen_at < ^cutoff
+      )
 
     stale_instances = Repo.all(query)
 

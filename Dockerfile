@@ -19,9 +19,6 @@ RUN apk add --no-cache \
     sqlite-dev \
     postgresql16-dev \
     curl \
-    ffmpeg-dev \
-    fdk-aac-dev \
-    pkgconfig \
     bash \
     unzip \
     xz

@@ -17,6 +17,7 @@ import 'channel_service.dart';
 import '../crypto/noise_service.dart';
 import '../auth/auth_storage.dart';
 import '../relay/relay_service.dart';
+import '../relay/relay_tunnel_service.dart';
 import '../connection/connection_manager.dart';
 
 /// Storage keys for pairing credentials.
@@ -139,17 +140,23 @@ class PairingService {
     AuthStorage? authStorage,
     RelayService? relayService,
     ConnectionManager? connectionManager,
+    String? relayUrl,
   })  : _channelService = channelService ?? ChannelService(),
         _noiseService = noiseService ?? NoiseService(),
         _authStorage = authStorage ?? getAuthStorage(),
         _relayService = relayService ?? RelayService(),
-        _connectionManager = connectionManager;
+        _connectionManager = connectionManager,
+        _relayUrl = relayUrl ?? const String.fromEnvironment(
+          'RELAY_URL',
+          defaultValue: 'https://relay.mydia.dev',
+        );
 
   final ChannelService _channelService;
   final NoiseService _noiseService;
   final AuthStorage _authStorage;
   final RelayService _relayService;
   final ConnectionManager? _connectionManager;
+  final String _relayUrl;
 
   /// Pairs this device using only a claim code.
   ///
@@ -209,8 +216,16 @@ class PairingService {
       }
 
       if (connectedUrl == null) {
-        return PairingResult.error(
-            'Could not connect to server. Please check your network connection.');
+        // Step 2b: All direct URLs failed - try relay fallback
+        onStatusUpdate?.call('Direct connection failed, trying relay...');
+        return await _pairViaRelayTunnel(
+          claimCode: claimCode,
+          claimInfo: claimInfo,
+          serverPublicKey: serverPublicKey,
+          deviceName: deviceName,
+          devicePlatform: devicePlatform,
+          onStatusUpdate: onStatusUpdate,
+        );
       }
 
       // Step 3: Join pairing channel
@@ -493,6 +508,183 @@ class PairingService {
   }
 
   // Private helpers
+
+  /// Pairs the device via relay tunnel when direct connections fail.
+  ///
+  /// This method:
+  /// 1. Connects to relay tunnel using the instance ID
+  /// 2. Performs Noise_NK handshake over the tunnel
+  /// 3. Sends encrypted claim code request
+  /// 4. Receives and decrypts pairing response
+  Future<PairingResult> _pairViaRelayTunnel({
+    required String claimCode,
+    required ClaimCodeInfo claimInfo,
+    required Uint8List serverPublicKey,
+    required String deviceName,
+    required String devicePlatform,
+    void Function(String status)? onStatusUpdate,
+  }) async {
+    RelayTunnel? tunnel;
+
+    try {
+      // Step 1: Connect to relay tunnel
+      onStatusUpdate?.call('Connecting via relay...');
+      final tunnelService = RelayTunnelService(relayUrl: _relayUrl);
+      final tunnelResult =
+          await tunnelService.connectViaRelay(claimInfo.instanceId);
+
+      if (!tunnelResult.success) {
+        return PairingResult.error(
+            tunnelResult.error ?? 'Failed to connect via relay');
+      }
+
+      tunnel = tunnelResult.data!;
+
+      // Step 2: Perform Noise_NK handshake over tunnel
+      onStatusUpdate?.call('Establishing secure connection...');
+      final noiseSession =
+          await _noiseService.startPairingHandshake(serverPublicKey);
+
+      // Send handshake message through tunnel (wrapped in JSON for server)
+      final handshakeMessage = await noiseSession.writeHandshakeMessage();
+      final handshakeRequest = jsonEncode({
+        'type': 'pairing_handshake',
+        'data': {'message': base64Encode(handshakeMessage)},
+      });
+      tunnel.sendMessage(Uint8List.fromList(utf8.encode(handshakeRequest)));
+
+      // Wait for server's handshake response
+      final handshakeResponseBytes = await tunnel.messages.first.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw Exception('Handshake response timeout'),
+      );
+
+      // Parse handshake response
+      final handshakeResponseJson =
+          jsonDecode(utf8.decode(handshakeResponseBytes)) as Map<String, dynamic>;
+
+      if (handshakeResponseJson['type'] == 'error') {
+        await tunnel.close();
+        return PairingResult.error(
+            handshakeResponseJson['message'] as String? ?? 'Handshake failed');
+      }
+
+      final serverHandshakeB64 = handshakeResponseJson['message'] as String?;
+      if (serverHandshakeB64 == null) {
+        await tunnel.close();
+        return PairingResult.error('Invalid handshake response');
+      }
+
+      // Process server's handshake response
+      await noiseSession.readHandshakeMessage(
+          Uint8List.fromList(base64Decode(serverHandshakeB64)));
+
+      if (!noiseSession.isComplete) {
+        await tunnel.close();
+        return PairingResult.error('Handshake incomplete');
+      }
+
+      // Step 3: Send claim code request (JSON-wrapped, transport-encrypted by Noise tunnel)
+      onStatusUpdate?.call('Submitting claim code...');
+      final claimRequest = jsonEncode({
+        'type': 'claim_code',
+        'data': {
+          'code': claimCode,
+          'device_name': deviceName,
+          'platform': devicePlatform,
+        },
+      });
+      tunnel.sendMessage(Uint8List.fromList(utf8.encode(claimRequest)));
+
+      // Step 4: Wait for response
+      final responseBytes = await tunnel.messages.first.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw Exception('Claim code response timeout'),
+      );
+
+      // Parse response
+      final responseJson =
+          jsonDecode(utf8.decode(responseBytes)) as Map<String, dynamic>;
+
+      // Check for error (server sends 'message' field for errors)
+      if (responseJson['type'] == 'error') {
+        final errorMsg = responseJson['message'] as String? ??
+            responseJson['reason'] as String? ??
+            'Unknown error';
+        await tunnel.close();
+        return PairingResult.error(_formatTunnelError(errorMsg));
+      }
+
+      // Parse pairing response
+      final deviceId = responseJson['device_id'] as String?;
+      final mediaToken = responseJson['media_token'] as String?;
+      final devicePublicKeyB64 = responseJson['device_public_key'] as String?;
+      final devicePrivateKeyB64 = responseJson['device_private_key'] as String?;
+
+      if (deviceId == null ||
+          mediaToken == null ||
+          devicePublicKeyB64 == null ||
+          devicePrivateKeyB64 == null) {
+        await tunnel.close();
+        return PairingResult.error('Incomplete pairing response from relay');
+      }
+
+      await tunnel.close();
+
+      // Step 5: Build credentials
+      // Use first direct URL as server URL, or relay URL if no direct URLs
+      final serverUrl = claimInfo.directUrls.isNotEmpty
+          ? claimInfo.directUrls.first
+          : _relayUrl;
+
+      final credentials = PairingCredentials(
+        serverUrl: serverUrl,
+        deviceId: deviceId,
+        mediaToken: mediaToken,
+        devicePublicKey: _base64ToBytes(devicePublicKeyB64),
+        devicePrivateKey: _base64ToBytes(devicePrivateKeyB64),
+        serverPublicKey: serverPublicKey,
+        directUrls: claimInfo.directUrls,
+        certFingerprint: null,
+        instanceName: null,
+        instanceId: claimInfo.instanceId,
+      );
+
+      await _storeCredentials(credentials);
+
+      // Step 6: Mark claim as consumed on relay
+      onStatusUpdate?.call('Finalizing...');
+      await _relayService.consumeClaim(claimInfo.claimId, deviceId);
+
+      // Store that we connected via relay
+      await _authStorage.write('connection_last_type', 'relay');
+
+      return PairingResult.success(credentials);
+    } catch (e) {
+      if (tunnel != null) {
+        await tunnel.close();
+      }
+      return PairingResult.error('Relay pairing error: $e');
+    }
+  }
+
+  /// Formats tunnel error messages to be user-friendly.
+  String _formatTunnelError(String reason) {
+    switch (reason) {
+      case 'invalid_claim_code':
+        return 'Invalid claim code';
+      case 'claim_code_used':
+        return 'This claim code has already been used';
+      case 'claim_code_expired':
+        return 'This claim code has expired';
+      case 'handshake_incomplete':
+        return 'Handshake must be completed before submitting claim code';
+      case 'device_creation_failed':
+        return 'Failed to create device registration';
+      default:
+        return reason;
+    }
+  }
 
   /// Attempts to establish a direct connection after pairing.
   ///

@@ -4,11 +4,19 @@ import 'package:graphql_flutter/graphql_flutter.dart';
 import '../auth/auth_service.dart';
 import '../auth/media_token_service.dart';
 import '../config/web_config.dart';
+import '../connection/reconnection_service.dart';
 import 'client.dart';
 
 /// Provider for the auth service instance.
 final authServiceProvider = Provider<AuthService>((ref) {
   return AuthService();
+});
+
+/// Provider for the reconnection service instance.
+///
+/// Used on native platforms to reconnect to a paired instance after app restart.
+final reconnectionServiceProvider = Provider<ReconnectionService>((ref) {
+  return ReconnectionService();
 });
 
 /// Provider for the server URL.
@@ -152,6 +160,12 @@ class AuthStateNotifier extends Notifier<AsyncValue<bool>> {
   AuthService get authService => ref.watch(authServiceProvider);
 
   /// Initialize authentication, checking for injected web config first.
+  ///
+  /// On native platforms, attempts to reconnect to the paired instance using
+  /// the ReconnectionService. This handles:
+  /// - Trying direct URLs first
+  /// - Falling back to relay tunnel if direct fails
+  /// - Refreshing the auth token on successful reconnection
   Future<void> _initAuth() async {
     state = const AsyncValue.loading();
     try {
@@ -161,10 +175,57 @@ class AuthStateNotifier extends Notifier<AsyncValue<bool>> {
         _webConfigProcessed = true;
       }
 
+      // Check if we have stored credentials
       final isAuth = await authService.isAuthenticated();
+
+      // On native platforms with stored credentials, try to reconnect
+      if (!isWebPlatform && isAuth) {
+        debugPrint('[AuthStateNotifier] Native platform with stored auth, attempting reconnection...');
+        final reconnectionResult = await _attemptReconnection();
+        state = AsyncValue.data(reconnectionResult);
+        return;
+      }
+
       state = AsyncValue.data(isAuth);
     } catch (e, st) {
       state = AsyncValue.error(e, st);
+    }
+  }
+
+  /// Attempt to reconnect to the paired instance using ReconnectionService.
+  ///
+  /// Returns true if reconnection succeeded and auth was updated,
+  /// false if reconnection failed (caller should show login).
+  Future<bool> _attemptReconnection() async {
+    final reconnectionService = ref.read(reconnectionServiceProvider);
+
+    try {
+      final result = await reconnectionService.reconnect();
+
+      if (result.success && result.session != null) {
+        final session = result.session!;
+        debugPrint('[AuthStateNotifier] Reconnection successful, updating auth session');
+
+        // Update auth service with the refreshed token
+        await authService.setSession(
+          token: session.mediaToken,
+          serverUrl: session.serverUrl,
+          userId: session.deviceId,
+          username: 'Device ${session.deviceId.substring(0, 8)}',
+        );
+
+        return true;
+      } else {
+        debugPrint('[AuthStateNotifier] Reconnection failed: ${result.error}');
+        // Clear invalid session so user is redirected to login
+        await authService.clearSession();
+        return false;
+      }
+    } catch (e) {
+      debugPrint('[AuthStateNotifier] Reconnection error: $e');
+      // Clear session on error to show login
+      await authService.clearSession();
+      return false;
     }
   }
 

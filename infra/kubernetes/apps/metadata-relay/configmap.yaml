@@ -15,5 +15,5 @@ data:
   # Database configuration
   SQLITE_DB_PATH: "/data/metadata_relay.db"
 
-  # Optional: Redis cache (if not set, uses in-memory cache)
-  # REDIS_URL: "redis://redis:6379"
+  # Redis cache for distributed/persistent caching
+  REDIS_URL: "redis://redis:6379"

@@ -127,8 +127,7 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
               direct_urls: info.direct_urls
             })
 
-          {:reply, :ok, {:text, response},
-           %{state | instance_id: instance_id, connected: true}}
+          {:reply, :ok, {:text, response}, %{state | instance_id: instance_id, connected: true}}
         else
           response =
             Jason.encode!(%{

@@ -17,13 +17,14 @@ defmodule MetadataRelay.Relay.Instance do
   @foreign_key_type :binary_id
 
   schema "relay_instances" do
-    field :instance_id, :string
-    field :public_key, :binary
-    field :direct_urls, {:array, :string}, default: []
-    field :last_seen_at, :utc_datetime
-    field :online, :boolean, default: false
+    field(:instance_id, :string)
+    field(:public_key, :binary)
+    field(:direct_urls, {:array, :string}, default: [])
+    field(:public_ip, :string)
+    field(:last_seen_at, :utc_datetime)
+    field(:online, :boolean, default: false)
 
-    has_many :claims, MetadataRelay.Relay.Claim
+    has_many(:claims, MetadataRelay.Relay.Claim)
 
     timestamps(type: :utc_datetime)
   end
@@ -33,7 +34,7 @@ defmodule MetadataRelay.Relay.Instance do
   """
   def create_changeset(instance, attrs) do
     instance
-    |> cast(attrs, [:instance_id, :public_key, :direct_urls])
+    |> cast(attrs, [:instance_id, :public_key, :direct_urls, :public_ip])
     |> validate_required([:instance_id, :public_key])
     |> validate_length(:instance_id, min: 1, max: 255)
     |> validate_public_key()
@@ -45,7 +46,7 @@ defmodule MetadataRelay.Relay.Instance do
   """
   def heartbeat_changeset(instance, attrs) do
     instance
-    |> cast(attrs, [:direct_urls, :last_seen_at, :online])
+    |> cast(attrs, [:direct_urls, :public_ip, :last_seen_at, :online])
   end
 
   @doc """

@@ -41,7 +41,10 @@ defmodule MetadataRelayWeb.RelayTunnelIntegrationTest do
       assert info.online == true
     end
 
-    test "claim codes can be created and redeemed", %{instance: instance, instance_id: instance_id} do
+    test "claim codes can be created and redeemed", %{
+      instance: instance,
+      instance_id: instance_id
+    } do
       # Set instance online first
       {:ok, _} = Relay.set_online(instance)
 

@@ -36,16 +36,54 @@ defmodule MetadataRelayWeb.RelaySocket do
   end
 
   @impl true
-  def connect(_state) do
+  def connect(state) do
     Logger.info("Relay socket connect callback called")
+
+    # Extract peer IP from connection info
+    peer_ip = extract_peer_ip(state)
+    Logger.info("Relay socket peer IP: #{peer_ip || "unknown"}")
+
     # Start unregistered - instance must send register message first
     {:ok,
      %{
        instance_id: nil,
        instance: nil,
        registered: false,
-       heartbeat_timer: nil
+       heartbeat_timer: nil,
+       peer_ip: peer_ip
      }}
+  end
+
+  # Extract peer IP from connect_info, handling proxies via X-Forwarded-For
+  defp extract_peer_ip(state) do
+    connect_info = Map.get(state, :connect_info, %{})
+
+    # First check X-Forwarded-For header (for reverse proxy scenarios)
+    x_headers = Map.get(connect_info, :x_headers, [])
+
+    forwarded_ip =
+      x_headers
+      |> Enum.find_value(fn
+        {"x-forwarded-for", value} ->
+          # Take the first IP (original client)
+          value |> String.split(",") |> List.first() |> String.trim()
+
+        _ ->
+          nil
+      end)
+
+    if forwarded_ip do
+      forwarded_ip
+    else
+      # Fall back to direct peer connection
+      case Map.get(connect_info, :peer_data) do
+        %{address: address} ->
+          address |> :inet.ntoa() |> to_string()
+
+        _ ->
+          nil
+      end
+    end
   end
 
   @impl true
@@ -109,7 +147,9 @@ defmodule MetadataRelayWeb.RelaySocket do
 
   @impl true
   def terminate(reason, state) do
-    Logger.info("Relay socket terminated: #{inspect(reason)}, instance: #{state.instance_id}, state: #{inspect(state)}")
+    Logger.info(
+      "Relay socket terminated: #{inspect(reason)}, instance: #{state.instance_id}, state: #{inspect(state)}"
+    )
 
     # Mark instance as offline
     if state.instance_id do
@@ -137,10 +177,11 @@ defmodule MetadataRelayWeb.RelaySocket do
            Relay.register_instance(%{
              instance_id: instance_id,
              public_key: public_key,
-             direct_urls: direct_urls
+             direct_urls: direct_urls,
+             public_ip: state.peer_ip
            }),
          {:ok, instance} <- Relay.set_online(instance) do
-      Logger.info("Instance registered: #{instance_id}")
+      Logger.info("Instance registered: #{instance_id}, public_ip: #{state.peer_ip || "unknown"}")
 
       # Subscribe to relay messages for this instance
       Phoenix.PubSub.subscribe(MetadataRelay.PubSub, "relay:instance:#{instance_id}")

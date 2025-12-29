@@ -3,9 +3,9 @@ defmodule Mydia.Streaming.HlsSession do
   GenServer managing individual HLS transcoding sessions.
 
   Each session represents a single user streaming a specific media file.
-  The session starts an FFmpeg transcoding backend to transcode
-  the file on-demand, manages temporary storage for HLS segments, and
-  automatically terminates after a period of inactivity.
+  The session starts FFmpeg to transcode the file on-demand, manages
+  temporary storage for HLS segments, and automatically terminates after
+  a period of inactivity.
 
   ## Lifecycle
 
@@ -390,10 +390,20 @@ defmodule Mydia.Streaming.HlsSession do
     end
   end
 
+  defp start_backend(backend, _media_file, _temp_dir) do
+    Logger.error("Unknown backend: #{backend}")
+    {:error, :unknown_backend}
+  end
+
   # Stop the backend process
   defp stop_backend(:ffmpeg, backend_pid) do
     Logger.info("Stopping FFmpeg backend")
     FfmpegHlsTranscoder.stop_transcoding(backend_pid)
+  end
+
+  defp stop_backend(backend, _backend_pid) do
+    Logger.warning("Unknown backend to stop: #{backend}")
+    :ok
   end
 
   defp generate_session_id do

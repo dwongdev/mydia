@@ -14,7 +14,11 @@ defmodule MetadataRelayWeb.Endpoint do
   socket("/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]])
 
   # Relay WebSocket endpoints
-  socket("/relay/tunnel", MetadataRelayWeb.RelaySocket, websocket: true)
+  # Pass peer_data to get client IP for public URL enrichment
+  socket("/relay/tunnel", MetadataRelayWeb.RelaySocket,
+    websocket: [connect_info: [:peer_data, :x_headers]]
+  )
+
   socket("/relay/client", MetadataRelayWeb.ClientTunnelSocket, websocket: true)
 
   # Serve at "/" the static files from "priv/static" directory.

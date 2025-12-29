@@ -108,7 +108,10 @@ class LoginController extends _$LoginController {
       final relayService = relayUrl != null && relayUrl.isNotEmpty
           ? RelayService(relayUrl: relayUrl)
           : null;
-      final pairingService = PairingService(relayService: relayService);
+      final pairingService = PairingService(
+        relayService: relayService,
+        relayUrl: relayUrl,
+      );
       final deviceInfo = DeviceInfoService();
       final deviceName = await deviceInfo.getDeviceName();
 
@@ -120,9 +123,13 @@ class LoginController extends _$LoginController {
           ClaimCodeStatus claimStatus;
           if (status.contains('Looking up')) {
             claimStatus = ClaimCodeStatus.lookingUp;
-          } else if (status.contains('Connecting') || status.contains('Joining')) {
+          } else if (status.contains('Connecting') ||
+                     status.contains('Joining') ||
+                     status.contains('relay')) {
             claimStatus = ClaimCodeStatus.connecting;
-          } else if (status.contains('Establishing') || status.contains('Submitting')) {
+          } else if (status.contains('Establishing') ||
+                     status.contains('Submitting') ||
+                     status.contains('secure')) {
             claimStatus = ClaimCodeStatus.handshaking;
           } else {
             claimStatus = ClaimCodeStatus.handshaking;

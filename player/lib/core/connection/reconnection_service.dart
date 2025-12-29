@@ -84,6 +84,12 @@ class ReconnectionSession {
   });
 }
 
+/// Default relay URL for fallback connections.
+const _defaultRelayUrl = String.fromEnvironment(
+  'RELAY_URL',
+  defaultValue: 'https://relay.mydia.dev',
+);
+
 /// Service for reconnecting to paired Mydia instances.
 ///
 /// This service manages the reconnection logic after app restart,
@@ -94,15 +100,18 @@ class ReconnectionService {
     NoiseService? noiseService,
     AuthStorage? authStorage,
     RelayTunnelService? relayTunnelService,
+    String? relayUrl,
   })  : _channelService = channelService ?? ChannelService(),
         _noiseService = noiseService ?? NoiseService(),
         _authStorage = authStorage ?? getAuthStorage(),
-        _relayTunnelService = relayTunnelService;
+        _relayTunnelService = relayTunnelService,
+        _relayUrl = relayUrl ?? _defaultRelayUrl;
 
   final ChannelService _channelService;
   final NoiseService _noiseService;
   final AuthStorage _authStorage;
   final RelayTunnelService? _relayTunnelService;
+  final String _relayUrl;
 
   /// Connection timeout for each direct URL attempt.
   static const _directUrlTimeout = Duration(seconds: 5);
@@ -138,9 +147,12 @@ class ReconnectionService {
       // Continue to next URL on failure
     }
 
-    // Fall back to relay tunnel if available
-    if (_relayTunnelService != null && credentials.instanceId != null) {
-      return await _tryRelayConnection(credentials);
+    // Fall back to relay tunnel
+    if (credentials.instanceId != null) {
+      final relayResult = await _tryRelayConnection(credentials);
+      if (relayResult.success) {
+        return relayResult;
+      }
     }
 
     return ReconnectionResult.error(
@@ -248,14 +260,18 @@ class ReconnectionService {
   Future<ReconnectionResult> _tryRelayConnection(
     _StoredCredentials credentials,
   ) async {
-    if (_relayTunnelService == null || credentials.instanceId == null) {
-      return ReconnectionResult.error('Relay connection not available');
+    if (credentials.instanceId == null) {
+      return ReconnectionResult.error('Relay connection not available: no instance ID');
     }
 
     try {
+      // Use provided service or create one with default relay URL
+      final tunnelService = _relayTunnelService ??
+          RelayTunnelService(relayUrl: _relayUrl);
+
       // Connect to relay tunnel
       final tunnelResult =
-          await _relayTunnelService.connectViaRelay(credentials.instanceId!);
+          await tunnelService.connectViaRelay(credentials.instanceId!);
 
       if (!tunnelResult.success) {
         return ReconnectionResult.error(
@@ -270,18 +286,39 @@ class ReconnectionService {
       final noiseSession =
           await _noiseService.startReconnectHandshake(serverPublicKey);
 
-      // Send handshake message through tunnel
+      // Send handshake message through tunnel (wrapped in JSON for server)
       final handshakeMessage = await noiseSession.writeHandshakeMessage();
-      tunnel.sendMessage(handshakeMessage);
+      final handshakeRequest = jsonEncode({
+        'type': 'handshake_init',
+        'data': {'message': base64Encode(handshakeMessage)},
+      });
+      tunnel.sendMessage(Uint8List.fromList(utf8.encode(handshakeRequest)));
 
       // Wait for server response
-      final responseMessage = await tunnel.messages.first.timeout(
+      final responseBytes = await tunnel.messages.first.timeout(
         const Duration(seconds: 10),
         onTimeout: () => throw TimeoutException('Handshake response timeout'),
       );
 
+      // Parse response
+      final responseJson =
+          jsonDecode(utf8.decode(responseBytes)) as Map<String, dynamic>;
+
+      if (responseJson['type'] == 'error') {
+        await tunnel.close();
+        return ReconnectionResult.error(
+            responseJson['message'] as String? ?? 'Handshake failed');
+      }
+
+      final serverHandshakeB64 = responseJson['message'] as String?;
+      if (serverHandshakeB64 == null) {
+        await tunnel.close();
+        return ReconnectionResult.error('Invalid handshake response');
+      }
+
       // Process server's handshake response
-      await noiseSession.readHandshakeMessage(responseMessage);
+      await noiseSession.readHandshakeMessage(
+          Uint8List.fromList(base64Decode(serverHandshakeB64)));
 
       if (!noiseSession.isComplete) {
         await tunnel.close();
@@ -289,13 +326,12 @@ class ReconnectionService {
       }
 
       // Extract device ID and media token from response
-      // Note: In relay mode, we need to get these from the tunnel info or credentials
-      final deviceId = credentials.deviceId;
-      final mediaToken = credentials.mediaToken;
+      final deviceId = responseJson['device_id'] as String? ?? credentials.deviceId;
+      final mediaToken = responseJson['token'] as String? ?? credentials.mediaToken;
 
       if (deviceId == null || mediaToken == null) {
         await tunnel.close();
-        return ReconnectionResult.error('Missing credentials for relay mode');
+        return ReconnectionResult.error('Missing credentials in relay response');
       }
 
       // Success! Return established session

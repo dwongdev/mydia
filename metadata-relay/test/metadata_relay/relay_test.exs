@@ -200,7 +200,8 @@ defmodule MetadataRelay.RelayTest do
       device_id = "device-#{System.unique_integer()}"
 
       # Try to consume claim with wrong instance credentials
-      assert {:error, :unauthorized} = Relay.consume_claim(instance2.instance_id, claim.id, device_id)
+      assert {:error, :unauthorized} =
+               Relay.consume_claim(instance2.instance_id, claim.id, device_id)
 
       # Verify claim was not consumed
       refreshed_claim = Repo.get(MetadataRelay.Relay.Claim, claim.id)

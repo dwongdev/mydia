@@ -11,7 +11,7 @@
 /// ```
 ///
 /// The tunnel:
-/// - Connects to relay at wss://relay/relay/client
+/// - Connects to relay at wss://relay/relay/client/websocket
 /// - Establishes E2E encrypted Noise channel through relay
 /// - Relay only sees ciphertext (cannot read messages)
 ///
@@ -92,12 +92,12 @@ class RelayTunnelInfo {
 /// This class manages an active WebSocket tunnel through the relay,
 /// handling message serialization and providing a stream of incoming messages.
 class RelayTunnel {
-  RelayTunnel._(this._channel, this._info) {
+  RelayTunnel._(this._channel, this._broadcastStream, this._info) {
     _messageController = StreamController<Uint8List>.broadcast();
     _errorController = StreamController<String>.broadcast();
 
-    // Listen to WebSocket messages
-    _channel.stream.listen(
+    // Listen to WebSocket messages via the broadcast stream
+    _broadcastStream.listen(
       _handleMessage,
       onError: (error) {
         _errorController.add('WebSocket error: $error');
@@ -111,6 +111,7 @@ class RelayTunnel {
   }
 
   final WebSocketChannel _channel;
+  final Stream<dynamic> _broadcastStream;
   final RelayTunnelInfo _info;
   late final StreamController<Uint8List> _messageController;
   late final StreamController<String> _errorController;
@@ -233,24 +234,27 @@ class RelayTunnelService {
     try {
       // Build WebSocket URL for client tunnel
       final wsUrl = _relayUrl.replaceFirst('http://', 'ws://').replaceFirst('https://', 'wss://');
-      final uri = Uri.parse('$wsUrl/relay/client');
+      // Phoenix WebSocket endpoints require /websocket suffix
+      final uri = Uri.parse('$wsUrl/relay/client/websocket');
 
       // Establish WebSocket connection
       final channel = WebSocketChannel.connect(uri);
 
-      // Wait for connection to be established (with timeout)
-      final connectCompleter = Completer<void>();
-      StreamSubscription? subscription;
+      // Convert to broadcast stream so multiple listeners can subscribe
+      final broadcastStream = channel.stream.asBroadcastStream();
 
-      subscription = channel.stream.listen(
+      // Wait for first message (the response to our connect request)
+      final responseCompleter = Completer<String>();
+
+      broadcastStream.listen(
         (message) {
-          if (!connectCompleter.isCompleted) {
-            connectCompleter.complete();
+          if (!responseCompleter.isCompleted && message is String) {
+            responseCompleter.complete(message);
           }
         },
         onError: (error) {
-          if (!connectCompleter.isCompleted) {
-            connectCompleter.completeError(error);
+          if (!responseCompleter.isCompleted) {
+            responseCompleter.completeError(error);
           }
         },
         cancelOnError: false,
@@ -263,27 +267,20 @@ class RelayTunnelService {
       });
       channel.sink.add(connectMsg);
 
-      // Wait for first message or timeout
+      // Wait for response or timeout
+      final String firstMessage;
       try {
-        await connectCompleter.future
+        firstMessage = await responseCompleter.future
             .timeout(const Duration(seconds: 10), onTimeout: () {
           throw TimeoutException('Connection timeout');
         });
       } catch (e) {
-        await subscription.cancel();
         await channel.sink.close();
         return RelayTunnelResult.error('Failed to connect: $e');
       }
 
       // Parse the connected response
-      final firstMessage = await channel.stream.first.timeout(
-        const Duration(seconds: 5),
-        onTimeout: () => throw TimeoutException('Response timeout'),
-      );
-
-      await subscription.cancel();
-
-      final json = jsonDecode(firstMessage as String) as Map<String, dynamic>;
+      final json = jsonDecode(firstMessage) as Map<String, dynamic>;
       final type = json['type'] as String?;
 
       if (type == 'error') {
@@ -300,8 +297,8 @@ class RelayTunnelService {
       // Parse connection info
       final info = RelayTunnelInfo.fromJson(json);
 
-      // Create and return tunnel
-      final tunnel = RelayTunnel._(channel, info);
+      // Create and return tunnel with broadcast stream
+      final tunnel = RelayTunnel._(channel, broadcastStream, info);
       return RelayTunnelResult.success(tunnel);
     } catch (e) {
       if (e.toString().contains('SocketException') ||
@@ -329,24 +326,27 @@ class RelayTunnelService {
     try {
       // Build WebSocket URL for client tunnel
       final wsUrl = _relayUrl.replaceFirst('http://', 'ws://').replaceFirst('https://', 'wss://');
-      final uri = Uri.parse('$wsUrl/relay/client');
+      // Phoenix WebSocket endpoints require /websocket suffix
+      final uri = Uri.parse('$wsUrl/relay/client/websocket');
 
       // Establish WebSocket connection
       final channel = WebSocketChannel.connect(uri);
 
-      // Wait for connection to be established
-      final connectCompleter = Completer<void>();
-      StreamSubscription? subscription;
+      // Convert to broadcast stream so multiple listeners can subscribe
+      final broadcastStream = channel.stream.asBroadcastStream();
 
-      subscription = channel.stream.listen(
+      // Wait for first message (the response to our connect request)
+      final responseCompleter = Completer<String>();
+
+      broadcastStream.listen(
         (message) {
-          if (!connectCompleter.isCompleted) {
-            connectCompleter.complete();
+          if (!responseCompleter.isCompleted && message is String) {
+            responseCompleter.complete(message);
           }
         },
         onError: (error) {
-          if (!connectCompleter.isCompleted) {
-            connectCompleter.completeError(error);
+          if (!responseCompleter.isCompleted) {
+            responseCompleter.completeError(error);
           }
         },
         cancelOnError: false,
@@ -359,27 +359,20 @@ class RelayTunnelService {
       });
       channel.sink.add(connectMsg);
 
-      // Wait for first message or timeout
+      // Wait for response or timeout
+      final String firstMessage;
       try {
-        await connectCompleter.future
+        firstMessage = await responseCompleter.future
             .timeout(const Duration(seconds: 10), onTimeout: () {
           throw TimeoutException('Connection timeout');
         });
       } catch (e) {
-        await subscription.cancel();
         await channel.sink.close();
         return RelayTunnelResult.error('Failed to connect: $e');
       }
 
       // Parse the connected response
-      final firstMessage = await channel.stream.first.timeout(
-        const Duration(seconds: 5),
-        onTimeout: () => throw TimeoutException('Response timeout'),
-      );
-
-      await subscription.cancel();
-
-      final json = jsonDecode(firstMessage as String) as Map<String, dynamic>;
+      final json = jsonDecode(firstMessage) as Map<String, dynamic>;
       final type = json['type'] as String?;
 
       if (type == 'error') {
@@ -396,8 +389,8 @@ class RelayTunnelService {
       // Parse connection info
       final info = RelayTunnelInfo.fromJson(json);
 
-      // Create and return tunnel
-      final tunnel = RelayTunnel._(channel, info);
+      // Create and return tunnel with broadcast stream
+      final tunnel = RelayTunnel._(channel, broadcastStream, info);
       return RelayTunnelResult.success(tunnel);
     } catch (e) {
       if (e.toString().contains('SocketException') ||

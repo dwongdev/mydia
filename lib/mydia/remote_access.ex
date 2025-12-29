@@ -9,7 +9,7 @@ defmodule Mydia.RemoteAccess do
   require Logger
 
   alias Mydia.Repo
-  alias Mydia.RemoteAccess.{Config, PairingClaim, RemoteDevice}
+  alias Mydia.RemoteAccess.{Config, DirectUrls, PairingClaim, RemoteDevice}
 
   # Config management
 
@@ -562,6 +562,56 @@ defmodule Mydia.RemoteAccess do
       {:ok, direct_urls}
     end
   end
+
+  @doc """
+  Updates the public port used for public IP URLs.
+
+  This port is used when generating sslip.io URLs from the detected public IP.
+  Useful when your external port differs from internal port (e.g., NAT port forwarding).
+
+  Pass `nil` to clear the override and use the default external_port.
+  """
+  def update_public_port(nil) do
+    case get_config() do
+      nil ->
+        {:error, :not_configured}
+
+      config ->
+        case config
+             |> Config.update_public_port_changeset(nil)
+             |> Repo.update() do
+          {:ok, updated_config} ->
+            # Clear the public IP cache to regenerate URLs with new port
+            DirectUrls.clear_public_ip_cache()
+            {:ok, updated_config}
+
+          {:error, _} = error ->
+            error
+        end
+    end
+  end
+
+  def update_public_port(port) when is_integer(port) and port > 0 and port < 65536 do
+    case get_config() do
+      nil ->
+        {:error, :not_configured}
+
+      config ->
+        case config
+             |> Config.update_public_port_changeset(port)
+             |> Repo.update() do
+          {:ok, updated_config} ->
+            # Clear the public IP cache to regenerate URLs with new port
+            DirectUrls.clear_public_ip_cache()
+            {:ok, updated_config}
+
+          {:error, _} = error ->
+            error
+        end
+    end
+  end
+
+  def update_public_port(_), do: {:error, :invalid_port}
 
   @doc """
   Manually triggers a relay reconnection.

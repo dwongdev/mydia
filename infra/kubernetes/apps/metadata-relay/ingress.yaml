@@ -1,5 +1,59 @@
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+# Certificate for TLS
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: metadata-relay-tls
+  namespace: metadata-relay
+  labels:
+    app.kubernetes.io/name: metadata-relay
+    app.kubernetes.io/component: relay-service
+spec:
+  dnsNames:
+    - relay.mydia.dev
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+  secretName: metadata-relay-tls-secret
+---
+# Middleware for HTTP to HTTPS redirect
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+  namespace: metadata-relay
+  labels:
+    app.kubernetes.io/name: metadata-relay
+    app.kubernetes.io/component: relay-service
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+# HTTP IngressRoute (redirects to HTTPS)
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: metadata-relay-http
+  namespace: metadata-relay
+  labels:
+    app.kubernetes.io/name: metadata-relay
+    app.kubernetes.io/component: relay-service
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`relay.mydia.dev`)
+      middlewares:
+        - name: redirect-https
+          namespace: metadata-relay
+      services:
+        - name: metadata-relay
+          port: 4001
+---
+# HTTPS IngressRoute
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
 metadata:
   name: metadata-relay
   namespace: metadata-relay
@@ -7,25 +61,16 @@ metadata:
     app.kubernetes.io/name: metadata-relay
     app.kubernetes.io/component: relay-service
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-    traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    # external-dns will automatically create DNS records for this ingress
-    external-dns.alpha.kubernetes.io/hostname: relay.mydia.dev
-    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+    # external-dns will create DNS record pointing to this IP
+    external-dns.alpha.kubernetes.io/target: 194.58.38.130
 spec:
-  ingressClassName: traefik
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`relay.mydia.dev`)
+      services:
+        - name: metadata-relay
+          port: 4001
   tls:
-    - hosts:
-        - relay.mydia.dev
-      secretName: metadata-relay-tls
-  rules:
-    - host: relay.mydia.dev
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: metadata-relay
-                port:
-                  name: http
+    secretName: metadata-relay-tls-secret

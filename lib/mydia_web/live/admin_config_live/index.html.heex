@@ -144,13 +144,11 @@
         <% end %>
         <%!-- Remote Access Tab --%>
         <%= if @active_tab == "remote_access" do %>
-          <div class="p-6">
-            <.live_component
-              module={MydiaWeb.AdminConfigLive.RemoteAccessComponent}
-              id="remote-access"
-              current_user={@current_user}
-            />
-          </div>
+          <.live_component
+            module={MydiaWeb.AdminConfigLive.RemoteAccessComponent}
+            id="remote-access"
+            current_user={@current_user}
+          />
         <% end %>
       </div>
     </div>

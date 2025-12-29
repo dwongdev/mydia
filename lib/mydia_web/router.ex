@@ -16,9 +16,15 @@ defmodule MydiaWeb.Router do
     plug :fetch_session
   end
 
+  # Base graphql pipeline - authentication handled separately
   pipeline :graphql do
     plug :accepts, ["json"]
     plug :fetch_session
+  end
+
+  # Builds Absinthe context after authentication
+  # Must run AFTER api_auth so Guardian has the current_user
+  pipeline :graphql_context do
     plug MydiaWeb.Plugs.AbsintheContext
   end
 
@@ -156,7 +162,6 @@ defmodule MydiaWeb.Router do
       live "/requests", AdminRequestsLive.Index, :index
       live "/users", AdminUsersLive.Index, :index
       live "/devices", AdminDevicesLive.Index, :index
-      live "/settings/remote-access", RemoteAccessSettingsLive.Index, :index
     end
   end
 
@@ -239,7 +244,7 @@ defmodule MydiaWeb.Router do
   # The :api_auth pipeline populates current_user if a valid JWT/API key is provided
   # Individual resolvers check for authentication and return :unauthorized if needed
   scope "/api/graphql" do
-    pipe_through [:graphql, :api_auth]
+    pipe_through [:graphql, :api_auth, :graphql_context]
 
     forward "/", Absinthe.Plug,
       schema: MydiaWeb.Schema,
@@ -250,7 +255,7 @@ defmodule MydiaWeb.Router do
   # GraphiQL interface for development
   if Application.compile_env(:mydia, :dev_routes) do
     scope "/api" do
-      pipe_through [:graphql, :api_auth]
+      pipe_through [:graphql, :api_auth, :graphql_context]
 
       forward "/graphiql", Absinthe.Plug.GraphiQL,
         schema: MydiaWeb.Schema,

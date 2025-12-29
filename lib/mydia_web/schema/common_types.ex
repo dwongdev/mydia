@@ -194,4 +194,10 @@ defmodule MydiaWeb.Schema.CommonTypes do
     field :success, non_null(:boolean), description: "Whether the revoke operation succeeded"
     field :device, :remote_device, description: "The revoked device"
   end
+
+  @desc "A pairing claim code for device pairing"
+  object :claim_code do
+    field :code, non_null(:string), description: "The claim code (e.g., 'ABC-XYZ')"
+    field :expires_at, non_null(:datetime), description: "When the code expires"
+  end
 end

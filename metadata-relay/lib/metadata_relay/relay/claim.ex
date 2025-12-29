@@ -26,13 +26,13 @@ defmodule MetadataRelay.Relay.Claim do
   @default_ttl_seconds 300
 
   schema "relay_claims" do
-    field :code, :string
-    field :user_id, :string
-    field :expires_at, :utc_datetime
-    field :consumed_at, :utc_datetime
-    field :consumed_by_device_id, :string
+    field(:code, :string)
+    field(:user_id, :string)
+    field(:expires_at, :utc_datetime)
+    field(:consumed_at, :utc_datetime)
+    field(:consumed_by_device_id, :string)
 
-    belongs_to :instance, MetadataRelay.Relay.Instance
+    belongs_to(:instance, MetadataRelay.Relay.Instance)
 
     timestamps(type: :utc_datetime)
   end

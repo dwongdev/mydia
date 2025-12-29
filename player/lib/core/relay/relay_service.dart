@@ -6,6 +6,7 @@
 library;
 
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 
 /// Response from looking up a claim code.
@@ -105,11 +106,13 @@ class RelayService {
 
     try {
       final url = Uri.parse('$_relayUrl/relay/claim/$normalizedCode');
+      debugPrint('[RelayService] Making POST request to $url');
 
       final response = await _httpClient.post(
         url,
         headers: {'Content-Type': 'application/json'},
       );
+      debugPrint('[RelayService] Response status: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
@@ -131,7 +134,9 @@ class RelayService {
         return RelayResult.error(
             'Failed to lookup claim code (${response.statusCode})');
       }
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[RelayService] Request failed: $e');
+      debugPrint('[RelayService] Stack trace: $st');
       if (e.toString().contains('SocketException') ||
           e.toString().contains('Connection refused')) {
         return RelayResult.error(

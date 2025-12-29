@@ -3,15 +3,13 @@
 # This runs the full stack with Flutter integration tests:
 # - metadata-relay: Relay service for NAT traversal
 # - mydia: Main application
-# - player: Flutter web app served via nginx
-# - chrome: Selenium Chrome for UI testing (shares network with test container)
-# - test: Flutter integration test runner
+# - player: Flutter web app served via nginx (for manual verification)
+# - test: Flutter integration test runner (includes Chrome)
 #
 # How it works:
-# Flutter's integration_test package hardcodes 'localhost' URLs when telling Chrome
-# where to navigate. To work around this, Chrome shares the test container's network
-# namespace via network_mode: service:test. This means 'localhost' in Chrome resolves
-# to the test container where the Flutter web server runs on port 4040.
+# Chrome is installed directly in the test container and controlled by
+# Flutter's `flutter test -d chrome` command. This avoids the WebDriver
+# complexity and ensures proper integration test binding.
 #
 # Performance optimizations:
 # - BuildKit enabled for cache mounts (DOCKER_BUILDKIT=1)
@@ -81,10 +79,13 @@ services:
       # Disable HTTPS origin checks for E2E
       PHX_CHECK_ORIGIN: "false"
 
-      # Direct URLs config - include Docker hostname for internal access
+      # Direct URLs config for E2E testing
+      # Disable auto-generated sslip.io URLs (they use HTTPS which requires certs)
+      # We'll use the test container to call a special endpoint to add HTTP URLs
       EXTERNAL_PORT: "4000"
       PUBLIC_IP_ENABLED: "false"
-      ADDITIONAL_DIRECT_URLS: "http://mydia:4000"
+      # Disable sslip.io URL generation so only manually added URLs are used
+      DISABLE_AUTO_SSLIP_URLS: "true"
     volumes:
       - mydia_config:/config
       - mydia_data:/data
@@ -133,21 +134,14 @@ services:
   # ============================================
   # Flutter Integration Test Runner
   # ============================================
-  # The test container runs the Flutter web server on port 4040.
-  # Chrome shares this container's network namespace, so localhost:4040
-  # in Chrome reaches the Flutter web server correctly.
+  # The test container includes Chrome and runs tests using
+  # `flutter test -d chrome`, which manages Chrome directly.
   test:
     build:
       context: .
       dockerfile: player/Dockerfile.test
     container_name: e2e_test
     environment:
-      # WebDriver configuration - Chrome is at localhost since we share network
-      CHROMEDRIVER_URL: "http://localhost:4444"
-
-      # Web port for Flutter web server (Chrome will reach this via localhost)
-      WEB_PORT: "4040"
-
       # Backend service URLs (test container is on the e2e network)
       MYDIA_URL: "http://mydia:4000"
       RELAY_URL: "http://relay:4001"
@@ -158,37 +152,11 @@ services:
     depends_on:
       mydia:
         condition: service_healthy
+      relay:
+        condition: service_healthy
     networks:
       - e2e
     # Test runner exits when done
-
-  # ============================================
-  # Selenium Chrome (for UI testing)
-  # ============================================
-  # Chrome shares the test container's network namespace via network_mode.
-  # This means 'localhost' in Chrome resolves to the test container, allowing
-  # Flutter's hardcoded localhost URLs to work correctly.
-  chrome:
-    image: selenium/standalone-chrome:131.0
-    container_name: e2e_chrome
-    shm_size: "2g"
-    environment:
-      SE_NODE_MAX_SESSIONS: "1"
-      SE_NODE_SESSION_TIMEOUT: "300"
-    # Share network namespace with test container - localhost in Chrome = test container
-    network_mode: service:test
-    # Note: No ports exposed here since we share test's network namespace.
-    # WebDriver is accessible at localhost:4444 from the test container.
-    # VNC debugging is available at localhost:7900 from the test container.
-    depends_on:
-      - test
-    # Health check runs in the shared namespace
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4444/status"]
-      interval: 2s
-      timeout: 2s
-      start_period: 5s
-      retries: 10
 
 networks:
   e2e:

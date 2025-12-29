@@ -35,6 +35,45 @@ void main() {
   // Get the pre-generated claim code from dart-define
   const claimCode = String.fromEnvironment('E2E_CLAIM_CODE');
 
+  /// Wait for the login screen to appear (auth state to resolve).
+  /// Uses pump() instead of pumpAndSettle() because the loading screen
+  /// has an infinite CircularProgressIndicator animation.
+  Future<void> waitForLoginScreen(WidgetTester tester, {int maxSeconds = 30}) async {
+    debugPrint('[Test] Waiting for login screen to appear...');
+    for (var i = 0; i < maxSeconds; i++) {
+      await tester.pump(const Duration(seconds: 1));
+      final loginTitle = find.text('Connect to Server');
+      if (loginTitle.evaluate().isNotEmpty) {
+        debugPrint('[Test] Login screen found after $i seconds');
+        // Give it a moment for the screen to fully render
+        await tester.pump(const Duration(milliseconds: 500));
+        return;
+      }
+    }
+    debugPrint('[Test] Login screen not found after $maxSeconds seconds');
+  }
+
+  /// Wait for the app to navigate away from the login screen after pairing.
+  Future<bool> waitForPairingComplete(WidgetTester tester, {int maxSeconds = 60}) async {
+    debugPrint('[Test] Waiting for pairing to complete...');
+    for (var i = 0; i < maxSeconds; i++) {
+      await tester.pump(const Duration(seconds: 1));
+      final loginTitle = find.text('Connect to Server');
+      if (loginTitle.evaluate().isEmpty) {
+        debugPrint('[Test] Navigated away from login screen after $i seconds');
+        return true;
+      }
+      // Check for error message
+      final errorIcon = find.byIcon(Icons.error_outline_rounded);
+      if (errorIcon.evaluate().isNotEmpty) {
+        debugPrint('[Test] Error message found after $i seconds');
+        return false;
+      }
+    }
+    debugPrint('[Test] Still on login screen after $maxSeconds seconds');
+    return false;
+  }
+
   group('Device Pairing Flow', () {
     testWidgets('Happy path: valid claim code leads to successful pairing',
         (WidgetTester tester) async {
@@ -49,21 +88,18 @@ void main() {
           child: MyApp(),
         ),
       );
-      await tester.pumpAndSettle();
 
-      // Wait for login screen to appear
-      await tester.pumpAndSettle(const Duration(seconds: 2));
+      // Wait for login screen (uses pump(), not pumpAndSettle due to CircularProgressIndicator)
+      await waitForLoginScreen(tester);
 
       // Find the claim code input field - it's the first TextFormField on the login screen
-      // The claim code field has centered text with letter-spacing styling
       final textField = find.byType(TextFormField).first;
-
       expect(textField, findsOneWidget,
           reason: 'Should find the claim code input field');
 
       // Enter the claim code (remove any dashes if present)
       await tester.enterText(textField, claimCode.replaceAll('-', ''));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
 
       // Find and tap the Connect button
       final connectButton = find.widgetWithText(ElevatedButton, 'Connect');
@@ -71,42 +107,18 @@ void main() {
           reason: 'Should find the Connect button');
 
       await tester.tap(connectButton);
+      await tester.pump(const Duration(milliseconds: 100));
 
       // Wait for pairing to complete (this involves Noise handshake)
-      // Give it up to 30 seconds for the full flow
-      await tester.pumpAndSettle(const Duration(seconds: 30));
-
-      // After successful pairing, we should be on the home screen
-      // The app navigates to '/' on success
-      // Look for common home screen elements
-
-      // Option 1: Check we're no longer on login screen
-      final loginTitle = find.text('Connect to Server');
-
-      // If still on login screen, check for success or error
-      if (loginTitle.evaluate().isNotEmpty) {
-        // Check if there's an error message
-        final errorContainer = find.byWidgetPredicate(
-          (widget) =>
-              widget is Container &&
-              widget.decoration is BoxDecoration &&
-              (widget.decoration as BoxDecoration).color?.value ==
-                  Colors.red.withOpacity(0.1).value,
-        );
-
-        if (errorContainer.evaluate().isNotEmpty) {
-          fail('Pairing failed with an error. Check logs for details.');
-        }
-
-        // Check for loading indicator
-        final loadingIndicator = find.byType(CircularProgressIndicator);
-        if (loadingIndicator.evaluate().isNotEmpty) {
-          // Still loading, wait more
-          await tester.pumpAndSettle(const Duration(seconds: 30));
-        }
-      }
+      final pairingSucceeded = await waitForPairingComplete(tester);
 
       // Verify we're no longer on login screen (pairing succeeded)
+      expect(
+        pairingSucceeded,
+        isTrue,
+        reason: 'Pairing should complete successfully',
+      );
+
       expect(
         find.text('Connect to Server'),
         findsNothing,
@@ -124,10 +136,9 @@ void main() {
           child: MyApp(),
         ),
       );
-      await tester.pumpAndSettle();
 
-      // Wait for login screen to appear
-      await tester.pumpAndSettle(const Duration(seconds: 2));
+      // Wait for login screen
+      await waitForLoginScreen(tester);
 
       // Find the claim code input field
       final textField = find.byType(TextFormField).first;
@@ -135,14 +146,23 @@ void main() {
 
       // Enter an invalid claim code
       await tester.enterText(textField, 'INVALID1');
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
 
       // Tap the Connect button
       final connectButton = find.widgetWithText(ElevatedButton, 'Connect');
       await tester.tap(connectButton);
+      await tester.pump(const Duration(milliseconds: 100));
 
-      // Wait for error response
-      await tester.pumpAndSettle(const Duration(seconds: 10));
+      // Wait for error response (with timeout)
+      debugPrint('[Test] Waiting for error message...');
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(seconds: 1));
+        final errorIcon = find.byIcon(Icons.error_outline_rounded);
+        if (errorIcon.evaluate().isNotEmpty) {
+          debugPrint('[Test] Error icon found after $i seconds');
+          break;
+        }
+      }
 
       // Should still be on login screen
       expect(
@@ -152,7 +172,6 @@ void main() {
       );
 
       // Should show an error message
-      // The error could be in various forms, let's check for error styling
       final errorIcon = find.byIcon(Icons.error_outline_rounded);
       expect(
         errorIcon,

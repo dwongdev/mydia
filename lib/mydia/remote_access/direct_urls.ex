@@ -118,7 +118,9 @@ defmodule Mydia.RemoteAccess.DirectUrls do
 
   """
   def build_sslip_url({a, b, c, d}, port) when is_integer(port) do
-    "https://#{a}-#{b}-#{c}-#{d}.sslip.io:#{port}"
+    config = Application.get_env(:mydia, :direct_urls, [])
+    scheme = if Keyword.get(config, :use_http, false), do: "http", else: "https"
+    "#{scheme}://#{a}-#{b}-#{c}-#{d}.sslip.io:#{port}"
   end
 
   @doc """

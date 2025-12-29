@@ -59,28 +59,30 @@ A lightweight Node.js/Express server that mimics the qBittorrent Web API.
 
 ## Running the E2E Environment
 
-### Start all services:
+Mock services are controlled via the `e2e` profile in `compose.test.yml`.
+
+### Start all services (including mocks):
 
 ```bash
-docker compose -f compose.e2e.yml up -d
+docker compose -f compose.test.yml --profile e2e up -d
 ```
 
 ### View logs:
 
 ```bash
-docker compose -f compose.e2e.yml logs -f
+docker compose -f compose.test.yml --profile e2e logs -f
 ```
 
 ### Stop all services:
 
 ```bash
-docker compose -f compose.e2e.yml down
+docker compose -f compose.test.yml --profile e2e down
 ```
 
 ### Rebuild mock services after changes:
 
 ```bash
-docker compose -f compose.e2e.yml build mock-prowlarr mock-qbittorrent
+docker compose -f compose.test.yml --profile e2e build mock-prowlarr mock-qbittorrent
 ```
 
 ## Service URLs (from host)
@@ -98,7 +100,7 @@ docker compose -f compose.e2e.yml build mock-prowlarr mock-qbittorrent
 
 ## Environment Variables
 
-The app service is configured to use mock services via environment variables in `compose.e2e.yml`:
+The app service is configured to use mock services via environment variables in `compose.test.yml`:
 
 ```yaml
 PROWLARR_URL: "http://mock-prowlarr:9696"
@@ -129,7 +131,7 @@ Modify the `mockIndexers` and `mockSearchResults` arrays in the Prowlarr server,
 Check service health with:
 
 ```bash
-docker compose -f compose.e2e.yml ps
+docker compose -f compose.test.yml --profile e2e ps
 ```
 
 ### Mock service crashes:
@@ -137,8 +139,8 @@ docker compose -f compose.e2e.yml ps
 View logs to debug:
 
 ```bash
-docker compose -f compose.e2e.yml logs mock-prowlarr
-docker compose -f compose.e2e.yml logs mock-qbittorrent
+docker compose -f compose.test.yml --profile e2e logs mock-prowlarr
+docker compose -f compose.test.yml --profile e2e logs mock-qbittorrent
 ```
 
 ### App can't connect to mock services:
@@ -146,6 +148,6 @@ docker compose -f compose.e2e.yml logs mock-qbittorrent
 Verify network connectivity from app container:
 
 ```bash
-docker compose -f compose.e2e.yml exec app curl http://mock-prowlarr:9696/health
-docker compose -f compose.e2e.yml exec app curl http://mock-qbittorrent:8080/health
+docker compose -f compose.test.yml --profile e2e exec app curl http://mock-prowlarr:9696/health
+docker compose -f compose.test.yml --profile e2e exec app curl http://mock-qbittorrent:8080/health
 ```

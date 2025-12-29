@@ -2,15 +2,12 @@
 # ============================================
 # E2E Test Runner - Flutter Integration Tests
 # ============================================
-# This Dockerfile runs Flutter integration tests against
-# a Selenium Chrome instance that shares our network namespace.
+# This Dockerfile runs Flutter integration tests using `flutter test -d chrome`.
 #
 # How it works:
-# In docker-compose, Chrome uses `network_mode: service:test` to share this
-# container's network namespace. This means:
-# 1. Chrome listens on localhost:4444 (WebDriver) from this container's perspective
-# 2. When Flutter tells Chrome to navigate to localhost:4040, Chrome reaches
-#    our Flutter web server directly (since localhost is shared)
+# 1. Chrome is installed directly in this container
+# 2. Flutter's `flutter test -d chrome` command launches Chrome headlessly
+# 3. Tests run against real Mydia and Relay services on the e2e network
 #
 # NOTE: This Dockerfile expects the build context to be the project root
 # (not the player directory) so it can access priv/graphql/schema.graphql
@@ -18,8 +15,6 @@
 # Build with: DOCKER_BUILDKIT=1 docker build -f player/Dockerfile.test .
 #
 # Environment variables required:
-# - CHROMEDRIVER_URL: URL of the Selenium WebDriver (default: http://localhost:4444)
-# - WEB_PORT: Port for the Flutter web server (default: 4040)
 # - MYDIA_URL: URL of the Mydia server (for API calls)
 # - RELAY_URL: URL of the metadata-relay service
 
@@ -28,12 +23,22 @@ FROM ghcr.io/cirruslabs/flutter:stable
 # Set pub cache location for caching
 ENV PUB_CACHE=/root/.pub-cache
 
-# Install additional dependencies
+# Install Chrome and additional dependencies
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
         curl \
         jq \
+        wget \
+        gnupg \
+        ca-certificates \
+    && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
+
+# Set Chrome as the default browser for Flutter
+ENV CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
 
 WORKDIR /app
 
@@ -62,24 +67,17 @@ COPY <<'EOF' /entrypoint.sh
 #!/bin/bash
 set -e
 
-CHROMEDRIVER_URL="${CHROMEDRIVER_URL:-http://localhost:4444}"
-WEB_PORT="${WEB_PORT:-4040}"
-
 echo "============================================"
 echo "Flutter E2E Integration Test Runner"
 echo "============================================"
 echo ""
 echo "Configuration:"
-echo "  CHROMEDRIVER_URL: ${CHROMEDRIVER_URL}"
-echo "  WEB_PORT: ${WEB_PORT}"
 echo "  MYDIA_URL: ${MYDIA_URL:-not set}"
 echo "  RELAY_URL: ${RELAY_URL:-not set}"
-echo ""
-echo "Network namespace sharing is enabled - Chrome container shares"
-echo "our network namespace, so localhost in Chrome reaches this container."
+echo "  Chrome: $(google-chrome-stable --version)"
 echo ""
 
-# Wait for Mydia to be ready first (Chrome depends on us starting)
+# Wait for Mydia to be ready and resolve its IP for Chrome
 echo "Waiting for Mydia..."
 max_attempts=30
 attempt=0
@@ -98,14 +96,26 @@ if [ $attempt -eq $max_attempts ]; then
     exit 1
 fi
 
-# Wait for Chrome to be ready (Chrome shares our network namespace)
-# Chrome container depends on us and starts after, so we need to wait
+# Get Mydia IP for Chrome (Chrome may not use Docker DNS)
+MYDIA_HOST=$(echo "${MYDIA_URL}" | sed -E 's|https?://([^:/]+).*|\1|')
+MYDIA_PORT=$(echo "${MYDIA_URL}" | sed -E 's|https?://[^:]+:([0-9]+).*|\1|')
+MYDIA_IP=$(getent hosts "${MYDIA_HOST}" 2>/dev/null | awk '{print $1}')
+if [ -n "$MYDIA_IP" ]; then
+    echo "  Resolved ${MYDIA_HOST} to ${MYDIA_IP}"
+    RESOLVED_MYDIA_URL="http://${MYDIA_IP}:${MYDIA_PORT}"
+    echo "  Using resolved URL: ${RESOLVED_MYDIA_URL}"
+else
+    echo "  Warning: Could not resolve ${MYDIA_HOST}, using original URL"
+    RESOLVED_MYDIA_URL="${MYDIA_URL}"
+fi
+
+# Wait for Relay to be ready and resolve its IP for Chrome
 echo ""
-echo "Waiting for Selenium Chrome (shared network namespace)..."
+echo "Waiting for Relay..."
 attempt=0
 while [ $attempt -lt $max_attempts ]; do
-    if curl -sf "${CHROMEDRIVER_URL}/status" > /dev/null 2>&1; then
-        echo "  ✓ Selenium Chrome is ready at ${CHROMEDRIVER_URL}!"
+    if curl -sf "${RELAY_URL}/health" > /dev/null 2>&1; then
+        echo "  ✓ Relay is ready!"
         break
     fi
     attempt=$((attempt + 1))
@@ -114,8 +124,21 @@ while [ $attempt -lt $max_attempts ]; do
 done
 
 if [ $attempt -eq $max_attempts ]; then
-    echo "ERROR: Selenium Chrome not available at ${CHROMEDRIVER_URL}"
+    echo "ERROR: Relay not available at ${RELAY_URL}"
     exit 1
+fi
+
+# Get relay IP for Chrome (Chrome may not use Docker DNS)
+RELAY_HOST=$(echo "${RELAY_URL}" | sed -E 's|https?://([^:/]+).*|\1|')
+RELAY_PORT=$(echo "${RELAY_URL}" | sed -E 's|https?://[^:]+:([0-9]+).*|\1|')
+RELAY_IP=$(getent hosts "${RELAY_HOST}" 2>/dev/null | awk '{print $1}')
+if [ -n "$RELAY_IP" ]; then
+    echo "  Resolved ${RELAY_HOST} to ${RELAY_IP}"
+    RESOLVED_RELAY_URL="http://${RELAY_IP}:${RELAY_PORT}"
+    echo "  Using resolved URL: ${RESOLVED_RELAY_URL}"
+else
+    echo "  Warning: Could not resolve ${RELAY_HOST}, using original URL"
+    RESOLVED_RELAY_URL="${RELAY_URL}"
 fi
 
 echo ""
@@ -132,20 +155,9 @@ fi
 echo "Found integration tests:"
 ls -la integration_test/
 
-# Create test driver
-mkdir -p test_driver
-cat > test_driver/integration_test.dart << 'DART'
-import 'package:integration_test/integration_test_driver.dart';
-
-Future<void> main() {
-  return integrationDriver();
-}
-DART
-
 echo ""
 echo "Setting up test environment..."
 echo "  Mydia API: ${MYDIA_URL}"
-echo "  Web Server: localhost:${WEB_PORT}"
 echo ""
 
 # Login to Mydia and get auth token
@@ -193,24 +205,27 @@ fi
 echo "  ✓ Claim code generated: $CLAIM_CODE"
 
 echo ""
-echo "Running Flutter integration tests..."
-echo "  WebDriver: ${CHROMEDRIVER_URL}"
-echo "  Web Server: localhost:${WEB_PORT} (Chrome reaches via shared namespace)"
+echo "Running Flutter integration tests with headless Chrome..."
 echo "  Claim Code: $CLAIM_CODE"
 echo ""
 
-# Run Flutter integration tests
-# - Uses 'web-server' device which serves the app on localhost:${WEB_PORT}
-# - Chrome shares our network namespace so localhost:${WEB_PORT} works
-# - dart-define passes environment to the Flutter app at compile time
+# Run Flutter integration tests using flutter test with chrome device
+# --no-pub: skip pub get (already done in Dockerfile)
+# -d chrome: use Chrome for web tests
+# --dart-define: pass environment variables to the Flutter app
+# Using resolved IP addresses for relay since Chrome may not resolve Docker hostnames
 
-flutter drive \
-    --driver=test_driver/integration_test.dart \
-    --target=integration_test/pairing_flow_test.dart \
-    -d web-server \
-    --web-port=${WEB_PORT} \
-    --dart-define=MYDIA_URL=${MYDIA_URL} \
-    --dart-define=RELAY_URL=${RELAY_URL} \
+echo "  Flutter dart-define values:"
+echo "    RELAY_URL=${RESOLVED_RELAY_URL}"
+echo "    MYDIA_URL=${RESOLVED_MYDIA_URL}"
+echo "    E2E_CLAIM_CODE=${CLAIM_CODE}"
+echo ""
+
+flutter test \
+    integration_test/pairing_flow_test.dart \
+    -d chrome \
+    --dart-define=MYDIA_URL=${RESOLVED_MYDIA_URL} \
+    --dart-define=RELAY_URL=${RESOLVED_RELAY_URL} \
     --dart-define=E2E_MODE=true \
     --dart-define=E2E_CLAIM_CODE=${CLAIM_CODE}
 

@@ -84,6 +84,7 @@ ${YELLOW}Player (Flutter in Docker):${NC}
   player logs          Follow player build output
   player restart       Restart player container
   player e2e           Run player E2E integration tests
+  player e2e-build     Pre-build E2E images (faster subsequent runs)
 
 ${YELLOW}Player Development Modes:${NC}
   Default (watch): Rebuilds on file change, access at http://localhost:4000/player
@@ -270,17 +271,30 @@ case "$COMMAND" in
                 echo ""
                 echo "Test flow: claim code → Noise handshake → device registration"
                 echo ""
+                echo "Tip: Run './dev player e2e-build' first to pre-cache Docker layers"
+                echo ""
                 # Build and run E2E tests
-                docker compose -f compose.player-e2e.yml build
+                DOCKER_BUILDKIT=1 docker compose -f compose.player-e2e.yml build
                 docker compose -f compose.player-e2e.yml up --abort-on-container-exit --exit-code-from test
                 exit_code=$?
                 # Clean up
                 docker compose -f compose.player-e2e.yml down -v
                 exit $exit_code
                 ;;
+            e2e-build)
+                echo -e "${GREEN}Pre-building player E2E images (without running tests)...${NC}"
+                echo ""
+                echo "This pre-builds all E2E Docker images to cache dependencies."
+                echo "Subsequent './dev player e2e' runs will be faster."
+                echo ""
+                DOCKER_BUILDKIT=1 docker compose -f compose.player-e2e.yml build
+                echo ""
+                echo -e "${GREEN}E2E images pre-built successfully!${NC}"
+                echo "Now run './dev player e2e' to execute the tests."
+                ;;
             *)
                 echo -e "${RED}Error: Unknown player command: $1${NC}"
-                echo "Usage: ./dev player <logs|build|hot|setup|shell|restart|e2e>"
+                echo "Usage: ./dev player <logs|build|hot|setup|shell|restart|e2e|e2e-build>"
                 exit 1
                 ;;
         esac

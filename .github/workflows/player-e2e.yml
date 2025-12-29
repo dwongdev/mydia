@@ -36,25 +36,29 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Cache Docker layers
-        uses: actions/cache@v4
         with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-player-e2e-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-player-e2e-
+          driver: docker-container
+          install: true
 
-      - name: Build and run E2E tests
+      - name: Build E2E images with caching
         run: |
-          echo "Building Docker images..."
-          docker compose -f compose.player-e2e.yml build
+          echo "Building Docker images with BuildKit caching..."
+          docker buildx bake \
+            -f compose.player-e2e.yml \
+            --set "*.cache-from=type=gha,scope=player-e2e" \
+            --set "*.cache-to=type=gha,mode=max,scope=player-e2e" \
+            --load
+        env:
+          DOCKER_BUILDKIT: 1
 
-          echo ""
+      - name: Run E2E tests
+        run: |
           echo "Starting E2E test suite..."
           docker compose -f compose.player-e2e.yml up \
             --abort-on-container-exit \
             --exit-code-from test
+        env:
+          DOCKER_BUILDKIT: 1
 
       - name: Collect logs on failure
         if: failure()

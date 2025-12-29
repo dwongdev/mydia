@@ -13,8 +13,14 @@
 # namespace via network_mode: service:test. This means 'localhost' in Chrome resolves
 # to the test container where the Flutter web server runs on port 4040.
 #
+# Performance optimizations:
+# - BuildKit enabled for cache mounts (DOCKER_BUILDKIT=1)
+# - Reduced service dependencies for faster parallel startup
+# - Pre-build with: ./dev player e2e-build
+#
 # Usage:
-#   docker compose -f compose.player-e2e.yml up --build --abort-on-container-exit
+#   DOCKER_BUILDKIT=1 docker compose -f compose.player-e2e.yml build
+#   docker compose -f compose.player-e2e.yml up --abort-on-container-exit
 #   docker compose -f compose.player-e2e.yml down -v
 
 services:
@@ -36,10 +42,10 @@ services:
       - "14001:4001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4001/health"]
-      interval: 5s
-      timeout: 3s
-      start_period: 10s
-      retries: 5
+      interval: 2s
+      timeout: 2s
+      start_period: 5s
+      retries: 10
     networks:
       - e2e
 
@@ -90,16 +96,18 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
-      interval: 5s
-      timeout: 3s
-      start_period: 30s
-      retries: 10
+      interval: 2s
+      timeout: 2s
+      start_period: 15s
+      retries: 20
     networks:
       - e2e
 
   # ============================================
   # Flutter Web Player (served via nginx)
   # ============================================
+  # Note: player doesn't need to depend on mydia - it's just static files
+  # The test runner will wait for mydia to be healthy
   player:
     build:
       context: .
@@ -111,15 +119,14 @@ services:
     container_name: e2e_player
     ports:
       - "18080:80"
-    depends_on:
-      mydia:
-        condition: service_healthy
+    # No depends_on - player is just nginx serving static files
+    # This allows it to start immediately while other services spin up
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/"]
-      interval: 5s
-      timeout: 3s
-      start_period: 10s
-      retries: 3
+      interval: 2s
+      timeout: 2s
+      start_period: 5s
+      retries: 5
     networks:
       - e2e
 
@@ -178,10 +185,10 @@ services:
     # Health check runs in the shared namespace
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4444/status"]
-      interval: 5s
-      timeout: 3s
-      start_period: 10s
-      retries: 5
+      interval: 2s
+      timeout: 2s
+      start_period: 5s
+      retries: 10
 
 networks:
   e2e:

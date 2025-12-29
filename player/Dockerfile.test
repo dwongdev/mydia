@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 # ============================================
 # E2E Test Runner - Flutter Integration Tests
 # ============================================
@@ -14,6 +15,8 @@
 # NOTE: This Dockerfile expects the build context to be the project root
 # (not the player directory) so it can access priv/graphql/schema.graphql
 #
+# Build with: DOCKER_BUILDKIT=1 docker build -f player/Dockerfile.test .
+#
 # Environment variables required:
 # - CHROMEDRIVER_URL: URL of the Selenium WebDriver (default: http://localhost:4444)
 # - WEB_PORT: Port for the Flutter web server (default: 4040)
@@ -21,6 +24,9 @@
 # - RELAY_URL: URL of the metadata-relay service
 
 FROM ghcr.io/cirruslabs/flutter:stable
+
+# Set pub cache location for caching
+ENV PUB_CACHE=/root/.pub-cache
 
 # Install additional dependencies
 RUN apt-get update -qq && \
@@ -34,8 +40,10 @@ WORKDIR /app
 # Copy pubspec files first for better caching
 COPY player/pubspec.yaml player/pubspec.lock ./
 
-# Install dependencies
-RUN flutter pub get
+# Install dependencies with cache
+RUN --mount=type=cache,target=/root/.pub-cache \
+    flutter pub get && \
+    cp -r /root/.pub-cache /tmp/.pub-cache-copy
 
 # Copy the rest of the player app
 COPY player/ .
@@ -44,8 +52,10 @@ COPY player/ .
 RUN rm -f lib/graphql/schema.graphql
 COPY priv/graphql/schema.graphql lib/graphql/schema.graphql
 
-# Run build_runner for code generation
-RUN flutter pub run build_runner build --delete-conflicting-outputs
+# Run build_runner for code generation with cache
+RUN --mount=type=cache,target=/root/.pub-cache \
+    cp -r /tmp/.pub-cache-copy/* /root/.pub-cache/ 2>/dev/null || true && \
+    flutter pub run build_runner build --delete-conflicting-outputs
 
 # Copy the test entrypoint script
 COPY <<'EOF' /entrypoint.sh

@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 # ============================================
 # E2E Test Build - Flutter Web Player
 # ============================================
@@ -7,6 +8,8 @@
 #
 # NOTE: This Dockerfile expects the build context to be the project root
 # (not the player directory) so it can access priv/graphql/schema.graphql
+#
+# Build with: DOCKER_BUILDKIT=1 docker build -f player/Dockerfile.e2e .
 
 # ============================================
 # Build Stage
@@ -17,13 +20,18 @@ FROM ghcr.io/cirruslabs/flutter:stable AS builder
 ARG RELAY_URL=http://localhost:4001
 ARG MYDIA_URL=http://localhost:4000
 
+# Set pub cache location for caching
+ENV PUB_CACHE=/root/.pub-cache
+
 WORKDIR /app
 
 # Copy pubspec files first for better caching
 COPY player/pubspec.yaml player/pubspec.lock ./
 
-# Install dependencies
-RUN flutter pub get
+# Install dependencies with cache
+RUN --mount=type=cache,target=/root/.pub-cache \
+    flutter pub get && \
+    cp -r /root/.pub-cache /tmp/.pub-cache-copy
 
 # Copy the rest of the player app
 COPY player/ .
@@ -32,11 +40,14 @@ COPY player/ .
 RUN rm -f lib/graphql/schema.graphql
 COPY priv/graphql/schema.graphql lib/graphql/schema.graphql
 
-# Run build_runner for code generation
-RUN flutter pub run build_runner build --delete-conflicting-outputs
+# Run build_runner for code generation with cache
+RUN --mount=type=cache,target=/root/.pub-cache \
+    cp -r /tmp/.pub-cache-copy/* /root/.pub-cache/ 2>/dev/null || true && \
+    flutter pub run build_runner build --delete-conflicting-outputs
 
 # Build Flutter web with environment variables baked in
-RUN flutter build web \
+RUN --mount=type=cache,target=/root/.pub-cache \
+    flutter build web \
     --release \
     --dart-define=RELAY_URL=${RELAY_URL} \
     --dart-define=MYDIA_URL=${MYDIA_URL} \

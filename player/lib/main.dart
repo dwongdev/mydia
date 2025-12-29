@@ -8,24 +8,6 @@ import 'app.dart';
 import 'core/downloads/download_service.dart';
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // Initialize media_kit for video playback
-  MediaKit.ensureInitialized();
-
-  // TODO: Chromecast support temporarily disabled due to API incompatibility
-  // with flutter_chrome_cast package. See backlog task for fix.
-  // await _initializeCastSdk();
-
-  // Initialize GraphQL Hive cache for offline support
-  await initHiveForFlutter();
-
-  // Initialize download database (only on native platforms)
-  if (isDownloadSupported) {
-    final downloadDb = getDownloadDatabase();
-    await downloadDb.initialize();
-  }
-
   // Add error logging for debugging
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
@@ -34,11 +16,31 @@ void main() async {
   };
 
   runZonedGuarded(
-    () => runApp(
-      const ProviderScope(
-        child: MyApp(),
-      ),
-    ),
+    () async {
+      WidgetsFlutterBinding.ensureInitialized();
+
+      // Initialize media_kit for video playback
+      MediaKit.ensureInitialized();
+
+      // TODO: Chromecast support temporarily disabled due to API incompatibility
+      // with flutter_chrome_cast package. See backlog task for fix.
+      // await _initializeCastSdk();
+
+      // Initialize GraphQL Hive cache for offline support
+      await initHiveForFlutter();
+
+      // Initialize download database (only on native platforms)
+      if (isDownloadSupported) {
+        final downloadDb = getDownloadDatabase();
+        await downloadDb.initialize();
+      }
+
+      runApp(
+        const ProviderScope(
+          child: MyApp(),
+        ),
+      );
+    },
     (error, stack) {
       debugPrint('Caught error: $error');
       debugPrint('Stack trace: $stack');

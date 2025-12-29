@@ -209,7 +209,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         child: Stack(
           children: [
             _buildBackgroundDecoration(),
-            if (_showQrScanner) _buildQrScannerOverlay(),
             SafeArea(
               child: Center(
                 child: SingleChildScrollView(
@@ -237,6 +236,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                 ),
               ),
             ),
+            if (_showQrScanner) _buildQrScannerOverlay(),
           ],
         ),
       ),

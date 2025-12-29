@@ -249,11 +249,16 @@ class AuthStateNotifier extends Notifier<AsyncValue<bool>> {
   }
 
   Future<void> _checkAuth() async {
+    debugPrint('[AuthStateNotifier] _checkAuth() called, setting state to loading');
     state = const AsyncValue.loading();
     try {
+      debugPrint('[AuthStateNotifier] Calling isAuthenticated()...');
       final isAuth = await authService.isAuthenticated();
+      debugPrint('[AuthStateNotifier] isAuthenticated() returned: $isAuth');
       state = AsyncValue.data(isAuth);
+      debugPrint('[AuthStateNotifier] State set to AsyncValue.data($isAuth)');
     } catch (e, st) {
+      debugPrint('[AuthStateNotifier] _checkAuth() error: $e');
       state = AsyncValue.error(e, st);
     }
   }
@@ -282,7 +287,9 @@ class AuthStateNotifier extends Notifier<AsyncValue<bool>> {
 
   /// Refresh the authentication state.
   Future<void> refresh() async {
+    debugPrint('[AuthStateNotifier] refresh() called');
     await _checkAuth();
+    debugPrint('[AuthStateNotifier] refresh() complete, state=$state');
   }
 }
 

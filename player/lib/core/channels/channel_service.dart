@@ -7,6 +7,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:phoenix_socket/phoenix_socket.dart';
 
 /// Result type for channel operations.
@@ -41,7 +42,7 @@ class ChannelResult<T> {
 ///
 /// ```dart
 /// final service = ChannelService();
-/// await service.connect('wss://mydia.example.com/socket/websocket');
+/// await service.connect('wss://mydia.example.com/ws/websocket');
 /// final channel = await service.joinPairingChannel();
 /// ```
 class ChannelService {
@@ -64,6 +65,7 @@ class ChannelService {
 
       // Convert https:// to wss:// and http:// to ws://
       final wsUrl = _buildWebSocketUrl(serverUrl);
+      debugPrint('[ChannelService] Connecting to $wsUrl...');
 
       // Create Phoenix socket
       _socket = PhoenixSocket(
@@ -73,6 +75,7 @@ class ChannelService {
         ),
       );
 
+      debugPrint('[ChannelService] Socket connecting...');
       // Connect to the socket
       await _socket!.connect();
 
@@ -80,11 +83,14 @@ class ChannelService {
       await Future.delayed(const Duration(milliseconds: 500));
 
       if (!_socket!.isConnected) {
+        debugPrint('[ChannelService] Socket NOT connected after delay');
         return ChannelResult.error('Failed to establish WebSocket connection');
       }
 
+      debugPrint('[ChannelService] Socket connected!');
       return ChannelResult.success(null);
     } catch (e) {
+      debugPrint('[ChannelService] Connection error: $e');
       return ChannelResult.error('Connection error: $e');
     }
   }
@@ -109,45 +115,51 @@ class ChannelService {
   ///
   /// Returns a [ChannelResult] with the joined channel on success.
   Future<ChannelResult<PhoenixChannel>> joinPairingChannel() async {
+    debugPrint('[ChannelService] Joining pairing channel...');
     if (_socket == null || !_socket!.isConnected) {
+      debugPrint('[ChannelService] ERROR: Not connected to server');
       return ChannelResult.error('Not connected to server');
     }
 
     try {
       // Leave any existing channel
       if (_activeChannel != null) {
+        debugPrint('[ChannelService] Leaving existing channel...');
         _activeChannel!.leave();
       }
 
       // Create and join the pairing channel
+      debugPrint('[ChannelService] Creating channel device:pair...');
       final channel = _socket!.addChannel(topic: 'device:pair');
-      final pushResponse = channel.join();
+      debugPrint('[ChannelService] Calling channel.join()...');
+      final push = channel.join();
+      debugPrint('[ChannelService] Awaiting join().future...');
 
-      // Wait for join response
-      final completer = Completer<PushResponse>();
-      pushResponse.onReply('ok', (response) {
-        completer
-            .complete(PushResponse(isOk: true, response: response as Map<String, dynamic>?));
-      });
-      pushResponse.onReply('error', (response) {
-        completer
-            .complete(PushResponse(isOk: false, response: response as Map<String, dynamic>?));
-      });
-
-      final response = await completer.future.timeout(
+      // Use the Push.future property to properly await the join response
+      final response = await push.future.timeout(
         const Duration(seconds: 10),
-        onTimeout: () =>
-            PushResponse(isOk: false, response: {'reason': 'timeout'}),
+        onTimeout: () {
+          debugPrint('[ChannelService] TIMEOUT waiting for channel join');
+          throw TimeoutException('Channel join timed out');
+        },
       );
 
+      debugPrint('[ChannelService] Got join response: ${response.status} - ${response.response}');
+
       if (response.isOk) {
+        debugPrint('[ChannelService] Channel joined successfully!');
         _activeChannel = channel;
         return ChannelResult.success(channel);
       } else {
         final error = response.response?['reason'] ?? 'Unknown error';
+        debugPrint('[ChannelService] Channel join failed: $error');
         return ChannelResult.error('Failed to join pairing channel: $error');
       }
+    } on TimeoutException {
+      debugPrint('[ChannelService] Channel join timed out');
+      return ChannelResult.error('Failed to join pairing channel: timeout');
     } catch (e) {
+      debugPrint('[ChannelService] Exception joining channel: $e');
       return ChannelResult.error('Error joining pairing channel: $e');
     }
   }
@@ -159,46 +171,51 @@ class ChannelService {
   ///
   /// Returns a [ChannelResult] with the joined channel on success.
   Future<ChannelResult<PhoenixChannel>> joinReconnectChannel() async {
+    debugPrint('[ChannelService] Joining reconnect channel...');
     if (_socket == null || !_socket!.isConnected) {
+      debugPrint('[ChannelService] ERROR: Not connected to server');
       return ChannelResult.error('Not connected to server');
     }
 
     try {
       // Leave any existing channel
       if (_activeChannel != null) {
+        debugPrint('[ChannelService] Leaving existing channel...');
         _activeChannel!.leave();
       }
 
       // Create and join the reconnect channel
+      debugPrint('[ChannelService] Creating channel device:reconnect...');
       final channel = _socket!.addChannel(topic: 'device:reconnect');
-      final pushResponse = channel.join();
+      debugPrint('[ChannelService] Calling channel.join()...');
+      final push = channel.join();
+      debugPrint('[ChannelService] Awaiting join().future...');
 
-      // Wait for join response
-      final completer = Completer<PushResponse>();
-      pushResponse.onReply('ok', (response) {
-        completer
-            .complete(PushResponse(isOk: true, response: response as Map<String, dynamic>?));
-      });
-      pushResponse.onReply('error', (response) {
-        completer
-            .complete(PushResponse(isOk: false, response: response as Map<String, dynamic>?));
-      });
-
-      final response = await completer.future.timeout(
+      // Use the Push.future property to properly await the join response
+      final response = await push.future.timeout(
         const Duration(seconds: 10),
-        onTimeout: () =>
-            PushResponse(isOk: false, response: {'reason': 'timeout'}),
+        onTimeout: () {
+          debugPrint('[ChannelService] TIMEOUT waiting for channel join');
+          throw TimeoutException('Channel join timed out');
+        },
       );
 
+      debugPrint('[ChannelService] Got join response: ${response.status} - ${response.response}');
+
       if (response.isOk) {
+        debugPrint('[ChannelService] Channel joined successfully!');
         _activeChannel = channel;
         return ChannelResult.success(channel);
       } else {
         final error = response.response?['reason'] ?? 'Unknown error';
-        return ChannelResult.error(
-            'Failed to join reconnect channel: $error');
+        debugPrint('[ChannelService] Channel join failed: $error');
+        return ChannelResult.error('Failed to join reconnect channel: $error');
       }
+    } on TimeoutException {
+      debugPrint('[ChannelService] Channel join timed out');
+      return ChannelResult.error('Failed to join reconnect channel: timeout');
     } catch (e) {
+      debugPrint('[ChannelService] Exception joining channel: $e');
       return ChannelResult.error('Error joining reconnect channel: $e');
     }
   }
@@ -213,41 +230,43 @@ class ChannelService {
     PhoenixChannel channel,
     Uint8List message,
   ) async {
+    debugPrint('[ChannelService] Sending pairing_handshake...');
     try {
       final push = channel.push(
         'pairing_handshake',
         {'message': base64Encode(message)},
       );
 
-      // Wait for response
-      final completer = Completer<PushResponse>();
-      push.onReply('ok', (response) {
-        completer
-            .complete(PushResponse(isOk: true, response: response as Map<String, dynamic>?));
-      });
-      push.onReply('error', (response) {
-        completer
-            .complete(PushResponse(isOk: false, response: response as Map<String, dynamic>?));
-      });
-
-      final response = await completer.future.timeout(
+      // Use the Push.future property to properly await the response
+      final response = await push.future.timeout(
         const Duration(seconds: 10),
-        onTimeout: () =>
-            PushResponse(isOk: false, response: {'reason': 'timeout'}),
+        onTimeout: () {
+          debugPrint('[ChannelService] TIMEOUT waiting for handshake response');
+          throw TimeoutException('Handshake timed out');
+        },
       );
+
+      debugPrint('[ChannelService] Got handshake response: ${response.status}');
 
       if (response.isOk) {
         final messageB64 = response.response?['message'] as String?;
         if (messageB64 == null) {
+          debugPrint('[ChannelService] No message in handshake response');
           return ChannelResult.error('No message in response');
         }
+        debugPrint('[ChannelService] Handshake successful!');
         return ChannelResult.success(
             Uint8List.fromList(base64Decode(messageB64)));
       } else {
         final error = response.response?['reason'] ?? 'Unknown error';
+        debugPrint('[ChannelService] Handshake failed: $error');
         return ChannelResult.error('Handshake failed: $error');
       }
+    } on TimeoutException {
+      debugPrint('[ChannelService] Handshake timed out');
+      return ChannelResult.error('Handshake failed: timeout');
     } catch (e) {
+      debugPrint('[ChannelService] Exception in handshake: $e');
       return ChannelResult.error('Error sending handshake: $e');
     }
   }
@@ -263,32 +282,28 @@ class ChannelService {
     PhoenixChannel channel,
     Uint8List message,
   ) async {
+    debugPrint('[ChannelService] Sending handshake_init for reconnect...');
     try {
       final push = channel.push(
         'handshake_init',
         {'message': base64Encode(message)},
       );
 
-      // Wait for response
-      final completer = Completer<PushResponse>();
-      push.onReply('ok', (response) {
-        completer
-            .complete(PushResponse(isOk: true, response: response as Map<String, dynamic>?));
-      });
-      push.onReply('error', (response) {
-        completer
-            .complete(PushResponse(isOk: false, response: response as Map<String, dynamic>?));
-      });
-
-      final response = await completer.future.timeout(
+      // Use the Push.future property to properly await the response
+      final response = await push.future.timeout(
         const Duration(seconds: 10),
-        onTimeout: () =>
-            PushResponse(isOk: false, response: {'reason': 'timeout'}),
+        onTimeout: () {
+          debugPrint('[ChannelService] TIMEOUT waiting for reconnect handshake');
+          throw TimeoutException('Reconnect handshake timed out');
+        },
       );
+
+      debugPrint('[ChannelService] Got reconnect response: ${response.status}');
 
       if (response.isOk) {
         final responseData = response.response;
         if (responseData == null) {
+          debugPrint('[ChannelService] No response data');
           return ChannelResult.error('No response data');
         }
 
@@ -297,9 +312,11 @@ class ChannelService {
         final deviceId = responseData['device_id'] as String?;
 
         if (messageB64 == null || token == null || deviceId == null) {
+          debugPrint('[ChannelService] Incomplete response data');
           return ChannelResult.error('Incomplete response data');
         }
 
+        debugPrint('[ChannelService] Reconnect handshake successful!');
         return ChannelResult.success(
           ReconnectResponse(
             message: Uint8List.fromList(base64Decode(messageB64)),
@@ -309,9 +326,14 @@ class ChannelService {
         );
       } else {
         final error = response.response?['reason'] ?? 'Unknown error';
+        debugPrint('[ChannelService] Reconnect handshake failed: $error');
         return ChannelResult.error('Handshake failed: $error');
       }
+    } on TimeoutException {
+      debugPrint('[ChannelService] Reconnect handshake timed out');
+      return ChannelResult.error('Handshake failed: timeout');
     } catch (e) {
+      debugPrint('[ChannelService] Exception in reconnect handshake: $e');
       return ChannelResult.error('Error sending handshake: $e');
     }
   }
@@ -330,6 +352,7 @@ class ChannelService {
     required String deviceName,
     required String platform,
   }) async {
+    debugPrint('[ChannelService] Submitting claim_code...');
     try {
       final push = channel.push('claim_code', {
         'code': claimCode,
@@ -337,26 +360,21 @@ class ChannelService {
         'platform': platform,
       });
 
-      // Wait for response
-      final completer = Completer<PushResponse>();
-      push.onReply('ok', (response) {
-        completer
-            .complete(PushResponse(isOk: true, response: response as Map<String, dynamic>?));
-      });
-      push.onReply('error', (response) {
-        completer
-            .complete(PushResponse(isOk: false, response: response as Map<String, dynamic>?));
-      });
-
-      final response = await completer.future.timeout(
+      // Use the Push.future property to properly await the response
+      final response = await push.future.timeout(
         const Duration(seconds: 10),
-        onTimeout: () =>
-            PushResponse(isOk: false, response: {'reason': 'timeout'}),
+        onTimeout: () {
+          debugPrint('[ChannelService] TIMEOUT waiting for claim_code response');
+          throw TimeoutException('Claim code submission timed out');
+        },
       );
+
+      debugPrint('[ChannelService] Got claim_code response: ${response.status}');
 
       if (response.isOk) {
         final responseData = response.response;
         if (responseData == null) {
+          debugPrint('[ChannelService] No response data');
           return ChannelResult.error('No response data');
         }
 
@@ -370,9 +388,11 @@ class ChannelService {
             mediaToken == null ||
             devicePublicKeyB64 == null ||
             devicePrivateKeyB64 == null) {
+          debugPrint('[ChannelService] Incomplete pairing response');
           return ChannelResult.error('Incomplete pairing response');
         }
 
+        debugPrint('[ChannelService] Claim code submission successful!');
         return ChannelResult.success(
           PairingResponse(
             deviceId: deviceId,
@@ -385,9 +405,14 @@ class ChannelService {
         );
       } else {
         final error = response.response?['reason'] ?? 'Unknown error';
+        debugPrint('[ChannelService] Claim code failed: $error');
         return ChannelResult.error(_formatErrorReason(error));
       }
+    } on TimeoutException {
+      debugPrint('[ChannelService] Claim code submission timed out');
+      return ChannelResult.error('Claim code submission timed out');
     } catch (e) {
+      debugPrint('[ChannelService] Exception submitting claim code: $e');
       return ChannelResult.error('Error submitting claim code: $e');
     }
   }
@@ -413,8 +438,8 @@ class ChannelService {
       wsUrl = 'wss://$baseUrl';
     }
 
-    // Append WebSocket path
-    return '$wsUrl/socket/websocket';
+    // Append WebSocket path (Phoenix channel is mounted at /ws)
+    return '$wsUrl/ws/websocket';
   }
 
   String _formatErrorReason(String reason) {
@@ -441,14 +466,6 @@ class ChannelService {
         return reason;
     }
   }
-}
-
-/// Helper class to wrap push responses.
-class PushResponse {
-  final bool isOk;
-  final Map<String, dynamic>? response;
-
-  PushResponse({required this.isOk, this.response});
 }
 
 /// Response from a successful pairing operation.

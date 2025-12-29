@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../core/graphql/graphql_provider.dart';
 import '../../../core/channels/pairing_service.dart';
@@ -153,9 +154,13 @@ class LoginController extends _$LoginController {
       }
 
       // Check if still mounted before updating state
-      if (!ref.mounted) return;
+      if (!ref.mounted) {
+        debugPrint('[LoginController] Not mounted after pairing, returning early');
+        return;
+      }
 
       // Pairing successful - store credentials in auth service
+      debugPrint('[LoginController] Pairing successful! Storing credentials...');
       final credentials = result.credentials!;
       final authService = ref.read(authServiceProvider);
 
@@ -165,19 +170,30 @@ class LoginController extends _$LoginController {
         userId: credentials.deviceId, // Use device ID as user ID for now
         username: 'Device ${credentials.deviceId.substring(0, 8)}',
       );
+      debugPrint('[LoginController] Credentials stored, refreshing auth state...');
 
-      if (!ref.mounted) return;
+      if (!ref.mounted) {
+        debugPrint('[LoginController] Not mounted after setSession, returning early');
+        return;
+      }
 
       // Refresh auth state
+      debugPrint('[LoginController] Calling authStateProvider.notifier.refresh()...');
       await ref.read(authStateProvider.notifier).refresh();
+      debugPrint('[LoginController] Auth state refreshed!');
 
-      if (!ref.mounted) return;
+      if (!ref.mounted) {
+        debugPrint('[LoginController] Not mounted after refresh, returning early');
+        return;
+      }
+      debugPrint('[LoginController] Setting success state...');
       state = state.copyWith(
         isLoading: false,
         claimCodeStatus: ClaimCodeStatus.paired,
         claimCodeMessage: 'Paired successfully!',
         success: true,
       );
+      debugPrint('[LoginController] Success state set!');
     } catch (e) {
       if (!ref.mounted) return;
       state = state.copyWith(

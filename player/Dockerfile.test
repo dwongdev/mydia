@@ -2,12 +2,13 @@
 # ============================================
 # E2E Test Runner - Flutter Integration Tests
 # ============================================
-# This Dockerfile runs Flutter integration tests using `flutter test -d chrome`.
+# This Dockerfile runs Flutter integration tests using `flutter drive` with ChromeDriver.
 #
 # How it works:
-# 1. Chrome is installed directly in this container
-# 2. Flutter's `flutter test -d chrome` command launches Chrome headlessly
-# 3. Tests run against real Mydia and Relay services on the e2e network
+# 1. Chrome and ChromeDriver are installed in this container
+# 2. ChromeDriver is started in the background on port 4444
+# 3. `flutter drive` launches the app and runs tests against it
+# 4. Tests run against real Mydia and Relay services on the e2e network
 #
 # NOTE: This Dockerfile expects the build context to be the project root
 # (not the player directory) so it can access priv/graphql/schema.graphql
@@ -23,7 +24,7 @@ FROM ghcr.io/cirruslabs/flutter:stable
 # Set pub cache location for caching
 ENV PUB_CACHE=/root/.pub-cache
 
-# Install Chrome and additional dependencies
+# Install Chrome, ChromeDriver and additional dependencies
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
         curl \
@@ -31,11 +32,24 @@ RUN apt-get update -qq && \
         wget \
         gnupg \
         ca-certificates \
+        unzip \
     && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update -qq \
     && apt-get install -y -qq --no-install-recommends google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
+
+# Install ChromeDriver that matches Chrome version
+RUN CHROME_VERSION=$(google-chrome-stable --version | awk '{print $3}' | cut -d. -f1) && \
+    echo "Chrome major version: $CHROME_VERSION" && \
+    CHROMEDRIVER_VERSION=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_$CHROME_VERSION") && \
+    echo "ChromeDriver version: $CHROMEDRIVER_VERSION" && \
+    wget -q "https://storage.googleapis.com/chrome-for-testing-public/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip" -O /tmp/chromedriver.zip && \
+    unzip -q /tmp/chromedriver.zip -d /tmp && \
+    mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/ && \
+    chmod +x /usr/local/bin/chromedriver && \
+    rm -rf /tmp/chromedriver* && \
+    chromedriver --version
 
 # Set Chrome as the default browser for Flutter
 ENV CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
@@ -75,6 +89,7 @@ echo "Configuration:"
 echo "  MYDIA_URL: ${MYDIA_URL:-not set}"
 echo "  RELAY_URL: ${RELAY_URL:-not set}"
 echo "  Chrome: $(google-chrome-stable --version)"
+echo "  ChromeDriver: $(chromedriver --version)"
 echo ""
 
 # Wait for Mydia to be ready and resolve its IP for Chrome
@@ -205,15 +220,21 @@ fi
 echo "  ✓ Claim code generated: $CLAIM_CODE"
 
 echo ""
-echo "Running Flutter integration tests with headless Chrome..."
+echo "Starting ChromeDriver..."
+chromedriver --port=4444 --log-level=WARNING &
+CHROMEDRIVER_PID=$!
+sleep 2
+
+if ! kill -0 $CHROMEDRIVER_PID 2>/dev/null; then
+    echo "ERROR: ChromeDriver failed to start"
+    exit 1
+fi
+echo "  ✓ ChromeDriver started (PID: $CHROMEDRIVER_PID)"
+
+echo ""
+echo "Running Flutter integration tests..."
 echo "  Claim Code: $CLAIM_CODE"
 echo ""
-
-# Run Flutter integration tests using flutter test with chrome device
-# --no-pub: skip pub get (already done in Dockerfile)
-# -d chrome: use Chrome for web tests
-# --dart-define: pass environment variables to the Flutter app
-# Using resolved IP addresses for relay since Chrome may not resolve Docker hostnames
 
 echo "  Flutter dart-define values:"
 echo "    RELAY_URL=${RESOLVED_RELAY_URL}"
@@ -221,15 +242,38 @@ echo "    MYDIA_URL=${RESOLVED_MYDIA_URL}"
 echo "    E2E_CLAIM_CODE=${CLAIM_CODE}"
 echo ""
 
-flutter test \
-    integration_test/pairing_flow_test.dart \
-    -d chrome \
+# Run Flutter drive tests with ChromeDriver
+# --target: the integration test file
+# -d web-server: use web-server device (required for web)
+# --browser-name: specify chrome
+# --driver: the test driver (handles communication)
+# --dart-define: pass environment variables
+#
+# Note: Additional Chrome flags are needed for Docker:
+# --no-sandbox: Required when running as root
+# --disable-dev-shm-usage: Avoid /dev/shm issues in containers
+# --disable-gpu: Disable GPU acceleration in headless mode
+
+flutter drive \
+    --target=integration_test/pairing_flow_test.dart \
+    --driver=test_driver/integration_test.dart \
+    -d web-server \
+    --browser-name=chrome \
+    --headless \
+    --web-browser-flag="--no-sandbox" \
+    --web-browser-flag="--disable-dev-shm-usage" \
+    --web-browser-flag="--disable-gpu" \
     --dart-define=MYDIA_URL=${RESOLVED_MYDIA_URL} \
     --dart-define=RELAY_URL=${RESOLVED_RELAY_URL} \
     --dart-define=E2E_MODE=true \
     --dart-define=E2E_CLAIM_CODE=${CLAIM_CODE}
 
 TEST_EXIT_CODE=$?
+
+# Cleanup ChromeDriver
+echo ""
+echo "Stopping ChromeDriver..."
+kill $CHROMEDRIVER_PID 2>/dev/null || true
 
 echo ""
 echo "============================================"

@@ -33,7 +33,16 @@ class CastService {
   bool get isCasting => _currentSession != null;
 
   /// Start discovering Chromecast devices on the network.
+  ///
+  /// Note: Cast discovery is not supported on web platform, so this is a no-op on web.
   Future<void> startDiscovery() async {
+    // Cast discovery is not supported on web (uses dart:io Platform internally)
+    if (kIsWeb) {
+      debugPrint('CastService: Skipping discovery on web platform');
+      _devicesController.add([]);
+      return;
+    }
+
     debugPrint('CastService: Starting device discovery');
 
     // Listen to device discovery stream
@@ -81,6 +90,11 @@ class CastService {
 
   /// Stop discovering devices.
   Future<void> stopDiscovery() async {
+    // Cast discovery is not supported on web
+    if (kIsWeb) {
+      return;
+    }
+
     debugPrint('CastService: Stopping device discovery');
 
     await GoogleCastDiscoveryManager.instance.stopDiscovery();

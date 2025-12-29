@@ -10,7 +10,6 @@ defmodule MydiaWeb.Api.V2.SubtitleControllerTest do
     # Create library path
     {:ok, library_path} =
       Repo.insert(%Mydia.Settings.LibraryPath{
-        name: "Test Movies",
         path: "/tmp/test-movies",
         type: :movies
       })

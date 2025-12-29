@@ -4,15 +4,12 @@ defmodule MetadataRelay.CrashReportTest do
   alias MetadataRelay.Router
 
   setup do
+    # Checkout a database connection for this test
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(MetadataRelay.Repo)
+
     # Start the rate limiter if not already started
     case GenServer.whereis(MetadataRelay.RateLimiter) do
       nil -> start_supervised!(MetadataRelay.RateLimiter)
-      _pid -> :ok
-    end
-
-    # Ensure the repo is started for ErrorTracker
-    case GenServer.whereis(MetadataRelay.Repo) do
-      nil -> start_supervised!(MetadataRelay.Repo)
       _pid -> :ok
     end
 

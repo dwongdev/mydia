@@ -59,7 +59,7 @@ defmodule Mydia.Metadata.Provider.OpenLibraryTest do
 
   @config %{
     type: :open_library,
-    base_url: "https://metadata-relay.arsfeld.dev",
+    base_url: "https://relay.mydia.dev",
     options: %{
       timeout: 30_000
     }

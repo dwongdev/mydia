@@ -35,7 +35,7 @@ services:
       MIX_ENV: dev
 
       # Metadata relay configuration
-      METADATA_RELAY_URL: ${METADATA_RELAY_URL:-https://metadata-relay.arsfeld.dev}
+      METADATA_RELAY_URL: ${METADATA_RELAY_URL:-https://relay.mydia.dev}
 
       # For interactive debugging
       MIX_HOME: /app/.mix

@@ -304,13 +304,17 @@ if config_env() == :prod do
   # Data directory for certificate storage
   data_dir = System.get_env("MYDIA_DATA_DIR") || "priv/data"
 
+  # Use HTTP instead of HTTPS for sslip.io URLs (for development/testing only)
+  use_http = System.get_env("DIRECT_URLS_USE_HTTP") == "true"
+
   config :mydia, :direct_urls,
     external_port: external_port,
     public_port: public_port,
     public_ip_enabled: public_ip_enabled,
     external_url: external_url,
     additional_direct_urls: additional_direct_urls,
-    data_dir: data_dir
+    data_dir: data_dir,
+    use_http: use_http
 end
 
 # FlareSolverr configuration (all environments)

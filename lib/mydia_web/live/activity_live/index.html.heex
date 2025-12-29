@@ -51,6 +51,13 @@
         >
           Auth
         </button>
+        <button
+          class={["tab", @category_filter == "search" && "tab-active"]}
+          phx-click="filter_category"
+          phx-value-category="search"
+        >
+          Search
+        </button>
       </div>
     </div>
     
@@ -116,6 +123,100 @@
               </div>
             <% end %>
           </div>
+          
+<!-- Expandable details for search events -->
+          <%= if has_search_details?(event) do %>
+            <div class="collapse collapse-arrow mt-3 bg-base-200 rounded-lg">
+              <input type="checkbox" />
+              <div class="collapse-title text-sm font-medium py-2 min-h-0">
+                View search details
+              </div>
+              <div class="collapse-content text-sm">
+                <div class="pt-2 space-y-3">
+                  <!-- Query information -->
+                  <%= if event.metadata["query"] do %>
+                    <div>
+                      <span class="font-medium text-base-content/70">Query:</span>
+                      <code class="ml-2 px-2 py-0.5 bg-base-300 rounded text-xs">
+                        {event.metadata["query"]}
+                      </code>
+                    </div>
+                  <% end %>
+                  
+<!-- Search statistics -->
+                  <%= if event.metadata["results_count"] || event.metadata["indexers_searched"] do %>
+                    <div class="flex flex-wrap gap-4">
+                      <%= if event.metadata["indexers_searched"] do %>
+                        <div class="flex items-center gap-2">
+                          <.icon name="hero-server-stack" class="w-4 h-4 text-base-content/50" />
+                          <span class="text-base-content/70">
+                            {event.metadata["indexers_searched"]} indexers searched
+                          </span>
+                        </div>
+                      <% end %>
+                      <%= if event.metadata["results_count"] do %>
+                        <div class="flex items-center gap-2">
+                          <.icon name="hero-document-text" class="w-4 h-4 text-base-content/50" />
+                          <span class="text-base-content/70">
+                            {event.metadata["results_count"]} results found
+                          </span>
+                        </div>
+                      <% end %>
+                    </div>
+                  <% end %>
+                  
+<!-- Filter statistics -->
+                  <%= if event.metadata["filter_stats"] do %>
+                    <div class="mt-2">
+                      <span class="font-medium text-base-content/70 block mb-1">
+                        Filter breakdown:
+                      </span>
+                      <div class="flex flex-wrap gap-2">
+                        <%= for {key, value} <- event.metadata["filter_stats"] do %>
+                          <span class="badge badge-sm badge-ghost">
+                            {format_filter_stat_label(key)}: {value}
+                          </span>
+                        <% end %>
+                      </div>
+                    </div>
+                  <% end %>
+                  
+<!-- Score breakdown for successful searches -->
+                  <%= if event.metadata["breakdown"] do %>
+                    <div class="mt-2">
+                      <span class="font-medium text-base-content/70 block mb-1">
+                        Score: {event.metadata["score"]}
+                      </span>
+                      <div class="flex flex-wrap gap-2">
+                        <%= for {key, value} <- event.metadata["breakdown"] do %>
+                          <span class={[
+                            "badge badge-sm",
+                            if(is_number(value) && value > 0,
+                              do: "badge-success",
+                              else: "badge-ghost"
+                            )
+                          ]}>
+                            {format_breakdown_label(key)}: {format_breakdown_value(value)}
+                          </span>
+                        <% end %>
+                      </div>
+                    </div>
+                  <% end %>
+                  
+<!-- Selected release info -->
+                  <%= if event.metadata["selected_release"] do %>
+                    <div class="mt-2 p-2 bg-success/10 rounded-lg border border-success/20">
+                      <div class="flex items-center gap-2">
+                        <.icon name="hero-check-circle" class="w-4 h-4 text-success" />
+                        <span class="font-medium text-success">Selected:</span>
+                      </div>
+                      <p class="mt-1 text-sm break-all">{event.metadata["selected_release"]}</p>
+                    </div>
+                  <% end %>
+                </div>
+              </div>
+            </div>
+          <% end %>
         </div>
       </div>
     </div>

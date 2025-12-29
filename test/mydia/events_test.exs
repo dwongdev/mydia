@@ -724,4 +724,170 @@ defmodule Mydia.EventsTest do
       assert event.metadata["attempts"] == 3
     end
   end
+
+  describe "search event helpers" do
+    test "search_completed/3 creates correct event for movie" do
+      media_item = %Mydia.Media.MediaItem{
+        id: Ecto.UUID.generate(),
+        title: "Test Movie",
+        type: "movie"
+      }
+
+      metadata = %{
+        "query" => "Test Movie 2024",
+        "results_count" => 15,
+        "selected_release" => "Test.Movie.2024.1080p.BluRay",
+        "score" => 850,
+        "breakdown" => %{"quality" => 200, "seeders" => 150}
+      }
+
+      Events.search_completed(media_item, metadata)
+      Process.sleep(100)
+
+      [event] = Events.list_events(type: "search.completed")
+      assert event.category == "search"
+      assert event.actor_type == :job
+      assert event.actor_id == "movie_search"
+      assert event.resource_type == "media_item"
+      assert event.resource_id == media_item.id
+      assert event.severity == :info
+      assert event.metadata["title"] == "Test Movie"
+      assert event.metadata["media_type"] == "movie"
+      assert event.metadata["results_count"] == 15
+      assert event.metadata["selected_release"] == "Test.Movie.2024.1080p.BluRay"
+    end
+
+    test "search_completed/3 creates correct event for TV episode" do
+      media_item = %Mydia.Media.MediaItem{
+        id: Ecto.UUID.generate(),
+        title: "Test Show",
+        type: "tv_show"
+      }
+
+      episode = %Mydia.Media.Episode{
+        id: Ecto.UUID.generate(),
+        season_number: 1,
+        episode_number: 5,
+        media_item_id: media_item.id
+      }
+
+      metadata = %{
+        "query" => "Test Show S01E05",
+        "results_count" => 10
+      }
+
+      Events.search_completed(media_item, metadata, episode: episode)
+      Process.sleep(100)
+
+      [event] = Events.list_events(type: "search.completed")
+      assert event.actor_id == "tv_show_search"
+      assert event.resource_type == "episode"
+      assert event.resource_id == episode.id
+      assert event.metadata["season_number"] == 1
+      assert event.metadata["episode_number"] == 5
+    end
+
+    test "search_no_results/3 creates correct event" do
+      media_item = %Mydia.Media.MediaItem{
+        id: Ecto.UUID.generate(),
+        title: "Rare Movie",
+        type: "movie"
+      }
+
+      metadata = %{
+        "query" => "Rare Movie 2024",
+        "indexers_searched" => 3
+      }
+
+      Events.search_no_results(media_item, metadata)
+      Process.sleep(100)
+
+      [event] = Events.list_events(type: "search.no_results")
+      assert event.category == "search"
+      assert event.severity == :warning
+      assert event.metadata["title"] == "Rare Movie"
+      assert event.metadata["indexers_searched"] == 3
+    end
+
+    test "search_filtered_out/3 creates correct event with filter stats" do
+      media_item = %Mydia.Media.MediaItem{
+        id: Ecto.UUID.generate(),
+        title: "Test Show",
+        type: "tv_show"
+      }
+
+      episode = %Mydia.Media.Episode{
+        id: Ecto.UUID.generate(),
+        season_number: 2,
+        episode_number: 3,
+        media_item_id: media_item.id
+      }
+
+      metadata = %{
+        "query" => "Test Show S02E03",
+        "results_count" => 10,
+        "filter_stats" => %{
+          "low_seeders" => 5,
+          "wrong_quality" => 3,
+          "blocked_tags" => 2
+        },
+        "top_rejections" => [
+          %{"title" => "Some.Release", "reason" => "low_seeders", "value" => 1}
+        ]
+      }
+
+      Events.search_filtered_out(media_item, metadata, episode: episode)
+      Process.sleep(100)
+
+      [event] = Events.list_events(type: "search.filtered_out")
+      assert event.category == "search"
+      assert event.severity == :warning
+      assert event.metadata["results_count"] == 10
+      assert event.metadata["filter_stats"]["low_seeders"] == 5
+      assert event.metadata["season_number"] == 2
+      assert event.metadata["episode_number"] == 3
+    end
+
+    test "search_error/4 creates correct event" do
+      media_item = %Mydia.Media.MediaItem{
+        id: Ecto.UUID.generate(),
+        title: "Test Movie",
+        type: "movie"
+      }
+
+      Events.search_error(media_item, "Connection timeout", %{
+        "query" => "Test Movie 2024"
+      })
+
+      Process.sleep(100)
+
+      [event] = Events.list_events(type: "search.error")
+      assert event.category == "search"
+      assert event.severity == :error
+      assert event.metadata["error_message"] == "Connection timeout"
+      assert event.metadata["query"] == "Test Movie 2024"
+    end
+
+    test "search_started/3 creates correct event" do
+      media_item = %Mydia.Media.MediaItem{
+        id: Ecto.UUID.generate(),
+        title: "Test Show",
+        type: "tv_show"
+      }
+
+      metadata = %{
+        "query" => "Test Show S01E01",
+        "mode" => "specific"
+      }
+
+      Events.search_started(media_item, metadata)
+      Process.sleep(100)
+
+      [event] = Events.list_events(type: "search.started")
+      assert event.category == "search"
+      assert event.severity == :info
+      assert event.actor_id == "tv_show_search"
+      assert event.metadata["mode"] == "specific"
+    end
+  end
 end

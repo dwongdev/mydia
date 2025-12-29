@@ -136,9 +136,53 @@ defmodule MydiaWeb.ActivityLive.Index do
         error = event.metadata["error_message"] || "Unknown error"
         "Job failed: #{job_name} (#{error})"
 
+      "search.started" ->
+        title = event.metadata["title"] || "Unknown"
+        format_search_description("Searching for", title, event.metadata)
+
+      "search.completed" ->
+        title = event.metadata["title"] || "Unknown"
+        selected = event.metadata["selected_release"]
+
+        if selected do
+          format_search_description("Found release for", title, event.metadata) <> ": #{selected}"
+        else
+          format_search_description("Search completed for", title, event.metadata)
+        end
+
+      "search.no_results" ->
+        title = event.metadata["title"] || "Unknown"
+        format_search_description("No results found for", title, event.metadata)
+
+      "search.filtered_out" ->
+        title = event.metadata["title"] || "Unknown"
+        count = event.metadata["results_count"] || 0
+        format_search_description("#{count} results filtered out for", title, event.metadata)
+
+      "search.error" ->
+        title = event.metadata["title"] || "Unknown"
+        error = event.metadata["error_message"] || "Unknown error"
+        format_search_description("Search failed for", title, event.metadata) <> " (#{error})"
+
       _ ->
         event.type
     end
+  end
+
+  defp format_search_description(prefix, title, metadata) do
+    episode_part =
+      case {metadata["season_number"], metadata["episode_number"]} do
+        {nil, _} ->
+          ""
+
+        {_, nil} ->
+          ""
+
+        {s, e} ->
+          " S#{String.pad_leading(to_string(s), 2, "0")}E#{String.pad_leading(to_string(e), 2, "0")}"
+      end
+
+    "#{prefix}: #{title}#{episode_part}"
   end
 
   defp format_actor(event) do
@@ -148,24 +192,6 @@ defmodule MydiaWeb.ActivityLive.Index do
       :job -> event.actor_id || "Job"
       nil -> "System"
       _ -> "Unknown"
-    end
-  end
-
-  defp event_icon(event) do
-    case event.type do
-      "media_item.added" -> "hero-plus-circle"
-      "media_item.updated" -> "hero-arrow-path"
-      "media_item.removed" -> "hero-trash"
-      "media_item.monitoring_changed" -> "hero-eye"
-      "download.initiated" -> "hero-arrow-down-tray"
-      "download.completed" -> "hero-check-circle"
-      "download.failed" -> "hero-x-circle"
-      "download.cancelled" -> "hero-x-mark"
-      "download.paused" -> "hero-pause"
-      "download.resumed" -> "hero-play"
-      "job.executed" -> "hero-cog-6-tooth"
-      "job.failed" -> "hero-exclamation-triangle"
-      _ -> "hero-information-circle"
     end
   end
 
@@ -198,8 +224,68 @@ defmodule MydiaWeb.ActivityLive.Index do
       "library" -> "Library"
       "system" -> "System"
       "auth" -> "Authentication"
+      "search" -> "Search"
       "all" -> "All"
       _ -> String.capitalize(category)
     end
   end
+
+  defp event_icon(event) do
+    case event.type do
+      "media_item.added" -> "hero-plus-circle"
+      "media_item.updated" -> "hero-arrow-path"
+      "media_item.removed" -> "hero-trash"
+      "media_item.monitoring_changed" -> "hero-eye"
+      "download.initiated" -> "hero-arrow-down-tray"
+      "download.completed" -> "hero-check-circle"
+      "download.failed" -> "hero-x-circle"
+      "download.cancelled" -> "hero-x-mark"
+      "download.paused" -> "hero-pause"
+      "download.resumed" -> "hero-play"
+      "job.executed" -> "hero-cog-6-tooth"
+      "job.failed" -> "hero-exclamation-triangle"
+      "search.started" -> "hero-magnifying-glass"
+      "search.completed" -> "hero-magnifying-glass"
+      "search.no_results" -> "hero-magnifying-glass"
+      "search.filtered_out" -> "hero-funnel"
+      "search.error" -> "hero-magnifying-glass"
+      _ -> "hero-information-circle"
+    end
+  end
+
+  defp has_search_details?(event) do
+    event.category == "search" &&
+      (event.metadata["query"] != nil ||
+         event.metadata["results_count"] != nil ||
+         event.metadata["filter_stats"] != nil ||
+         event.metadata["breakdown"] != nil)
+  end
+
+  defp format_filter_stat_label(key) do
+    case key do
+      "total_results" -> "Total"
+      "low_seeders" -> "Low seeders"
+      "below_quality_threshold" -> "Below quality"
+      "no_valid_season_packs" -> "No season packs"
+      _ -> String.replace(key, "_", " ") |> String.capitalize()
+    end
+  end
+
+  defp format_breakdown_label(key) do
+    case key do
+      "quality" -> "Quality"
+      "seeders" -> "Seeders"
+      "size" -> "Size"
+      "preferred_tags" -> "Preferred"
+      "blocked_tags" -> "Blocked"
+      "title_relevance" -> "Title match"
+      _ -> String.replace(key, "_", " ") |> String.capitalize()
+    end
+  end
+
+  defp format_breakdown_value(value) when is_float(value) do
+    :erlang.float_to_binary(value, decimals: 1)
+  end
+
+  defp format_breakdown_value(value), do: to_string(value)
 end

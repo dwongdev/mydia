@@ -53,7 +53,7 @@ defmodule Mydia.Jobs.TVShowSearch do
 
   import Ecto.Query, warn: false
 
-  alias Mydia.{Repo, Media, Indexers, Downloads}
+  alias Mydia.{Repo, Media, Indexers, Downloads, Events}
   alias Mydia.Indexers.ReleaseRanker
   alias Mydia.Media.{MediaItem, Episode}
   alias Phoenix.PubSub
@@ -586,6 +586,17 @@ defmodule Mydia.Jobs.TVShowSearch do
           season_number: season_number
         )
 
+        # Log no results event for season pack search
+        Events.search_no_results(
+          media_item,
+          %{
+            "query" => query,
+            "indexers_searched" => count_enabled_indexers(),
+            "season_number" => season_number,
+            "search_type" => "season_pack"
+          }
+        )
+
         # Fall back to searching individual episodes
         search_individual_episodes(episodes, new_count, args)
 
@@ -608,6 +619,18 @@ defmodule Mydia.Jobs.TVShowSearch do
             total_results: length(results)
           )
 
+          # Log filtered out event
+          Events.search_filtered_out(
+            media_item,
+            %{
+              "query" => query,
+              "results_count" => length(results),
+              "season_number" => season_number,
+              "search_type" => "season_pack",
+              "filter_stats" => %{"no_valid_season_packs" => length(results)}
+            }
+          )
+
           search_individual_episodes(episodes, new_count, args)
         else
           result =
@@ -616,7 +639,8 @@ defmodule Mydia.Jobs.TVShowSearch do
               season_number,
               episodes,
               season_pack_results,
-              args
+              args,
+              query
             )
 
           # If season pack processing failed, fall back to individual episodes
@@ -641,7 +665,7 @@ defmodule Mydia.Jobs.TVShowSearch do
     end)
   end
 
-  defp process_season_pack_results(media_item, season_number, episodes, results, args) do
+  defp process_season_pack_results(media_item, season_number, episodes, results, args, query) do
     # Build ranking options from the first episode (they all share the same show)
     ranking_opts = build_ranking_options_for_season(media_item, season_number, episodes, args)
 
@@ -653,6 +677,18 @@ defmodule Mydia.Jobs.TVShowSearch do
           title: media_item.title,
           season_number: season_number,
           total_results: length(results)
+        )
+
+        # Log filtered out event
+        Events.search_filtered_out(
+          media_item,
+          %{
+            "query" => query,
+            "results_count" => length(results),
+            "season_number" => season_number,
+            "search_type" => "season_pack",
+            "filter_stats" => build_filter_stats(results, ranking_opts)
+          }
         )
 
         # Return :no_results to signal fallback needed
@@ -669,7 +705,24 @@ defmodule Mydia.Jobs.TVShowSearch do
           episodes_count: length(episodes)
         )
 
-        initiate_season_pack_download(media_item, season_number, episodes, best_result)
+        result = initiate_season_pack_download(media_item, season_number, episodes, best_result)
+
+        # Log search completed event
+        Events.search_completed(
+          media_item,
+          %{
+            "query" => query,
+            "results_count" => length(results),
+            "selected_release" => best_result.title,
+            "score" => score,
+            "breakdown" => stringify_keys(breakdown),
+            "season_number" => season_number,
+            "search_type" => "season_pack",
+            "episodes_included" => length(episodes)
+          }
+        )
+
+        result
     end
   end
 
@@ -781,6 +834,13 @@ defmodule Mydia.Jobs.TVShowSearch do
           query: query
         )
 
+        # Log search event for no results
+        Events.search_no_results(
+          episode.media_item,
+          %{"query" => query, "indexers_searched" => count_enabled_indexers()},
+          episode: episode
+        )
+
         :ok
 
       {:ok, results} ->
@@ -791,11 +851,11 @@ defmodule Mydia.Jobs.TVShowSearch do
           episode: episode.episode_number
         )
 
-        process_episode_results(episode, results, args)
+        process_episode_results(episode, results, args, query)
     end
   end
 
-  defp process_episode_results(episode, results, args) do
+  defp process_episode_results(episode, results, args, query) do
     ranking_opts = build_ranking_options(episode, args)
 
     case ReleaseRanker.select_best_result(results, ranking_opts) do
@@ -806,6 +866,17 @@ defmodule Mydia.Jobs.TVShowSearch do
           season: episode.season_number,
           episode: episode.episode_number,
           total_results: length(results)
+        )
+
+        # Log search event for all results filtered out
+        Events.search_filtered_out(
+          episode.media_item,
+          %{
+            "query" => query,
+            "results_count" => length(results),
+            "filter_stats" => build_filter_stats(results, ranking_opts)
+          },
+          episode: episode
         )
 
         :ok
@@ -821,7 +892,22 @@ defmodule Mydia.Jobs.TVShowSearch do
           breakdown: breakdown
         )
 
-        initiate_episode_download(episode, best_result)
+        result = initiate_episode_download(episode, best_result)
+
+        # Log search completed event
+        Events.search_completed(
+          episode.media_item,
+          %{
+            "query" => query,
+            "results_count" => length(results),
+            "selected_release" => best_result.title,
+            "score" => score,
+            "breakdown" => stringify_keys(breakdown)
+          },
+          episode: episode
+        )
+
+        result
     end
   end
 
@@ -1219,6 +1305,17 @@ defmodule Mydia.Jobs.TVShowSearch do
           season_number: season_number
         )
 
+        # Log no results event for season pack search
+        Events.search_no_results(
+          media_item,
+          %{
+            "query" => query,
+            "indexers_searched" => count_enabled_indexers(),
+            "season_number" => season_number,
+            "search_type" => "season_pack"
+          }
+        )
+
         # Fall back to searching individual episodes
         search_individual_episodes_with_stats(episodes, new_count, args)
 
@@ -1241,6 +1338,18 @@ defmodule Mydia.Jobs.TVShowSearch do
             total_results: length(results)
           )
 
+          # Log filtered out event
+          Events.search_filtered_out(
+            media_item,
+            %{
+              "query" => query,
+              "results_count" => length(results),
+              "season_number" => season_number,
+              "search_type" => "season_pack",
+              "filter_stats" => %{"no_valid_season_packs" => length(results)}
+            }
+          )
+
           {count, ep_stats} = search_individual_episodes_with_stats(episodes, new_count, args)
           # Add the season pack results to the stats
           {count, %{ep_stats | results_found: ep_stats.results_found + length(results)}}
@@ -1251,7 +1360,8 @@ defmodule Mydia.Jobs.TVShowSearch do
               season_number,
               episodes,
               season_pack_results,
-              args
+              args,
+              query
             )
 
           # If season pack processing failed, fall back to individual episodes
@@ -1379,6 +1489,13 @@ defmodule Mydia.Jobs.TVShowSearch do
           query: query
         )
 
+        # Log search event for no results
+        Events.search_no_results(
+          episode.media_item,
+          %{"query" => query, "indexers_searched" => count_enabled_indexers()},
+          episode: episode
+        )
+
         {:ok, 0}
 
       {:ok, results} ->
@@ -1389,10 +1506,32 @@ defmodule Mydia.Jobs.TVShowSearch do
           episode: episode.episode_number
         )
 
-        case process_episode_results(episode, results, args) do
+        case process_episode_results(episode, results, args, query) do
           :ok -> {:ok, length(results)}
           {:error, _} = err -> {err, length(results)}
         end
     end
   end
+
+  ## Private Functions - Event Helpers
+
+  # Build a map of filter statistics for rejected results
+  defp build_filter_stats(results, ranking_opts) do
+    min_seeders = Keyword.get(ranking_opts, :min_seeders, 3)
+
+    low_seeders = Enum.count(results, fn r -> (r[:seeders] || 0) < min_seeders end)
+
+    %{
+      "total_results" => length(results),
+      "low_seeders" => low_seeders,
+      "below_quality_threshold" => length(results) - low_seeders
+    }
+  end
+
+  # Convert a map with atom keys to string keys for JSON serialization
+  defp stringify_keys(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {to_string(k), v} end)
+  end
+
+  defp stringify_keys(other), do: other
 end

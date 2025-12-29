@@ -855,6 +855,21 @@ defmodule Mydia.Events do
       "job.failed" ->
         {"hero-exclamation-triangle", "text-error", "Job Failed"}
 
+      "search.started" ->
+        {"hero-magnifying-glass", "text-info", "Search Started"}
+
+      "search.completed" ->
+        {"hero-magnifying-glass", "text-success", "Search Completed"}
+
+      "search.no_results" ->
+        {"hero-magnifying-glass", "text-warning", "No Results"}
+
+      "search.filtered_out" ->
+        {"hero-funnel", "text-warning", "All Filtered Out"}
+
+      "search.error" ->
+        {"hero-magnifying-glass", "text-error", "Search Error"}
+
       _ ->
         # Default based on severity
         case severity do
@@ -930,6 +945,43 @@ defmodule Mydia.Events do
     "#{job_name} failed: #{error}"
   end
 
+  defp build_event_description(%Event{type: "search.started", metadata: metadata}) do
+    build_search_description("Searching for", metadata)
+  end
+
+  defp build_event_description(%Event{type: "search.completed", metadata: metadata}) do
+    title = metadata["title"] || "Unknown"
+    results_count = metadata["results_count"] || 0
+    selected = metadata["selected_release"]
+    episode_part = format_episode_part(metadata)
+
+    base = "Searched for #{title}#{episode_part}"
+
+    if selected do
+      "#{base} - found #{results_count} results, selected release"
+    else
+      "#{base} - found #{results_count} results"
+    end
+  end
+
+  defp build_event_description(%Event{type: "search.no_results", metadata: metadata}) do
+    build_search_description("Searched for", metadata) <> " - no results found"
+  end
+
+  defp build_event_description(%Event{type: "search.filtered_out", metadata: metadata}) do
+    title = metadata["title"] || "Unknown"
+    results_count = metadata["results_count"] || 0
+    episode_part = format_episode_part(metadata)
+    "Searched for #{title}#{episode_part} - #{results_count} results, all filtered out"
+  end
+
+  defp build_event_description(%Event{type: "search.error", metadata: metadata}) do
+    title = metadata["title"] || "Unknown"
+    error = metadata["error_message"] || "Unknown error"
+    episode_part = format_episode_part(metadata)
+    "Search failed for #{title}#{episode_part}: #{error}"
+  end
+
   defp build_event_description(%Event{metadata: metadata}) do
     # Fallback: try to extract a meaningful description from metadata
     cond do
@@ -946,6 +998,273 @@ defmodule Mydia.Events do
       "media_item_id" => media_item.id,
       "media_title" => media_item.title,
       "media_type" => media_item.type
+    })
+  end
+
+  # Helper to build search description with episode info
+  defp build_search_description(prefix, metadata) do
+    title = metadata["title"] || "Unknown"
+    episode_part = format_episode_part(metadata)
+    "#{prefix} #{title}#{episode_part}"
+  end
+
+  # Helper to format episode part of description (e.g., " S01E05")
+  defp format_episode_part(metadata) do
+    season = metadata["season_number"]
+    episode = metadata["episode_number"]
+
+    cond do
+      season && episode ->
+        " S#{String.pad_leading("#{season}", 2, "0")}E#{String.pad_leading("#{episode}", 2, "0")}"
+
+      season ->
+        " S#{String.pad_leading("#{season}", 2, "0")}"
+
+      true ->
+        ""
+    end
+  end
+
+  ## Search Event Helpers
+
+  @doc """
+  Records a search.completed event when a search finds results and initiates a download.
+
+  ## Parameters
+    - `media_item` - The MediaItem being searched for
+    - `metadata` - Search result metadata including:
+      - `query` - The search query used
+      - `results_count` - Total results found
+      - `selected_release` - The release that was selected
+      - `score` - The ranking score of the selected release
+      - `breakdown` - Score breakdown details
+    - `opts` - Optional parameters:
+      - `:episode` - The Episode if this is a TV show episode search
+
+  ## Examples
+
+      iex> search_completed(media_item, %{
+      ...>   "query" => "Breaking Bad S01E01",
+      ...>   "results_count" => 15,
+      ...>   "selected_release" => "Breaking.Bad.S01E01.1080p.BluRay",
+      ...>   "score" => 850,
+      ...>   "breakdown" => %{"quality" => 200, "seeders" => 150}
+      ...> })
+      :ok
+  """
+  def search_completed(media_item, metadata, opts \\ []) do
+    episode = opts[:episode]
+
+    base_metadata =
+      %{
+        "title" => media_item.title,
+        "media_type" => media_item.type
+      }
+      |> Map.merge(metadata)
+      |> maybe_add_episode_context(episode)
+
+    create_event_async(%{
+      category: "search",
+      type: "search.completed",
+      actor_type: :job,
+      actor_id: search_actor_id(media_item),
+      resource_type: resource_type_for_search(episode),
+      resource_id: resource_id_for_search(media_item, episode),
+      severity: :info,
+      metadata: base_metadata
+    })
+  end
+
+  @doc """
+  Records a search.no_results event when a search returns no results from indexers.
+
+  ## Parameters
+    - `media_item` - The MediaItem being searched for
+    - `metadata` - Search metadata including:
+      - `query` - The search query used
+      - `indexers_searched` - Number of indexers queried
+    - `opts` - Optional parameters:
+      - `:episode` - The Episode if this is a TV show episode search
+
+  ## Examples
+
+      iex> search_no_results(media_item, %{"query" => "Breaking Bad S01E01", "indexers_searched" => 3})
+      :ok
+  """
+  def search_no_results(media_item, metadata, opts \\ []) do
+    episode = opts[:episode]
+
+    base_metadata =
+      %{
+        "title" => media_item.title,
+        "media_type" => media_item.type
+      }
+      |> Map.merge(metadata)
+      |> maybe_add_episode_context(episode)
+
+    create_event_async(%{
+      category: "search",
+      type: "search.no_results",
+      actor_type: :job,
+      actor_id: search_actor_id(media_item),
+      resource_type: resource_type_for_search(episode),
+      resource_id: resource_id_for_search(media_item, episode),
+      severity: :warning,
+      metadata: base_metadata
+    })
+  end
+
+  @doc """
+  Records a search.filtered_out event when results exist but all were filtered/rejected.
+
+  ## Parameters
+    - `media_item` - The MediaItem being searched for
+    - `metadata` - Search metadata including:
+      - `query` - The search query used
+      - `results_count` - Total results before filtering
+      - `filter_stats` - Breakdown of why results were filtered
+      - `top_rejections` - Sample of top rejected releases with reasons
+    - `opts` - Optional parameters:
+      - `:episode` - The Episode if this is a TV show episode search
+
+  ## Examples
+
+      iex> search_filtered_out(media_item, %{
+      ...>   "query" => "Breaking Bad S01E01",
+      ...>   "results_count" => 10,
+      ...>   "filter_stats" => %{
+      ...>     "low_seeders" => 5,
+      ...>     "wrong_quality" => 3,
+      ...>     "blocked_tags" => 2
+      ...>   },
+      ...>   "top_rejections" => [
+      ...>     %{"title" => "Some.Release", "reason" => "low_seeders", "value" => 1}
+      ...>   ]
+      ...> })
+      :ok
+  """
+  def search_filtered_out(media_item, metadata, opts \\ []) do
+    episode = opts[:episode]
+
+    base_metadata =
+      %{
+        "title" => media_item.title,
+        "media_type" => media_item.type
+      }
+      |> Map.merge(metadata)
+      |> maybe_add_episode_context(episode)
+
+    create_event_async(%{
+      category: "search",
+      type: "search.filtered_out",
+      actor_type: :job,
+      actor_id: search_actor_id(media_item),
+      resource_type: resource_type_for_search(episode),
+      resource_id: resource_id_for_search(media_item, episode),
+      severity: :warning,
+      metadata: base_metadata
+    })
+  end
+
+  @doc """
+  Records a search.error event when a search encounters an error.
+
+  ## Parameters
+    - `media_item` - The MediaItem being searched for
+    - `error_message` - Description of the error
+    - `metadata` - Additional metadata (optional)
+    - `opts` - Optional parameters:
+      - `:episode` - The Episode if this is a TV show episode search
+
+  ## Examples
+
+      iex> search_error(media_item, "Connection timeout", %{"query" => "Breaking Bad S01E01"})
+      :ok
+  """
+  def search_error(media_item, error_message, metadata \\ %{}, opts \\ []) do
+    episode = opts[:episode]
+
+    base_metadata =
+      %{
+        "title" => media_item.title,
+        "media_type" => media_item.type,
+        "error_message" => error_message
+      }
+      |> Map.merge(metadata)
+      |> maybe_add_episode_context(episode)
+
+    create_event_async(%{
+      category: "search",
+      type: "search.error",
+      actor_type: :job,
+      actor_id: search_actor_id(media_item),
+      resource_type: resource_type_for_search(episode),
+      resource_id: resource_id_for_search(media_item, episode),
+      severity: :error,
+      metadata: base_metadata
+    })
+  end
+
+  @doc """
+  Records a search.started event when a search begins.
+
+  ## Parameters
+    - `media_item` - The MediaItem being searched for
+    - `metadata` - Search metadata including:
+      - `query` - The search query used
+      - `mode` - The search mode (e.g., "specific", "season", "show", "all_monitored")
+    - `opts` - Optional parameters:
+      - `:episode` - The Episode if this is a TV show episode search
+
+  ## Examples
+
+      iex> search_started(media_item, %{"query" => "Breaking Bad S01E01", "mode" => "specific"})
+      :ok
+  """
+  def search_started(media_item, metadata, opts \\ []) do
+    episode = opts[:episode]
+
+    base_metadata =
+      %{
+        "title" => media_item.title,
+        "media_type" => media_item.type
+      }
+      |> Map.merge(metadata)
+      |> maybe_add_episode_context(episode)
+
+    create_event_async(%{
+      category: "search",
+      type: "search.started",
+      actor_type: :job,
+      actor_id: search_actor_id(media_item),
+      resource_type: resource_type_for_search(episode),
+      resource_id: resource_id_for_search(media_item, episode),
+      severity: :info,
+      metadata: base_metadata
+    })
+  end
+
+  # Helper to determine actor_id based on media type
+  defp search_actor_id(%{type: "movie"}), do: "movie_search"
+  defp search_actor_id(%{type: "tv_show"}), do: "tv_show_search"
+  defp search_actor_id(_), do: "search"
+
+  # Helper to determine resource type based on episode presence
+  defp resource_type_for_search(nil), do: "media_item"
+  defp resource_type_for_search(_episode), do: "episode"
+
+  # Helper to determine resource id based on episode presence
+  defp resource_id_for_search(media_item, nil), do: media_item.id
+  defp resource_id_for_search(_media_item, episode), do: episode.id
+
+  # Helper to add episode context to metadata
+  defp maybe_add_episode_context(metadata, nil), do: metadata
+
+  defp maybe_add_episode_context(metadata, episode) do
+    Map.merge(metadata, %{
+      "episode_id" => episode.id,
+      "season_number" => episode.season_number,
+      "episode_number" => episode.episode_number
     })
   end
 end

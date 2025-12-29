@@ -54,8 +54,7 @@ defmodule MydiaWeb.CollectionLive.Index do
               class="btn btn-primary gap-2"
               phx-click="open_new_modal"
             >
-              <.icon name="hero-plus" class="w-5 h-5" />
-              New Collection
+              <.icon name="hero-plus" class="w-5 h-5" /> New Collection
             </button>
           </div>
         </div>
@@ -105,8 +104,7 @@ defmodule MydiaWeb.CollectionLive.Index do
                 class="btn btn-primary gap-2"
                 phx-click="open_new_modal"
               >
-                <.icon name="hero-plus" class="w-5 h-5" />
-                Create your first collection
+                <.icon name="hero-plus" class="w-5 h-5" /> Create your first collection
               </button>
             </:actions>
           </.collection_empty_state>
@@ -121,7 +119,12 @@ defmodule MydiaWeb.CollectionLive.Index do
         >
           <:title>Create New Collection</:title>
 
-          <.form for={@new_form} phx-submit="create_collection" phx-change="validate_collection" id="new-collection-form">
+          <.form
+            for={@new_form}
+            phx-submit="create_collection"
+            phx-change="validate_collection"
+            id="new-collection-form"
+          >
             <div class="space-y-4">
               <%!-- Collection Type --%>
               <.type_selector
@@ -190,8 +193,7 @@ defmodule MydiaWeb.CollectionLive.Index do
               Cancel
             </button>
             <button type="submit" form="new-collection-form" class="btn btn-primary">
-              <.icon name="hero-plus" class="w-4 h-4" />
-              Create Collection
+              <.icon name="hero-plus" class="w-4 h-4" /> Create Collection
             </button>
           </:actions>
         </.modal>
@@ -275,7 +277,8 @@ defmodule MydiaWeb.CollectionLive.Index do
          |> push_navigate(to: ~p"/collections/#{collection.id}")}
 
       {:error, :unauthorized} ->
-        {:noreply, put_flash(socket, :error, "You don't have permission to create shared collections")}
+        {:noreply,
+         put_flash(socket, :error, "You don't have permission to create shared collections")}
 
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply,

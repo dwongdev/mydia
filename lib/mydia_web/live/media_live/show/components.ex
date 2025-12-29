@@ -121,8 +121,7 @@ defmodule MydiaWeb.MediaLive.Show.Components do
                 </li>
                 <li>
                   <.link navigate={~p"/collections"} class="justify-start">
-                    <.icon name="hero-plus" class="w-4 h-4" />
-                    Create Collection
+                    <.icon name="hero-plus" class="w-4 h-4" /> Create Collection
                   </.link>
                 </li>
               <% else %>
@@ -134,7 +133,9 @@ defmodule MydiaWeb.MediaLive.Show.Components do
                   <li>
                     <button
                       type="button"
-                      phx-click={if is_in_collection, do: "remove_from_collection", else: "add_to_collection"}
+                      phx-click={
+                        if is_in_collection, do: "remove_from_collection", else: "add_to_collection"
+                      }
                       phx-value-collection-id={collection.id}
                       class="justify-between"
                     >
@@ -154,8 +155,7 @@ defmodule MydiaWeb.MediaLive.Show.Components do
                 <div class="divider my-1"></div>
                 <li>
                   <.link navigate={~p"/collections"} class="justify-start">
-                    <.icon name="hero-folder-open" class="w-4 h-4" />
-                    Manage Collections
+                    <.icon name="hero-folder-open" class="w-4 h-4" /> Manage Collections
                   </.link>
                 </li>
               <% end %>

@@ -1,5 +1,26 @@
 # ============================================
-# Build Stage
+# Flutter Build Stage
+# ============================================
+FROM ghcr.io/cirruslabs/flutter:stable AS flutter-builder
+
+WORKDIR /app/player
+
+# Copy player source
+COPY player/pubspec.yaml player/pubspec.lock ./
+COPY player/build.yaml ./
+COPY player/lib ./lib
+COPY player/web ./web
+
+# Copy the GraphQL schema (resolves symlink from priv/graphql/)
+COPY priv/graphql/schema.graphql ./lib/graphql/schema.graphql
+
+# Install dependencies and build (skip build_runner - generated files are committed)
+RUN flutter config --no-analytics && \
+    flutter pub get && \
+    flutter build web --release --base-href /player/
+
+# ============================================
+# Elixir Build Stage
 # ============================================
 FROM elixir:1.18-alpine AS builder
 
@@ -9,19 +30,13 @@ FROM elixir:1.18-alpine AS builder
 ARG DATABASE_TYPE=sqlite
 
 # Install build dependencies
-# postgresql16-dev is needed for postgrex compilation
-# Flutter build dependencies: bash, git, curl, unzip, xz
 RUN apk add --no-cache \
     build-base \
     git \
     nodejs \
     npm \
     sqlite-dev \
-    postgresql16-dev \
-    curl \
-    bash \
-    unzip \
-    xz
+    postgresql16-dev
 
 # Set build environment
 ENV MIX_ENV=prod
@@ -30,17 +45,6 @@ ENV DATABASE_TYPE=${DATABASE_TYPE}
 # Install Hex and Rebar
 RUN mix local.hex --force && \
     mix local.rebar --force
-
-# Install Flutter SDK
-ARG FLUTTER_VERSION=3.24.0
-ENV FLUTTER_HOME=/usr/local/flutter
-ENV PATH="${FLUTTER_HOME}/bin:${PATH}"
-
-RUN curl -fsSL https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz -o flutter.tar.xz && \
-    tar xf flutter.tar.xz -C /usr/local && \
-    rm flutter.tar.xz && \
-    flutter config --no-analytics && \
-    flutter --version
 
 # Create app directory
 WORKDIR /app
@@ -65,21 +69,12 @@ COPY config ./config
 COPY priv ./priv
 COPY lib ./lib
 COPY assets ./assets
-COPY player ./player
+
+# Copy Flutter build output from flutter-builder stage
+COPY --from=flutter-builder /app/player/build/web ./priv/static/player
 
 # Compile application
 RUN mix compile
-
-# Build Flutter web player
-RUN if [ -d "player" ]; then \
-      cd player && \
-      flutter pub get && \
-      flutter pub run build_runner build --delete-conflicting-outputs && \
-      flutter build web --release --base-href /player/ && \
-      mkdir -p ../priv/static/player && \
-      cp -r build/web/* ../priv/static/player/ && \
-      cd ..; \
-    fi
 
 # Build Phoenix assets
 RUN cd assets && \

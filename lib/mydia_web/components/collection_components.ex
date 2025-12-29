@@ -156,8 +156,7 @@ defmodule MydiaWeb.CollectionComponents do
             </span>
             <%= if @collection.visibility == "shared" do %>
               <span class="badge badge-xs badge-outline gap-1">
-                <.icon name="hero-globe-alt" class="w-3 h-3" />
-                Shared
+                <.icon name="hero-globe-alt" class="w-3 h-3" /> Shared
               </span>
             <% end %>
           </div>
@@ -241,13 +240,11 @@ defmodule MydiaWeb.CollectionComponents do
       <div class="w-24 hidden lg:flex justify-center flex-shrink-0">
         <%= if @collection.visibility == "shared" do %>
           <span class="badge badge-sm badge-outline gap-1">
-            <.icon name="hero-globe-alt" class="w-3 h-3" />
-            Shared
+            <.icon name="hero-globe-alt" class="w-3 h-3" /> Shared
           </span>
         <% else %>
           <span class="badge badge-sm badge-ghost gap-1">
-            <.icon name="hero-lock-closed" class="w-3 h-3" />
-            Private
+            <.icon name="hero-lock-closed" class="w-3 h-3" /> Private
           </span>
         <% end %>
       </div>
@@ -291,8 +288,7 @@ defmodule MydiaWeb.CollectionComponents do
           />
           <div>
             <div class="flex items-center gap-2 font-medium">
-              <.icon name="hero-folder" class="w-5 h-5" />
-              Manual
+              <.icon name="hero-folder" class="w-5 h-5" /> Manual
             </div>
             <div class="text-sm text-base-content/60">
               Curate items by hand, drag to reorder
@@ -316,8 +312,7 @@ defmodule MydiaWeb.CollectionComponents do
           />
           <div>
             <div class="flex items-center gap-2 font-medium">
-              <.icon name="hero-sparkles" class="w-5 h-5" />
-              Smart
+              <.icon name="hero-sparkles" class="w-5 h-5" /> Smart
             </div>
             <div class="text-sm text-base-content/60">
               Auto-populate based on filter rules
@@ -360,13 +355,19 @@ defmodule MydiaWeb.CollectionComponents do
           <option value="monitored" selected={@condition["field"] == "monitored"}>Monitored</option>
         </optgroup>
         <optgroup label="Metadata">
-          <option value="metadata.vote_average" selected={@condition["field"] == "metadata.vote_average"}>
+          <option
+            value="metadata.vote_average"
+            selected={@condition["field"] == "metadata.vote_average"}
+          >
             Rating
           </option>
           <option value="metadata.genres" selected={@condition["field"] == "metadata.genres"}>
             Genre
           </option>
-          <option value="metadata.original_language" selected={@condition["field"] == "metadata.original_language"}>
+          <option
+            value="metadata.original_language"
+            selected={@condition["field"] == "metadata.original_language"}
+          >
             Language
           </option>
           <option value="metadata.status" selected={@condition["field"] == "metadata.status"}>
@@ -465,8 +466,7 @@ defmodule MydiaWeb.CollectionComponents do
       <div class="flex items-center justify-between">
         <.match_type_selector selected={Map.get(@rules, "match_type", "all")} />
         <button type="button" phx-click="add_condition" class="btn btn-sm btn-ghost gap-1">
-          <.icon name="hero-plus" class="w-4 h-4" />
-          Add Condition
+          <.icon name="hero-plus" class="w-4 h-4" /> Add Condition
         </button>
       </div>
 
@@ -540,8 +540,7 @@ defmodule MydiaWeb.CollectionComponents do
       <%= if @show_preview do %>
         <div class="flex justify-end">
           <button type="button" phx-click="preview_rules" class="btn btn-sm btn-ghost gap-1">
-            <.icon name="hero-eye" class="w-4 h-4" />
-            Preview Results
+            <.icon name="hero-eye" class="w-4 h-4" /> Preview Results
           </button>
         </div>
       <% end %>

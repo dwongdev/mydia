@@ -63,8 +63,7 @@ defmodule MydiaWeb.CollectionLive.Show do
                 <h1 class="text-2xl font-bold">{@collection.name}</h1>
                 <%= if @collection.is_system do %>
                   <span class="badge badge-ghost gap-1">
-                    <.icon name="hero-star" class="w-3 h-3" />
-                    System
+                    <.icon name="hero-star" class="w-3 h-3" /> System
                   </span>
                 <% end %>
                 <span class={["badge badge-sm gap-1", type_badge_class(@collection.type)]}>
@@ -88,8 +87,7 @@ defmodule MydiaWeb.CollectionLive.Show do
                 class="btn btn-ghost btn-sm gap-1"
                 phx-click="open_edit_modal"
               >
-                <.icon name="hero-funnel" class="w-4 h-4" />
-                Edit Rules
+                <.icon name="hero-funnel" class="w-4 h-4" /> Edit Rules
               </button>
             <% end %>
             <%!-- Settings dropdown for non-system collections --%>
@@ -98,17 +96,18 @@ defmodule MydiaWeb.CollectionLive.Show do
                 <label tabindex="0" class="btn btn-ghost btn-sm gap-1">
                   <.icon name="hero-ellipsis-vertical" class="w-5 h-5" />
                 </label>
-                <ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52">
+                <ul
+                  tabindex="0"
+                  class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52"
+                >
                   <li>
                     <button type="button" phx-click="open_edit_modal">
-                      <.icon name="hero-pencil" class="w-4 h-4" />
-                      Edit Collection
+                      <.icon name="hero-pencil" class="w-4 h-4" /> Edit Collection
                     </button>
                   </li>
                   <li>
                     <button type="button" phx-click="open_delete_modal" class="text-error">
-                      <.icon name="hero-trash" class="w-4 h-4" />
-                      Delete Collection
+                      <.icon name="hero-trash" class="w-4 h-4" /> Delete Collection
                     </button>
                   </li>
                 </ul>
@@ -287,8 +286,7 @@ defmodule MydiaWeb.CollectionLive.Show do
               Cancel
             </button>
             <button type="button" class="btn btn-error" phx-click="delete_collection">
-              <.icon name="hero-trash" class="w-4 h-4" />
-              Delete Collection
+              <.icon name="hero-trash" class="w-4 h-4" /> Delete Collection
             </button>
           </:actions>
         </.modal>
@@ -393,7 +391,8 @@ defmodule MydiaWeb.CollectionLive.Show do
          |> push_navigate(to: ~p"/collections")}
 
       {:error, :unauthorized} ->
-        {:noreply, put_flash(socket, :error, "You don't have permission to delete this collection")}
+        {:noreply,
+         put_flash(socket, :error, "You don't have permission to delete this collection")}
 
       {:error, :system_collection} ->
         {:noreply, put_flash(socket, :error, "System collections cannot be deleted")}

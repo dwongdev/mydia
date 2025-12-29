@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:graphql_flutter/graphql_flutter.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:media_kit/media_kit.dart';
 
-import 'package:player/main.dart' as app;
+import 'package:player/app.dart';
 
 /// E2E integration tests for the device pairing flow.
 ///
@@ -16,7 +19,18 @@ import 'package:player/main.dart' as app;
 /// 1. Happy path: Valid claim code -> successful pairing -> home screen
 /// 2. Invalid claim code: Shows error message
 void main() {
+  // Initialize integration test binding FIRST - this must happen before
+  // any other Flutter binding initialization
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  // Set up the app once before all tests
+  setUpAll(() async {
+    // Initialize media_kit for video playback
+    MediaKit.ensureInitialized();
+
+    // Initialize GraphQL Hive cache for offline support
+    await initHiveForFlutter();
+  });
 
   // Get the pre-generated claim code from dart-define
   const claimCode = String.fromEnvironment('E2E_CLAIM_CODE');
@@ -29,8 +43,12 @@ void main() {
           reason: 'E2E_CLAIM_CODE must be set via --dart-define');
       debugPrint('Using pre-generated claim code: $claimCode');
 
-      // Launch the app
-      app.main();
+      // Launch the app using pumpWidget with proper Riverpod scope
+      await tester.pumpWidget(
+        const ProviderScope(
+          child: MyApp(),
+        ),
+      );
       await tester.pumpAndSettle();
 
       // Wait for login screen to appear
@@ -100,8 +118,12 @@ void main() {
 
     testWidgets('Invalid claim code shows error message',
         (WidgetTester tester) async {
-      // Launch the app
-      app.main();
+      // Launch the app using pumpWidget with proper Riverpod scope
+      await tester.pumpWidget(
+        const ProviderScope(
+          child: MyApp(),
+        ),
+      );
       await tester.pumpAndSettle();
 
       // Wait for login screen to appear

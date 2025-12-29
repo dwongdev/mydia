@@ -512,9 +512,13 @@ defmodule Mydia.ImportLists do
   end
 
   # Adds media item to target collection if configured
-  defp maybe_add_to_target_collection(%ImportList{target_collection_id: nil}, _media_item), do: :ok
+  defp maybe_add_to_target_collection(%ImportList{target_collection_id: nil}, _media_item),
+    do: :ok
 
-  defp maybe_add_to_target_collection(%ImportList{target_collection_id: collection_id}, media_item) do
+  defp maybe_add_to_target_collection(
+         %ImportList{target_collection_id: collection_id},
+         media_item
+       ) do
     alias Mydia.Collections
 
     case Collections.get_collection_by_id(collection_id) do

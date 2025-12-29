@@ -1515,16 +1515,23 @@ defmodule MydiaWeb.MediaLive.Show do
     media_item = socket.assigns.media_item
     quality_profile = media_item.quality_profile
     media_type = get_media_type(media_item)
+    search_query = socket.assigns.manual_search_query
 
     filtered_results = filter_search_results(results, socket.assigns)
 
     sorted_results =
-      sort_search_results(filtered_results, socket.assigns.sort_by, quality_profile, media_type)
+      sort_search_results(
+        filtered_results,
+        socket.assigns.sort_by,
+        quality_profile,
+        media_type,
+        search_query
+      )
 
     duration = System.monotonic_time(:millisecond) - start_time
 
     Logger.info(
-      "Search completed: query=\"#{socket.assigns.manual_search_query}\", " <>
+      "Search completed: query=\"#{search_query}\", " <>
         "results=#{length(results)}, filtered=#{length(filtered_results)}, " <>
         "processing_time=#{duration}ms"
     )

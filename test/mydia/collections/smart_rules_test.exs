@@ -301,7 +301,9 @@ defmodule Mydia.Collections.SmartRulesTest do
     test "handles JSON string input" do
       media_item_fixture(%{type: "movie"})
 
-      json = ~s({"match_type": "all", "conditions": [{"field": "type", "operator": "eq", "value": "movie"}]})
+      json =
+        ~s({"match_type": "all", "conditions": [{"field": "type", "operator": "eq", "value": "movie"}]})
+
       items = SmartRules.execute_query(json)
 
       assert length(items) >= 1
@@ -365,7 +367,9 @@ defmodule Mydia.Collections.SmartRulesTest do
     end
 
     test "filters by metadata.genres contains" do
-      action = media_item_fixture(%{type: "movie", metadata: %{"genres" => ["Action", "Thriller"]}})
+      action =
+        media_item_fixture(%{type: "movie", metadata: %{"genres" => ["Action", "Thriller"]}})
+
       _comedy = media_item_fixture(%{type: "movie", metadata: %{"genres" => ["Comedy"]}})
 
       rules = %{

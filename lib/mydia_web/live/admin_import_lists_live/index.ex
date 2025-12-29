@@ -76,7 +76,9 @@ defmodule MydiaWeb.AdminImportListsLive.Index do
 
   defp load_data(socket) do
     import_lists =
-      ImportLists.list_import_lists(preload: [:quality_profile, :library_path, :target_collection])
+      ImportLists.list_import_lists(
+        preload: [:quality_profile, :library_path, :target_collection]
+      )
 
     presets = ImportLists.available_preset_lists()
     quality_profiles = Settings.list_quality_profiles()

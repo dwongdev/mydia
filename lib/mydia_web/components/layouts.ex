@@ -92,21 +92,20 @@ defmodule MydiaWeb.Layouts do
         <aside class="flex flex-col w-64 min-h-full bg-base-300">
           <!-- Logo and branding -->
           <div class="p-4 border-b border-base-300">
-            <div class="flex items-center gap-2">
-              <.icon name="hero-film" class="w-8 h-8 text-primary" />
-              <h1 class="text-2xl font-bold">Mydia</h1>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <.icon name="hero-film" class="w-8 h-8 text-primary" />
+                <h1 class="text-2xl font-bold">Mydia</h1>
+              </div>
+              <a
+                href="/player"
+                class="btn btn-primary btn-sm h-8 min-h-8 px-2 hover:px-3 rounded-full transition-all duration-200 group"
+                title="Open Player"
+              >
+                <.icon name="hero-play-solid" class="w-4 h-4" />
+                <span class="hidden group-hover:inline text-sm">Player</span>
+              </a>
             </div>
-          </div>
-          
-    <!-- Player launch button -->
-          <div class="px-4 pt-4">
-            <a
-              href="/player"
-              class="btn btn-primary btn-block gap-2"
-            >
-              <.icon name="hero-play-circle-solid" class="w-5 h-5" /> Open Player
-              <.icon name="hero-arrow-top-right-on-square" class="w-4 h-4 opacity-70" />
-            </a>
           </div>
           
     <!-- Navigation menu -->
@@ -177,6 +176,11 @@ defmodule MydiaWeb.Layouts do
               <li>
                 <.link navigate="/activity">
                   <.icon name="hero-clock" class="w-5 h-5" /> Activity
+                </.link>
+              </li>
+              <li>
+                <.link navigate="/collections">
+                  <.icon name="hero-folder" class="w-5 h-5" /> Collections
                 </.link>
               </li>
 

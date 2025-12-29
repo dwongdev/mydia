@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'movie_detail_controller.dart';
 import '../../widgets/quality_selector.dart';
 import '../../widgets/quality_download_dialog.dart';
+import '../../../core/downloads/download_service.dart' show isDownloadSupported;
 import '../../../core/downloads/download_providers.dart';
 import '../../../core/downloads/download_job_providers.dart';
 import '../../../domain/models/download.dart';
@@ -217,8 +218,10 @@ class MovieDetailScreen extends ConsumerWidget {
           Expanded(
             child: _buildPlayButton(context, ref, movie),
           ),
-          const SizedBox(width: 12),
-          _buildDownloadButton(context, ref, movie),
+          if (isDownloadSupported) ...[
+            const SizedBox(width: 12),
+            _buildDownloadButton(context, ref, movie),
+          ],
           const SizedBox(width: 12),
           _buildFavoriteButton(ref, movie),
         ],

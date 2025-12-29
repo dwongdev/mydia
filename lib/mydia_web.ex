@@ -89,6 +89,8 @@ defmodule MydiaWeb do
       import MydiaWeb.CoreComponents
       # Library components for media/music/books views
       import MydiaWeb.LibraryComponents
+      # Collection components for collection views
+      import MydiaWeb.CollectionComponents
       # Metadata search components
       import MydiaWeb.Live.Components.MetadataSearchForm
 

@@ -1691,12 +1691,15 @@ defmodule Mydia.Media do
     diff < threshold_seconds
   end
 
-  ## Favorites
-
-  alias Mydia.Media.UserFavorite
+  ## Favorites (delegated to Collections context)
+  ##
+  ## These functions now delegate to the Collections context which uses the
+  ## unified collection system. The user_favorites table is deprecated.
 
   @doc """
   Checks if a media item is favorited by a user.
+
+  Delegates to Collections.is_favorite?/2.
 
   ## Examples
 
@@ -1708,60 +1711,14 @@ defmodule Mydia.Media do
 
   """
   def is_favorite?(user_id, media_item_id) do
-    from(f in UserFavorite,
-      where: f.user_id == ^user_id and f.media_item_id == ^media_item_id
-    )
-    |> Repo.exists?()
-  end
-
-  @doc """
-  Adds a media item to user favorites.
-
-  Returns {:ok, favorite} on success or {:error, changeset} on failure.
-
-  ## Examples
-
-      iex> add_favorite(user_id, media_item_id)
-      {:ok, %UserFavorite{}}
-
-      iex> add_favorite(user_id, already_favorited_id)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def add_favorite(user_id, media_item_id) do
-    %UserFavorite{}
-    |> UserFavorite.changeset(%{user_id: user_id, media_item_id: media_item_id})
-    |> Repo.insert()
-  end
-
-  @doc """
-  Removes a media item from user favorites.
-
-  Returns {:ok, favorite} on success or {:error, :not_found} if not favorited.
-
-  ## Examples
-
-      iex> remove_favorite(user_id, media_item_id)
-      {:ok, %UserFavorite{}}
-
-      iex> remove_favorite(user_id, non_favorited_id)
-      {:error, :not_found}
-
-  """
-  def remove_favorite(user_id, media_item_id) do
-    case Repo.get_by(UserFavorite, user_id: user_id, media_item_id: media_item_id) do
-      nil ->
-        {:error, :not_found}
-
-      favorite ->
-        Repo.delete(favorite)
-    end
+    user = Mydia.Accounts.get_user!(user_id)
+    Mydia.Collections.is_favorite?(user, media_item_id)
   end
 
   @doc """
   Toggles favorite status for a media item.
 
-  If the item is favorited, it removes it. If not favorited, it adds it.
+  Delegates to Collections.toggle_favorite/2.
 
   Returns {:ok, :added} or {:ok, :removed} on success.
 
@@ -1775,23 +1732,15 @@ defmodule Mydia.Media do
 
   """
   def toggle_favorite(user_id, media_item_id) do
-    case Repo.get_by(UserFavorite, user_id: user_id, media_item_id: media_item_id) do
-      nil ->
-        case add_favorite(user_id, media_item_id) do
-          {:ok, _favorite} -> {:ok, :added}
-          {:error, changeset} -> {:error, changeset}
-        end
-
-      favorite ->
-        case Repo.delete(favorite) do
-          {:ok, _} -> {:ok, :removed}
-          {:error, changeset} -> {:error, changeset}
-        end
-    end
+    user = Mydia.Accounts.get_user!(user_id)
+    Mydia.Collections.toggle_favorite(user, media_item_id)
   end
 
   @doc """
-  Lists all favorites for a user.
+  Lists all favorite media items for a user.
+
+  Delegates to Collections context and returns the media items from
+  the user's Favorites collection.
 
   ## Options
     - `:preload` - List of associations to preload on media_items
@@ -1799,22 +1748,21 @@ defmodule Mydia.Media do
   ## Examples
 
       iex> list_user_favorites(user_id)
-      [%UserFavorite{}, ...]
+      [%MediaItem{}, ...]
 
       iex> list_user_favorites(user_id, preload: [:media_files])
-      [%UserFavorite{media_item: %MediaItem{media_files: [...]}, ...}, ...]
+      [%MediaItem{media_files: [...]}, ...]
 
   """
   def list_user_favorites(user_id, opts \\ []) do
-    query = from(f in UserFavorite, where: f.user_id == ^user_id)
+    user = Mydia.Accounts.get_user!(user_id)
 
-    query =
-      if opts[:preload] do
-        from(f in query, preload: [media_item: ^opts[:preload]])
-      else
-        from(f in query, preload: [:media_item])
-      end
+    case Mydia.Collections.get_or_create_favorites(user) do
+      {:ok, favorites} ->
+        Mydia.Collections.list_collection_items(favorites, opts)
 
-    Repo.all(query)
+      {:error, _} ->
+        []
+    end
   end
 end

@@ -1,6 +1,15 @@
 defmodule Mydia.Media.UserFavorite do
   @moduledoc """
   Schema for user favorites (movies and TV shows).
+
+  ## Deprecation Notice
+
+  This module is deprecated. Favorites are now managed through the unified
+  Collections system. See `Mydia.Collections` for the new API.
+
+  The `user_favorites` table is kept for backward compatibility and migration
+  purposes. All favorite operations now use the system "Favorites" collection
+  per user.
   """
   use Ecto.Schema
   import Ecto.Changeset

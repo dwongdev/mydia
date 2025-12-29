@@ -2,14 +2,21 @@
 # E2E Test Runner - Flutter Integration Tests
 # ============================================
 # This Dockerfile runs Flutter integration tests against
-# a Selenium Chrome instance (not included - see compose).
+# a Selenium Chrome instance that shares our network namespace.
+#
+# How it works:
+# In docker-compose, Chrome uses `network_mode: service:test` to share this
+# container's network namespace. This means:
+# 1. Chrome listens on localhost:4444 (WebDriver) from this container's perspective
+# 2. When Flutter tells Chrome to navigate to localhost:4040, Chrome reaches
+#    our Flutter web server directly (since localhost is shared)
 #
 # NOTE: This Dockerfile expects the build context to be the project root
 # (not the player directory) so it can access priv/graphql/schema.graphql
 #
 # Environment variables required:
-# - CHROMEDRIVER_URL: URL of the Selenium WebDriver (e.g., http://chrome:4444)
-# - PLAYER_URL: URL of the Flutter web app to test
+# - CHROMEDRIVER_URL: URL of the Selenium WebDriver (default: http://localhost:4444)
+# - WEB_PORT: Port for the Flutter web server (default: 4040)
 # - MYDIA_URL: URL of the Mydia server (for API calls)
 # - RELAY_URL: URL of the metadata-relay service
 
@@ -20,7 +27,6 @@ RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
         curl \
         jq \
-        socat \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -46,41 +52,30 @@ COPY <<'EOF' /entrypoint.sh
 #!/bin/bash
 set -e
 
+CHROMEDRIVER_URL="${CHROMEDRIVER_URL:-http://localhost:4444}"
+WEB_PORT="${WEB_PORT:-4040}"
+
 echo "============================================"
 echo "Flutter E2E Integration Test Runner"
 echo "============================================"
 echo ""
 echo "Configuration:"
-echo "  CHROMEDRIVER_URL: ${CHROMEDRIVER_URL:-not set}"
+echo "  CHROMEDRIVER_URL: ${CHROMEDRIVER_URL}"
+echo "  WEB_PORT: ${WEB_PORT}"
 echo "  MYDIA_URL: ${MYDIA_URL:-not set}"
 echo "  RELAY_URL: ${RELAY_URL:-not set}"
 echo ""
+echo "Network namespace sharing is enabled - Chrome container shares"
+echo "our network namespace, so localhost in Chrome reaches this container."
+echo ""
 
-# Wait for Chrome to be ready
-echo "Waiting for Selenium Chrome..."
+# Wait for Mydia to be ready first (Chrome depends on us starting)
+echo "Waiting for Mydia..."
 max_attempts=30
 attempt=0
 while [ $attempt -lt $max_attempts ]; do
-    if curl -sf "${CHROMEDRIVER_URL}/status" > /dev/null 2>&1; then
-        echo "Selenium Chrome is ready!"
-        break
-    fi
-    attempt=$((attempt + 1))
-    echo "  Attempt $attempt/$max_attempts..."
-    sleep 2
-done
-
-if [ $attempt -eq $max_attempts ]; then
-    echo "ERROR: Selenium Chrome not available at ${CHROMEDRIVER_URL}"
-    exit 1
-fi
-
-# Wait for Mydia to be ready
-echo "Waiting for Mydia..."
-attempt=0
-while [ $attempt -lt $max_attempts ]; do
     if curl -sf "${MYDIA_URL}/health" > /dev/null 2>&1; then
-        echo "Mydia is ready!"
+        echo "  ✓ Mydia is ready!"
         break
     fi
     attempt=$((attempt + 1))
@@ -93,27 +88,29 @@ if [ $attempt -eq $max_attempts ]; then
     exit 1
 fi
 
+# Wait for Chrome to be ready (Chrome shares our network namespace)
+# Chrome container depends on us and starts after, so we need to wait
 echo ""
-echo "All services ready! Setting up WebDriver proxy..."
-echo "============================================"
-echo ""
+echo "Waiting for Selenium Chrome (shared network namespace)..."
+attempt=0
+while [ $attempt -lt $max_attempts ]; do
+    if curl -sf "${CHROMEDRIVER_URL}/status" > /dev/null 2>&1; then
+        echo "  ✓ Selenium Chrome is ready at ${CHROMEDRIVER_URL}!"
+        break
+    fi
+    attempt=$((attempt + 1))
+    echo "  Attempt $attempt/$max_attempts..."
+    sleep 2
+done
 
-# Set up port forwarding: localhost:4444 -> chrome:4444
-# This allows flutter drive to connect to chromedriver as if it's local
-socat TCP-LISTEN:4444,fork TCP:chrome:4444 &
-SOCAT_PID=$!
-echo "Port forwarding: localhost:4444 -> chrome:4444 (PID: $SOCAT_PID)"
-sleep 1
-
-# Verify the port forward is working
-if curl -sf "http://localhost:4444/status" > /dev/null 2>&1; then
-    echo "  ✓ Port forwarding verified"
-else
-    echo "WARNING: Port forward may not be working correctly"
+if [ $attempt -eq $max_attempts ]; then
+    echo "ERROR: Selenium Chrome not available at ${CHROMEDRIVER_URL}"
+    exit 1
 fi
 
 echo ""
-echo "Running integration tests..."
+echo "All services ready!"
+echo "============================================"
 echo ""
 
 # Verify integration test files exist
@@ -125,7 +122,7 @@ fi
 echo "Found integration tests:"
 ls -la integration_test/
 
-# Create test driver (uses host network so localhost works for both)
+# Create test driver
 mkdir -p test_driver
 cat > test_driver/integration_test.dart << 'DART'
 import 'package:integration_test/integration_test_driver.dart';
@@ -135,14 +132,10 @@ Future<void> main() {
 }
 DART
 
-# Get the test container hostname for Chrome to reach our web server
-TEST_HOST="${TEST_HOST:-test}"
-WEB_PORT="${WEB_PORT:-4040}"
-
 echo ""
 echo "Setting up test environment..."
 echo "  Mydia API: ${MYDIA_URL}"
-echo "  Test Host: ${TEST_HOST}:${WEB_PORT}"
+echo "  Web Server: localhost:${WEB_PORT}"
 echo ""
 
 # Login to Mydia and get auth token
@@ -191,26 +184,21 @@ echo "  ✓ Claim code generated: $CLAIM_CODE"
 
 echo ""
 echo "Running Flutter integration tests..."
-echo "  WebDriver: localhost:4444 (proxied to chrome:4444)"
-echo "  Test Web Server: http://${TEST_HOST}:${WEB_PORT}"
+echo "  WebDriver: ${CHROMEDRIVER_URL}"
+echo "  Web Server: localhost:${WEB_PORT} (Chrome reaches via shared namespace)"
 echo "  Claim Code: $CLAIM_CODE"
-echo ""
-echo "NOTE: Flutter's integration_test package hardcodes localhost URLs,"
-echo "which means Chrome will try to navigate to localhost:${WEB_PORT}"
-echo "instead of http://${TEST_HOST}:${WEB_PORT}. This is a known limitation."
 echo ""
 
 # Run Flutter integration tests
-# - Uses 'web-server' device which serves the app and connects to WebDriver at localhost:4444
+# - Uses 'web-server' device which serves the app on localhost:${WEB_PORT}
+# - Chrome shares our network namespace so localhost:${WEB_PORT} works
 # - dart-define passes environment to the Flutter app at compile time
-# - web-hostname=0.0.0.0 allows remote Chrome to connect back to our server
 
 flutter drive \
     --driver=test_driver/integration_test.dart \
     --target=integration_test/pairing_flow_test.dart \
     -d web-server \
     --web-port=${WEB_PORT} \
-    --web-hostname=0.0.0.0 \
     --dart-define=MYDIA_URL=${MYDIA_URL} \
     --dart-define=RELAY_URL=${RELAY_URL} \
     --dart-define=E2E_MODE=true \

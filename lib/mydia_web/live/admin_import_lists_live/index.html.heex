@@ -135,6 +135,11 @@
                       <.icon name="hero-bolt" class="w-3 h-3" /> Auto-add
                     </span>
                   <% end %>
+                  <%= if list.target_collection do %>
+                    <span class="badge badge-accent badge-sm gap-1" title={"Add to: #{list.target_collection.name}"}>
+                      <.icon name="hero-folder" class="w-3 h-3" /> {list.target_collection.name}
+                    </span>
+                  <% end %>
                   <button
                     phx-click="view_items"
                     phx-value-id={list.id}
@@ -310,6 +315,17 @@
               options={[{"Default", nil}] ++ Enum.map(@library_paths, &{&1.path, &1.id})}
               prompt="Select library path..."
             />
+
+            <.input
+              field={@form[:target_collection_id]}
+              type="select"
+              label="Target Collection (Optional)"
+              options={[{"None", nil}] ++ Enum.map(@manual_collections, &{&1.name, &1.id})}
+              prompt="Auto-add to collection..."
+            />
+            <p class="text-xs text-base-content/50 -mt-2 ml-1">
+              Items will be automatically added to this collection when imported
+            </p>
 
             <div class="divider text-sm text-base-content/60">Behavior</div>
 

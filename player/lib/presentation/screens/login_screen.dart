@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/graphql/graphql_provider.dart';
 import '../../core/theme/colors.dart';
@@ -33,6 +34,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   bool _obscurePassword = true;
   bool _showAdvanced = false;
   bool _showDirectConnection = false;
+  bool _showQrScanner = false;
+  MobileScannerController? _scannerController;
 
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -92,7 +95,56 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     _usernameFocus.dispose();
     _passwordFocus.dispose();
     _claimCodeFocus.dispose();
+    _scannerController?.dispose();
     super.dispose();
+  }
+
+  void _openQrScanner() {
+    _scannerController = MobileScannerController(
+      detectionSpeed: DetectionSpeed.normal,
+      facing: CameraFacing.back,
+    );
+    setState(() => _showQrScanner = true);
+  }
+
+  void _closeQrScanner() {
+    _scannerController?.dispose();
+    _scannerController = null;
+    setState(() => _showQrScanner = false);
+  }
+
+  void _handleQrCodeDetected(BarcodeCapture capture) {
+    final barcode = capture.barcodes.firstOrNull;
+    if (barcode == null || barcode.rawValue == null) return;
+
+    // Try to parse as QR pairing data
+    final qrData = QrPairingData.tryParse(barcode.rawValue!);
+    if (qrData == null) {
+      // Not a valid Mydia QR code - show error briefly and continue scanning
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Invalid QR code. Please scan a Mydia pairing code.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    // Valid QR - close scanner and pair
+    _closeQrScanner();
+    _pairWithQrData(qrData);
+  }
+
+  Future<void> _pairWithQrData(QrPairingData qrData) async {
+    final controller = ref.read(loginControllerProvider.notifier);
+    await controller.pairWithQrCode(qrData);
+
+    if (mounted) {
+      final state = ref.read(loginControllerProvider);
+      if (state.success) {
+        context.go('/');
+      }
+    }
   }
 
   Future<void> _handleLogin() async {
@@ -157,6 +209,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         child: Stack(
           children: [
             _buildBackgroundDecoration(),
+            if (_showQrScanner) _buildQrScannerOverlay(),
             SafeArea(
               child: Center(
                 child: SingleChildScrollView(
@@ -237,6 +290,83 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     );
   }
 
+  Widget _buildQrScannerOverlay() {
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withValues(alpha: 0.9),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Header with close button
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    IconButton(
+                      onPressed: _closeQrScanner,
+                      icon: const Icon(Icons.close, color: Colors.white),
+                    ),
+                    const Expanded(
+                      child: Text(
+                        'Scan QR Code',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 48), // Balance the close button
+                  ],
+                ),
+              ),
+              // Scanner
+              Expanded(
+                child: Center(
+                  child: Container(
+                    constraints: const BoxConstraints(
+                      maxWidth: 300,
+                      maxHeight: 300,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: AppColors.primary,
+                        width: 2,
+                      ),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: _scannerController != null
+                          ? MobileScanner(
+                              controller: _scannerController!,
+                              onDetect: _handleQrCodeDetected,
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                  ),
+                ),
+              ),
+              // Instructions
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  'Point your camera at the QR code shown on your Mydia server',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.7),
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildLogo(bool isCompact) {
     final logoSize = isCompact ? 56.0 : 64.0;
     final iconSize = isCompact ? 32.0 : 36.0;
@@ -291,7 +421,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     );
   }
 
-  // ===== CLAIM CODE ENTRY =====
+  // ===== LOGIN CARD =====
   Widget _buildClaimCodeCard(LoginState loginState, bool isCompact) {
     return Container(
       constraints: const BoxConstraints(maxWidth: 360),
@@ -308,61 +438,121 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                 color: AppColors.border.withValues(alpha: 0.2),
               ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Title
-                Text(
-                  'Enter Claim Code',
-                  style: TextStyle(
-                    fontSize: isCompact ? 18 : 20,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Ask your server admin for a claim code',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textSecondary.withValues(alpha: 0.7),
-                  ),
-                ),
-                SizedBox(height: isCompact ? 20 : 24),
-
-                // Claim code input (no server URL needed - relay looks it up)
-                _buildClaimCodeInput(loginState),
-
-                if (loginState.claimCodeMessage != null &&
-                    loginState.claimCodeStatus != ClaimCodeStatus.error) ...[
-                  const SizedBox(height: 16),
-                  _buildProgressIndicator(loginState),
-                ],
-
-                if (loginState.error != null && loginState.mode != ConnectionMode.direct) ...[
-                  const SizedBox(height: 14),
-                  _buildErrorMessage(loginState.error!),
-                ],
-
-                const SizedBox(height: 16),
-                _buildAdvancedSettings(loginState),
-
-                SizedBox(height: isCompact ? 20 : 24),
-                _buildClaimCodeButton(loginState),
-
-                // Direct Connection expandable section
-                const SizedBox(height: 24),
-                _buildDirectConnectionSection(loginState, isCompact),
-              ],
-            ),
+            child: _showDirectConnection
+                ? _buildDirectConnectionContent(loginState, isCompact)
+                : _buildClaimCodeContent(loginState, isCompact),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildDirectConnectionSection(LoginState loginState, bool isCompact) {
+  Widget _buildClaimCodeContent(LoginState loginState, bool isCompact) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Title
+        Text(
+          'Connect to Server',
+          style: TextStyle(
+            fontSize: isCompact ? 18 : 20,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Scan QR code or enter claim code manually',
+          style: TextStyle(
+            fontSize: 12,
+            color: AppColors.textSecondary.withValues(alpha: 0.7),
+          ),
+        ),
+        SizedBox(height: isCompact ? 16 : 20),
+
+        // Scan QR Code button
+        SizedBox(
+          height: 52,
+          child: OutlinedButton.icon(
+            onPressed: loginState.isLoading ? null : _openQrScanner,
+            icon: const Icon(Icons.qr_code_scanner_rounded, size: 22),
+            label: const Text(
+              'Scan QR Code',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.primary,
+              side: BorderSide(
+                color: AppColors.primary.withValues(alpha: 0.5),
+                width: 1.5,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ),
+
+        // "or" divider
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: Container(
+                  height: 1,
+                  color: AppColors.border.withValues(alpha: 0.2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  'or enter code',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.textSecondary.withValues(alpha: 0.6),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Container(
+                  height: 1,
+                  color: AppColors.border.withValues(alpha: 0.2),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Claim code input (no server URL needed - relay looks it up)
+        _buildClaimCodeInput(loginState),
+
+        if (loginState.claimCodeMessage != null &&
+            loginState.claimCodeStatus != ClaimCodeStatus.error) ...[
+          const SizedBox(height: 16),
+          _buildProgressIndicator(loginState),
+        ],
+
+        if (loginState.error != null && loginState.mode != ConnectionMode.direct) ...[
+          const SizedBox(height: 14),
+          _buildErrorMessage(loginState.error!),
+        ],
+
+        const SizedBox(height: 16),
+        _buildAdvancedSettings(loginState),
+
+        SizedBox(height: isCompact ? 20 : 24),
+        _buildClaimCodeButton(loginState),
+
+        // Direct Connection link
+        const SizedBox(height: 24),
+        _buildDirectConnectionLink(loginState),
+      ],
+    );
+  }
+
+  Widget _buildDirectConnectionLink(LoginState loginState) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -395,18 +585,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         ),
         const SizedBox(height: 16),
 
-        // Direct Connection toggle
+        // Direct Connection button
         GestureDetector(
           onTap: loginState.isLoading
               ? null
               : () {
-                  setState(() => _showDirectConnection = !_showDirectConnection);
-                  // Switch mode for proper error handling
-                  if (_showDirectConnection) {
-                    ref.read(loginControllerProvider.notifier).setMode(ConnectionMode.direct);
-                  } else {
-                    ref.read(loginControllerProvider.notifier).setMode(ConnectionMode.claimCode);
-                  }
+                  setState(() => _showDirectConnection = true);
+                  ref.read(loginControllerProvider.notifier).setMode(ConnectionMode.direct);
                 },
           child: Container(
             padding: const EdgeInsets.all(14),
@@ -457,22 +642,77 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   ),
                 ),
                 Icon(
-                  _showDirectConnection
-                      ? Icons.keyboard_arrow_up_rounded
-                      : Icons.keyboard_arrow_down_rounded,
-                  size: 20,
+                  Icons.arrow_forward_rounded,
+                  size: 18,
                   color: AppColors.textSecondary.withValues(alpha: 0.6),
                 ),
               ],
             ),
           ),
         ),
+      ],
+    );
+  }
 
-        // Expandable direct connection form
-        if (_showDirectConnection) ...[
-          const SizedBox(height: 16),
-          _buildDirectConnectionForm(loginState, isCompact),
-        ],
+  Widget _buildDirectConnectionContent(LoginState loginState, bool isCompact) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Back button and title row
+        Row(
+          children: [
+            GestureDetector(
+              onTap: loginState.isLoading
+                  ? null
+                  : () {
+                      setState(() => _showDirectConnection = false);
+                      ref.read(loginControllerProvider.notifier).setMode(ConnectionMode.claimCode);
+                    },
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceVariant.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  Icons.arrow_back_rounded,
+                  size: 18,
+                  color: loginState.isLoading
+                      ? AppColors.textDisabled
+                      : AppColors.textSecondary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Direct Connection',
+                style: TextStyle(
+                  fontSize: isCompact ? 18 : 20,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Padding(
+          padding: const EdgeInsets.only(left: 44),
+          child: Text(
+            'Connect directly to your server',
+            style: TextStyle(
+              fontSize: 12,
+              color: AppColors.textSecondary.withValues(alpha: 0.7),
+            ),
+          ),
+        ),
+        SizedBox(height: isCompact ? 20 : 24),
+
+        // Direct connection form
+        _buildDirectConnectionForm(loginState, isCompact),
       ],
     );
   }

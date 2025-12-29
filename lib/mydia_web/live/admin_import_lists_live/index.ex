@@ -10,6 +10,7 @@ defmodule MydiaWeb.AdminImportListsLive.Index do
   alias Mydia.ImportLists
   alias Mydia.ImportLists.ImportList
   alias Mydia.Settings
+  alias Mydia.Collections
   alias Mydia.Jobs.ImportListSync
 
   require Logger
@@ -74,10 +75,23 @@ defmodule MydiaWeb.AdminImportListsLive.Index do
   ## Data Loading
 
   defp load_data(socket) do
-    import_lists = ImportLists.list_import_lists(preload: [:quality_profile, :library_path])
+    import_lists =
+      ImportLists.list_import_lists(preload: [:quality_profile, :library_path, :target_collection])
+
     presets = ImportLists.available_preset_lists()
     quality_profiles = Settings.list_quality_profiles()
     library_paths = Settings.list_library_paths()
+
+    # Load manual collections for target collection selector
+    # Use the current user from the socket
+    manual_collections =
+      case socket.assigns[:current_scope] do
+        %{user: user} ->
+          Collections.list_collections(user, type: "manual")
+
+        _ ->
+          []
+      end
 
     # Build map of configured preset IDs
     configured_presets =
@@ -91,6 +105,7 @@ defmodule MydiaWeb.AdminImportListsLive.Index do
     |> assign(:configured_presets, configured_presets)
     |> assign(:quality_profiles, quality_profiles)
     |> assign(:library_paths, library_paths)
+    |> assign(:manual_collections, manual_collections)
   end
 
   defp load_list_items(socket, import_list, filter) do

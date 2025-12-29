@@ -11,6 +11,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 
 import 'channel_service.dart';
@@ -19,6 +20,67 @@ import '../auth/auth_storage.dart';
 import '../relay/relay_service.dart';
 import '../relay/relay_tunnel_service.dart';
 import '../connection/connection_manager.dart';
+
+/// Data parsed from a QR code for device pairing.
+///
+/// The QR code contains JSON with the following fields:
+/// - instance_id: The server's unique instance ID
+/// - public_key: The server's static public key (Base64 encoded)
+/// - relay_url: The relay service URL
+/// - claim_code: The pairing claim code (rotates every 5 minutes)
+class QrPairingData {
+  /// The server's unique instance ID.
+  final String instanceId;
+
+  /// The server's static public key (Base64 encoded).
+  final String publicKey;
+
+  /// The relay service URL.
+  final String relayUrl;
+
+  /// The pairing claim code.
+  final String claimCode;
+
+  const QrPairingData({
+    required this.instanceId,
+    required this.publicKey,
+    required this.relayUrl,
+    required this.claimCode,
+  });
+
+  /// Parses QR code content into [QrPairingData].
+  ///
+  /// Returns null if the content is not valid JSON or is missing required fields.
+  static QrPairingData? tryParse(String content) {
+    try {
+      final json = jsonDecode(content) as Map<String, dynamic>;
+
+      final instanceId = json['instance_id'] as String?;
+      final publicKey = json['public_key'] as String?;
+      final relayUrl = json['relay_url'] as String?;
+      final claimCode = json['claim_code'] as String?;
+
+      if (instanceId == null ||
+          publicKey == null ||
+          relayUrl == null ||
+          claimCode == null) {
+        return null;
+      }
+
+      return QrPairingData(
+        instanceId: instanceId,
+        publicKey: publicKey,
+        relayUrl: relayUrl,
+        claimCode: claimCode,
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Returns the public key as bytes.
+  Uint8List get publicKeyBytes => Uint8List.fromList(base64Decode(publicKey));
+}
 
 /// Storage keys for pairing credentials.
 abstract class _StorageKeys {
@@ -301,6 +363,171 @@ class PairingService {
       // Step 7: Mark claim as consumed on relay
       onStatusUpdate?.call('Finalizing...');
       await _relayService.consumeClaim(claimInfo.claimId, response.deviceId);
+
+      // Step 8: Attempt to switch to direct connection
+      if (_connectionManager != null && credentials.directUrls.isNotEmpty) {
+        onStatusUpdate?.call('Testing direct connection...');
+        await _attemptDirectConnection(credentials);
+      }
+
+      return PairingResult.success(credentials);
+    } catch (e) {
+      await _channelService.disconnect();
+      return PairingResult.error('Pairing error: $e');
+    }
+  }
+
+  /// Pairs this device using QR code data.
+  ///
+  /// This method uses the data scanned from a QR code, which includes:
+  /// - The server's instance ID
+  /// - The server's public key
+  /// - The relay URL (for self-hosted relays)
+  /// - The claim code (rotates every 5 minutes)
+  ///
+  /// The flow is similar to [pairWithClaimCodeOnly] but uses the relay URL
+  /// from the QR code, making it work with self-hosted relay services.
+  ///
+  /// ## Parameters
+  ///
+  /// - [qrData]: The parsed QR code data
+  /// - [deviceName]: A friendly name for this device (e.g., 'My iPhone')
+  /// - [platform]: The device platform (defaults to detected platform)
+  /// - [onStatusUpdate]: Optional callback for status updates
+  ///
+  /// Returns a [PairingResult] indicating success or failure.
+  Future<PairingResult> pairWithQrData({
+    required QrPairingData qrData,
+    required String deviceName,
+    String? platform,
+    void Function(String status)? onStatusUpdate,
+  }) async {
+    try {
+      final devicePlatform = platform ?? _detectPlatform();
+
+      // Step 1: Look up claim code via relay (using relay URL from QR)
+      // This validates the claim and gets direct URLs
+      onStatusUpdate?.call('Validating pairing code...');
+      final relayService = RelayService(relayUrl: qrData.relayUrl);
+      final lookupResult = await relayService.lookupClaimCode(qrData.claimCode);
+
+      if (!lookupResult.success) {
+        return PairingResult.error(
+            lookupResult.error ?? 'Failed to validate pairing code');
+      }
+
+      final claimInfo = lookupResult.data!;
+
+      // Validate that the instance ID matches
+      if (claimInfo.instanceId != qrData.instanceId) {
+        return PairingResult.error(
+            'QR code does not match server. Please scan a fresh QR code.');
+      }
+
+      // Use the public key from the QR code (already validated by matching instance ID)
+      final serverPublicKey = qrData.publicKeyBytes;
+
+      if (claimInfo.directUrls.isEmpty) {
+        return PairingResult.error(
+            'Server has no direct URLs configured. Please contact your administrator.');
+      }
+
+      // Step 2: Try each direct URL until one works
+      onStatusUpdate?.call('Connecting to server...');
+      String? connectedUrl;
+
+      for (final url in claimInfo.directUrls) {
+        final connectResult = await _channelService.connect(url);
+        if (connectResult.success) {
+          connectedUrl = url;
+          break;
+        }
+      }
+
+      if (connectedUrl == null) {
+        // All direct URLs failed - try relay fallback
+        onStatusUpdate?.call('Direct connection failed, trying relay...');
+        return await _pairViaRelayTunnel(
+          claimCode: qrData.claimCode,
+          claimInfo: claimInfo,
+          serverPublicKey: serverPublicKey,
+          deviceName: deviceName,
+          devicePlatform: devicePlatform,
+          onStatusUpdate: onStatusUpdate,
+        );
+      }
+
+      // Step 3: Join pairing channel
+      onStatusUpdate?.call('Joining pairing channel...');
+      final joinResult = await _channelService.joinPairingChannel();
+      if (!joinResult.success) {
+        await _channelService.disconnect();
+        return PairingResult.error(
+            joinResult.error ?? 'Failed to join pairing channel');
+      }
+      final channel = joinResult.data!;
+
+      // Step 4: Perform Noise_NK handshake
+      onStatusUpdate?.call('Establishing secure connection...');
+      final noiseSession =
+          await _noiseService.startPairingHandshake(serverPublicKey);
+
+      final handshakeMessage = await noiseSession.writeHandshakeMessage();
+      final handshakeResult = await _channelService.sendPairingHandshake(
+        channel,
+        handshakeMessage,
+      );
+
+      if (!handshakeResult.success) {
+        await _channelService.disconnect();
+        return PairingResult.error(
+            handshakeResult.error ?? 'Handshake failed');
+      }
+
+      await noiseSession.readHandshakeMessage(handshakeResult.data!);
+
+      if (!noiseSession.isComplete) {
+        await _channelService.disconnect();
+        return PairingResult.error('Handshake incomplete');
+      }
+
+      // Step 5: Submit claim code
+      onStatusUpdate?.call('Submitting claim code...');
+      final claimResult = await _channelService.submitClaimCode(
+        channel,
+        claimCode: qrData.claimCode,
+        deviceName: deviceName,
+        platform: devicePlatform,
+      );
+
+      await _channelService.disconnect();
+
+      if (!claimResult.success) {
+        return PairingResult.error(
+            claimResult.error ?? 'Failed to submit claim code');
+      }
+
+      final response = claimResult.data!;
+
+      // Step 6: Store credentials
+      final credentials = PairingCredentials(
+        serverUrl: connectedUrl,
+        deviceId: response.deviceId,
+        mediaToken: response.mediaToken,
+        devicePublicKey: response.devicePublicKey,
+        devicePrivateKey: response.devicePrivateKey,
+        serverPublicKey: serverPublicKey,
+        directUrls: claimInfo.directUrls,
+        certFingerprint: null,
+        instanceName: null,
+        instanceId: claimInfo.instanceId,
+      );
+
+      await _storeCredentials(credentials);
+
+      // Step 7: Mark claim as consumed on relay
+      onStatusUpdate?.call('Finalizing...');
+      await relayService.consumeClaim(claimInfo.claimId, response.deviceId);
 
       // Step 8: Attempt to switch to direct connection
       if (_connectionManager != null && credentials.directUrls.isNotEmpty) {

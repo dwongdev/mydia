@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/config/web_config.dart';
+import '../../core/downloads/download_service.dart' show isDownloadSupported;
 import '../../core/layout/breakpoints.dart';
 import '../../core/theme/colors.dart';
 
@@ -27,8 +28,13 @@ class _AppShellState extends ConsumerState<AppShell> {
     final location = widget.location;
     if (location.startsWith('/movies')) return 1;
     if (location.startsWith('/shows')) return 2;
-    if (location.startsWith('/downloads')) return 3;
-    if (location.startsWith('/settings')) return 4;
+    if (isDownloadSupported) {
+      if (location.startsWith('/downloads')) return 3;
+      if (location.startsWith('/settings')) return 4;
+    } else {
+      // On web, settings is at index 3 (no downloads)
+      if (location.startsWith('/settings')) return 3;
+    }
     return 0; // Home
   }
 
@@ -44,7 +50,11 @@ class _AppShellState extends ConsumerState<AppShell> {
         context.go('/shows');
         break;
       case 3:
-        context.go('/downloads');
+        if (isDownloadSupported) {
+          context.go('/downloads');
+        } else {
+          context.go('/settings');
+        }
         break;
       case 4:
         context.go('/settings');
@@ -200,21 +210,25 @@ class _DesktopSidebar extends StatelessWidget {
                           isSelected: selectedIndex == 2,
                           onTap: () => onItemTapped(2),
                         ),
-                        const SizedBox(height: 4),
-                        _SidebarItem(
-                          icon: Icons.download_outlined,
-                          selectedIcon: Icons.download_rounded,
-                          label: 'Downloads',
-                          isSelected: selectedIndex == 3,
-                          onTap: () => onItemTapped(3),
-                        ),
+                        if (isDownloadSupported) ...[
+                          const SizedBox(height: 4),
+                          _SidebarItem(
+                            icon: Icons.download_outlined,
+                            selectedIcon: Icons.download_rounded,
+                            label: 'Downloads',
+                            isSelected: selectedIndex == 3,
+                            onTap: () => onItemTapped(3),
+                          ),
+                        ],
                         const Spacer(),
                         _SidebarItem(
                           icon: Icons.settings_outlined,
                           selectedIcon: Icons.settings_rounded,
                           label: 'Settings',
-                          isSelected: selectedIndex == 4,
-                          onTap: () => onItemTapped(4),
+                          isSelected: isDownloadSupported
+                              ? selectedIndex == 4
+                              : selectedIndex == 3,
+                          onTap: () => onItemTapped(isDownloadSupported ? 4 : 3),
                         ),
                         const SizedBox(height: 16),
                       ],
@@ -367,19 +381,22 @@ class _ModernBottomNav extends StatelessWidget {
                 isSelected: selectedIndex == 2,
                 onTap: () => onItemTapped(2),
               ),
-              _NavItem(
-                icon: Icons.download_outlined,
-                selectedIcon: Icons.download_rounded,
-                label: 'Downloads',
-                isSelected: selectedIndex == 3,
-                onTap: () => onItemTapped(3),
-              ),
+              if (isDownloadSupported)
+                _NavItem(
+                  icon: Icons.download_outlined,
+                  selectedIcon: Icons.download_rounded,
+                  label: 'Downloads',
+                  isSelected: selectedIndex == 3,
+                  onTap: () => onItemTapped(3),
+                ),
               _NavItem(
                 icon: Icons.settings_outlined,
                 selectedIcon: Icons.settings_rounded,
                 label: 'Settings',
-                isSelected: selectedIndex == 4,
-                onTap: () => onItemTapped(4),
+                isSelected: isDownloadSupported
+                    ? selectedIndex == 4
+                    : selectedIndex == 3,
+                onTap: () => onItemTapped(isDownloadSupported ? 4 : 3),
               ),
             ],
           ),

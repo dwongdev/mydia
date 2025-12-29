@@ -1,0 +1,486 @@
+defmodule Mydia.Collections do
+  @moduledoc """
+  The Collections context handles user collections of media items.
+
+  Collections can be:
+  - **Manual**: User-curated lists where items are explicitly added and reordered
+  - **Smart**: Rule-based collections that auto-populate based on filter criteria
+
+  ## Visibility
+
+  - `private`: Only visible to the owner (default)
+  - `shared`: Visible to all users (admin only can create)
+
+  ## System Collections
+
+  Each user has a special "Favorites" collection created automatically.
+  System collections cannot be deleted or renamed.
+  """
+
+  import Ecto.Query, warn: false
+  alias Mydia.Repo
+  alias Mydia.Collections.{Collection, CollectionItem, SmartRules}
+  alias Mydia.Media.MediaItem
+  alias Mydia.Accounts.User
+
+  ## Collections
+
+  @doc """
+  Returns the list of collections accessible to a user.
+
+  ## Options
+    - `:type` - Filter by type ("manual" or "smart")
+    - `:visibility` - Filter by visibility ("private" or "shared")
+    - `:include_shared` - Include shared collections from other users (default: true)
+    - `:preload` - List of associations to preload
+  """
+  def list_collections(%User{} = user, opts \\ []) do
+    include_shared = Keyword.get(opts, :include_shared, true)
+
+    query =
+      if include_shared do
+        # User's own collections + shared collections from anyone
+        from(c in Collection,
+          where: c.user_id == ^user.id or c.visibility == "shared",
+          order_by: [asc: c.position, asc: c.name]
+        )
+      else
+        # Only user's own collections
+        from(c in Collection,
+          where: c.user_id == ^user.id,
+          order_by: [asc: c.position, asc: c.name]
+        )
+      end
+
+    query
+    |> apply_collection_filters(opts)
+    |> maybe_preload(opts[:preload])
+    |> Repo.all()
+  end
+
+  @doc """
+  Gets a single collection accessible to the user.
+
+  Returns the collection if:
+  - User owns it, OR
+  - Collection is shared
+
+  Raises `Ecto.NoResultsError` if collection doesn't exist or isn't accessible.
+  """
+  def get_collection!(%User{} = user, id, opts \\ []) do
+    Collection
+    |> where([c], c.id == ^id)
+    |> where([c], c.user_id == ^user.id or c.visibility == "shared")
+    |> maybe_preload(opts[:preload])
+    |> Repo.one!()
+  end
+
+  @doc """
+  Gets a collection by ID, returning nil if not found.
+  Only returns collections accessible to the user.
+  """
+  def get_collection(%User{} = user, id, opts \\ []) do
+    Collection
+    |> where([c], c.id == ^id)
+    |> where([c], c.user_id == ^user.id or c.visibility == "shared")
+    |> maybe_preload(opts[:preload])
+    |> Repo.one()
+  end
+
+  @doc """
+  Gets a collection by ID without user access checks.
+
+  This is intended for internal system use only (e.g., import list auto-add).
+  For user-facing code, use `get_collection/2` or `get_collection!/2` instead.
+  """
+  def get_collection_by_id(id, opts \\ []) do
+    Collection
+    |> maybe_preload(opts[:preload])
+    |> Repo.get(id)
+  end
+
+  @doc """
+  Creates a collection for a user.
+
+  Regular users can only create private collections.
+  Admins can create shared collections.
+
+  ## Examples
+
+      iex> create_collection(user, %{name: "My Collection", type: "manual"})
+      {:ok, %Collection{}}
+
+      iex> create_collection(regular_user, %{name: "Test", visibility: "shared"})
+      {:error, :unauthorized}
+  """
+  def create_collection(%User{} = user, attrs) do
+    visibility = Map.get(attrs, :visibility, Map.get(attrs, "visibility", "private"))
+
+    # Only admins can create shared collections
+    if visibility == "shared" and user.role != "admin" do
+      {:error, :unauthorized}
+    else
+      %Collection{user_id: user.id}
+      |> Collection.changeset(attrs)
+      |> Repo.insert()
+    end
+  end
+
+  @doc """
+  Updates a collection.
+
+  Only the owner can update a collection. System collections cannot be updated.
+  Regular users cannot change visibility to "shared".
+  """
+  def update_collection(%User{} = user, %Collection{} = collection, attrs) do
+    cond do
+      collection.user_id != user.id ->
+        {:error, :unauthorized}
+
+      collection.is_system ->
+        {:error, :system_collection}
+
+      true ->
+        # Prevent non-admins from setting visibility to shared
+        visibility = Map.get(attrs, :visibility, Map.get(attrs, "visibility"))
+
+        if visibility == "shared" and user.role != "admin" do
+          {:error, :unauthorized}
+        else
+          collection
+          |> Collection.changeset(attrs)
+          |> Repo.update()
+        end
+    end
+  end
+
+  @doc """
+  Deletes a collection.
+
+  Only the owner can delete. System collections cannot be deleted.
+  """
+  def delete_collection(%User{} = user, %Collection{} = collection) do
+    cond do
+      collection.user_id != user.id ->
+        {:error, :unauthorized}
+
+      collection.is_system ->
+        {:error, :system_collection}
+
+      true ->
+        Repo.delete(collection)
+    end
+  end
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for tracking collection changes.
+  """
+  def change_collection(%Collection{} = collection, attrs \\ %{}) do
+    Collection.changeset(collection, attrs)
+  end
+
+  ## Favorites (System Collection)
+
+  @doc """
+  Gets or creates the Favorites collection for a user.
+
+  Each user has exactly one Favorites collection which is a system collection.
+  """
+  def get_or_create_favorites(%User{} = user) do
+    case Repo.get_by(Collection, user_id: user.id, is_system: true, name: "Favorites") do
+      nil ->
+        %Collection{user_id: user.id}
+        |> Collection.system_changeset(%{name: "Favorites", type: "manual"})
+        |> Repo.insert()
+
+      favorites ->
+        {:ok, favorites}
+    end
+  end
+
+  @doc """
+  Checks if a media item is in the user's Favorites collection.
+  """
+  def is_favorite?(%User{} = user, %MediaItem{} = media_item) do
+    is_favorite?(user, media_item.id)
+  end
+
+  def is_favorite?(%User{} = user, media_item_id) when is_binary(media_item_id) do
+    case get_or_create_favorites(user) do
+      {:ok, favorites} ->
+        Repo.exists?(
+          from(ci in CollectionItem,
+            where: ci.collection_id == ^favorites.id and ci.media_item_id == ^media_item_id
+          )
+        )
+
+      {:error, _} ->
+        false
+    end
+  end
+
+  @doc """
+  Toggles a media item's presence in the user's Favorites collection.
+
+  Returns `{:ok, :added}` or `{:ok, :removed}`.
+  """
+  def toggle_favorite(%User{} = user, media_item_id) do
+    with {:ok, favorites} <- get_or_create_favorites(user) do
+      case Repo.get_by(CollectionItem,
+             collection_id: favorites.id,
+             media_item_id: media_item_id
+           ) do
+        nil ->
+          case add_item(favorites, media_item_id) do
+            {:ok, _item} -> {:ok, :added}
+            {:error, reason} -> {:error, reason}
+          end
+
+        item ->
+          case Repo.delete(item) do
+            {:ok, _} -> {:ok, :removed}
+            {:error, changeset} -> {:error, changeset}
+          end
+      end
+    end
+  end
+
+  ## Collection Items
+
+  @doc """
+  Lists items in a collection.
+
+  For manual collections, returns items ordered by position.
+  For smart collections, returns items matching the smart rules.
+
+  ## Options
+    - `:preload` - List of associations to preload on media_items
+    - `:limit` - Maximum number of items to return
+    - `:offset` - Number of items to skip
+  """
+  def list_collection_items(collection, opts \\ [])
+
+  def list_collection_items(%Collection{type: "manual"} = collection, opts) do
+    query =
+      from(ci in CollectionItem,
+        where: ci.collection_id == ^collection.id,
+        order_by: [asc: ci.position],
+        preload: [:media_item]
+      )
+
+    query
+    |> apply_pagination(opts)
+    |> Repo.all()
+    |> Enum.map(& &1.media_item)
+    |> maybe_preload_items(opts[:preload])
+  end
+
+  def list_collection_items(%Collection{type: "smart"} = collection, opts) do
+    SmartRules.execute_query(collection.smart_rules || "{}", opts)
+  end
+
+  @doc """
+  Returns the number of items in a collection.
+  """
+  def item_count(%Collection{type: "manual"} = collection) do
+    Repo.aggregate(
+      from(ci in CollectionItem, where: ci.collection_id == ^collection.id),
+      :count
+    )
+  end
+
+  def item_count(%Collection{type: "smart"} = collection) do
+    SmartRules.execute_count(collection.smart_rules || "{}")
+  end
+
+  @doc """
+  Validates smart rules for a collection.
+  Delegates to `SmartRules.validate/1`.
+  """
+  def validate_smart_rules(rules) do
+    SmartRules.validate(rules)
+  end
+
+  @doc """
+  Previews items that would be included in a smart collection with the given rules.
+  Useful for showing users what a smart collection will contain before saving.
+  """
+  def preview_smart_rules(rules, limit \\ 10) do
+    SmartRules.preview(rules, limit)
+  end
+
+  @doc """
+  Adds an item to a manual collection.
+
+  The item is added at the end of the collection (highest position + 1).
+  Returns {:error, :smart_collection} if called on a smart collection.
+  """
+  def add_item(%Collection{type: "smart"}, _media_item_id) do
+    {:error, :smart_collection}
+  end
+
+  def add_item(%Collection{type: "manual"} = collection, media_item_id) do
+    # Get the next position
+    max_position =
+      Repo.one(
+        from(ci in CollectionItem,
+          where: ci.collection_id == ^collection.id,
+          select: max(ci.position)
+        )
+      ) || -1
+
+    %CollectionItem{
+      collection_id: collection.id,
+      media_item_id: media_item_id,
+      position: max_position + 1
+    }
+    |> CollectionItem.changeset(%{})
+    |> Repo.insert()
+  end
+
+  @doc """
+  Adds multiple items to a manual collection.
+
+  Items are added at the end in the order provided.
+  Returns {:ok, count} where count is the number of items added.
+  """
+  def add_items(%Collection{type: "smart"}, _media_item_ids) do
+    {:error, :smart_collection}
+  end
+
+  def add_items(%Collection{type: "manual"} = collection, media_item_ids)
+      when is_list(media_item_ids) do
+    max_position =
+      Repo.one(
+        from(ci in CollectionItem,
+          where: ci.collection_id == ^collection.id,
+          select: max(ci.position)
+        )
+      ) || -1
+
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    items =
+      media_item_ids
+      |> Enum.with_index(max_position + 1)
+      |> Enum.map(fn {media_item_id, position} ->
+        %{
+          id: Ecto.UUID.generate(),
+          collection_id: collection.id,
+          media_item_id: media_item_id,
+          position: position,
+          inserted_at: now
+        }
+      end)
+
+    {count, _} =
+      Repo.insert_all(CollectionItem, items, on_conflict: :nothing)
+
+    {:ok, count}
+  end
+
+  @doc """
+  Removes an item from a manual collection.
+  """
+  def remove_item(%Collection{type: "smart"}, _media_item_id) do
+    {:error, :smart_collection}
+  end
+
+  def remove_item(%Collection{type: "manual"} = collection, media_item_id) do
+    case Repo.get_by(CollectionItem,
+           collection_id: collection.id,
+           media_item_id: media_item_id
+         ) do
+      nil ->
+        {:error, :not_found}
+
+      item ->
+        Repo.delete(item)
+    end
+  end
+
+  @doc """
+  Reorders items in a manual collection.
+
+  Takes a list of media_item_ids in the desired order.
+  Updates the position of each item to match its index in the list.
+  """
+  def reorder_items(%Collection{type: "smart"}, _item_ids) do
+    {:error, :smart_collection}
+  end
+
+  def reorder_items(%Collection{type: "manual"} = collection, item_ids)
+      when is_list(item_ids) do
+    Repo.transaction(fn ->
+      item_ids
+      |> Enum.with_index()
+      |> Enum.each(fn {media_item_id, position} ->
+        from(ci in CollectionItem,
+          where: ci.collection_id == ^collection.id and ci.media_item_id == ^media_item_id
+        )
+        |> Repo.update_all(set: [position: position])
+      end)
+
+      :ok
+    end)
+  end
+
+  @doc """
+  Returns all collections that contain a specific media item.
+  Only returns collections accessible to the user.
+  """
+  def collections_for_item(%User{} = user, media_item_id) do
+    # Get IDs of manual collections containing this item
+    manual_collection_ids =
+      from(ci in CollectionItem,
+        where: ci.media_item_id == ^media_item_id,
+        select: ci.collection_id
+      )
+      |> Repo.all()
+
+    # Return collections that:
+    # 1. Are manual and contain the item, AND
+    # 2. Are accessible to the user (owned or shared)
+    from(c in Collection,
+      where: c.id in ^manual_collection_ids,
+      where: c.user_id == ^user.id or c.visibility == "shared",
+      order_by: [asc: c.name]
+    )
+    |> Repo.all()
+  end
+
+  ## Private Helpers
+
+  defp apply_collection_filters(query, opts) do
+    Enum.reduce(opts, query, fn
+      {:type, type}, query when type in ["manual", "smart"] ->
+        where(query, [c], c.type == ^type)
+
+      {:visibility, visibility}, query when visibility in ["private", "shared"] ->
+        where(query, [c], c.visibility == ^visibility)
+
+      _other, query ->
+        query
+    end)
+  end
+
+  defp apply_pagination(query, opts) do
+    query
+    |> apply_limit(opts[:limit])
+    |> apply_offset(opts[:offset])
+  end
+
+  defp apply_limit(query, nil), do: query
+  defp apply_limit(query, limit) when is_integer(limit), do: limit(query, ^limit)
+
+  defp apply_offset(query, nil), do: query
+  defp apply_offset(query, offset) when is_integer(offset), do: offset(query, ^offset)
+
+  defp maybe_preload(query, nil), do: query
+  defp maybe_preload(query, []), do: query
+  defp maybe_preload(query, preloads), do: preload(query, ^preloads)
+
+  defp maybe_preload_items(items, nil), do: items
+  defp maybe_preload_items(items, []), do: items
+  defp maybe_preload_items(items, preloads), do: Repo.preload(items, preloads)
+end

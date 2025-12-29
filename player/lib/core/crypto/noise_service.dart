@@ -52,6 +52,8 @@ abstract class _StorageKeys {
 ///
 /// Manual implementation of Noise Protocol patterns NK and IK using
 /// Curve25519 (X25519), ChaCha20-Poly1305, and BLAKE2b.
+///
+/// This implementation is compatible with the Decibel Elixir library.
 class NoiseSession {
   NoiseSession._({
     required this.isInitiator,
@@ -65,9 +67,17 @@ class NoiseSession {
   final SimpleKeyPair? localStaticKeypair;
   final Uint8List? remoteStaticPublicKey;
 
-  /// Symmetric state for encryption
-  final _chainingKey = Uint8List(64); // BLAKE2b output size
-  final _hash = Uint8List(64); // BLAKE2b output size
+  /// Symmetric state for encryption (CipherState + SymmetricState)
+  final _chainingKey = Uint8List(64); // BLAKE2b output size = 64 bytes
+  final _hash = Uint8List(64); // BLAKE2b output size = 64 bytes
+
+  /// Cipher key for encryption during handshake (null = no key yet)
+  /// This is set by MixKey and used by EncryptAndHash/DecryptAndHash.
+  Uint8List? _cipherKey;
+
+  /// Cipher nonce for handshake encryption (resets after each MixKey)
+  int _cipherNonce = 0;
+
   SimpleKeyPair? _ephemeralKeypair;
   Uint8List? _remoteEphemeralPublicKey;
 
@@ -141,11 +151,10 @@ class NoiseSession {
       _mixKey(ssBytes);
     }
 
-    // Encrypt payload if provided
-    if (payload != null && payload.isNotEmpty) {
-      final encryptedPayload = await _encryptAndHash(payload);
-      buffer.add(encryptedPayload);
-    }
+    // Always encrypt payload (even if empty) - this produces the auth tag
+    final effectivePayload = payload ?? Uint8List(0);
+    final encryptedPayload = await _encryptAndHash(effectivePayload);
+    buffer.add(encryptedPayload);
 
     _messageIndex++;
     return buffer.toBytes();
@@ -199,14 +208,11 @@ class NoiseSession {
       _mixKey(seBytes);
     }
 
-    // Decrypt any remaining payload
-    Uint8List payload = Uint8List(0);
-    if (offset < message.length) {
-      payload = await _decryptAndHash(message.sublist(offset));
-    }
+    // Decrypt the remaining payload (always present, at least auth tag for empty payload)
+    final payload = await _decryptAndHash(message.sublist(offset));
 
     // Split keys for transport
-    await _split();
+    _split();
     isComplete = true;
     _messageIndex++;
 
@@ -284,6 +290,9 @@ class NoiseSession {
   void dispose() {
     _chainingKey.fillRange(0, _chainingKey.length, 0);
     _hash.fillRange(0, _hash.length, 0);
+    _cipherKey?.fillRange(0, _cipherKey!.length, 0);
+    _cipherKey = null;
+    _cipherNonce = 0;
     _sendNonce = 0;
     _receiveNonce = 0;
     _ephemeralKeypair = null;
@@ -298,11 +307,11 @@ class NoiseSession {
 
   /// Initialize the symmetric state with protocol name and pre-messages.
   void _initialize(String protocolName, Uint8List remoteStaticKey) {
-    // Initialize hash with protocol name
+    // Initialize hash with protocol name (pad with zeros if shorter than 64 bytes)
     final protocolBytes = Uint8List.fromList(protocolName.codeUnits);
 
     if (protocolBytes.length <= 64) {
-      // If protocol name fits in 64 bytes, use it directly
+      // If protocol name fits in 64 bytes, pad with zeros
       _hash.setRange(0, protocolBytes.length, protocolBytes);
       _hash.fillRange(protocolBytes.length, 64, 0);
     } else {
@@ -314,16 +323,33 @@ class NoiseSession {
     // Initialize chaining key to hash
     _chainingKey.setRange(0, 64, _hash);
 
+    // No cipher key initially (will be set by first MixKey)
+    _cipherKey = null;
+    _cipherNonce = 0;
+
     // For NK and IK patterns, the responder's static key is a pre-message
     // Mix it into the hash (as if we received it)
     _mixHash(remoteStaticKey);
   }
 
-  /// MixKey: mixes new key material into the chaining key.
+  /// MixKey: mixes new key material into the chaining key and derives a new cipher key.
+  ///
+  /// This follows the Noise specification:
+  /// - Sets ck, temp_k = HKDF(ck, input_key_material, 2)
+  /// - Initializes cipher key with temp_k[:32]
+  /// - Resets cipher nonce to 0
   void _mixKey(Uint8List inputKeyMaterial) {
-    // HKDF using BLAKE2b
-    final tempKey = _hkdf(_chainingKey, inputKeyMaterial);
-    _chainingKey.setRange(0, 64, tempKey.sublist(0, 64));
+    // HKDF returns (ck, temp_k) where each is hash_len bytes
+    final (newCk, tempK) = _hkdf2(_chainingKey, inputKeyMaterial);
+
+    // Update chaining key
+    _chainingKey.setRange(0, 64, newCk);
+
+    // Initialize cipher key with first 32 bytes of temp_k
+    _cipherKey = tempK.sublist(0, 32);
+
+    // Reset nonce for the new key
+    _cipherNonce = 0;
   }
 
   /// MixHash: mixes new data into the hash.
@@ -333,43 +359,62 @@ class NoiseSession {
     _hash.setRange(0, 64, newHash);
   }
 
-  /// EncryptAndHash: encrypts plaintext and mixes ciphertext into hash.
+  /// EncryptAndHash: encrypts plaintext using the current cipher key and mixes ciphertext into hash.
+  ///
+  /// If no cipher key is set (before any MixKey), returns plaintext unchanged.
   Future<Uint8List> _encryptAndHash(Uint8List plaintext) async {
-    // Extract 32-byte key from chaining key
-    final tempKey = _hkdf(_chainingKey, Uint8List(0));
-    final key = SecretKey(tempKey.sublist(0, 32));
+    // If no cipher key is set, just mix hash and return plaintext
+    // (This shouldn't happen in NK/IK patterns after the first MixKey)
+    if (_cipherKey == null) {
+      _mixHash(plaintext);
+      return plaintext;
+    }
 
+    final key = SecretKey(_cipherKey!);
     final cipher = Chacha20.poly1305Aead();
-    final nonce = Uint8List(12); // Zero nonce for handshake
+
+    // Nonce is 12 bytes: 4 zeros + 8-byte little-endian counter
+    final nonce = _makeNonce(_cipherNonce);
+    _cipherNonce++;
 
     final secretBox = await cipher.encrypt(
       plaintext,
       secretKey: key,
       nonce: nonce,
-      aad: _hash, // Use hash as additional authenticated data
+      aad: _hash, // Use current hash as additional authenticated data
     );
 
-    // Ciphertext = encrypted data + MAC
+    // Ciphertext = encrypted data + MAC (16 bytes)
     final ciphertext = Uint8List.fromList([...secretBox.cipherText, ...secretBox.mac.bytes]);
+
+    // Mix the ciphertext into the hash
     _mixHash(ciphertext);
+
     return ciphertext;
   }
 
-  /// DecryptAndHash: decrypts ciphertext and mixes it into hash.
+  /// DecryptAndHash: decrypts ciphertext using the current cipher key and mixes it into hash.
   Future<Uint8List> _decryptAndHash(Uint8List ciphertext) async {
-    // Extract 32-byte key from chaining key
-    final tempKey = _hkdf(_chainingKey, Uint8List(0));
-    final key = SecretKey(tempKey.sublist(0, 32));
-
     if (ciphertext.length < 16) {
       throw ArgumentError('Ciphertext too short for MAC');
+    }
+
+    // If no cipher key is set, just mix hash and return ciphertext
+    // (This shouldn't happen in NK/IK patterns after the first MixKey)
+    if (_cipherKey == null) {
+      _mixHash(ciphertext);
+      return ciphertext;
     }
 
     final mac = ciphertext.sublist(ciphertext.length - 16);
     final encryptedData = ciphertext.sublist(0, ciphertext.length - 16);
 
+    final key = SecretKey(_cipherKey!);
     final cipher = Chacha20.poly1305Aead();
-    final nonce = Uint8List(12); // Zero nonce for handshake
+
+    // Nonce is 12 bytes: 4 zeros + 8-byte little-endian counter
+    final nonce = _makeNonce(_cipherNonce);
+    _cipherNonce++;
 
     final secretBox = SecretBox(
       encryptedData,
@@ -377,24 +422,33 @@ class NoiseSession {
       mac: Mac(mac),
     );
 
+    // Mix the ciphertext into the hash BEFORE decryption
+    // (so the hash used for AAD is the pre-mix state)
+    final hashBeforeMix = Uint8List.fromList(_hash);
     _mixHash(ciphertext);
 
     final plaintext = await cipher.decrypt(
       secretBox,
       secretKey: key,
-      aad: _hash.sublist(0, 64), // Restore pre-mixHash state for AAD
+      aad: hashBeforeMix,
     );
 
     return Uint8List.fromList(plaintext);
   }
 
   /// Split: derives transport encryption keys after handshake.
-  Future<void> _split() async {
-    final tempKey = _hkdf(_chainingKey, Uint8List(0));
+  ///
+  /// Sets temp_k1, temp_k2 = HKDF(ck, empty, 2)
+  /// - For initiator: send key = temp_k1[:32], receive key = temp_k2[:32]
+  /// - For responder: send key = temp_k2[:32], receive key = temp_k1[:32]
+  void _split() {
+    final (tempK1, tempK2) = _hkdf2(_chainingKey, Uint8List(0));
 
-    // First 32 bytes for sending, next 32 for receiving
-    _sendKey = SecretKey(tempKey.sublist(0, 32));
-    _receiveKey = SecretKey(tempKey.sublist(32, 64));
+    // For initiator: c1 = send, c2 = receive
+    // For responder: c1 = receive, c2 = send
+    // Since we're always the initiator in this implementation:
+    _sendKey = SecretKey(tempK1.sublist(0, 32));
+    _receiveKey = SecretKey(tempK2.sublist(0, 32));
   }
 
   // ============================================================================
@@ -410,41 +464,56 @@ class NoiseSession {
     return output;
   }
 
-  /// HKDF using BLAKE2b as the hash function.
-  Uint8List _hkdf(Uint8List chainingKey, Uint8List inputKeyMaterial) {
-    // HKDF-Extract: HMAC-BLAKE2b(chainingKey, inputKeyMaterial)
+  /// HMAC-BLAKE2b: keyed hash function.
+  Uint8List _hmacBlake2b(Uint8List key, Uint8List data) {
     final hmac = pc.HMac(pc.Blake2bDigest(digestSize: 64), 128);
-    hmac.init(pc.KeyParameter(chainingKey));
-
-    final prkOutput = Uint8List(64);
-    hmac.update(inputKeyMaterial, 0, inputKeyMaterial.length);
-    hmac.doFinal(prkOutput, 0);
-
-    // HKDF-Expand: Output 64 bytes (2 x 32-byte keys)
-    final hmac2 = pc.HMac(pc.Blake2bDigest(digestSize: 64), 128);
-    hmac2.init(pc.KeyParameter(prkOutput));
-
-    final output1 = Uint8List(64);
-    hmac2.update(Uint8List.fromList([0x01]), 0, 1);
-    hmac2.doFinal(output1, 0);
-
-    final hmac3 = pc.HMac(pc.Blake2bDigest(digestSize: 64), 128);
-    hmac3.init(pc.KeyParameter(prkOutput));
-
-    final output2 = Uint8List(64);
-    final input2 = Uint8List.fromList([...output1, 0x02]);
-    hmac3.update(input2, 0, input2.length);
-    hmac3.doFinal(output2, 0);
-
-    return Uint8List.fromList([...output1, ...output2]);
+    hmac.init(pc.KeyParameter(key));
+    hmac.update(data, 0, data.length);
+    final output = Uint8List(64);
+    hmac.doFinal(output, 0);
+    return output;
   }
 
-  /// Converts a uint64 nonce to 8-byte little-endian format.
+  /// HKDF using BLAKE2b, returning 2 outputs as a tuple.
+  ///
+  /// This follows the Noise specification HKDF(chaining_key, input_key_material, num_outputs):
+  /// - temp_key = HMAC-HASH(chaining_key, input_key_material)
+  /// - output1 = HMAC-HASH(temp_key, 0x01)
+  /// - output2 = HMAC-HASH(temp_key, output1 || 0x02)
+  ///
+  /// Returns (output1, output2) where each is 64 bytes.
+  (Uint8List, Uint8List) _hkdf2(Uint8List chainingKey, Uint8List inputKeyMaterial) {
+    // HKDF-Extract: temp_key = HMAC-BLAKE2b(chaining_key, input_key_material)
+    final tempKey = _hmacBlake2b(chainingKey, inputKeyMaterial);
+
+    // HKDF-Expand for 2 outputs:
+    // output1 = HMAC-BLAKE2b(temp_key, 0x01)
+    final output1 = _hmacBlake2b(tempKey, Uint8List.fromList([0x01]));
+
+    // output2 = HMAC-BLAKE2b(temp_key, output1 || 0x02)
+    final output2Input = Uint8List.fromList([...output1, 0x02]);
+    final output2 = _hmacBlake2b(tempKey, output2Input);
+
+    return (output1, output2);
+  }
+
+  /// Creates a 12-byte ChaCha20-Poly1305 nonce from an integer counter.
+  ///
+  /// Format: 4 zero bytes + 8-byte little-endian counter
+  Uint8List _makeNonce(int counter) {
+    final nonce = Uint8List(12);
+    final view = ByteData.view(nonce.buffer);
+    // First 4 bytes are zeros (already initialized)
+    // Last 8 bytes are the counter in little-endian
+    view.setUint64(4, counter, Endian.little);
+    return nonce;
+  }
+
+  /// Converts a uint64 nonce to 12-byte format for transport messages.
+  ///
+  /// Format: 4 zero bytes + 8-byte little-endian counter
   Uint8List _uint64ToBytes(int value) {
-    final bytes = Uint8List(12); // 12 bytes for ChaCha20 nonce
-    final view = ByteData.view(bytes.buffer);
-    view.setUint64(4, value, Endian.little); // Last 8 bytes
-    return bytes;
+    return _makeNonce(value);
   }
 }
 

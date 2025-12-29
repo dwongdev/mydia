@@ -96,7 +96,7 @@ defmodule Mydia.MixProject do
       {:sweet_xml, "~> 0.7"},
       {:floki, "~> 0.36"},
       {:nimble_parsec, "~> 1.4"},
-      {:eqrcode, "~> 0.1.10"},
+      {:eqrcode, "~> 0.2.1"},
 
       # Telemetry & Monitoring
       {:telemetry_metrics, "~> 1.0"},

@@ -4,6 +4,7 @@ defmodule MydiaWeb.MediaLive.Index do
   alias Mydia.Media.EpisodeStatus
   alias Mydia.Metadata.Structs.MediaMetadata
   alias Mydia.Settings
+  alias Mydia.Collections
 
   @items_per_page 50
   @items_per_scroll 25
@@ -36,6 +37,8 @@ defmodule MydiaWeb.MediaLive.Index do
      |> assign(:scan_progress, nil)
      |> assign(:filter_library_type, nil)
      |> assign(:specialized_library_type, nil)
+     |> assign(:show_add_to_collection_modal, false)
+     |> assign(:user_collections, [])
      |> stream(:media_items, [])}
   end
 
@@ -403,6 +406,53 @@ defmodule MydiaWeb.MediaLive.Index do
          socket
          |> put_flash(:error, "Failed to update items")
          |> assign(:show_batch_edit_modal, false)}
+    end
+  end
+
+  def handle_event("show_add_to_collection", _params, socket) do
+    user = socket.assigns.current_scope.user
+    user_collections = Collections.list_collections(user, type: "manual", include_shared: false)
+
+    {:noreply,
+     socket
+     |> assign(:user_collections, user_collections)
+     |> assign(:show_add_to_collection_modal, true)}
+  end
+
+  def handle_event("cancel_add_to_collection", _params, socket) do
+    {:noreply, assign(socket, :show_add_to_collection_modal, false)}
+  end
+
+  def handle_event("batch_add_to_collection", %{"collection-id" => collection_id}, socket) do
+    user = socket.assigns.current_scope.user
+    selected_ids = MapSet.to_list(socket.assigns.selected_ids)
+
+    case Collections.get_collection(user, collection_id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Collection not found")}
+
+      collection ->
+        case Collections.add_items(collection, selected_ids) do
+          {:ok, count} ->
+            {:noreply,
+             socket
+             |> put_flash(:info, "Added #{count} #{pluralize_items(count)} to #{collection.name}")
+             |> assign(:selection_mode, false)
+             |> assign(:selected_ids, MapSet.new())
+             |> assign(:show_add_to_collection_modal, false)}
+
+          {:error, :smart_collection} ->
+            {:noreply,
+             socket
+             |> put_flash(:error, "Cannot add items to smart collections")
+             |> assign(:show_add_to_collection_modal, false)}
+
+          {:error, _reason} ->
+            {:noreply,
+             socket
+             |> put_flash(:error, "Failed to add to collection")
+             |> assign(:show_add_to_collection_modal, false)}
+        end
     end
   end
 

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../domain/models/episode.dart';
 import '../../domain/models/download.dart';
+import '../../core/downloads/download_service.dart' show isDownloadSupported;
 import '../../core/downloads/download_providers.dart';
 import '../../core/downloads/download_job_providers.dart';
 import '../../core/theme/colors.dart';
@@ -389,7 +390,7 @@ class _EpisodeCardState extends ConsumerState<EpisodeCard>
   }
 
   Widget _buildActionButtons(BuildContext context, bool isDownloaded) {
-    if (!widget.episode.hasFile) {
+    if (!widget.episode.hasFile || !isDownloadSupported) {
       return const SizedBox(width: 16);
     }
 

@@ -4,6 +4,9 @@ import '../../../core/channels/pairing_service.dart';
 import '../../../core/auth/device_info_service.dart';
 import '../../../core/relay/relay_service.dart';
 
+// Re-export QrPairingData so UI can import from one place
+export '../../../core/channels/pairing_service.dart' show QrPairingData;
+
 part 'login_controller.g.dart';
 
 /// Connection mode for the login flow.
@@ -217,6 +220,84 @@ class LoginController extends _$LoginController {
       }
 
       state = state.copyWith(isLoading: false, error: errorMessage);
+    }
+  }
+
+  /// Attempt to pair using QR code data.
+  ///
+  /// Uses the PairingService to pair using data scanned from a QR code.
+  /// The QR code contains the relay URL, instance ID, public key, and claim code.
+  Future<void> pairWithQrCode(QrPairingData qrData) async {
+    state = state.copyWith(
+      isLoading: true,
+      error: null,
+      claimCodeStatus: ClaimCodeStatus.lookingUp,
+      claimCodeMessage: 'Validating QR code...',
+    );
+
+    try {
+      final pairingService = PairingService(
+        relayUrl: qrData.relayUrl,
+      );
+      final deviceInfo = DeviceInfoService();
+      final deviceName = await deviceInfo.getDeviceName();
+
+      final result = await pairingService.pairWithQrData(
+        qrData: qrData,
+        deviceName: deviceName,
+        onStatusUpdate: (status) {
+          ClaimCodeStatus claimStatus;
+          if (status.contains('Validating')) {
+            claimStatus = ClaimCodeStatus.lookingUp;
+          } else if (status.contains('Connecting') ||
+                     status.contains('Joining') ||
+                     status.contains('relay')) {
+            claimStatus = ClaimCodeStatus.connecting;
+          } else if (status.contains('Establishing') ||
+                     status.contains('Submitting') ||
+                     status.contains('secure')) {
+            claimStatus = ClaimCodeStatus.handshaking;
+          } else {
+            claimStatus = ClaimCodeStatus.handshaking;
+          }
+
+          state = state.copyWith(
+            claimCodeStatus: claimStatus,
+            claimCodeMessage: status,
+          );
+        },
+      );
+
+      if (!result.success) {
+        throw Exception(result.error ?? 'Pairing failed');
+      }
+
+      // Pairing successful - store credentials in auth service
+      final credentials = result.credentials!;
+      final authService = ref.read(authServiceProvider);
+
+      await authService.setSession(
+        token: credentials.mediaToken,
+        serverUrl: credentials.serverUrl,
+        userId: credentials.deviceId,
+        username: 'Device ${credentials.deviceId.substring(0, 8)}',
+      );
+
+      // Refresh auth state
+      await ref.read(authStateProvider.notifier).refresh();
+
+      state = state.copyWith(
+        isLoading: false,
+        claimCodeStatus: ClaimCodeStatus.paired,
+        claimCodeMessage: 'Paired successfully!',
+        success: true,
+      );
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        claimCodeStatus: ClaimCodeStatus.error,
+        error: e.toString().replaceFirst('Exception: ', ''),
+      );
     }
   }
 

@@ -126,6 +126,10 @@ defmodule MydiaWeb.Router do
       live "/calendar", CalendarLive.Index, :index
       live "/activity", ActivityLive.Index, :index
 
+      # Collections
+      live "/collections", CollectionLive.Index, :index
+      live "/collections/:id", CollectionLive.Show, :show
+
       # Playback routes
       live "/play/:type/:id", PlaybackLive.Show, :show
       get "/covers/:id", CoverController, :show

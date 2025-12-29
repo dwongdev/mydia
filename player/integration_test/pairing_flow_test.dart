@@ -36,17 +36,9 @@ void main() {
       // Wait for login screen to appear
       await tester.pumpAndSettle(const Duration(seconds: 2));
 
-      // Find the claim code input field by hint text
-      final claimCodeField = find.byWidgetPredicate(
-        (widget) =>
-            widget is TextField &&
-            widget.decoration?.hintText == 'ABC123',
-      );
-
-      // If not found by hint, try finding by type
-      final textField = claimCodeField.evaluate().isNotEmpty
-          ? claimCodeField
-          : find.byType(TextFormField).first;
+      // Find the claim code input field - it's the first TextFormField on the login screen
+      // The claim code field has centered text with letter-spacing styling
+      final textField = find.byType(TextFormField).first;
 
       expect(textField, findsOneWidget,
           reason: 'Should find the claim code input field');
@@ -71,7 +63,7 @@ void main() {
       // Look for common home screen elements
 
       // Option 1: Check we're no longer on login screen
-      final loginTitle = find.text('Enter Claim Code');
+      final loginTitle = find.text('Connect to Server');
 
       // If still on login screen, check for success or error
       if (loginTitle.evaluate().isNotEmpty) {
@@ -98,7 +90,7 @@ void main() {
 
       // Verify we're no longer on login screen (pairing succeeded)
       expect(
-        find.text('Enter Claim Code'),
+        find.text('Connect to Server'),
         findsNothing,
         reason: 'Should have navigated away from login screen after pairing',
       );
@@ -132,7 +124,7 @@ void main() {
 
       // Should still be on login screen
       expect(
-        find.text('Enter Claim Code'),
+        find.text('Connect to Server'),
         findsOneWidget,
         reason: 'Should remain on login screen after invalid code',
       );

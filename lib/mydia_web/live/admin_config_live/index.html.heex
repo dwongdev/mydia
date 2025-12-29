@@ -6,8 +6,8 @@
         System status, application settings, and configuration management
       </p>
     </div>
-    <%!-- Tabs Navigation with tab-content pattern --%>
-    <div role="tablist" class="tabs tabs-lift">
+    <%!-- Tabs Navigation --%>
+    <div role="tablist" class="tabs tabs-border mb-6">
       <button
         role="tab"
         class={["tab gap-2", @active_tab == "status" && "tab-active"]}
@@ -72,7 +72,9 @@
       >
         <.icon name="hero-signal" class="w-4 h-4" /> Remote Access
       </button>
-      <div class="tab-content block bg-base-100 border-base-300">
+    </div>
+    <%!-- Tab Content --%>
+    <div class="bg-base-100">
         <%!-- System Status Tab --%>
         <%= if @active_tab == "status" do %>
           <Components.status_tab
@@ -150,7 +152,6 @@
             current_user={@current_user}
           />
         <% end %>
-      </div>
     </div>
     <%!-- Quality Profile Modal --%>
     <%= if assigns[:show_quality_profile_modal] do %>

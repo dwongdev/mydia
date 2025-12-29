@@ -298,20 +298,21 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
               <.icon name="hero-qr-code" class="w-4 h-4" /> Pair New Device
             </h3>
             <div class="bg-base-200 rounded-box p-4">
-              <div class="flex flex-col sm:flex-row gap-6 items-center sm:items-start">
-                <%!-- QR Code --%>
-                <%= if qr_svg = generate_qr_code(@ra_config, @relay_url) do %>
-                  <div class="shrink-0">
-                    <div class="p-2 bg-white rounded-lg">
-                      {Phoenix.HTML.raw(qr_svg)}
+              <%= if @claim_code do %>
+                <%!-- Active pairing code - show QR and code together --%>
+                <div class="flex flex-col sm:flex-row gap-6 items-center sm:items-start">
+                  <%!-- QR Code - only shown when claim_code exists (rotates with each generation) --%>
+                  <%= if qr_svg = generate_qr_code(@ra_config, @relay_url, @claim_code) do %>
+                    <div class="shrink-0">
+                      <div class="p-2 bg-white rounded-lg">
+                        {Phoenix.HTML.raw(qr_svg)}
+                      </div>
+                      <p class="text-xs text-base-content/50 mt-2 text-center">Scan to pair</p>
                     </div>
-                    <p class="text-xs text-base-content/50 mt-2 text-center">Scan with camera</p>
-                  </div>
-                <% end %>
+                  <% end %>
 
-                <%!-- Pairing Code --%>
-                <div class="flex-1 text-center sm:text-left">
-                  <%= if @claim_code do %>
+                  <%!-- Pairing Code --%>
+                  <div class="flex-1 text-center sm:text-left">
                     <p class="text-sm text-base-content/60 mb-2">Or enter this code:</p>
                     <div class="flex items-center gap-2 justify-center sm:justify-start">
                       <code class="text-2xl font-bold tracking-[0.25em] bg-base-300 px-4 py-2 rounded-lg font-mono">
@@ -343,28 +344,31 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                     >
                       <.icon name="hero-arrow-path" class="w-3 h-3" /> New Code
                     </button>
-                  <% else %>
-                    <%= if @pairing_error do %>
-                      <div class="alert alert-error alert-sm mb-3">
-                        <.icon name="hero-exclamation-circle" class="w-4 h-4" />
-                        <span class="text-sm">{@pairing_error}</span>
-                      </div>
-                    <% end %>
-                    <p class="text-sm text-base-content/60 mb-3">
-                      Generate a code to pair a new device.
-                    </p>
-                    <button
-                      id="generate-pairing-code-btn"
-                      class="btn btn-primary btn-sm"
-                      phx-click="generate_claim_code"
-                      phx-target={@myself}
-                      phx-disable-with="Generating..."
-                    >
-                      <.icon name="hero-key" class="w-4 h-4" /> Generate Code
-                    </button>
-                  <% end %>
+                  </div>
                 </div>
-              </div>
+              <% else %>
+                <%!-- No active code - show generate button --%>
+                <div class="text-center py-4">
+                  <%= if @pairing_error do %>
+                    <div class="alert alert-error alert-sm mb-4 text-left">
+                      <.icon name="hero-exclamation-circle" class="w-4 h-4" />
+                      <span class="text-sm">{@pairing_error}</span>
+                    </div>
+                  <% end %>
+                  <p class="text-sm text-base-content/60 mb-4">
+                    Generate a pairing code to connect a new device. The code and QR will expire after 5 minutes.
+                  </p>
+                  <button
+                    id="generate-pairing-code-btn"
+                    class="btn btn-primary"
+                    phx-click="generate_claim_code"
+                    phx-target={@myself}
+                    phx-disable-with="Generating..."
+                  >
+                    <.icon name="hero-key" class="w-4 h-4" /> Generate Pairing Code
+                  </button>
+                </div>
+              <% end %>
             </div>
           </div>
         <% end %>
@@ -1089,14 +1093,15 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
     end
   end
 
-  defp generate_qr_code(config, relay_url) do
-    if config && config.static_public_key do
-      # Build QR code content
+  defp generate_qr_code(config, relay_url, claim_code) do
+    if config && config.static_public_key && claim_code do
+      # Build QR code content - includes claim_code so it rotates with each generation
       content =
         Jason.encode!(%{
           instance_id: config.instance_id,
           public_key: Base.encode64(config.static_public_key),
-          relay_url: relay_url
+          relay_url: relay_url,
+          claim_code: claim_code
         })
 
       # Generate QR code as SVG

@@ -122,6 +122,9 @@ class LoginController extends _$LoginController {
         claimCode: claimCode,
         deviceName: deviceName,
         onStatusUpdate: (status) {
+          // Check if still mounted before updating state
+          if (!ref.mounted) return;
+
           // Map status messages to claim code statuses
           ClaimCodeStatus claimStatus;
           if (status.contains('Looking up')) {
@@ -149,6 +152,9 @@ class LoginController extends _$LoginController {
         throw Exception(result.error ?? 'Pairing failed');
       }
 
+      // Check if still mounted before updating state
+      if (!ref.mounted) return;
+
       // Pairing successful - store credentials in auth service
       final credentials = result.credentials!;
       final authService = ref.read(authServiceProvider);
@@ -160,9 +166,12 @@ class LoginController extends _$LoginController {
         username: 'Device ${credentials.deviceId.substring(0, 8)}',
       );
 
+      if (!ref.mounted) return;
+
       // Refresh auth state
       await ref.read(authStateProvider.notifier).refresh();
 
+      if (!ref.mounted) return;
       state = state.copyWith(
         isLoading: false,
         claimCodeStatus: ClaimCodeStatus.paired,
@@ -170,6 +179,7 @@ class LoginController extends _$LoginController {
         success: true,
       );
     } catch (e) {
+      if (!ref.mounted) return;
       state = state.copyWith(
         isLoading: false,
         claimCodeStatus: ClaimCodeStatus.error,
@@ -196,11 +206,18 @@ class LoginController extends _$LoginController {
         password: password,
       );
 
+      // Check if still mounted before updating state
+      if (!ref.mounted) return;
+
       // Update the auth state provider to trigger UI updates
       await ref.read(authStateProvider.notifier).refresh();
 
+      if (!ref.mounted) return;
       state = state.copyWith(isLoading: false, success: true);
     } catch (e) {
+      // Check if still mounted before updating state
+      if (!ref.mounted) return;
+
       // Extract a user-friendly error message
       String errorMessage = 'Login failed. Please check your credentials.';
 
@@ -246,6 +263,9 @@ class LoginController extends _$LoginController {
         qrData: qrData,
         deviceName: deviceName,
         onStatusUpdate: (status) {
+          // Check if still mounted before updating state
+          if (!ref.mounted) return;
+
           ClaimCodeStatus claimStatus;
           if (status.contains('Validating')) {
             claimStatus = ClaimCodeStatus.lookingUp;
@@ -272,6 +292,9 @@ class LoginController extends _$LoginController {
         throw Exception(result.error ?? 'Pairing failed');
       }
 
+      // Check if still mounted before updating state
+      if (!ref.mounted) return;
+
       // Pairing successful - store credentials in auth service
       final credentials = result.credentials!;
       final authService = ref.read(authServiceProvider);
@@ -283,9 +306,12 @@ class LoginController extends _$LoginController {
         username: 'Device ${credentials.deviceId.substring(0, 8)}',
       );
 
+      if (!ref.mounted) return;
+
       // Refresh auth state
       await ref.read(authStateProvider.notifier).refresh();
 
+      if (!ref.mounted) return;
       state = state.copyWith(
         isLoading: false,
         claimCodeStatus: ClaimCodeStatus.paired,
@@ -293,6 +319,7 @@ class LoginController extends _$LoginController {
         success: true,
       );
     } catch (e) {
+      if (!ref.mounted) return;
       state = state.copyWith(
         isLoading: false,
         claimCodeStatus: ClaimCodeStatus.error,

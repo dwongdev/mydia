@@ -42,6 +42,8 @@ RUN apk add --no-cache \
 # Set build environment
 ENV MIX_ENV=prod
 ENV DATABASE_TYPE=${DATABASE_TYPE}
+# Increase hex timeout for slow networks/CI (5 minutes)
+ENV HEX_HTTP_TIMEOUT=300000
 
 # Install Hex and Rebar
 RUN mix local.hex --force && \

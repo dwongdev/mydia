@@ -32,6 +32,8 @@ ENV MIX_ENV=prod
 ENV DATABASE_TYPE=${DATABASE_TYPE}
 ENV HEX_HOME=/root/.hex
 ENV MIX_HOME=/root/.mix
+# Increase hex timeout for slow networks/CI (5 minutes)
+ENV HEX_HTTP_TIMEOUT=300000
 
 # Install Hex and Rebar with cache
 RUN --mount=type=cache,target=/root/.hex \
@@ -45,11 +47,14 @@ WORKDIR /app
 # Copy dependency manifests (for better layer caching)
 COPY mix.exs mix.lock ./
 
-# Install dependencies with cache
+# Install dependencies with cache (with retry for transient network failures)
 RUN --mount=type=cache,target=/root/.hex \
     --mount=type=cache,target=/root/.mix \
     --mount=type=cache,target=/app/deps \
-    mix deps.get --only prod && \
+    for i in 1 2 3; do \
+      mix deps.get --only prod && break || \
+      (echo "Attempt $i failed, retrying in 10s..." && sleep 10); \
+    done && \
     cp -r deps deps_copy
 
 # Restore deps from cache copy

@@ -70,12 +70,37 @@ void main() {
       if (errorIcon.evaluate().isNotEmpty && !sawError) {
         debugPrint('[Test] Error message found after $i seconds - continuing to wait...');
         sawError = true;
-        // Print the error text if we can find it
-        final errorText = find.textContaining('');
-        debugPrint('[Test] UI contains: ${errorText.evaluate().length} text widgets');
+        // Print all text in the UI to see the error message
+        final allText = tester.widgetList<Text>(find.byType(Text));
+        for (final text in allText) {
+          if (text.data != null && text.data!.isNotEmpty) {
+            debugPrint('[Test] Text: ${text.data}');
+          }
+        }
+      }
+      // Log status messages periodically to see what's happening
+      if (i % 5 == 0 && i > 0) {
+        final allText = tester.widgetList<Text>(find.byType(Text));
+        for (final text in allText) {
+          final data = text.data;
+          // Look for our step markers
+          if (data != null && (data.contains('Step') || data.contains('Error') ||
+              data.contains('Looking') || data.contains('Connecting'))) {
+            // Use print instead of debugPrint to try to get output
+            // ignore: avoid_print
+            print('[Test@$i] Status: $data');
+          }
+        }
       }
     }
     debugPrint('[Test] Still on login screen after $maxSeconds seconds (sawError: $sawError)');
+    // Print final state
+    final allText = tester.widgetList<Text>(find.byType(Text));
+    for (final text in allText) {
+      if (text.data != null && text.data!.isNotEmpty && text.data!.length > 3) {
+        debugPrint('[Test] Final UI text: ${text.data}');
+      }
+    }
     return false;
   }
 

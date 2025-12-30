@@ -10,6 +10,7 @@
 /// 7. Consume claim on relay to mark it as used
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
@@ -245,10 +246,13 @@ class PairingService {
   }) async {
     try {
       final devicePlatform = platform ?? _detectPlatform();
+      debugPrint('[PairingService] === STEP 1: Looking up claim code via relay ===');
+      debugPrint('[PairingService] claimCode=$claimCode, deviceName=$deviceName, platform=$devicePlatform');
 
       // Step 1: Look up claim code via relay
-      onStatusUpdate?.call('Looking up claim code...');
+      onStatusUpdate?.call('Step 1: Looking up claim code...');
       final lookupResult = await _relayService.lookupClaimCode(claimCode);
+      debugPrint('[PairingService] Lookup result: success=${lookupResult.success}, error=${lookupResult.error}');
 
       if (!lookupResult.success) {
         return PairingResult.error(
@@ -256,6 +260,9 @@ class PairingService {
       }
 
       final claimInfo = lookupResult.data!;
+      debugPrint('[PairingService] ClaimInfo: instanceId=${claimInfo.instanceId}');
+      debugPrint('[PairingService] ClaimInfo: directUrls=${claimInfo.directUrls}');
+      debugPrint('[PairingService] ClaimInfo: publicKey length=${claimInfo.publicKey.length}');
 
       if (claimInfo.directUrls.isEmpty) {
         return PairingResult.error(
@@ -263,16 +270,23 @@ class PairingService {
       }
 
       // Decode the server's public key
+      debugPrint('[PairingService] === STEP 2a: Decoding server public key ===');
       final serverPublicKey = _base64ToBytes(claimInfo.publicKey);
+      debugPrint('[PairingService] Server public key: ${serverPublicKey.length} bytes');
 
       // Step 2: Try each direct URL until one works
+      debugPrint('[PairingService] === STEP 2b: Trying direct URLs ===');
       onStatusUpdate?.call('Connecting to server...');
       String? connectedUrl;
 
       for (final url in claimInfo.directUrls) {
+        debugPrint('[PairingService] Trying direct URL: $url');
+        onStatusUpdate?.call('Step 2: Connecting to $url...');
         final connectResult = await _channelService.connect(url);
+        debugPrint('[PairingService] Connect result: success=${connectResult.success}, error=${connectResult.error}');
         if (connectResult.success) {
           connectedUrl = url;
+          onStatusUpdate?.call('Step 2 done: Connected!');
           break;
         }
       }
@@ -291,26 +305,61 @@ class PairingService {
       }
 
       // Step 3: Join pairing channel
+      debugPrint('[PairingService] === STEP 3: Joining pairing channel ===');
       onStatusUpdate?.call('Joining pairing channel...');
       final joinResult = await _channelService.joinPairingChannel();
+      debugPrint('[PairingService] Join result: success=${joinResult.success}, error=${joinResult.error}');
       if (!joinResult.success) {
         await _channelService.disconnect();
         return PairingResult.error(
             joinResult.error ?? 'Failed to join pairing channel');
       }
       final channel = joinResult.data!;
+      debugPrint('[PairingService] Channel joined successfully!');
+      onStatusUpdate?.call('Step 3 done: Channel joined');
 
       // Step 4: Perform Noise_NK handshake
-      onStatusUpdate?.call('Establishing secure connection...');
-      final noiseSession =
-          await _noiseService.startPairingHandshake(serverPublicKey);
+      debugPrint('[PairingService] === STEP 4: Performing Noise_NK handshake ===');
+      onStatusUpdate?.call('Step 4: Creating secure session...');
+      debugPrint('[PairingService] Starting handshake with server public key...');
+
+      NoiseSession noiseSession;
+      try {
+        noiseSession = await _noiseService
+            .startPairingHandshake(serverPublicKey)
+            .timeout(const Duration(seconds: 10), onTimeout: () {
+          throw TimeoutException('Noise session creation timed out');
+        });
+      } catch (e) {
+        debugPrint('[PairingService] ERROR: Failed to create noise session: $e');
+        onStatusUpdate?.call('Error: Failed to create session');
+        rethrow;
+      }
+      debugPrint('[PairingService] Noise session created');
+      onStatusUpdate?.call('Step 4b: Writing handshake...');
 
       // Send handshake message to server
-      final handshakeMessage = await noiseSession.writeHandshakeMessage();
+      debugPrint('[PairingService] Writing handshake message...');
+      Uint8List handshakeMessage;
+      try {
+        handshakeMessage = await noiseSession
+            .writeHandshakeMessage()
+            .timeout(const Duration(seconds: 10), onTimeout: () {
+          throw TimeoutException('Handshake message creation timed out');
+        });
+      } catch (e) {
+        debugPrint('[PairingService] ERROR: Failed to write handshake message: $e');
+        onStatusUpdate?.call('Error: Failed to write handshake');
+        rethrow;
+      }
+      debugPrint('[PairingService] Handshake message: ${handshakeMessage.length} bytes');
+      onStatusUpdate?.call('Step 4c: Sending handshake...');
+      debugPrint('[PairingService] Sending handshake to server...');
       final handshakeResult = await _channelService.sendPairingHandshake(
         channel,
         handshakeMessage,
       );
+      debugPrint('[PairingService] Handshake result: success=${handshakeResult.success}, error=${handshakeResult.error}');
 
       if (!handshakeResult.success) {
         await _channelService.disconnect();
@@ -371,7 +420,10 @@ class PairingService {
       }
 
       return PairingResult.success(credentials);
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[PairingService] === EXCEPTION in pairWithClaimCodeOnly ===');
+      debugPrint('[PairingService] Error: $e');
+      debugPrint('[PairingService] Stack trace: $st');
       await _channelService.disconnect();
       return PairingResult.error('Pairing error: $e');
     }

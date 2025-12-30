@@ -1,6 +1,9 @@
 defmodule Mydia.Downloads.JobManagerTest do
   use ExUnit.Case, async: false
 
+  # These tests require FFmpeg to be installed
+  @moduletag :requires_ffmpeg
+
   alias Mydia.Downloads.JobManager
 
   # We need a supervised GenServer for these tests

@@ -256,7 +256,9 @@ defmodule Mydia.RemoteAccess.PairingTest do
     end
   end
 
+  # These tests require the Relay service to be running
   describe "complete_pairing/3" do
+    @describetag :external
     setup do
       # Initialize server keypair
       {:ok, _config} = RemoteAccess.initialize_keypair()
@@ -372,7 +374,9 @@ defmodule Mydia.RemoteAccess.PairingTest do
     end
   end
 
+  # This test requires the Relay service to be running
   describe "full NK pairing flow" do
+    @describetag :external
     setup do
       # Initialize server keypair
       {:ok, _config} = RemoteAccess.initialize_keypair()

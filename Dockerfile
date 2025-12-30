@@ -14,9 +14,10 @@ COPY player/web ./web
 # Copy the GraphQL schema (resolves symlink from priv/graphql/)
 COPY priv/graphql/schema.graphql ./lib/graphql/schema.graphql
 
-# Install dependencies and build (skip build_runner - generated files are committed)
+# Install dependencies, generate code, and build
 RUN flutter config --no-analytics && \
     flutter pub get && \
+    dart run build_runner build --delete-conflicting-outputs && \
     flutter build web --release --base-href /player/
 
 # ============================================

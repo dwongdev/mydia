@@ -10,6 +10,7 @@ defmodule MydiaWeb.Api.V2.SearchController do
   import Ecto.Query, warn: false
   alias Mydia.Repo
   alias Mydia.Media.MediaItem
+  alias Mydia.Metadata.Structs.MediaMetadata
 
   @default_limit 20
   @max_limit 100
@@ -44,12 +45,14 @@ defmodule MydiaWeb.Api.V2.SearchController do
   defp search_media_items("", _limit), do: []
 
   defp search_media_items(query, limit) when is_binary(query) do
-    search_pattern = "%#{query}%"
+    # SQLite uses case-insensitive LIKE with lower() for consistent behavior
+    search_pattern = "%#{String.downcase(query)}%"
 
     MediaItem
     |> where(
       [m],
-      ilike(m.title, ^search_pattern) or ilike(m.original_title, ^search_pattern)
+      like(fragment("lower(?)", m.title), ^search_pattern) or
+        like(fragment("lower(?)", m.original_title), ^search_pattern)
     )
     |> order_by([m], asc: m.title)
     |> limit(^limit)
@@ -84,7 +87,7 @@ defmodule MydiaWeb.Api.V2.SearchController do
     }
   end
 
-  defp extract_poster_url(%MediaItem{metadata: %{"poster_path" => poster_path}})
+  defp extract_poster_url(%MediaItem{metadata: %MediaMetadata{poster_path: poster_path}})
        when is_binary(poster_path),
        do: poster_path
 

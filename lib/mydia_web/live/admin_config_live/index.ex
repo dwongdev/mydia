@@ -2265,20 +2265,6 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     end
   end
 
-  # Test event to verify LiveView events are working
-  def handle_event("test_parent_event", _params, socket) do
-    require Logger
-    Logger.warning("TEST_PARENT_EVENT RECEIVED!")
-    {:noreply, put_flash(socket, :info, "Test event received!")}
-  end
-
-  # Catch-all for debugging unknown events
-  def handle_event(event, params, socket) do
-    require Logger
-    Logger.warning("UNKNOWN EVENT in AdminConfigLive: #{event}, params: #{inspect(params)}")
-    {:noreply, socket}
-  end
-
   ## Private Functions
 
   defp test_plex_connection(conn, token) do

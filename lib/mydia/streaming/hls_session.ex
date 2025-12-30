@@ -301,9 +301,15 @@ defmodule Mydia.Streaming.HlsSession do
   def handle_cast(:notify_ready, state) do
     Logger.info("Session #{state.session_id} is ready (playlist available)")
 
-    # Reply to all waiters
+    # Reply to all waiters, catching failures if waiter processes have terminated
     Enum.each(state.ready_waiters, fn from ->
-      GenServer.reply(from, :ok)
+      try do
+        GenServer.reply(from, :ok)
+      catch
+        :exit, _ ->
+          # Waiter process has terminated, ignore
+          :ok
+      end
     end)
 
     {:noreply, %{state | ready: true, ready_waiters: []}}

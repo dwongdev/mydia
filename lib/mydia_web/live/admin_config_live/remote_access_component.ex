@@ -1161,10 +1161,30 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
   defp valid_local_ip?(_), do: false
 
   # Check if port is accessible from the internet using portchecker.io
+  # Note: This relies on the third-party service portchecker.io for external port checks.
+  # Results are cached for 5 minutes to reduce API calls and handle service unavailability.
+  @port_check_cache_ttl :timer.minutes(5)
+
   defp check_port_accessible(nil, _port), do: :unknown
   defp check_port_accessible(_ip, nil), do: :unknown
 
   defp check_port_accessible(ip, port) do
+    cache_key = "port_check:#{ip}:#{port}"
+
+    # Check cache first
+    case Mydia.Metadata.Cache.get(cache_key) do
+      {:ok, cached_result} ->
+        cached_result
+
+      {:error, :not_found} ->
+        result = do_port_check(ip, port)
+        # Cache the result (even failures, to avoid hammering the service)
+        Mydia.Metadata.Cache.put(cache_key, result, ttl: @port_check_cache_ttl)
+        result
+    end
+  end
+
+  defp do_port_check(ip, port) do
     url = "https://portchecker.io/api/v1/query"
 
     body =
@@ -1177,7 +1197,9 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
            body: body,
            headers: [{"content-type", "application/json"}],
            receive_timeout: 10_000,
-           retry: false
+           retry: :transient,
+           retry_delay: fn attempt -> attempt * 1000 end,
+           max_retries: 2
          ) do
       {:ok, %Req.Response{status: 200, body: %{"check" => results}}} ->
         # Results is a list like [%{"port" => 4000, "status" => true}]

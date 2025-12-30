@@ -35,14 +35,17 @@ defmodule MydiaWeb.Api.Player.V1.SubtitleControllerTest do
         audio_codec: "AAC"
       })
 
-    # Create test episode
+    # Create test episode (skip auto episode refresh to avoid unique constraint violations)
     {:ok, tv_show} =
-      Media.create_media_item(%{
-        title: "Test Show",
-        type: "tv_show",
-        library_path_id: library_path.id,
-        year: 2024
-      })
+      Media.create_media_item(
+        %{
+          title: "Test Show",
+          type: "tv_show",
+          library_path_id: library_path.id,
+          year: 2024
+        },
+        skip_episode_refresh: true
+      )
 
     {:ok, episode} =
       Media.create_episode(%{

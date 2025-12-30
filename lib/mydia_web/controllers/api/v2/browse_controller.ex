@@ -263,7 +263,7 @@ defmodule MydiaWeb.Api.V2.BrowseController do
                   data: %{
                     media_item_id: id,
                     season_number: season_number,
-                    episodes: Enum.map(episodes, &serialize_episode(elem(&1, 0), progress_map))
+                    episodes: Enum.map(episodes, &serialize_episode(&1, progress_map))
                   }
                 })
               end
@@ -424,9 +424,9 @@ defmodule MydiaWeb.Api.V2.BrowseController do
       year: movie.year,
       poster_url: get_poster_url(movie),
       backdrop_url: get_backdrop_url(movie),
-      overview: movie.overview,
+      overview: get_overview(movie),
       runtime: get_runtime(movie),
-      genres: movie.genres || [],
+      genres: get_genres(movie),
       progress: serialize_progress(progress)
     }
   end
@@ -439,9 +439,9 @@ defmodule MydiaWeb.Api.V2.BrowseController do
       year: movie.year,
       poster_url: get_poster_url(movie),
       backdrop_url: get_backdrop_url(movie),
-      overview: movie.overview,
+      overview: get_overview(movie),
       runtime: get_runtime(movie),
-      genres: movie.genres || [],
+      genres: get_genres(movie),
       tmdb_id: movie.tmdb_id,
       imdb_id: movie.imdb_id,
       status: get_status(movie),
@@ -468,8 +468,8 @@ defmodule MydiaWeb.Api.V2.BrowseController do
       year: show.year,
       poster_url: get_poster_url(show),
       backdrop_url: get_backdrop_url(show),
-      overview: show.overview,
-      genres: show.genres || [],
+      overview: get_overview(show),
+      genres: get_genres(show),
       total_seasons: count_seasons(show.episodes),
       total_episodes: total_episodes,
       watched_episodes: watched_count
@@ -486,8 +486,8 @@ defmodule MydiaWeb.Api.V2.BrowseController do
       year: show.year,
       poster_url: get_poster_url(show),
       backdrop_url: get_backdrop_url(show),
-      overview: show.overview,
-      genres: show.genres || [],
+      overview: get_overview(show),
+      genres: get_genres(show),
       tmdb_id: show.tmdb_id,
       imdb_id: show.imdb_id,
       status: get_status(show),
@@ -574,42 +574,72 @@ defmodule MydiaWeb.Api.V2.BrowseController do
   end
 
   defp get_poster_url(media_item) do
-    case media_item.metadata do
-      %{"poster_path" => path} when is_binary(path) -> path
-      _ -> media_item.poster_url
-    end
+    get_metadata_field(media_item.metadata, :poster_path)
   end
 
   defp get_backdrop_url(media_item) do
-    case media_item.metadata do
-      %{"backdrop_path" => path} when is_binary(path) -> path
-      _ -> media_item.backdrop_url
-    end
+    get_metadata_field(media_item.metadata, :backdrop_path)
   end
 
   defp get_runtime(media_item) do
-    case media_item.metadata do
-      %{"runtime" => runtime} when is_integer(runtime) -> runtime
-      _ -> media_item.runtime
-    end
+    get_metadata_field(media_item.metadata, :runtime)
   end
 
   defp get_status(media_item) do
+    get_metadata_field(media_item.metadata, :status)
+  end
+
+  defp get_overview(media_item) do
+    get_metadata_field(media_item.metadata, :overview)
+  end
+
+  defp get_genres(media_item) do
     case media_item.metadata do
-      %{"status" => status} when is_binary(status) -> status
-      _ -> media_item.status
+      # Handle MediaMetadata struct
+      %{genres: genres} when is_list(genres) ->
+        extract_genre_names(genres)
+
+      # Handle plain map with string keys (legacy)
+      %{"genres" => genres} when is_list(genres) ->
+        extract_genre_names(genres)
+
+      _ ->
+        []
+    end
+  end
+
+  defp extract_genre_names(genres) do
+    Enum.map(genres, fn
+      %{name: name} when is_binary(name) -> name
+      %{"name" => name} when is_binary(name) -> name
+      name when is_binary(name) -> name
+      _ -> nil
+    end)
+    |> Enum.filter(&is_binary/1)
+  end
+
+  # Generic helper to get a field from metadata (handles struct or map)
+  defp get_metadata_field(nil, _field), do: nil
+
+  defp get_metadata_field(metadata, field) when is_atom(field) do
+    cond do
+      # Handle struct with atom keys
+      is_struct(metadata) -> Map.get(metadata, field)
+      # Handle map with atom keys
+      is_map(metadata) and is_map_key(metadata, field) -> Map.get(metadata, field)
+      # Handle map with string keys
+      is_map(metadata) -> Map.get(metadata, to_string(field))
+      true -> nil
     end
   end
 
   defp get_episode_overview(episode) do
-    case episode.metadata do
-      %{"overview" => overview} when is_binary(overview) -> overview
-      _ -> nil
-    end
+    get_metadata_field(episode.metadata, :overview)
   end
 
   defp get_episode_still_url(episode) do
     case episode.metadata do
+      %{still_path: path} when is_binary(path) -> path
       %{"still_path" => path} when is_binary(path) -> path
       _ -> nil
     end

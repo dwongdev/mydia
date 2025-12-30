@@ -9,38 +9,70 @@ defmodule Mydia.Repo.Migrations.MigrateFavoritesToCollections do
   The user_favorites table is kept for rollback safety.
   """
   use Ecto.Migration
+  import Mydia.Repo.Migrations.Helpers
 
   def up do
     # For each user that has favorites, create a Favorites collection
     # and migrate their favorites to collection_items
-    execute("""
-    INSERT INTO collections (id, name, type, visibility, is_system, position, user_id, inserted_at, updated_at)
-    SELECT
-      lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))) as id,
-      'Favorites' as name,
-      'manual' as type,
-      'private' as visibility,
-      1 as is_system,
-      0 as position,
-      user_id,
-      datetime('now') as inserted_at,
-      datetime('now') as updated_at
-    FROM (SELECT DISTINCT user_id FROM user_favorites)
-    """)
+    if postgres?() do
+      execute("""
+      INSERT INTO collections (id, name, type, visibility, is_system, position, user_id, inserted_at, updated_at)
+      SELECT
+        gen_random_uuid() as id,
+        'Favorites' as name,
+        'manual' as type,
+        'private' as visibility,
+        true as is_system,
+        0 as position,
+        user_id,
+        NOW() as inserted_at,
+        NOW() as updated_at
+      FROM (SELECT DISTINCT user_id FROM user_favorites) sub
+      """)
+    else
+      execute("""
+      INSERT INTO collections (id, name, type, visibility, is_system, position, user_id, inserted_at, updated_at)
+      SELECT
+        lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))) as id,
+        'Favorites' as name,
+        'manual' as type,
+        'private' as visibility,
+        1 as is_system,
+        0 as position,
+        user_id,
+        datetime('now') as inserted_at,
+        datetime('now') as updated_at
+      FROM (SELECT DISTINCT user_id FROM user_favorites)
+      """)
+    end
 
     # Now copy favorites to collection_items
     # We need to join with the newly created collections to get the collection_id
-    execute("""
-    INSERT INTO collection_items (id, collection_id, media_item_id, position, inserted_at)
-    SELECT
-      lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))) as id,
-      c.id as collection_id,
-      uf.media_item_id,
-      ROW_NUMBER() OVER (PARTITION BY uf.user_id ORDER BY uf.inserted_at) - 1 as position,
-      uf.inserted_at
-    FROM user_favorites uf
-    INNER JOIN collections c ON c.user_id = uf.user_id AND c.is_system = 1 AND c.name = 'Favorites'
-    """)
+    if postgres?() do
+      execute("""
+      INSERT INTO collection_items (id, collection_id, media_item_id, position, inserted_at)
+      SELECT
+        gen_random_uuid() as id,
+        c.id as collection_id,
+        uf.media_item_id,
+        ROW_NUMBER() OVER (PARTITION BY uf.user_id ORDER BY uf.inserted_at) - 1 as position,
+        uf.inserted_at
+      FROM user_favorites uf
+      INNER JOIN collections c ON c.user_id = uf.user_id AND c.is_system = true AND c.name = 'Favorites'
+      """)
+    else
+      execute("""
+      INSERT INTO collection_items (id, collection_id, media_item_id, position, inserted_at)
+      SELECT
+        lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))) as id,
+        c.id as collection_id,
+        uf.media_item_id,
+        ROW_NUMBER() OVER (PARTITION BY uf.user_id ORDER BY uf.inserted_at) - 1 as position,
+        uf.inserted_at
+      FROM user_favorites uf
+      INNER JOIN collections c ON c.user_id = uf.user_id AND c.is_system = 1 AND c.name = 'Favorites'
+      """)
+    end
   end
 
   def down do

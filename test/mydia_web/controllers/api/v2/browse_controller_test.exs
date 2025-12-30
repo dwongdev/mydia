@@ -356,7 +356,7 @@ defmodule MydiaWeb.Api.V2.BrowseControllerTest do
       type: "movie",
       year: year,
       monitored: true,
-      genres: genres
+      metadata: %{"genres" => Enum.map(genres, &%{"name" => &1})}
     })
   end
 

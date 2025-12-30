@@ -32,6 +32,7 @@ defmodule Mydia.Downloads.FfmpegMp4TranscoderTest do
       end
     end
 
+    @tag :requires_ffmpeg
     test "fails with invalid input path" do
       output_path = "/tmp/test_output.mp4"
 
@@ -46,6 +47,7 @@ defmodule Mydia.Downloads.FfmpegMp4TranscoderTest do
       assert {:ok, _pid} = result
     end
 
+    @tag :requires_ffmpeg
     test "validates resolution preset" do
       input_path = "/tmp/test_input.mp4"
       output_path = "/tmp/test_output.mp4"

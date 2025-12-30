@@ -44,4 +44,15 @@ defmodule MydiaWeb.Schema.EnumTypes do
     value(:anime_series, description: "Anime series")
     value(:cartoon_series, description: "Animated/cartoon series")
   end
+
+  @desc "Subtitle format"
+  enum :subtitle_format do
+    value(:srt, description: "SubRip Text")
+    value(:vtt, description: "WebVTT")
+    value(:ass, description: "Advanced SubStation Alpha")
+    value(:ssa, description: "SubStation Alpha")
+    value(:pgs, description: "Presentation Graphic Stream (image-based)")
+    value(:vobsub, description: "VobSub (image-based)")
+    value(:unknown, description: "Unknown format")
+  end
 end

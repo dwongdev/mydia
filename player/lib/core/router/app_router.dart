@@ -105,44 +105,71 @@ CustomTransitionPage<T> _buildFadeTransition<T>({
   );
 }
 
-@riverpod
+/// Simple ChangeNotifier to trigger GoRouter refreshes.
+/// The actual auth state is read directly from the provider in the redirect callback.
+class _AuthRefreshNotifier extends ChangeNotifier {
+  void refresh() {
+    debugPrint('[AppRouter] _AuthRefreshNotifier.refresh() called');
+    notifyListeners();
+  }
+}
+
+@Riverpod(keepAlive: true)
 GoRouter appRouter(Ref ref) {
-  final authState = ref.watch(authStateProvider);
+  debugPrint('[AppRouter] Creating appRouter provider');
+
+  // Simple notifier just to trigger GoRouter refreshes
+  final refreshNotifier = _AuthRefreshNotifier();
+
+  // Listen to auth state changes and trigger router refresh
+  ref.listen<AsyncValue<bool>>(authStateProvider, (previous, next) {
+    debugPrint('[AppRouter] Auth state changed: $previous -> $next');
+    refreshNotifier.refresh();
+  });
+
+  // Dispose the notifier when the provider is disposed
+  ref.onDispose(() {
+    debugPrint('[AppRouter] Disposing appRouter provider');
+    refreshNotifier.dispose();
+  });
 
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
     initialLocation: '/',
     debugLogDiagnostics: true,
+    refreshListenable: refreshNotifier,
     redirect: (context, state) {
-      // Wait for auth state to load
-      return authState.when(
-        data: (isAuthenticated) {
-          final isLoginRoute = state.matchedLocation == '/login';
-
-          // If not authenticated and not on login page, redirect to login
-          if (!isAuthenticated && !isLoginRoute) {
-            return '/login';
-          }
-
-          // If authenticated and on login page, redirect to home
-          if (isAuthenticated && isLoginRoute) {
-            return '/';
-          }
-
-          // No redirect needed
-          return null;
-        },
-        loading: () {
-          // While loading, allow navigation to continue
-          // This prevents flickering on initial load
-          return null;
-        },
-        error: (_, __) {
-          // On error, redirect to login
-          final isLoginRoute = state.matchedLocation == '/login';
-          return isLoginRoute ? null : '/login';
-        },
+      // Read auth state directly from the provider each time
+      // This ensures we always get the latest state
+      final authState = ref.read(authStateProvider);
+      final isAuthenticated = authState.maybeWhen(
+        data: (value) => value,
+        orElse: () => false,
       );
+      final isLoading = authState.isLoading;
+      final isLoginRoute = state.matchedLocation == '/login';
+
+      debugPrint('[AppRouter] Redirect check: authState=$authState, isAuthenticated=$isAuthenticated, isLoading=$isLoading, path=${state.matchedLocation}');
+
+      // While loading, allow navigation to continue
+      if (isLoading) {
+        return null;
+      }
+
+      // If not authenticated and not on login page, redirect to login
+      if (!isAuthenticated && !isLoginRoute) {
+        debugPrint('[AppRouter] Redirecting to /login (not authenticated)');
+        return '/login';
+      }
+
+      // If authenticated and on login page, redirect to home
+      if (isAuthenticated && isLoginRoute) {
+        debugPrint('[AppRouter] Redirecting to / (authenticated on login page)');
+        return '/';
+      }
+
+      // No redirect needed
+      return null;
     },
     routes: [
       // Login route - outside shell (fade transition)

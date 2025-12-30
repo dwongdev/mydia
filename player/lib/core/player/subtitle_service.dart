@@ -25,7 +25,7 @@ class SubtitleService {
     String mediaType,
   ) async {
     try {
-      final url = '$serverUrl/api/v2/subtitles/$mediaType/$mediaId';
+      final url = '$serverUrl/api/player/v1/subtitles/$mediaType/$mediaId';
       debugPrint('Fetching subtitles from: $url');
 
       final response = await http.get(
@@ -72,7 +72,7 @@ class SubtitleService {
     String trackId, {
     String format = 'vtt',
   }) {
-    return '$serverUrl/api/v2/subtitles/$mediaType/$mediaId/$trackId?format=$format';
+    return '$serverUrl/api/player/v1/subtitles/$mediaType/$mediaId/$trackId?format=$format';
   }
 
   /// Download subtitle content as a string.

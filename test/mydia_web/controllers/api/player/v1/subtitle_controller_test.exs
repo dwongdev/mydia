@@ -1,4 +1,4 @@
-defmodule MydiaWeb.Api.V2.SubtitleControllerTest do
+defmodule MydiaWeb.Api.Player.V1.SubtitleControllerTest do
   use MydiaWeb.ConnCase, async: true
 
   alias Mydia.{Media, Repo}
@@ -84,7 +84,7 @@ defmodule MydiaWeb.Api.V2.SubtitleControllerTest do
      external_subtitle: external_subtitle}
   end
 
-  describe "GET /api/v2/subtitles/:type/:id" do
+  describe "GET /api/player/v1/subtitles/:type/:id" do
     test "lists subtitles for a movie", %{
       conn: conn,
       token: token,
@@ -94,7 +94,7 @@ defmodule MydiaWeb.Api.V2.SubtitleControllerTest do
       conn =
         conn
         |> put_req_header("authorization", "Bearer #{token}")
-        |> get("/api/v2/subtitles/movie/#{movie.id}")
+        |> get("/api/player/v1/subtitles/movie/#{movie.id}")
 
       assert %{"data" => tracks} = json_response(conn, 200)
       assert is_list(tracks)
@@ -115,7 +115,7 @@ defmodule MydiaWeb.Api.V2.SubtitleControllerTest do
       conn =
         conn
         |> put_req_header("authorization", "Bearer #{token}")
-        |> get("/api/v2/subtitles/episode/#{episode.id}")
+        |> get("/api/player/v1/subtitles/episode/#{episode.id}")
 
       assert %{"data" => tracks} = json_response(conn, 200)
       assert is_list(tracks)
@@ -130,7 +130,7 @@ defmodule MydiaWeb.Api.V2.SubtitleControllerTest do
       conn =
         conn
         |> put_req_header("authorization", "Bearer #{token}")
-        |> get("/api/v2/subtitles/file/#{media_file.id}")
+        |> get("/api/player/v1/subtitles/file/#{media_file.id}")
 
       assert %{"data" => tracks} = json_response(conn, 200)
       assert is_list(tracks)
@@ -145,7 +145,7 @@ defmodule MydiaWeb.Api.V2.SubtitleControllerTest do
       conn =
         conn
         |> put_req_header("authorization", "Bearer #{token}")
-        |> get("/api/v2/subtitles/movie/00000000-0000-0000-0000-000000000000")
+        |> get("/api/player/v1/subtitles/movie/00000000-0000-0000-0000-000000000000")
 
       assert json_response(conn, 404)["error"] == "Media not found"
     end
@@ -154,7 +154,7 @@ defmodule MydiaWeb.Api.V2.SubtitleControllerTest do
       conn =
         conn
         |> put_req_header("authorization", "Bearer #{token}")
-        |> get("/api/v2/subtitles/episode/00000000-0000-0000-0000-000000000000")
+        |> get("/api/player/v1/subtitles/episode/00000000-0000-0000-0000-000000000000")
 
       assert json_response(conn, 404)["error"] == "Media not found"
     end
@@ -163,21 +163,21 @@ defmodule MydiaWeb.Api.V2.SubtitleControllerTest do
       conn =
         conn
         |> put_req_header("authorization", "Bearer #{token}")
-        |> get("/api/v2/subtitles/invalid/#{movie.id}")
+        |> get("/api/player/v1/subtitles/invalid/#{movie.id}")
 
       assert json_response(conn, 400)["error"] =~
                "Invalid type. Use 'movie', 'episode', or 'file'"
     end
 
     test "requires authentication", %{conn: conn, movie: movie} do
-      conn = get(conn, "/api/v2/subtitles/movie/#{movie.id}")
+      conn = get(conn, "/api/player/v1/subtitles/movie/#{movie.id}")
 
       # Should get 401 Unauthorized or redirect to login
       assert conn.status in [401, 302]
     end
   end
 
-  describe "GET /api/v2/subtitles/:type/:id/:track" do
+  describe "GET /api/player/v1/subtitles/:type/:id/:track" do
     test "downloads external subtitle", %{
       conn: conn,
       token: token,
@@ -190,7 +190,7 @@ defmodule MydiaWeb.Api.V2.SubtitleControllerTest do
       conn =
         conn
         |> put_req_header("authorization", "Bearer #{token}")
-        |> get("/api/v2/subtitles/movie/#{movie.id}/#{external_subtitle.id}")
+        |> get("/api/player/v1/subtitles/movie/#{movie.id}/#{external_subtitle.id}")
 
       assert response(conn, 200) == "Test subtitle content"
       assert get_resp_header(conn, "content-type") == ["text/plain; charset=utf-8"]
@@ -207,7 +207,7 @@ defmodule MydiaWeb.Api.V2.SubtitleControllerTest do
       conn =
         conn
         |> put_req_header("authorization", "Bearer #{token}")
-        |> get("/api/v2/subtitles/movie/#{movie.id}/00000000-0000-0000-0000-000000000000")
+        |> get("/api/player/v1/subtitles/movie/#{movie.id}/00000000-0000-0000-0000-000000000000")
 
       assert json_response(conn, 404)["error"] == "Subtitle track not found"
     end
@@ -224,7 +224,7 @@ defmodule MydiaWeb.Api.V2.SubtitleControllerTest do
       conn =
         conn
         |> put_req_header("authorization", "Bearer #{token}")
-        |> get("/api/v2/subtitles/movie/#{movie.id}/#{external_subtitle.id}")
+        |> get("/api/player/v1/subtitles/movie/#{movie.id}/#{external_subtitle.id}")
 
       assert json_response(conn, 404)["error"] == "Subtitle file not found on disk"
     end
@@ -233,13 +233,13 @@ defmodule MydiaWeb.Api.V2.SubtitleControllerTest do
       conn =
         conn
         |> put_req_header("authorization", "Bearer #{token}")
-        |> get("/api/v2/subtitles/movie/00000000-0000-0000-0000-000000000000/0")
+        |> get("/api/player/v1/subtitles/movie/00000000-0000-0000-0000-000000000000/0")
 
       assert json_response(conn, 404)["error"] == "Media not found"
     end
 
     test "requires authentication", %{conn: conn, movie: movie, external_subtitle: subtitle} do
-      conn = get(conn, "/api/v2/subtitles/movie/#{movie.id}/#{subtitle.id}")
+      conn = get(conn, "/api/player/v1/subtitles/movie/#{movie.id}/#{subtitle.id}")
 
       # Should get 401 Unauthorized or redirect to login
       assert conn.status in [401, 302]

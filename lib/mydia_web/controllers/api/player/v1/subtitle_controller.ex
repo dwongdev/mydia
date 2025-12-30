@@ -1,6 +1,6 @@
-defmodule MydiaWeb.Api.V2.SubtitleController do
+defmodule MydiaWeb.Api.Player.V1.SubtitleController do
   @moduledoc """
-  REST API controller for subtitle management (API v2).
+  REST API controller for subtitle management.
 
   Provides endpoints for:
   - Listing available subtitle tracks (embedded and external)
@@ -17,7 +17,7 @@ defmodule MydiaWeb.Api.V2.SubtitleController do
   @doc """
   Lists all available subtitle tracks for a media file.
 
-  GET /api/v2/subtitles/:type/:id
+  GET /api/player/v1/subtitles/:type/:id
 
   Parameters:
     - type: "movie", "episode", or "file"
@@ -70,7 +70,7 @@ defmodule MydiaWeb.Api.V2.SubtitleController do
   @doc """
   Downloads or streams a specific subtitle track.
 
-  GET /api/v2/subtitles/:type/:id/:track
+  GET /api/player/v1/subtitles/:type/:id/:track
 
   Parameters:
     - type: "movie", "episode", or "file"

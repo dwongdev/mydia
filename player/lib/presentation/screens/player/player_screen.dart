@@ -10,7 +10,6 @@ import 'package:http/http.dart' as http;
 import '../../../core/graphql/graphql_provider.dart';
 import '../../../core/player/progress_service.dart';
 import '../../../core/utils/file_utils.dart' as file_utils;
-import '../../../core/player/subtitle_service.dart';
 import '../../../core/player/platform_features.dart';
 import '../../../core/player/streaming_strategy.dart';
 import '../../../core/cast/cast_providers.dart';
@@ -24,6 +23,7 @@ import '../../widgets/cast_device_picker.dart';
 import '../../widgets/airplay_button.dart';
 import '../../../domain/models/subtitle_track.dart' as app_models;
 import '../../../domain/models/cast_device.dart';
+import '../../../graphql/fragments/media_file_fragment.graphql.dart';
 import '../../../graphql/queries/movie_detail.graphql.dart';
 import '../../../graphql/queries/episode_detail.graphql.dart';
 import '../../../graphql/queries/season_episodes.graphql.dart';
@@ -243,8 +243,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         _isLoading = false;
       });
 
-      // Load subtitle tracks after player is initialized
-      _loadSubtitleTracks(serverUrl, token);
+      // Subtitle tracks are now extracted from GraphQL in _fetchProgressAndEpisodes
+      debugPrint('Loaded ${_subtitleTracks.length} subtitle tracks from GraphQL');
     } catch (e) {
       debugPrint('Error initializing player: $e');
       setState(() {
@@ -268,6 +268,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         if (result.data != null) {
           final movie = Query$MovieDetail.fromJson(result.data!).movie;
           _savedPositionSeconds = movie?.progress?.positionSeconds;
+
+          // Extract subtitle tracks from files
+          _extractSubtitlesFromFiles(movie?.files);
         }
       } else if (widget.mediaType == 'episode') {
         // Fetch episode progress
@@ -282,6 +285,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           final episode = Query$EpisodeDetail.fromJson(result.data!).episode;
           _savedPositionSeconds = episode?.progress?.positionSeconds;
 
+          // Extract subtitle tracks from files
+          _extractSubtitlesFromFiles(episode?.files);
+
           // If we have show and season info, fetch episode list for navigation
           if (widget.showId != null && widget.seasonNumber != null) {
             await _fetchSeasonEpisodes(client);
@@ -290,6 +296,27 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       }
     } catch (e) {
       debugPrint('Error fetching progress: $e');
+    }
+  }
+
+  /// Extract subtitle tracks from media files returned by GraphQL
+  void _extractSubtitlesFromFiles(List<Fragment$MediaFileFragment?>? files) {
+    if (files == null || files.isEmpty) return;
+
+    // Find the file matching the current fileId
+    for (final file in files) {
+      if (file == null) continue;
+      if (file.id == widget.fileId) {
+        final subtitles = file.subtitles;
+        if (subtitles != null) {
+          _subtitleTracks = subtitles
+              .whereType<Fragment$MediaFileFragment$subtitles>()
+              .map((sub) => app_models.SubtitleTrack.fromGraphQL(sub))
+              .toList();
+          debugPrint('Extracted ${_subtitleTracks.length} subtitle tracks from GraphQL');
+        }
+        break;
+      }
     }
   }
 
@@ -475,37 +502,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
   }
 
-  /// Load available subtitle tracks from the API
-  Future<void> _loadSubtitleTracks(String serverUrl, String token) async {
-    setState(() {
-      _loadingSubtitles = true;
-    });
-
-    try {
-      final subtitleService = SubtitleService(
-        serverUrl: serverUrl,
-        authToken: token,
-      );
-
-      // Use widget.fileId for file-based lookup
-      final tracks = await subtitleService.fetchSubtitles(
-        widget.fileId,
-        'file',
-      );
-
-      setState(() {
-        _subtitleTracks = tracks;
-        _loadingSubtitles = false;
-      });
-
-      debugPrint('Loaded ${tracks.length} subtitle tracks');
-    } catch (e) {
-      debugPrint('Failed to load subtitle tracks: $e');
-      setState(() {
-        _loadingSubtitles = false;
-      });
-    }
-  }
+  // Note: Subtitle tracks are now loaded via GraphQL in _fetchProgressAndEpisodes
+  // The _loadSubtitleTracks method has been removed.
 
   /// Show subtitle track selector
   Future<void> _showSubtitleSelector() async {

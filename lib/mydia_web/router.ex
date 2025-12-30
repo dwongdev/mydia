@@ -267,26 +267,13 @@ defmodule MydiaWeb.Router do
     end
   end
 
-  # API v2 routes - authenticated with JWT or API key
-  scope "/api/v2", MydiaWeb.Api.V2 do
+  # Player API routes - authenticated with JWT or API key
+  # Note: Browse, discover, and search endpoints have been migrated to GraphQL.
+  # Only subtitle streaming endpoints remain here (serving actual subtitle files).
+  scope "/api/player/v1", MydiaWeb.Api.Player.V1 do
     pipe_through [:api, :api_auth, :require_authenticated]
 
-    # Browse endpoints
-    get "/browse/movies", BrowseController, :list_movies
-    get "/browse/movies/:id", BrowseController, :show_movie
-    get "/browse/tv", BrowseController, :list_tv_shows
-    get "/browse/tv/:id", BrowseController, :show_tv_show
-    get "/browse/tv/:id/seasons/:season", BrowseController, :list_season_episodes
-
-    # Discovery endpoints
-    get "/discover/continue", DiscoverController, :continue_watching
-    get "/discover/recent", DiscoverController, :recent
-    get "/discover/up_next", DiscoverController, :up_next
-
-    # Search
-    get "/search", SearchController, :index
-
-    # Subtitles
+    # Subtitles - serves actual subtitle files (URLs provided by GraphQL)
     get "/subtitles/:type/:id", SubtitleController, :index
     get "/subtitles/:type/:id/:track", SubtitleController, :show
   end

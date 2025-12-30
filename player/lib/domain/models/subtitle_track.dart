@@ -1,3 +1,5 @@
+import '../../graphql/fragments/media_file_fragment.graphql.dart';
+
 /// Represents a subtitle track available for a media file.
 class SubtitleTrack {
   /// Unique identifier for the track
@@ -9,7 +11,7 @@ class SubtitleTrack {
   /// Human-readable title (optional)
   final String? title;
 
-  /// URL for external subtitles (if not embedded)
+  /// URL for downloading/streaming the subtitle
   final String? url;
 
   /// Whether this is the default track
@@ -30,6 +32,18 @@ class SubtitleTrack {
     this.format = 'srt',
     this.embedded = false,
   });
+
+  /// Create from GraphQL fragment
+  factory SubtitleTrack.fromGraphQL(Fragment$MediaFileFragment$subtitles sub) {
+    return SubtitleTrack(
+      id: sub.trackId,
+      language: sub.language,
+      title: sub.title,
+      url: sub.url,
+      format: sub.format,
+      embedded: sub.embedded,
+    );
+  }
 
   /// Returns a display name for the track
   String get displayName {

@@ -41,6 +41,7 @@ import 'dart:typed_data';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:pointycastle/export.dart' as pc;
+import 'package:x25519/x25519.dart' as x25519_dart;
 
 /// Keys for secure storage.
 abstract class _StorageKeys {
@@ -59,12 +60,14 @@ class NoiseSession {
     required this.isInitiator,
     required this.pattern,
     this.localStaticKeypair,
+    this.localStaticKeypairDart,
     this.remoteStaticPublicKey,
   });
 
   final bool isInitiator;
   final NoisePattern pattern;
   final SimpleKeyPair? localStaticKeypair;
+  final x25519_dart.KeyPair? localStaticKeypairDart;
   final Uint8List? remoteStaticPublicKey;
 
   /// Symmetric state for encryption (CipherState + SymmetricState)
@@ -79,6 +82,7 @@ class NoiseSession {
   int _cipherNonce = 0;
 
   SimpleKeyPair? _ephemeralKeypair;
+  x25519_dart.KeyPair? _ephemeralKeypairDart;
   Uint8List? _remoteEphemeralPublicKey;
 
   /// Transport encryption keys (derived after handshake)
@@ -113,11 +117,9 @@ class NoiseSession {
 
     final buffer = BytesBuilder();
 
-    // Generate ephemeral keypair
-    final x25519 = X25519();
-    _ephemeralKeypair = await x25519.newKeyPair();
-    final ephemeralPublicKey = await _ephemeralKeypair!.extractPublicKey();
-    final ephemeralPublicKeyBytes = Uint8List.fromList(ephemeralPublicKey.bytes);
+    // Generate ephemeral keypair using pure Dart x25519 (avoids WebCrypto hang on web)
+    _ephemeralKeypairDart = x25519_dart.generateKeyPair();
+    final ephemeralPublicKeyBytes = Uint8List.fromList(_ephemeralKeypairDart!.publicKey);
 
     // Write ephemeral public key (e)
     buffer.add(ephemeralPublicKeyBytes);
@@ -127,27 +129,28 @@ class NoiseSession {
     if (remoteStaticPublicKey == null) {
       throw StateError('Remote static public key required');
     }
-    final remoteStaticKey = SimplePublicKey(remoteStaticPublicKey!.toList(), type: KeyPairType.x25519);
-    final esSharedSecret = await x25519.sharedSecretKey(
-      keyPair: _ephemeralKeypair!,
-      remotePublicKey: remoteStaticKey,
-    );
-    final esBytes = Uint8List.fromList(await esSharedSecret.extractBytes());
+    final esBytes = Uint8List.fromList(x25519_dart.X25519(
+      _ephemeralKeypairDart!.privateKey,
+      remoteStaticPublicKey!,
+    ));
     _mixKey(esBytes);
 
     if (pattern == NoisePattern.ik) {
       // IK: Send encrypted static key (s)
-      final localPublicKey = await localStaticKeypair!.extractPublicKey();
-      final localPublicKeyBytes = Uint8List.fromList(localPublicKey.bytes);
-      final encryptedStatic = await _encryptAndHash(localPublicKeyBytes);
+      final localPublicKeyBytes = localStaticKeypairDart != null
+          ? Uint8List.fromList(localStaticKeypairDart!.publicKey)
+          : (await localStaticKeypair!.extractPublicKey()).bytes as Uint8List;
+      final encryptedStatic = await _encryptAndHash(Uint8List.fromList(localPublicKeyBytes));
       buffer.add(encryptedStatic);
 
       // Perform DH between static keys (ss)
-      final ssSharedSecret = await x25519.sharedSecretKey(
-        keyPair: localStaticKeypair!,
-        remotePublicKey: remoteStaticKey,
-      );
-      final ssBytes = Uint8List.fromList(await ssSharedSecret.extractBytes());
+      final localPrivateKey = localStaticKeypairDart != null
+          ? localStaticKeypairDart!.privateKey
+          : await localStaticKeypair!.extractPrivateKeyBytes();
+      final ssBytes = Uint8List.fromList(x25519_dart.X25519(
+        localPrivateKey,
+        remoteStaticPublicKey!,
+      ));
       _mixKey(ssBytes);
     }
 
@@ -188,23 +191,19 @@ class NoiseSession {
     offset += 32;
     _mixHash(_remoteEphemeralPublicKey!);
 
-    // Perform ee DH
-    final remoteEphemeralKey = SimplePublicKey(_remoteEphemeralPublicKey!.toList(), type: KeyPairType.x25519);
-    final x25519 = X25519();
-    final eeSharedSecret = await x25519.sharedSecretKey(
-      keyPair: _ephemeralKeypair!,
-      remotePublicKey: remoteEphemeralKey,
-    );
-    final eeBytes = Uint8List.fromList(await eeSharedSecret.extractBytes());
+    // Perform ee DH using pure Dart x25519 (avoids WebCrypto hang on web)
+    final eeBytes = Uint8List.fromList(x25519_dart.X25519(
+      _ephemeralKeypairDart!.privateKey,
+      _remoteEphemeralPublicKey!,
+    ));
     _mixKey(eeBytes);
 
-    if (pattern == NoisePattern.ik && localStaticKeypair != null) {
-      // IK: Perform se DH
-      final seSharedSecret = await x25519.sharedSecretKey(
-        keyPair: localStaticKeypair!,
-        remotePublicKey: remoteEphemeralKey,
-      );
-      final seBytes = Uint8List.fromList(await seSharedSecret.extractBytes());
+    if (pattern == NoisePattern.ik && localStaticKeypairDart != null) {
+      // IK: Perform se DH using pure Dart x25519
+      final seBytes = Uint8List.fromList(x25519_dart.X25519(
+        localStaticKeypairDart!.privateKey,
+        _remoteEphemeralPublicKey!,
+      ));
       _mixKey(seBytes);
     }
 
@@ -545,17 +544,13 @@ class NoiseService {
 
   /// Generates a new Curve25519 keypair for this device.
   ///
+  /// Uses pure Dart x25519 implementation to avoid WebCrypto hang on web.
   /// Returns a tuple of (publicKey, privateKey) as Uint8List.
-  Future<(Uint8List, Uint8List)> generateKeypair() async {
-    final algorithm = X25519();
-    final keypair = await algorithm.newKeyPair();
-
-    final publicKeyBytes = await keypair.extractPublicKey();
-    final privateKeyBytes = await keypair.extractPrivateKeyBytes();
-
+  (Uint8List, Uint8List) generateKeypair() {
+    final keypair = x25519_dart.generateKeyPair();
     return (
-      Uint8List.fromList(publicKeyBytes.bytes),
-      Uint8List.fromList(privateKeyBytes),
+      Uint8List.fromList(keypair.publicKey),
+      Uint8List.fromList(keypair.privateKey),
     );
   }
 
@@ -575,8 +570,8 @@ class NoiseService {
       return (publicKey, privateKey);
     }
 
-    // Generate new keypair
-    final (publicKey, privateKey) = await generateKeypair();
+    // Generate new keypair using pure Dart x25519 (avoids WebCrypto hang)
+    final (publicKey, privateKey) = generateKeypair();
 
     // Store in secure storage
     await _storage.write(
@@ -695,16 +690,18 @@ class NoiseService {
     // Load device keypair
     final (publicKey, privateKey) = await loadOrGenerateKeypair();
 
-    // Reconstruct keypair from stored keys
-    final algorithm = X25519();
-    final keypair = await algorithm.newKeyPairFromSeed(privateKey);
+    // Create pure Dart x25519 keypair from stored keys (avoids WebCrypto hang)
+    final keypair = x25519_dart.KeyPair(
+      publicKey: publicKey.toList(),
+      privateKey: privateKey.toList(),
+    );
 
     // Create Noise_IK handshake session as initiator
     // IK: client has static keypair (I), server's public key is known (K)
     final session = NoiseSession._(
       isInitiator: true,
       pattern: NoisePattern.ik,
-      localStaticKeypair: keypair,
+      localStaticKeypairDart: keypair,
       remoteStaticPublicKey: serverPublicKey,
     );
 

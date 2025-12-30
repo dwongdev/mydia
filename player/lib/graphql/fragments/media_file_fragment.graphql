@@ -9,4 +9,12 @@ fragment MediaFileFragment on MediaFile {
   directPlaySupported
   streamUrl
   directPlayUrl
+  subtitles {
+    trackId
+    language
+    title
+    format
+    embedded
+    url(format: VTT)
+  }
 }

@@ -12,6 +12,7 @@ class Fragment$MediaFileFragment {
     this.directPlaySupported,
     this.streamUrl,
     this.directPlayUrl,
+    this.subtitles,
     this.$__typename = 'MediaFile',
   });
 
@@ -26,6 +27,7 @@ class Fragment$MediaFileFragment {
     final l$directPlaySupported = json['directPlaySupported'];
     final l$streamUrl = json['streamUrl'];
     final l$directPlayUrl = json['directPlayUrl'];
+    final l$subtitles = json['subtitles'];
     final l$$__typename = json['__typename'];
     return Fragment$MediaFileFragment(
       id: (l$id as String),
@@ -38,6 +40,15 @@ class Fragment$MediaFileFragment {
       directPlaySupported: (l$directPlaySupported as bool?),
       streamUrl: (l$streamUrl as String?),
       directPlayUrl: (l$directPlayUrl as String?),
+      subtitles: (l$subtitles as List<dynamic>?)
+          ?.map(
+            (e) => e == null
+                ? null
+                : Fragment$MediaFileFragment$subtitles.fromJson(
+                    (e as Map<String, dynamic>),
+                  ),
+          )
+          .toList(),
       $__typename: (l$$__typename as String),
     );
   }
@@ -61,6 +72,8 @@ class Fragment$MediaFileFragment {
   final String? streamUrl;
 
   final String? directPlayUrl;
+
+  final List<Fragment$MediaFileFragment$subtitles?>? subtitles;
 
   final String $__typename;
 
@@ -86,6 +99,8 @@ class Fragment$MediaFileFragment {
     _resultData['streamUrl'] = l$streamUrl;
     final l$directPlayUrl = directPlayUrl;
     _resultData['directPlayUrl'] = l$directPlayUrl;
+    final l$subtitles = subtitles;
+    _resultData['subtitles'] = l$subtitles?.map((e) => e?.toJson()).toList();
     final l$$__typename = $__typename;
     _resultData['__typename'] = l$$__typename;
     return _resultData;
@@ -103,6 +118,7 @@ class Fragment$MediaFileFragment {
     final l$directPlaySupported = directPlaySupported;
     final l$streamUrl = streamUrl;
     final l$directPlayUrl = directPlayUrl;
+    final l$subtitles = subtitles;
     final l$$__typename = $__typename;
     return Object.hashAll([
       l$id,
@@ -115,6 +131,7 @@ class Fragment$MediaFileFragment {
       l$directPlaySupported,
       l$streamUrl,
       l$directPlayUrl,
+      l$subtitles == null ? null : Object.hashAll(l$subtitles.map((v) => v)),
       l$$__typename,
     ]);
   }
@@ -178,6 +195,22 @@ class Fragment$MediaFileFragment {
     if (l$directPlayUrl != lOther$directPlayUrl) {
       return false;
     }
+    final l$subtitles = subtitles;
+    final lOther$subtitles = other.subtitles;
+    if (l$subtitles != null && lOther$subtitles != null) {
+      if (l$subtitles.length != lOther$subtitles.length) {
+        return false;
+      }
+      for (int i = 0; i < l$subtitles.length; i++) {
+        final l$subtitles$entry = l$subtitles[i];
+        final lOther$subtitles$entry = lOther$subtitles[i];
+        if (l$subtitles$entry != lOther$subtitles$entry) {
+          return false;
+        }
+      }
+    } else if (l$subtitles != lOther$subtitles) {
+      return false;
+    }
     final l$$__typename = $__typename;
     final lOther$$__typename = other.$__typename;
     if (l$$__typename != lOther$$__typename) {
@@ -213,8 +246,19 @@ abstract class CopyWith$Fragment$MediaFileFragment<TRes> {
     bool? directPlaySupported,
     String? streamUrl,
     String? directPlayUrl,
+    List<Fragment$MediaFileFragment$subtitles?>? subtitles,
     String? $__typename,
   });
+  TRes subtitles(
+    Iterable<Fragment$MediaFileFragment$subtitles?>? Function(
+      Iterable<
+        CopyWith$Fragment$MediaFileFragment$subtitles<
+          Fragment$MediaFileFragment$subtitles
+        >?
+      >?,
+    )
+    _fn,
+  );
 }
 
 class _CopyWithImpl$Fragment$MediaFileFragment<TRes>
@@ -238,6 +282,7 @@ class _CopyWithImpl$Fragment$MediaFileFragment<TRes>
     Object? directPlaySupported = _undefined,
     Object? streamUrl = _undefined,
     Object? directPlayUrl = _undefined,
+    Object? subtitles = _undefined,
     Object? $__typename = _undefined,
   }) => _then(
     Fragment$MediaFileFragment(
@@ -263,10 +308,32 @@ class _CopyWithImpl$Fragment$MediaFileFragment<TRes>
       directPlayUrl: directPlayUrl == _undefined
           ? _instance.directPlayUrl
           : (directPlayUrl as String?),
+      subtitles: subtitles == _undefined
+          ? _instance.subtitles
+          : (subtitles as List<Fragment$MediaFileFragment$subtitles?>?),
       $__typename: $__typename == _undefined || $__typename == null
           ? _instance.$__typename
           : ($__typename as String),
     ),
+  );
+
+  TRes subtitles(
+    Iterable<Fragment$MediaFileFragment$subtitles?>? Function(
+      Iterable<
+        CopyWith$Fragment$MediaFileFragment$subtitles<
+          Fragment$MediaFileFragment$subtitles
+        >?
+      >?,
+    )
+    _fn,
+  ) => call(
+    subtitles: _fn(
+      _instance.subtitles?.map(
+        (e) => e == null
+            ? null
+            : CopyWith$Fragment$MediaFileFragment$subtitles(e, (i) => i),
+      ),
+    )?.toList(),
   );
 }
 
@@ -287,8 +354,11 @@ class _CopyWithStubImpl$Fragment$MediaFileFragment<TRes>
     bool? directPlaySupported,
     String? streamUrl,
     String? directPlayUrl,
+    List<Fragment$MediaFileFragment$subtitles?>? subtitles,
     String? $__typename,
   }) => _res;
+
+  subtitles(_fn) => _res;
 }
 
 const fragmentDefinitionMediaFileFragment = FragmentDefinitionNode(
@@ -370,6 +440,70 @@ const fragmentDefinitionMediaFileFragment = FragmentDefinitionNode(
         selectionSet: null,
       ),
       FieldNode(
+        name: NameNode(value: 'subtitles'),
+        alias: null,
+        arguments: [],
+        directives: [],
+        selectionSet: SelectionSetNode(
+          selections: [
+            FieldNode(
+              name: NameNode(value: 'trackId'),
+              alias: null,
+              arguments: [],
+              directives: [],
+              selectionSet: null,
+            ),
+            FieldNode(
+              name: NameNode(value: 'language'),
+              alias: null,
+              arguments: [],
+              directives: [],
+              selectionSet: null,
+            ),
+            FieldNode(
+              name: NameNode(value: 'title'),
+              alias: null,
+              arguments: [],
+              directives: [],
+              selectionSet: null,
+            ),
+            FieldNode(
+              name: NameNode(value: 'format'),
+              alias: null,
+              arguments: [],
+              directives: [],
+              selectionSet: null,
+            ),
+            FieldNode(
+              name: NameNode(value: 'embedded'),
+              alias: null,
+              arguments: [],
+              directives: [],
+              selectionSet: null,
+            ),
+            FieldNode(
+              name: NameNode(value: 'url'),
+              alias: null,
+              arguments: [
+                ArgumentNode(
+                  name: NameNode(value: 'format'),
+                  value: EnumValueNode(name: NameNode(value: 'VTT')),
+                ),
+              ],
+              directives: [],
+              selectionSet: null,
+            ),
+            FieldNode(
+              name: NameNode(value: '__typename'),
+              alias: null,
+              arguments: [],
+              directives: [],
+              selectionSet: null,
+            ),
+          ],
+        ),
+      ),
+      FieldNode(
         name: NameNode(value: '__typename'),
         alias: null,
         arguments: [],
@@ -382,3 +516,227 @@ const fragmentDefinitionMediaFileFragment = FragmentDefinitionNode(
 const documentNodeFragmentMediaFileFragment = DocumentNode(
   definitions: [fragmentDefinitionMediaFileFragment],
 );
+
+class Fragment$MediaFileFragment$subtitles {
+  Fragment$MediaFileFragment$subtitles({
+    required this.trackId,
+    required this.language,
+    required this.title,
+    required this.format,
+    required this.embedded,
+    this.url,
+    this.$__typename = 'SubtitleTrack',
+  });
+
+  factory Fragment$MediaFileFragment$subtitles.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    final l$trackId = json['trackId'];
+    final l$language = json['language'];
+    final l$title = json['title'];
+    final l$format = json['format'];
+    final l$embedded = json['embedded'];
+    final l$url = json['url'];
+    final l$$__typename = json['__typename'];
+    return Fragment$MediaFileFragment$subtitles(
+      trackId: (l$trackId as String),
+      language: (l$language as String),
+      title: (l$title as String),
+      format: (l$format as String),
+      embedded: (l$embedded as bool),
+      url: (l$url as String?),
+      $__typename: (l$$__typename as String),
+    );
+  }
+
+  final String trackId;
+
+  final String language;
+
+  final String title;
+
+  final String format;
+
+  final bool embedded;
+
+  final String? url;
+
+  final String $__typename;
+
+  Map<String, dynamic> toJson() {
+    final _resultData = <String, dynamic>{};
+    final l$trackId = trackId;
+    _resultData['trackId'] = l$trackId;
+    final l$language = language;
+    _resultData['language'] = l$language;
+    final l$title = title;
+    _resultData['title'] = l$title;
+    final l$format = format;
+    _resultData['format'] = l$format;
+    final l$embedded = embedded;
+    _resultData['embedded'] = l$embedded;
+    final l$url = url;
+    _resultData['url'] = l$url;
+    final l$$__typename = $__typename;
+    _resultData['__typename'] = l$$__typename;
+    return _resultData;
+  }
+
+  @override
+  int get hashCode {
+    final l$trackId = trackId;
+    final l$language = language;
+    final l$title = title;
+    final l$format = format;
+    final l$embedded = embedded;
+    final l$url = url;
+    final l$$__typename = $__typename;
+    return Object.hashAll([
+      l$trackId,
+      l$language,
+      l$title,
+      l$format,
+      l$embedded,
+      l$url,
+      l$$__typename,
+    ]);
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    if (other is! Fragment$MediaFileFragment$subtitles ||
+        runtimeType != other.runtimeType) {
+      return false;
+    }
+    final l$trackId = trackId;
+    final lOther$trackId = other.trackId;
+    if (l$trackId != lOther$trackId) {
+      return false;
+    }
+    final l$language = language;
+    final lOther$language = other.language;
+    if (l$language != lOther$language) {
+      return false;
+    }
+    final l$title = title;
+    final lOther$title = other.title;
+    if (l$title != lOther$title) {
+      return false;
+    }
+    final l$format = format;
+    final lOther$format = other.format;
+    if (l$format != lOther$format) {
+      return false;
+    }
+    final l$embedded = embedded;
+    final lOther$embedded = other.embedded;
+    if (l$embedded != lOther$embedded) {
+      return false;
+    }
+    final l$url = url;
+    final lOther$url = other.url;
+    if (l$url != lOther$url) {
+      return false;
+    }
+    final l$$__typename = $__typename;
+    final lOther$$__typename = other.$__typename;
+    if (l$$__typename != lOther$$__typename) {
+      return false;
+    }
+    return true;
+  }
+}
+
+extension UtilityExtension$Fragment$MediaFileFragment$subtitles
+    on Fragment$MediaFileFragment$subtitles {
+  CopyWith$Fragment$MediaFileFragment$subtitles<
+    Fragment$MediaFileFragment$subtitles
+  >
+  get copyWith => CopyWith$Fragment$MediaFileFragment$subtitles(this, (i) => i);
+}
+
+abstract class CopyWith$Fragment$MediaFileFragment$subtitles<TRes> {
+  factory CopyWith$Fragment$MediaFileFragment$subtitles(
+    Fragment$MediaFileFragment$subtitles instance,
+    TRes Function(Fragment$MediaFileFragment$subtitles) then,
+  ) = _CopyWithImpl$Fragment$MediaFileFragment$subtitles;
+
+  factory CopyWith$Fragment$MediaFileFragment$subtitles.stub(TRes res) =
+      _CopyWithStubImpl$Fragment$MediaFileFragment$subtitles;
+
+  TRes call({
+    String? trackId,
+    String? language,
+    String? title,
+    String? format,
+    bool? embedded,
+    String? url,
+    String? $__typename,
+  });
+}
+
+class _CopyWithImpl$Fragment$MediaFileFragment$subtitles<TRes>
+    implements CopyWith$Fragment$MediaFileFragment$subtitles<TRes> {
+  _CopyWithImpl$Fragment$MediaFileFragment$subtitles(
+    this._instance,
+    this._then,
+  );
+
+  final Fragment$MediaFileFragment$subtitles _instance;
+
+  final TRes Function(Fragment$MediaFileFragment$subtitles) _then;
+
+  static const _undefined = <dynamic, dynamic>{};
+
+  TRes call({
+    Object? trackId = _undefined,
+    Object? language = _undefined,
+    Object? title = _undefined,
+    Object? format = _undefined,
+    Object? embedded = _undefined,
+    Object? url = _undefined,
+    Object? $__typename = _undefined,
+  }) => _then(
+    Fragment$MediaFileFragment$subtitles(
+      trackId: trackId == _undefined || trackId == null
+          ? _instance.trackId
+          : (trackId as String),
+      language: language == _undefined || language == null
+          ? _instance.language
+          : (language as String),
+      title: title == _undefined || title == null
+          ? _instance.title
+          : (title as String),
+      format: format == _undefined || format == null
+          ? _instance.format
+          : (format as String),
+      embedded: embedded == _undefined || embedded == null
+          ? _instance.embedded
+          : (embedded as bool),
+      url: url == _undefined ? _instance.url : (url as String?),
+      $__typename: $__typename == _undefined || $__typename == null
+          ? _instance.$__typename
+          : ($__typename as String),
+    ),
+  );
+}
+
+class _CopyWithStubImpl$Fragment$MediaFileFragment$subtitles<TRes>
+    implements CopyWith$Fragment$MediaFileFragment$subtitles<TRes> {
+  _CopyWithStubImpl$Fragment$MediaFileFragment$subtitles(this._res);
+
+  TRes _res;
+
+  call({
+    String? trackId,
+    String? language,
+    String? title,
+    String? format,
+    bool? embedded,
+    String? url,
+    String? $__typename,
+  }) => _res;
+}

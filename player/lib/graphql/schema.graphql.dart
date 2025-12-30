@@ -573,6 +573,64 @@ Enum$MediaCategory fromJson$Enum$MediaCategory(String value) {
   }
 }
 
+enum Enum$SubtitleFormat {
+  SRT,
+  VTT,
+  ASS,
+  SSA,
+  PGS,
+  VOBSUB,
+  UNKNOWN,
+  $unknown;
+
+  factory Enum$SubtitleFormat.fromJson(String value) =>
+      fromJson$Enum$SubtitleFormat(value);
+
+  String toJson() => toJson$Enum$SubtitleFormat(this);
+}
+
+String toJson$Enum$SubtitleFormat(Enum$SubtitleFormat e) {
+  switch (e) {
+    case Enum$SubtitleFormat.SRT:
+      return r'SRT';
+    case Enum$SubtitleFormat.VTT:
+      return r'VTT';
+    case Enum$SubtitleFormat.ASS:
+      return r'ASS';
+    case Enum$SubtitleFormat.SSA:
+      return r'SSA';
+    case Enum$SubtitleFormat.PGS:
+      return r'PGS';
+    case Enum$SubtitleFormat.VOBSUB:
+      return r'VOBSUB';
+    case Enum$SubtitleFormat.UNKNOWN:
+      return r'UNKNOWN';
+    case Enum$SubtitleFormat.$unknown:
+      return r'$unknown';
+  }
+}
+
+Enum$SubtitleFormat fromJson$Enum$SubtitleFormat(String value) {
+  switch (value) {
+    case r'SRT':
+      return Enum$SubtitleFormat.SRT;
+    case r'VTT':
+      return Enum$SubtitleFormat.VTT;
+    case r'ASS':
+      return Enum$SubtitleFormat.ASS;
+    case r'SSA':
+      return Enum$SubtitleFormat.SSA;
+    case r'PGS':
+      return Enum$SubtitleFormat.PGS;
+    case r'VOBSUB':
+      return Enum$SubtitleFormat.VOBSUB;
+    case r'UNKNOWN':
+      return Enum$SubtitleFormat.UNKNOWN;
+    default:
+      return Enum$SubtitleFormat.$unknown;
+  }
+}
+
 enum Enum$__TypeKind {
   SCALAR,
   OBJECT,

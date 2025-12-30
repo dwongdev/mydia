@@ -43,6 +43,11 @@ defmodule MydiaWeb.Schema.CommonTypes do
         {:ok, "/api/v1/stream/file/#{file.id}?strategy=DIRECT_PLAY"}
       end)
     end
+
+    @desc "Available subtitle tracks (embedded and external)"
+    field :subtitles, list_of(:subtitle_track) do
+      resolve(&MydiaWeb.Schema.Resolvers.SubtitleResolver.list_subtitles/3)
+    end
   end
 
   @desc "User playback progress on a media item or episode"
@@ -199,5 +204,40 @@ defmodule MydiaWeb.Schema.CommonTypes do
   object :claim_code do
     field :code, non_null(:string), description: "The claim code (e.g., 'ABC-XYZ')"
     field :expires_at, non_null(:datetime), description: "When the code expires"
+  end
+
+  @desc "A subtitle track available for a media file"
+  object :subtitle_track do
+    @desc "Track identifier (integer for embedded, UUID for external)"
+    field :track_id, non_null(:string)
+
+    @desc "ISO 639-2 language code (e.g., 'eng', 'spa')"
+    field :language, non_null(:string)
+
+    @desc "Display title (e.g., 'English', 'Spanish (Forced)')"
+    field :title, non_null(:string)
+
+    @desc "Subtitle format (srt, vtt, ass, etc.)"
+    field :format, non_null(:string)
+
+    @desc "Whether the subtitle is embedded in the media file"
+    field :embedded, non_null(:boolean)
+
+    @desc "URL to download this subtitle in the requested format"
+    field :url, :string do
+      arg(:format, :subtitle_format, default_value: :vtt)
+
+      resolve(fn track, args, info ->
+        # Get the media_file_id from the parent context
+        media_file_id = Map.get(info.source, :_media_file_id)
+        format = args[:format] || :vtt
+        format_str = Atom.to_string(format)
+
+        url =
+          "/api/player/v1/subtitles/file/#{media_file_id}/#{track.track_id}?format=#{format_str}"
+
+        {:ok, url}
+      end)
+    end
   end
 end

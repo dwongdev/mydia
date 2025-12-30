@@ -76,6 +76,9 @@ type RootMutationType {
   "Refresh a media access token before it expires"
   refreshMediaToken(token: String!): MediaToken
 
+  "Generate a pairing claim code for device pairing (requires authentication)"
+  generateClaimCode: ClaimCode
+
   "Create a new API key for the current user"
   createApiKey(name: String!, permissions: [String!], expiresAt: DateTime): CreateApiKeyResult
 
@@ -471,6 +474,9 @@ type MediaFile {
 
   "Direct play URL (no transcoding)"
   directPlayUrl: String
+
+  "Available subtitle tracks (embedded and external)"
+  subtitles: [SubtitleTrack]
 }
 
 "User playback progress on a media item or episode"
@@ -693,6 +699,36 @@ type RevokeDeviceResult {
   device: RemoteDevice
 }
 
+"A pairing claim code for device pairing"
+type ClaimCode {
+  "The claim code (e.g., 'ABC-XYZ')"
+  code: String!
+
+  "When the code expires"
+  expiresAt: DateTime!
+}
+
+"A subtitle track available for a media file"
+type SubtitleTrack {
+  "Track identifier (integer for embedded, UUID for external)"
+  trackId: String!
+
+  "ISO 639-2 language code (e.g., 'eng', 'spa')"
+  language: String!
+
+  "Display title (e.g., 'English', 'Spanish (Forced)')"
+  title: String!
+
+  "Subtitle format (srt, vtt, ass, etc.)"
+  format: String!
+
+  "Whether the subtitle is embedded in the media file"
+  embedded: Boolean!
+
+  "URL to download this subtitle in the requested format"
+  url(format: SubtitleFormat): String
+}
+
 "Media content types"
 enum MediaType {
   "A movie"
@@ -766,6 +802,30 @@ enum MediaCategory {
 
   "Animated\/cartoon series"
   CARTOON_SERIES
+}
+
+"Subtitle format"
+enum SubtitleFormat {
+  "SubRip Text"
+  SRT
+
+  "WebVTT"
+  VTT
+
+  "Advanced SubStation Alpha"
+  ASS
+
+  "SubStation Alpha"
+  SSA
+
+  "Presentation Graphic Stream (image-based)"
+  PGS
+
+  "VobSub (image-based)"
+  VOBSUB
+
+  "Unknown format"
+  UNKNOWN
 }
 
 """

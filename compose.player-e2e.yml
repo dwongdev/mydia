@@ -80,12 +80,10 @@ services:
       PHX_CHECK_ORIGIN: "false"
 
       # Direct URLs config for E2E testing
-      # Disable auto-generated sslip.io URLs (they use HTTPS which requires certs)
-      # We'll use the test container to call a special endpoint to add HTTP URLs
+      # Use HTTP instead of HTTPS for sslip.io URLs (required for E2E since we don't have certs)
       EXTERNAL_PORT: "4000"
       PUBLIC_IP_ENABLED: "false"
-      # Disable sslip.io URL generation so only manually added URLs are used
-      DISABLE_AUTO_SSLIP_URLS: "true"
+      DIRECT_URLS_USE_HTTP: "true"
     volumes:
       - mydia_config:/config
       - mydia_data:/data

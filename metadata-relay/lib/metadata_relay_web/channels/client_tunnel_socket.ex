@@ -31,6 +31,7 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
   @impl true
   def connect(_state) do
     session_id = generate_session_id()
+    Logger.info("Client tunnel socket connect: session_id=#{session_id}")
 
     {:ok,
      %{
@@ -226,6 +227,13 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
         Logger.warning("Invalid base64 payload in client message")
         {:ok, state}
     end
+  end
+
+  defp handle_message(%{"type" => "ping"}, state) do
+    # Heartbeat ping from client - respond with pong and reset timeout
+    state = reset_timeout(state)
+    response = Jason.encode!(%{type: "pong"})
+    {:reply, :ok, {:text, response}, state}
   end
 
   defp handle_message(%{"type" => "close"}, state) do

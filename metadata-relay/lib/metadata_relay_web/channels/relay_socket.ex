@@ -25,6 +25,8 @@ defmodule MetadataRelayWeb.RelaySocket do
   require Logger
 
   alias MetadataRelay.Relay
+  alias MetadataRelay.Relay.ConnectionRegistry
+  alias MetadataRelay.Relay.PendingRequests
 
   # Heartbeat timeout: 60 seconds (should receive ping every 30 seconds)
   @heartbeat_timeout 60_000
@@ -89,6 +91,11 @@ defmodule MetadataRelayWeb.RelaySocket do
   @impl true
   def init(state) do
     Logger.info("Relay socket init callback called")
+
+    # Trap exits to ensure clean shutdown and proper cleanup
+    # This ensures terminate/2 is called even on crash
+    Process.flag(:trap_exit, true)
+
     # Start heartbeat timeout timer
     timer = Process.send_after(self(), :heartbeat_timeout, @heartbeat_timeout)
     {:ok, %{state | heartbeat_timer: timer}}
@@ -151,8 +158,26 @@ defmodule MetadataRelayWeb.RelaySocket do
       "Relay socket terminated: #{inspect(reason)}, instance: #{state.instance_id}, state: #{inspect(state)}"
     )
 
-    # Mark instance as offline
     if state.instance_id do
+      # Unregister from ETS connection registry
+      ConnectionRegistry.unregister(state.instance_id)
+
+      # Fail all pending requests with 502 error
+      # Clients waiting for responses will receive immediate error instead of hanging
+      failed_count = PendingRequests.fail_all(state.instance_id, {:error, :tunnel_disconnected})
+
+      if failed_count > 0 do
+        Logger.info("Failed #{failed_count} pending request(s) for instance #{state.instance_id}")
+      end
+
+      # Broadcast disconnect event via PubSub for subscribers
+      Phoenix.PubSub.broadcast(
+        MetadataRelay.PubSub,
+        "instance:#{state.instance_id}",
+        {:tunnel_disconnected, state.instance_id, reason}
+      )
+
+      # Mark instance as offline in database
       Relay.set_offline_by_instance_id(state.instance_id)
     end
 
@@ -183,6 +208,13 @@ defmodule MetadataRelayWeb.RelaySocket do
          {:ok, instance} <- Relay.set_online(instance) do
       Logger.info("Instance registered: #{instance_id}, public_ip: #{state.peer_ip || "unknown"}")
 
+      # Register in ETS for O(1) lookups
+      ConnectionRegistry.register(instance_id, self(), %{
+        connected_at: DateTime.utc_now(),
+        public_ip: state.peer_ip,
+        direct_urls: direct_urls
+      })
+
       # Subscribe to relay messages for this instance
       Phoenix.PubSub.subscribe(MetadataRelay.PubSub, "relay:instance:#{instance_id}")
 
@@ -204,6 +236,15 @@ defmodule MetadataRelayWeb.RelaySocket do
 
   defp handle_message(%{"type" => "ping"}, state) do
     state = reset_heartbeat_timer(state)
+
+    # Update last_seen_at in database to prevent cleanup marking instance as stale
+    if state.registered and state.instance do
+      # Use async Task to avoid blocking the WebSocket response
+      Task.start(fn ->
+        Relay.update_heartbeat(state.instance)
+      end)
+    end
+
     response = Jason.encode!(%{type: "pong"})
     {:reply, :ok, {:text, response}, state}
   end

@@ -1,48 +1,48 @@
 defmodule MydiaWeb.DeviceChannel do
   @moduledoc """
-  Phoenix Channel for device pairing and reconnection using Noise protocol.
+  Phoenix Channel for device pairing and reconnection using X25519 key exchange.
 
   ## Device Pairing (device:pair)
 
-  This topic handles initial device pairing using the Noise_NK protocol pattern.
-  The client does not yet have a static key, so the server authenticates but
-  the client does not (initially).
+  This topic handles initial device pairing using X25519 ECDH key exchange.
+  The client and server exchange ephemeral public keys to establish a shared
+  session key.
 
   ### Pairing Flow
 
   1. Client joins "device:pair" topic
-  2. Server initializes NK handshake
-  3. Client sends "pairing_handshake" with first handshake message
-  4. Server responds with handshake completion
+  2. Server generates ephemeral keypair
+  3. Client sends "pairing_handshake" with their public key
+  4. Server derives session key and responds with its public key
   5. Client sends "claim_code" with code and device info
   6. Server validates claim code, creates device, sends keypair and token
-  7. Channel transitions to encrypted communication mode
 
   ### Pairing Messages
 
-  - `pairing_handshake` - Client initiates NK handshake
+  - `pairing_handshake` - Client sends public key, server responds with its key
   - `claim_code` - Client submits claim code and device info
   - `pairing_complete` - Server sends device keypair and media token
   - `pairing_error` - Server reports pairing failure
 
   ## Device Reconnection (device:reconnect)
 
-  This topic handles the secure reconnection of paired devices using the
-  Noise_IK protocol pattern, which provides mutual authentication.
+  This topic handles the secure reconnection of paired devices using X25519
+  key exchange. The device is authenticated by verifying its stored static
+  public key against the database.
 
   ### Reconnection Flow
 
   1. Client joins "device:reconnect" topic
-  2. Client sends "handshake_init" with their first handshake message
-  3. Server processes message, verifies device key, sends response
-  4. On success, client receives fresh media token
-  5. Channel transitions to encrypted communication mode
+  2. Server generates ephemeral keypair
+  3. Client sends "key_exchange" with their static public key and device token
+  4. Server verifies device, derives session key, sends response
+  5. On success, client receives fresh media token and server's public key
 
   ### Reconnection Messages
 
-  - `handshake_init` - Client initiates handshake with first message
-  - `handshake_complete` - Server confirms successful handshake and sends token
-  - `handshake_error` - Server reports handshake failure
+  - `key_exchange` - Client sends static public key and device token
+  - `key_exchange_complete` - Server confirms and sends token + its public key
+  - `key_exchange_error` - Server reports failure
   """
   use MydiaWeb, :channel
 
@@ -52,31 +52,32 @@ defmodule MydiaWeb.DeviceChannel do
 
   @impl true
   def join("device:pair", _payload, socket) do
-    # Initialize the NK handshake state for pairing when client joins
+    # Initialize the X25519 keypair for pairing when client joins
     case Pairing.start_pairing_handshake() do
-      {:ok, handshake_state} ->
-        # Store handshake state in socket assigns
-        socket = assign(socket, :handshake_state, handshake_state)
-        {:ok, socket}
+      {:ok, server_public_key, server_private_key} ->
+        # Store server keypair in socket assigns
+        socket =
+          socket
+          |> assign(:server_public_key, server_public_key)
+          |> assign(:server_private_key, server_private_key)
+          |> assign(:handshake_complete, false)
 
-      {:error, reason} ->
-        Logger.error("Failed to initialize pairing handshake: #{inspect(reason)}")
-        {:error, %{reason: "handshake_init_failed"}}
+        {:ok, socket}
     end
   end
 
   @impl true
   def join("device:reconnect", _payload, socket) do
-    # Initialize the IK handshake state for reconnection when client joins
+    # Initialize the X25519 keypair for reconnection when client joins
     case Pairing.start_reconnect_handshake() do
-      {:ok, handshake_state} ->
-        # Store handshake state in socket assigns
-        socket = assign(socket, :handshake_state, handshake_state)
-        {:ok, socket}
+      {:ok, server_public_key, server_private_key} ->
+        # Store server keypair in socket assigns
+        socket =
+          socket
+          |> assign(:server_public_key, server_public_key)
+          |> assign(:server_private_key, server_private_key)
 
-      {:error, reason} ->
-        Logger.error("Failed to initialize reconnect handshake: #{inspect(reason)}")
-        {:error, %{reason: "handshake_init_failed"}}
+        {:ok, socket}
     end
   end
 
@@ -86,39 +87,29 @@ defmodule MydiaWeb.DeviceChannel do
   end
 
   # ============================================================================
-  # Pairing Handlers (Noise_NK)
+  # Pairing Handlers (X25519 Key Exchange)
   # ============================================================================
 
   @impl true
-  def handle_in("pairing_handshake", %{"message" => client_message_b64}, socket) do
-    # Decode the base64-encoded client message
-    client_message_result =
-      case Base.decode64(client_message_b64) do
-        {:ok, msg} -> {:ok, msg}
-        :error -> {:error, :invalid_base64}
-      end
+  def handle_in("pairing_handshake", %{"message" => client_public_key_b64}, socket) do
+    server_private_key = socket.assigns.server_private_key
+    server_public_key = socket.assigns.server_public_key
 
-    with {:ok, client_message} <- client_message_result,
-         handshake_state <- socket.assigns.handshake_state,
-         {:ok, final_state, response_message} <-
-           Pairing.process_pairing_message(handshake_state, client_message) do
-      # Update socket with completed handshake state
-      socket = assign(socket, :handshake_state, final_state)
+    # Process client's public key and derive session key
+    case Pairing.process_pairing_message(server_private_key, client_public_key_b64) do
+      {:ok, session_key} ->
+        # Update socket with session key and mark handshake as complete
+        socket =
+          socket
+          |> assign(:session_key, session_key)
+          |> assign(:handshake_complete, true)
 
-      # Send success response with server's handshake message
-      {:reply, {:ok, %{message: Base.encode64(response_message)}}, socket}
-    else
-      {:error, :handshake_failed} ->
-        Logger.error("Noise NK pairing handshake failed")
-        {:reply, {:error, %{reason: "handshake_failed"}}, socket}
+        # Send server's public key back to client
+        {:reply, {:ok, %{message: Base.encode64(server_public_key)}}, socket}
 
-      {:error, :invalid_base64} ->
-        Logger.warning("Invalid base64 message received for pairing")
+      {:error, :invalid_key} ->
+        Logger.warning("Invalid public key received for pairing")
         {:reply, {:error, %{reason: "invalid_message"}}, socket}
-
-      {:error, reason} ->
-        Logger.error("Unexpected error during pairing handshake: #{inspect(reason)}")
-        {:reply, {:error, %{reason: "internal_error"}}, socket}
     end
   end
 
@@ -128,34 +119,33 @@ defmodule MydiaWeb.DeviceChannel do
         %{"code" => claim_code, "device_name" => device_name, "platform" => platform},
         socket
       ) do
-    handshake_state = socket.assigns.handshake_state
-
     # Verify handshake is complete
-    unless Decibel.is_handshake_complete?(handshake_state) do
+    unless socket.assigns[:handshake_complete] do
       Logger.warning("Claim code submitted before handshake completion")
       {:reply, {:error, %{reason: "handshake_incomplete"}}, socket}
     else
+      session_key = socket.assigns.session_key
+
       device_attrs = %{
         device_name: device_name,
         platform: platform
       }
 
       # Complete the pairing process
-      case Pairing.complete_pairing(claim_code, device_attrs, handshake_state) do
-        {:ok, device, media_token, {device_public_key, device_private_key}, final_state} ->
+      case Pairing.complete_pairing(claim_code, device_attrs, session_key) do
+        {:ok, device, media_token, {device_public_key, device_private_key}, _session_key} ->
           # Update socket with device info
           socket =
             socket
             |> assign(:device_id, device.id)
             |> assign(:user_id, device.user_id)
             |> assign(:authenticated, true)
-            |> assign(:handshake_state, final_state)
 
           # Publish device connected event
           Mydia.RemoteAccess.publish_device_event(device, :connected)
 
           # Send the device keypair and tokens to the client
-          # The keypair is sent over the encrypted Noise channel
+          # The keypair should be encrypted over the secure channel
           {:reply,
            {:ok,
             %{
@@ -189,46 +179,48 @@ defmodule MydiaWeb.DeviceChannel do
   end
 
   # ============================================================================
-  # Reconnection Handlers (Noise_IK)
+  # Reconnection Handlers (X25519 Key Exchange)
   # ============================================================================
 
   @impl true
-  def handle_in("handshake_init", %{"message" => client_message_b64}, socket) do
-    # Decode the base64-encoded client message
-    # Note: Base.decode64 returns :error (not {:error, _}) on failure
-    client_message_result =
-      case Base.decode64(client_message_b64) do
-        {:ok, msg} -> {:ok, msg}
-        :error -> {:error, :invalid_base64}
-      end
+  def handle_in(
+        "key_exchange",
+        %{"client_public_key" => client_public_key_b64, "device_token" => device_token},
+        socket
+      ) do
+    server_private_key = socket.assigns.server_private_key
+    server_public_key = socket.assigns.server_public_key
 
-    with {:ok, client_message} <- client_message_result,
-         handshake_state <- socket.assigns.handshake_state,
-         {:ok, final_state, client_static_key, response_message, device} <-
-           Pairing.process_client_message(handshake_state, client_message),
-         {:ok, updated_device, token, _final_state} <-
-           Pairing.complete_reconnection(device, final_state) do
+    # Process client's static public key and verify device
+    with {:ok, session_key, device} <-
+           Pairing.process_client_message(server_private_key, client_public_key_b64),
+         true <- verify_device_token(device, device_token),
+         {:ok, updated_device, token, _session_key} <-
+           Pairing.complete_reconnection(device, session_key) do
       # Update socket with authenticated device info
       socket =
         socket
         |> assign(:device_id, updated_device.id)
         |> assign(:user_id, updated_device.user_id)
-        |> assign(:client_static_key, client_static_key)
+        |> assign(:session_key, session_key)
         |> assign(:authenticated, true)
-        |> assign(:handshake_state, final_state)
 
       # Publish device connected event
       Mydia.RemoteAccess.publish_device_event(updated_device, :connected)
 
-      # Send success response with server's handshake message and token
+      # Send success response with server's public key and token
       {:reply,
        {:ok,
         %{
-          message: Base.encode64(response_message),
+          server_public_key: Base.encode64(server_public_key),
           token: token,
           device_id: updated_device.id
         }}, socket}
     else
+      false ->
+        Logger.warning("Device reconnection failed: invalid device token")
+        {:reply, {:error, %{reason: "invalid_device_token"}}, socket}
+
       {:error, :device_not_found} ->
         Logger.warning("Device reconnection failed: device not found")
         {:reply, {:error, %{reason: "device_not_found"}}, socket}
@@ -237,18 +229,23 @@ defmodule MydiaWeb.DeviceChannel do
         Logger.warning("Device reconnection failed: device revoked")
         {:reply, {:error, %{reason: "device_revoked"}}, socket}
 
-      {:error, :handshake_failed} ->
-        Logger.error("Noise handshake failed")
-        {:reply, {:error, %{reason: "handshake_failed"}}, socket}
-
-      {:error, :invalid_base64} ->
-        Logger.warning("Invalid base64 message received")
+      {:error, :invalid_key} ->
+        Logger.warning("Invalid public key received for reconnection")
         {:reply, {:error, %{reason: "invalid_message"}}, socket}
 
       {:error, reason} ->
-        Logger.error("Unexpected error during handshake: #{inspect(reason)}")
+        Logger.error("Unexpected error during reconnection: #{inspect(reason)}")
         {:reply, {:error, %{reason: "internal_error"}}, socket}
     end
+  end
+
+  # Legacy handler for old Noise-based handshake_init (for backwards compatibility)
+  @impl true
+  def handle_in("handshake_init", %{"message" => _client_message_b64}, socket) do
+    # This handler is kept for backwards compatibility but returns an error
+    # directing clients to use the new key_exchange message
+    Logger.warning("Deprecated handshake_init message received, use key_exchange instead")
+    {:reply, {:error, %{reason: "use_key_exchange"}}, socket}
   end
 
   @impl true
@@ -270,5 +267,12 @@ defmodule MydiaWeb.DeviceChannel do
     end
 
     :ok
+  end
+
+  # Private helper to verify device token
+  defp verify_device_token(device, provided_token) do
+    # Compare the stored token with the provided one
+    # Use secure_compare to prevent timing attacks
+    Plug.Crypto.secure_compare(device.token || "", provided_token)
   end
 end

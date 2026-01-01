@@ -30,6 +30,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// Result of a relay tunnel operation.
@@ -87,27 +88,95 @@ class RelayTunnelInfo {
   }
 }
 
+/// Response from a tunneled HTTP request.
+class TunnelResponse {
+  /// HTTP status code.
+  final int status;
+
+  /// Response headers.
+  final Map<String, String> headers;
+
+  /// Response body (decoded from base64 if binary).
+  final dynamic body;
+
+  /// Whether the body is binary data.
+  final bool isBinary;
+
+  const TunnelResponse({
+    required this.status,
+    required this.headers,
+    this.body,
+    this.isBinary = false,
+  });
+
+  /// Gets the body as a string.
+  String? get bodyAsString {
+    if (body == null) return null;
+    if (body is String) return body;
+    if (body is Uint8List) return utf8.decode(body);
+    return body.toString();
+  }
+
+  /// Gets the body as bytes.
+  Uint8List? get bodyAsBytes {
+    if (body == null) return null;
+    if (body is Uint8List) return body;
+    if (body is String) return Uint8List.fromList(utf8.encode(body));
+    return null;
+  }
+
+  /// Whether the request was successful (2xx status code).
+  bool get isSuccess => status >= 200 && status < 300;
+}
+
 /// Active relay tunnel connection.
 ///
 /// This class manages an active WebSocket tunnel through the relay,
 /// handling message serialization and providing a stream of incoming messages.
+/// Includes heartbeat mechanism to detect dead connections.
 class RelayTunnel {
+  /// Heartbeat interval: 30 seconds
+  static const _heartbeatInterval = Duration(seconds: 30);
+
+  /// Heartbeat response timeout: 10 seconds
+  static const _heartbeatTimeout = Duration(seconds: 10);
+
+  /// Request timeout: 30 seconds
+  static const _requestTimeout = Duration(seconds: 30);
+
   RelayTunnel._(this._channel, this._broadcastStream, this._info) {
+    debugPrint('[RelayTunnel] Creating tunnel for session: ${_info.sessionId}');
     _messageController = StreamController<Uint8List>.broadcast();
     _errorController = StreamController<String>.broadcast();
+    _pendingRequests = {};
 
     // Listen to WebSocket messages via the broadcast stream
     _broadcastStream.listen(
-      _handleMessage,
-      onError: (error) {
+      (message) {
+        debugPrint('[RelayTunnel] Received message: ${message.runtimeType}, length: ${message is String ? message.length : "N/A"}');
+        if (message is String && message.length < 500) {
+          debugPrint('[RelayTunnel] Message content: $message');
+        }
+        _handleMessage(message);
+      },
+      onError: (error, stackTrace) {
+        debugPrint('[RelayTunnel] WebSocket error: $error');
+        debugPrint('[RelayTunnel] WebSocket error stack: $stackTrace');
         _errorController.add('WebSocket error: $error');
       },
       onDone: () {
+        debugPrint('[RelayTunnel] WebSocket stream done (closed)');
+        debugPrint('[RelayTunnel] Current stack: ${StackTrace.current}');
+        _stopHeartbeat();
         _messageController.close();
         _errorController.close();
       },
       cancelOnError: false,
     );
+
+    // Start heartbeat mechanism
+    _startHeartbeat();
+    debugPrint('[RelayTunnel] Tunnel initialized');
   }
 
   final WebSocketChannel _channel;
@@ -115,6 +184,12 @@ class RelayTunnel {
   final RelayTunnelInfo _info;
   late final StreamController<Uint8List> _messageController;
   late final StreamController<String> _errorController;
+  late final Map<String, Completer<TunnelResponse>> _pendingRequests;
+  int _requestCounter = 0;
+
+  Timer? _heartbeatTimer;
+  Timer? _heartbeatTimeoutTimer;
+  bool _pendingHeartbeat = false;
 
   /// Information about this tunnel connection.
   RelayTunnelInfo get info => _info;
@@ -148,6 +223,20 @@ class RelayTunnel {
   Future<void> close() async {
     if (!isActive) return;
 
+    _stopHeartbeat();
+
+    // Complete all pending requests with error
+    for (final entry in _pendingRequests.entries) {
+      if (!entry.value.isCompleted) {
+        entry.value.complete(const TunnelResponse(
+          status: 503,
+          headers: {},
+          body: '{"error": "Tunnel closed"}',
+        ));
+      }
+    }
+    _pendingRequests.clear();
+
     try {
       // Send close message
       final message = jsonEncode({'type': 'close'});
@@ -159,6 +248,141 @@ class RelayTunnel {
     await _channel.sink.close();
     await _messageController.close();
     await _errorController.close();
+  }
+
+  /// Sends an HTTP request through the tunnel.
+  ///
+  /// This method proxies HTTP requests through the relay tunnel to the
+  /// Mydia instance, allowing API communication when direct connection
+  /// is not possible.
+  ///
+  /// ## Parameters
+  ///
+  /// - [method] - HTTP method (GET, POST, PUT, DELETE, etc.)
+  /// - [path] - Request path (e.g., '/api/graphql')
+  /// - [headers] - Optional request headers
+  /// - [body] - Optional request body
+  ///
+  /// ## Returns
+  ///
+  /// A [TunnelResponse] containing the response status, headers, and body.
+  ///
+  /// ## Example
+  ///
+  /// ```dart
+  /// final response = await tunnel.request(
+  ///   method: 'POST',
+  ///   path: '/api/graphql',
+  ///   headers: {'Content-Type': 'application/json'},
+  ///   body: '{"query": "{ me { id } }"}',
+  /// );
+  /// if (response.isSuccess) {
+  ///   print('Response: ${response.bodyAsString}');
+  /// }
+  /// ```
+  Future<TunnelResponse> request({
+    required String method,
+    required String path,
+    Map<String, String>? headers,
+    String? body,
+  }) async {
+    if (!isActive) {
+      throw StateError('Tunnel is closed');
+    }
+
+    // Generate unique request ID
+    final requestId = '${_info.sessionId}-${++_requestCounter}';
+
+    // Create completer for the response
+    final completer = Completer<TunnelResponse>();
+    _pendingRequests[requestId] = completer;
+
+    // Build and send request message
+    final requestMessage = jsonEncode({
+      'type': 'request',
+      'id': requestId,
+      'method': method,
+      'path': path,
+      'headers': headers ?? {},
+      'body': body,
+    });
+
+    try {
+      final wrappedMessage = jsonEncode({
+        'type': 'message',
+        'payload': base64Encode(utf8.encode(requestMessage)),
+      });
+      _channel.sink.add(wrappedMessage);
+    } catch (e) {
+      _pendingRequests.remove(requestId);
+      rethrow;
+    }
+
+    // Wait for response with timeout
+    try {
+      return await completer.future.timeout(
+        _requestTimeout,
+        onTimeout: () {
+          _pendingRequests.remove(requestId);
+          return const TunnelResponse(
+            status: 504,
+            headers: {},
+            body: '{"error": "Request timeout"}',
+          );
+        },
+      );
+    } catch (e) {
+      _pendingRequests.remove(requestId);
+      rethrow;
+    }
+  }
+
+  /// Starts the periodic heartbeat mechanism.
+  void _startHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) {
+      _sendHeartbeat();
+    });
+  }
+
+  /// Stops the heartbeat mechanism.
+  void _stopHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+    _heartbeatTimeoutTimer?.cancel();
+    _heartbeatTimeoutTimer = null;
+    _pendingHeartbeat = false;
+  }
+
+  /// Sends a heartbeat ping and starts timeout timer.
+  void _sendHeartbeat() {
+    if (!isActive) return;
+
+    try {
+      final message = jsonEncode({'type': 'ping'});
+      _channel.sink.add(message);
+      _pendingHeartbeat = true;
+
+      // Start timeout timer
+      _heartbeatTimeoutTimer?.cancel();
+      _heartbeatTimeoutTimer = Timer(_heartbeatTimeout, () {
+        if (_pendingHeartbeat) {
+          _errorController.add('Heartbeat timeout - connection appears dead');
+          close();
+        }
+      });
+    } catch (e) {
+      // Connection likely dead
+      _errorController.add('Failed to send heartbeat: $e');
+      close();
+    }
+  }
+
+  /// Called when heartbeat response (pong) is received.
+  void _onHeartbeatResponse() {
+    _pendingHeartbeat = false;
+    _heartbeatTimeoutTimer?.cancel();
+    _heartbeatTimeoutTimer = null;
   }
 
   void _handleMessage(dynamic rawMessage) {
@@ -180,7 +404,24 @@ class RelayTunnel {
           }
 
           final payload = Uint8List.fromList(base64Decode(payloadB64));
+
+          // Try to parse as JSON to check if it's a response message
+          try {
+            final payloadJson = jsonDecode(utf8.decode(payload)) as Map<String, dynamic>;
+            if (payloadJson['type'] == 'response') {
+              _handleResponseMessage(payloadJson);
+              return;
+            }
+          } catch (_) {
+            // Not JSON or not a response, forward as regular message
+          }
+
           _messageController.add(payload);
+          break;
+
+        case 'pong':
+          // Heartbeat response received
+          _onHeartbeatResponse();
           break;
 
         case 'error':
@@ -195,6 +436,53 @@ class RelayTunnel {
     } catch (e) {
       _errorController.add('Failed to parse message: $e');
     }
+  }
+
+  /// Handles a response message from a tunneled request.
+  void _handleResponseMessage(Map<String, dynamic> json) {
+    final requestId = json['id'] as String?;
+    if (requestId == null) {
+      debugPrint('[RelayTunnel] Response missing request ID');
+      return;
+    }
+
+    final completer = _pendingRequests.remove(requestId);
+    if (completer == null) {
+      debugPrint('[RelayTunnel] No pending request for ID: $requestId');
+      return;
+    }
+
+    if (completer.isCompleted) {
+      debugPrint('[RelayTunnel] Request already completed: $requestId');
+      return;
+    }
+
+    final status = json['status'] as int? ?? 500;
+    final headers = (json['headers'] as Map<String, dynamic>?)
+            ?.map((k, v) => MapEntry(k, v.toString())) ??
+        {};
+
+    // Decode body based on encoding
+    final bodyEncoding = json['body_encoding'] as String? ?? 'raw';
+    final rawBody = json['body'];
+    dynamic body;
+    bool isBinary = false;
+
+    if (rawBody != null) {
+      if (bodyEncoding == 'base64' && rawBody is String) {
+        body = base64Decode(rawBody);
+        isBinary = true;
+      } else {
+        body = rawBody;
+      }
+    }
+
+    completer.complete(TunnelResponse(
+      status: status,
+      headers: headers,
+      body: body,
+      isBinary: isBinary,
+    ));
   }
 }
 
@@ -231,14 +519,17 @@ class RelayTunnelService {
   /// ```
   Future<RelayTunnelResult<RelayTunnel>> connectViaRelay(
       String instanceId) async {
+    debugPrint('[RelayTunnelService] Connecting via relay to instance: $instanceId');
     try {
       // Build WebSocket URL for client tunnel
       final wsUrl = _relayUrl.replaceFirst('http://', 'ws://').replaceFirst('https://', 'wss://');
       // Phoenix WebSocket endpoints require /websocket suffix
       final uri = Uri.parse('$wsUrl/relay/client/websocket');
+      debugPrint('[RelayTunnelService] WebSocket URL: $uri');
 
       // Establish WebSocket connection
       final channel = WebSocketChannel.connect(uri);
+      debugPrint('[RelayTunnelService] WebSocket channel created');
 
       // Convert to broadcast stream so multiple listeners can subscribe
       final broadcastStream = channel.stream.asBroadcastStream();
@@ -252,9 +543,11 @@ class RelayTunnelService {
             responseCompleter.complete(message);
           }
         },
-        onError: (error) {
+        onError: (error, stackTrace) {
+          debugPrint('[RelayTunnelService] connectViaRelay broadcast error: $error');
+          debugPrint('[RelayTunnelService] Stack trace: $stackTrace');
           if (!responseCompleter.isCompleted) {
-            responseCompleter.completeError(error);
+            responseCompleter.completeError(error, stackTrace);
           }
         },
         cancelOnError: false,
@@ -274,7 +567,9 @@ class RelayTunnelService {
             .timeout(const Duration(seconds: 10), onTimeout: () {
           throw TimeoutException('Connection timeout');
         });
-      } catch (e) {
+      } catch (e, stackTrace) {
+        debugPrint('[RelayTunnelService] connectViaRelay wait error: $e');
+        debugPrint('[RelayTunnelService] Stack trace: $stackTrace');
         await channel.sink.close();
         return RelayTunnelResult.error('Failed to connect: $e');
       }
@@ -294,13 +589,28 @@ class RelayTunnelService {
         return RelayTunnelResult.error('Unexpected response type: $type');
       }
 
+      debugPrint('[RelayTunnelService] Received connected response');
+
       // Parse connection info
-      final info = RelayTunnelInfo.fromJson(json);
+      RelayTunnelInfo info;
+      try {
+        info = RelayTunnelInfo.fromJson(json);
+        debugPrint('[RelayTunnelService] Parsed tunnel info: session=${info.sessionId}, instance=${info.instanceId}');
+      } catch (e, stackTrace) {
+        debugPrint('[RelayTunnelService] Failed to parse tunnel info: $e');
+        debugPrint('[RelayTunnelService] Stack trace: $stackTrace');
+        await channel.sink.close();
+        return RelayTunnelResult.error('Failed to parse connection info: $e');
+      }
 
       // Create and return tunnel with broadcast stream
+      debugPrint('[RelayTunnelService] Creating tunnel...');
       final tunnel = RelayTunnel._(channel, broadcastStream, info);
+      debugPrint('[RelayTunnelService] Tunnel created successfully');
       return RelayTunnelResult.success(tunnel);
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('[RelayTunnelService] Connection error: $e');
+      debugPrint('[RelayTunnelService] Stack trace: $stackTrace');
       if (e.toString().contains('SocketException') ||
           e.toString().contains('WebSocketChannelException')) {
         return RelayTunnelResult.error('Cannot reach relay service');
@@ -323,6 +633,7 @@ class RelayTunnelService {
   /// A [RelayTunnelResult] containing the active [RelayTunnel] on success.
   Future<RelayTunnelResult<RelayTunnel>> connectViaClaimCode(
       String claimCode) async {
+    debugPrint('[RelayTunnelService] Connecting via claim code');
     try {
       // Build WebSocket URL for client tunnel
       final wsUrl = _relayUrl.replaceFirst('http://', 'ws://').replaceFirst('https://', 'wss://');
@@ -344,9 +655,11 @@ class RelayTunnelService {
             responseCompleter.complete(message);
           }
         },
-        onError: (error) {
+        onError: (error, stackTrace) {
+          debugPrint('[RelayTunnelService] connectViaClaimCode broadcast error: $error');
+          debugPrint('[RelayTunnelService] Stack trace: $stackTrace');
           if (!responseCompleter.isCompleted) {
-            responseCompleter.completeError(error);
+            responseCompleter.completeError(error, stackTrace);
           }
         },
         cancelOnError: false,
@@ -366,7 +679,9 @@ class RelayTunnelService {
             .timeout(const Duration(seconds: 10), onTimeout: () {
           throw TimeoutException('Connection timeout');
         });
-      } catch (e) {
+      } catch (e, stackTrace) {
+        debugPrint('[RelayTunnelService] connectViaClaimCode wait error: $e');
+        debugPrint('[RelayTunnelService] Stack trace: $stackTrace');
         await channel.sink.close();
         return RelayTunnelResult.error('Failed to connect: $e');
       }
@@ -392,7 +707,9 @@ class RelayTunnelService {
       // Create and return tunnel with broadcast stream
       final tunnel = RelayTunnel._(channel, broadcastStream, info);
       return RelayTunnelResult.success(tunnel);
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('[RelayTunnelService] connectViaClaimCode error: $e');
+      debugPrint('[RelayTunnelService] Stack trace: $stackTrace');
       if (e.toString().contains('SocketException') ||
           e.toString().contains('WebSocketChannelException')) {
         return RelayTunnelResult.error('Cannot reach relay service');

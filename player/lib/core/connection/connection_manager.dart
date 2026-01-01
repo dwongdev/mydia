@@ -124,27 +124,25 @@ class ConnectionManager {
     // Load connection preferences
     final prefs = await _loadPreferences();
 
-    // Try direct URLs first
+    // Try direct URLs first (in parallel)
     if (directUrls.isNotEmpty) {
       // Reorder URLs to prioritize last successful URL
       final orderedUrls = _reorderUrls(directUrls, prefs.lastSuccessfulUrl);
 
-      for (final url in orderedUrls) {
-        _emitState('Trying direct URL: $url');
+      _emitState('Trying ${orderedUrls.length} direct URL(s) in parallel');
 
-        final result = await _tryDirectConnection(
-          url: url,
-          certFingerprint: certFingerprint,
+      final result = await _tryDirectUrlsInParallel(
+        urls: orderedUrls,
+        certFingerprint: certFingerprint,
+      );
+
+      if (result != null) {
+        _emitState('Direct connection successful');
+        await _storePreference(
+          type: ConnectionType.direct,
+          url: result.connectedUrl!,
         );
-
-        if (result.success) {
-          _emitState('Direct connection successful');
-          await _storePreference(
-            type: ConnectionType.direct,
-            url: url,
-          );
-          return result;
-        }
+        return result;
       }
 
       _emitState('All direct URLs failed');
@@ -173,6 +171,57 @@ class ConnectionManager {
     return ConnectionResult.error(
       'Could not connect to server. All direct URLs failed and no relay service available.',
     );
+  }
+
+  /// Tries all direct URLs in parallel and returns the first successful connection.
+  ///
+  /// This method races all URL attempts simultaneously:
+  /// - All URLs are tried in parallel with individual timeouts
+  /// - Returns immediately when the first connection succeeds
+  /// - Returns null if all connections fail
+  ///
+  /// The [urls] list order determines priority for tie-breaking (first URL
+  /// to succeed wins, but if multiple succeed simultaneously, order is used).
+  Future<ConnectionResult?> _tryDirectUrlsInParallel({
+    required List<String> urls,
+    String? certFingerprint,
+  }) async {
+    if (urls.isEmpty) return null;
+
+    // Create a completer that resolves on first success
+    final completer = Completer<ConnectionResult?>();
+    var pendingCount = urls.length;
+    final errors = <String>[];
+
+    for (final url in urls) {
+      // ignore: unawaited_futures
+      _tryDirectConnection(url: url, certFingerprint: certFingerprint)
+          .then((result) {
+        if (completer.isCompleted) return;
+
+        if (result.success) {
+          completer.complete(result);
+        } else {
+          errors.add(result.error ?? 'Unknown error for $url');
+          pendingCount--;
+          if (pendingCount == 0) {
+            // All attempts failed
+            completer.complete(null);
+          }
+        }
+      }).catchError((Object e) {
+        if (completer.isCompleted) return;
+
+        errors.add('Error for $url: $e');
+        pendingCount--;
+        if (pendingCount == 0) {
+          // All attempts failed
+          completer.complete(null);
+        }
+      });
+    }
+
+    return completer.future;
   }
 
   /// Tries to establish a direct connection to a URL.

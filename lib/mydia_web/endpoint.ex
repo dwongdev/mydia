@@ -36,6 +36,15 @@ defmodule MydiaWeb.Endpoint do
     websocket: true,
     longpoll: false
 
+  # In development, proxy Flutter dev server WebSocket for hot reload
+  if code_reloading? do
+    socket "/player/$dwdsSseHandler", MydiaWeb.PlayerDevSocket,
+      websocket: true,
+      longpoll: false
+
+    plug MydiaWeb.Plugs.PlayerProxy
+  end
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),

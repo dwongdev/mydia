@@ -4,20 +4,14 @@ defmodule Mydia.RemoteAccess.PairingTest do
   alias Mydia.RemoteAccess
   alias Mydia.RemoteAccess.Pairing
   alias Mydia.Accounts
+  alias Mydia.Crypto
 
   describe "start_reconnect_handshake/0" do
-    test "returns handshake state when keypair is configured" do
-      # Initialize the keypair first
-      {:ok, _config} = RemoteAccess.initialize_keypair()
-
-      # Start handshake
-      assert {:ok, handshake_state} = Pairing.start_reconnect_handshake()
-      assert is_reference(handshake_state)
-    end
-
-    test "returns error when keypair is not configured" do
-      # Don't initialize keypair
-      assert {:error, :not_configured} = Pairing.start_reconnect_handshake()
+    test "returns server keypair for session" do
+      # Start handshake - this generates an ephemeral keypair for the session
+      assert {:ok, public_key, private_key} = Pairing.start_reconnect_handshake()
+      assert byte_size(public_key) == 32
+      assert byte_size(private_key) == 32
     end
   end
 
@@ -32,8 +26,8 @@ defmodule Mydia.RemoteAccess.PairingTest do
           display_name: "Test User"
         })
 
-      # Generate device keypair
-      {device_public_key, _device_private_key} = Mydia.Crypto.Noise.generate_keypair()
+      # Generate device keypair using new Crypto module
+      {device_public_key, _device_private_key} = Crypto.generate_keypair()
 
       # Create a paired device
       {:ok, device} =
@@ -54,7 +48,7 @@ defmodule Mydia.RemoteAccess.PairingTest do
     end
 
     test "returns error for non-existent device key" do
-      {random_key, _} = Mydia.Crypto.Noise.generate_keypair()
+      {random_key, _} = Crypto.generate_keypair()
       assert {:error, :device_not_found} = Pairing.verify_device_key(random_key)
     end
 
@@ -70,6 +64,93 @@ defmodule Mydia.RemoteAccess.PairingTest do
     end
   end
 
+  describe "process_client_message/2 (reconnection)" do
+    setup do
+      # Create a user
+      {:ok, user} =
+        Accounts.create_user(%{
+          username: "testuser",
+          email: "test@example.com",
+          password: "password123",
+          display_name: "Test User"
+        })
+
+      # Generate device keypair
+      {device_public_key, device_private_key} = Crypto.generate_keypair()
+
+      # Create a paired device
+      {:ok, device} =
+        RemoteAccess.create_device(%{
+          device_name: "Test Device",
+          platform: "iOS",
+          device_static_public_key: device_public_key,
+          token: "test-token-#{System.unique_integer()}",
+          user_id: user.id
+        })
+
+      %{
+        device: device,
+        device_public_key: device_public_key,
+        device_private_key: device_private_key,
+        user: user
+      }
+    end
+
+    test "successfully derives session key for valid device", %{
+      device_public_key: device_public_key
+    } do
+      # Server generates ephemeral keypair
+      {:ok, server_public_key, server_private_key} = Pairing.start_reconnect_handshake()
+
+      # Process client's public key (the device's stored key)
+      assert {:ok, session_key, device} =
+               Pairing.process_client_message(server_private_key, device_public_key)
+
+      # Verify we got the right device
+      assert device.device_static_public_key == device_public_key
+
+      # Verify session key was derived
+      assert byte_size(session_key) == 32
+    end
+
+    test "accepts base64-encoded client public key", %{device_public_key: device_public_key} do
+      # Server generates ephemeral keypair
+      {:ok, _server_public_key, server_private_key} = Pairing.start_reconnect_handshake()
+
+      # Encode the device public key as base64 (as client would send it)
+      encoded_key = Base.encode64(device_public_key)
+
+      # Process client's base64-encoded public key
+      assert {:ok, session_key, device} =
+               Pairing.process_client_message(server_private_key, encoded_key)
+
+      # Verify we got the right device
+      assert device.device_static_public_key == device_public_key
+      assert byte_size(session_key) == 32
+    end
+
+    test "returns error for non-existent device" do
+      # Server generates ephemeral keypair
+      {:ok, _server_public_key, server_private_key} = Pairing.start_reconnect_handshake()
+
+      # Generate a random key that's not in the database
+      {random_key, _} = Crypto.generate_keypair()
+
+      # Should fail
+      assert {:error, :device_not_found} =
+               Pairing.process_client_message(server_private_key, random_key)
+    end
+
+    test "returns error for invalid key format" do
+      # Server generates ephemeral keypair
+      {:ok, _server_public_key, server_private_key} = Pairing.start_reconnect_handshake()
+
+      # Send garbage data that can't be decoded
+      assert {:error, :invalid_key} =
+               Pairing.process_client_message(server_private_key, "not-valid-base64!!!")
+    end
+  end
+
   describe "complete_reconnection/2" do
     setup do
       # Create a user
@@ -82,7 +163,7 @@ defmodule Mydia.RemoteAccess.PairingTest do
         })
 
       # Generate device keypair
-      {device_public_key, _device_private_key} = Mydia.Crypto.Noise.generate_keypair()
+      {device_public_key, _device_private_key} = Crypto.generate_keypair()
 
       # Create a paired device
       {:ok, device} =
@@ -94,20 +175,20 @@ defmodule Mydia.RemoteAccess.PairingTest do
           user_id: user.id
         })
 
-      # Create a mock handshake state (just a reference for testing)
-      handshake_state = make_ref()
+      # Generate a session key (as would be derived from ECDH)
+      session_key = :crypto.strong_rand_bytes(32)
 
-      %{device: device, handshake_state: handshake_state}
+      %{device: device, session_key: session_key}
     end
 
     test "updates last_seen_at and generates token", %{
       device: device,
-      handshake_state: handshake_state
+      session_key: session_key
     } do
       old_last_seen = device.last_seen_at
 
-      assert {:ok, updated_device, token, returned_state} =
-               Pairing.complete_reconnection(device, handshake_state)
+      assert {:ok, updated_device, token, returned_key} =
+               Pairing.complete_reconnection(device, session_key)
 
       # Check that last_seen_at was updated
       refute updated_device.last_seen_at == old_last_seen
@@ -117,16 +198,13 @@ defmodule Mydia.RemoteAccess.PairingTest do
       assert is_binary(token)
       assert byte_size(token) > 0
 
-      # Check that handshake state is returned
-      assert returned_state == handshake_state
+      # Check that session key is returned
+      assert returned_key == session_key
     end
   end
 
-  describe "full handshake flow" do
+  describe "full reconnection flow" do
     setup do
-      # Initialize server keypair
-      {:ok, _config} = RemoteAccess.initialize_keypair()
-
       # Create a user
       {:ok, user} =
         Accounts.create_user(%{
@@ -137,7 +215,7 @@ defmodule Mydia.RemoteAccess.PairingTest do
         })
 
       # Generate device keypair
-      {device_public_key, device_private_key} = Mydia.Crypto.Noise.generate_keypair()
+      {device_public_key, device_private_key} = Crypto.generate_keypair()
 
       # Create a paired device
       {:ok, device} =
@@ -155,104 +233,105 @@ defmodule Mydia.RemoteAccess.PairingTest do
       }
     end
 
-    test "completes full Noise_IK handshake", %{device_keypair: device_keypair} do
-      # Server: Start handshake
-      {:ok, server_handshake} = Pairing.start_reconnect_handshake()
+    test "completes full X25519 key exchange for reconnection", %{
+      device_keypair: {device_public_key, device_private_key}
+    } do
+      # Step 1: Server generates ephemeral keypair
+      {:ok, server_public_key, server_private_key} = Pairing.start_reconnect_handshake()
 
-      # Client: Initialize IK handshake as initiator
-      # Client needs to know server's public key
-      server_public_key = RemoteAccess.get_public_key()
-      protocol_name = "Noise_IK_25519_ChaChaPoly_BLAKE2b"
-      client_keys = %{s: device_keypair, rs: server_public_key}
-      client_handshake = Decibel.new(protocol_name, :ini, client_keys)
-
-      # Client: Send first message (-> e, es, s, ss)
-      client_message = Decibel.handshake_encrypt(client_handshake, <<>>)
-      client_message_bin = IO.iodata_to_binary(client_message)
-
-      # Server: Process client message and verify device
-      assert {:ok, server_handshake_final, client_static_key, server_response, device} =
-               Pairing.process_client_message(server_handshake, client_message_bin)
+      # Step 2: Client sends its stored static public key to server
+      #         Server derives session key and verifies device
+      assert {:ok, server_session_key, device} =
+               Pairing.process_client_message(server_private_key, device_public_key)
 
       # Verify we got the right device
-      assert device.device_static_public_key == elem(device_keypair, 0)
-      assert client_static_key == elem(device_keypair, 0)
+      assert device.device_static_public_key == device_public_key
 
-      # Client: Process server response (<- e, ee, se)
-      _payload = Decibel.handshake_decrypt(client_handshake, server_response)
+      # Step 3: Client receives server's ephemeral public key and derives same session key
+      client_session_key = Crypto.derive_session_key(device_private_key, server_public_key)
 
-      # Verify handshake is complete
-      assert Decibel.is_handshake_complete?(client_handshake)
-      assert Decibel.is_handshake_complete?(server_handshake_final)
+      # Both parties should have the same session key
+      assert server_session_key == client_session_key
 
-      # Server: Complete reconnection
-      assert {:ok, updated_device, token, _final_state} =
-               Pairing.complete_reconnection(device, server_handshake_final)
+      # Step 4: Server completes reconnection
+      assert {:ok, updated_device, token, _session_key} =
+               Pairing.complete_reconnection(device, server_session_key)
 
       assert updated_device.id == device.id
       assert is_binary(token)
 
-      # At this point, both parties have established a secure channel
-      # and can use the handshake states for encrypted communication
+      # Step 5: Verify encryption works with shared session key
+      # Server encrypts a message
+      message = "Hello from server!"
+      encrypted = Crypto.encrypt(message, server_session_key)
+
+      # Client decrypts the message
+      {:ok, decrypted} =
+        Crypto.decrypt(
+          encrypted.ciphertext,
+          encrypted.nonce,
+          encrypted.mac,
+          client_session_key
+        )
+
+      assert decrypted == message
     end
   end
 
   describe "start_pairing_handshake/0" do
-    test "returns handshake state when keypair is configured" do
-      # Initialize the keypair first
-      {:ok, _config} = RemoteAccess.initialize_keypair()
-
-      # Start pairing handshake
-      assert {:ok, handshake_state} = Pairing.start_pairing_handshake()
-      assert is_reference(handshake_state)
-    end
-
-    test "returns error when keypair is not configured" do
-      # Don't initialize keypair
-      assert {:error, :not_configured} = Pairing.start_pairing_handshake()
+    test "returns server keypair for pairing session" do
+      # Start pairing handshake - this generates an ephemeral keypair
+      assert {:ok, public_key, private_key} = Pairing.start_pairing_handshake()
+      assert byte_size(public_key) == 32
+      assert byte_size(private_key) == 32
     end
   end
 
   describe "process_pairing_message/2" do
-    setup do
-      # Initialize server keypair
-      {:ok, _config} = RemoteAccess.initialize_keypair()
-      %{}
+    test "successfully derives session key from client's public key" do
+      # Server generates ephemeral keypair
+      {:ok, server_public_key, server_private_key} = Pairing.start_pairing_handshake()
+
+      # Client generates ephemeral keypair
+      {client_public_key, client_private_key} = Crypto.generate_keypair()
+
+      # Server processes client's public key
+      assert {:ok, server_session_key} =
+               Pairing.process_pairing_message(server_private_key, client_public_key)
+
+      assert byte_size(server_session_key) == 32
+
+      # Client derives the same session key
+      client_session_key = Crypto.derive_session_key(client_private_key, server_public_key)
+
+      # Both should be equal
+      assert server_session_key == client_session_key
     end
 
-    test "successfully processes client NK handshake message" do
-      # Server: Start NK handshake
-      {:ok, server_handshake} = Pairing.start_pairing_handshake()
+    test "accepts base64-encoded client public key" do
+      # Server generates ephemeral keypair
+      {:ok, _server_public_key, server_private_key} = Pairing.start_pairing_handshake()
 
-      # Client: Initialize NK handshake as initiator
-      server_public_key = RemoteAccess.get_public_key()
-      protocol_name = "Noise_NK_25519_ChaChaPoly_BLAKE2b"
-      client_keys = %{rs: server_public_key}
-      client_handshake = Decibel.new(protocol_name, :ini, client_keys)
+      # Client generates ephemeral keypair
+      {client_public_key, _client_private_key} = Crypto.generate_keypair()
 
-      # Client: Send first message (-> e, es)
-      client_message = Decibel.handshake_encrypt(client_handshake, <<>>)
-      client_message_bin = IO.iodata_to_binary(client_message)
+      # Encode the client public key as base64
+      encoded_key = Base.encode64(client_public_key)
 
-      # Server: Process client message
-      assert {:ok, _server_handshake_final, server_response} =
-               Pairing.process_pairing_message(server_handshake, client_message_bin)
+      # Server processes client's base64-encoded public key
+      assert {:ok, session_key} =
+               Pairing.process_pairing_message(server_private_key, encoded_key)
 
-      # Verify we got a response
-      assert is_binary(server_response)
-      assert byte_size(server_response) > 0
+      assert byte_size(session_key) == 32
     end
 
-    test "returns error for invalid handshake message" do
-      # Server: Start NK handshake
-      {:ok, server_handshake} = Pairing.start_pairing_handshake()
+    test "returns error for invalid key format" do
+      # Server generates ephemeral keypair
+      {:ok, _server_public_key, server_private_key} = Pairing.start_pairing_handshake()
 
-      # Send garbage data
-      invalid_message = :crypto.strong_rand_bytes(64)
-
-      # Should fail
-      assert {:error, :handshake_failed} =
-               Pairing.process_pairing_message(server_handshake, invalid_message)
+      # Send garbage data that can't be decoded
+      assert {:error, :invalid_key} =
+               Pairing.process_pairing_message(server_private_key, "not-valid-base64!!!")
     end
   end
 
@@ -260,9 +339,6 @@ defmodule Mydia.RemoteAccess.PairingTest do
   describe "complete_pairing/3" do
     @describetag :external
     setup do
-      # Initialize server keypair
-      {:ok, _config} = RemoteAccess.initialize_keypair()
-
       # Create a user
       {:ok, user} =
         Accounts.create_user(%{
@@ -275,23 +351,23 @@ defmodule Mydia.RemoteAccess.PairingTest do
       # Generate a claim code
       {:ok, claim} = RemoteAccess.generate_claim_code(user.id)
 
-      # Create a mock handshake state
-      handshake_state = make_ref()
+      # Generate a session key (as would be derived from ECDH)
+      session_key = :crypto.strong_rand_bytes(32)
 
-      %{user: user, claim: claim, handshake_state: handshake_state}
+      %{user: user, claim: claim, session_key: session_key}
     end
 
     test "successfully completes pairing with valid claim code", %{
       claim: claim,
-      handshake_state: handshake_state
+      session_key: session_key
     } do
       device_attrs = %{
         device_name: "iPhone 15",
         platform: "iOS"
       }
 
-      assert {:ok, device, media_token, {device_public_key, device_private_key}, returned_state} =
-               Pairing.complete_pairing(claim.code, device_attrs, handshake_state)
+      assert {:ok, device, media_token, {device_public_key, device_private_key}, returned_key} =
+               Pairing.complete_pairing(claim.code, device_attrs, session_key)
 
       # Verify device was created
       assert device.device_name == "iPhone 15"
@@ -308,8 +384,8 @@ defmodule Mydia.RemoteAccess.PairingTest do
       assert is_binary(media_token)
       assert byte_size(media_token) > 0
 
-      # Verify handshake state is returned
-      assert returned_state == handshake_state
+      # Verify session key is returned
+      assert returned_key == session_key
 
       # Verify claim code was consumed
       consumed_claim = RemoteAccess.get_claim_by_code(claim.code)
@@ -317,17 +393,17 @@ defmodule Mydia.RemoteAccess.PairingTest do
       assert consumed_claim.device_id == device.id
     end
 
-    test "fails with invalid claim code", %{handshake_state: handshake_state} do
+    test "fails with invalid claim code", %{session_key: session_key} do
       device_attrs = %{
         device_name: "iPhone 15",
         platform: "iOS"
       }
 
       assert {:error, :not_found} =
-               Pairing.complete_pairing("INVALID-CODE", device_attrs, handshake_state)
+               Pairing.complete_pairing("INVALID-CODE", device_attrs, session_key)
     end
 
-    test "fails with expired claim code", %{claim: claim, handshake_state: handshake_state} do
+    test "fails with expired claim code", %{claim: claim, session_key: session_key} do
       # Manually expire the claim
       past_time = DateTime.utc_now() |> DateTime.add(-10, :minute) |> DateTime.truncate(:second)
 
@@ -341,16 +417,16 @@ defmodule Mydia.RemoteAccess.PairingTest do
       }
 
       assert {:error, :expired} =
-               Pairing.complete_pairing(claim.code, device_attrs, handshake_state)
+               Pairing.complete_pairing(claim.code, device_attrs, session_key)
     end
 
     test "fails with already used claim code", %{
       claim: claim,
       user: user,
-      handshake_state: handshake_state
+      session_key: session_key
     } do
       # Create a device and consume the claim
-      {device_public_key, _} = Mydia.Crypto.Noise.generate_keypair()
+      {device_public_key, _} = Crypto.generate_keypair()
 
       {:ok, device} =
         RemoteAccess.create_device(%{
@@ -370,17 +446,14 @@ defmodule Mydia.RemoteAccess.PairingTest do
       }
 
       assert {:error, :already_used} =
-               Pairing.complete_pairing(claim.code, device_attrs, handshake_state)
+               Pairing.complete_pairing(claim.code, device_attrs, session_key)
     end
   end
 
   # This test requires the Relay service to be running
-  describe "full NK pairing flow" do
+  describe "full X25519 pairing flow" do
     @describetag :external
     setup do
-      # Initialize server keypair
-      {:ok, _config} = RemoteAccess.initialize_keypair()
-
       # Create a user
       {:ok, user} =
         Accounts.create_user(%{
@@ -396,39 +469,32 @@ defmodule Mydia.RemoteAccess.PairingTest do
       %{user: user, claim: claim}
     end
 
-    test "completes full Noise_NK pairing handshake", %{claim: claim} do
-      # Server: Start NK handshake
-      {:ok, server_handshake} = Pairing.start_pairing_handshake()
+    test "completes full X25519 pairing handshake", %{claim: claim} do
+      # Step 1: Server generates ephemeral keypair
+      {:ok, server_public_key, server_private_key} = Pairing.start_pairing_handshake()
 
-      # Client: Initialize NK handshake as initiator
-      server_public_key = RemoteAccess.get_public_key()
-      protocol_name = "Noise_NK_25519_ChaChaPoly_BLAKE2b"
-      client_keys = %{rs: server_public_key}
-      client_handshake = Decibel.new(protocol_name, :ini, client_keys)
+      # Step 2: Client generates ephemeral keypair
+      {client_public_key, client_private_key} = Crypto.generate_keypair()
 
-      # Client: Send first message (-> e, es)
-      client_message = Decibel.handshake_encrypt(client_handshake, <<>>)
-      client_message_bin = IO.iodata_to_binary(client_message)
+      # Step 3: Client sends public key to server
+      #         Server derives session key
+      assert {:ok, server_session_key} =
+               Pairing.process_pairing_message(server_private_key, client_public_key)
 
-      # Server: Process client message
-      assert {:ok, server_handshake_final, server_response} =
-               Pairing.process_pairing_message(server_handshake, client_message_bin)
+      # Step 4: Client receives server's public key and derives same session key
+      client_session_key = Crypto.derive_session_key(client_private_key, server_public_key)
 
-      # Client: Process server response (<- e, ee)
-      _payload = Decibel.handshake_decrypt(client_handshake, server_response)
+      # Both parties should have the same session key
+      assert server_session_key == client_session_key
 
-      # Verify handshake is complete
-      assert Decibel.is_handshake_complete?(client_handshake)
-      assert Decibel.is_handshake_complete?(server_handshake_final)
-
-      # Server: Complete pairing with claim code
+      # Step 5: Server completes pairing with claim code
       device_attrs = %{
         device_name: "Test Phone",
         platform: "iOS"
       }
 
-      assert {:ok, device, media_token, {device_public_key, device_private_key}, _final_state} =
-               Pairing.complete_pairing(claim.code, device_attrs, server_handshake_final)
+      assert {:ok, device, media_token, {device_public_key, device_private_key}, _session_key} =
+               Pairing.complete_pairing(claim.code, device_attrs, server_session_key)
 
       # Verify device was created
       assert device.device_name == "Test Phone"
@@ -442,8 +508,27 @@ defmodule Mydia.RemoteAccess.PairingTest do
       # Verify token was generated
       assert is_binary(media_token)
 
-      # At this point, the device keypair can be sent to the client
-      # over the encrypted Noise channel
+      # Step 6: Server encrypts device keypair and sends to client over secure channel
+      keypair_data =
+        Jason.encode!(%{
+          public_key: Base.encode64(device_public_key),
+          private_key: Base.encode64(device_private_key)
+        })
+
+      encrypted = Crypto.encrypt(keypair_data, server_session_key)
+
+      # Client decrypts the keypair
+      {:ok, decrypted_data} =
+        Crypto.decrypt(
+          encrypted.ciphertext,
+          encrypted.nonce,
+          encrypted.mac,
+          client_session_key
+        )
+
+      decoded = Jason.decode!(decrypted_data)
+      assert decoded["public_key"] == Base.encode64(device_public_key)
+      assert decoded["private_key"] == Base.encode64(device_private_key)
     end
   end
 end

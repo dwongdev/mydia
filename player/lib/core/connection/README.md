@@ -14,7 +14,8 @@ Result types for connection operations:
 ### `connection_manager.dart`
 
 The main connection orchestration service that implements:
-- **Direct-first strategy**: Tries each direct URL with configurable timeout (default 5s)
+- **Direct-first strategy**: Tries all direct URLs in parallel, returning the first successful connection
+- **Parallel attempts**: All URLs are tried simultaneously with individual timeouts (default 5s), improving connection time when some URLs are unreachable
 - **Certificate verification**: (TODO) Validates TLS certificates against stored fingerprints
 - **Relay fallback**: Falls back to WebSocket tunnel if all direct URLs fail
 - **Preference storage**: Remembers last successful connection method for future optimization
@@ -122,7 +123,7 @@ if (tunnel != null) {
 ## Future Enhancements
 
 1. **Certificate Pinning**: Implement actual TLS certificate verification in `_tryDirectConnection()`
-2. **Parallel Attempts**: Try multiple direct URLs in parallel with timeout race
+2. ~~**Parallel Attempts**: Try multiple direct URLs in parallel with timeout race~~ ✅ Implemented
 3. **Connection Quality**: Track connection latency and reliability metrics
 4. **Smart Ordering**: Use historical success rates to reorder direct URLs
 5. **Relay Handshake**: Extend to support performing Noise handshakes over relay tunnels

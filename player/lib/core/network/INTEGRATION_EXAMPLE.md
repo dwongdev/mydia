@@ -231,7 +231,7 @@ As of this implementation:
 
 ## Testing
 
-Due to FlutterSecureStorage requiring native platform, unit tests need mocking. See `test/core/crypto/noise_service_test.dart` for an example of mocking FlutterSecureStorage.
+Due to FlutterSecureStorage requiring native platform, unit tests need mocking. Use Mockito to mock FlutterSecureStorage in your tests.
 
 For integration testing, test with a real development server using self-signed certificates:
 

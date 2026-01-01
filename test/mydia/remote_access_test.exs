@@ -69,7 +69,7 @@ defmodule Mydia.RemoteAccessTest do
       encrypted_data = %{ciphertext: ciphertext, nonce: nonce}
 
       assert {:ok, decrypted_key} =
-               Mydia.Crypto.Noise.decrypt_private_key(encrypted_data, app_secret)
+               Mydia.Crypto.decrypt_private_key(encrypted_data, app_secret)
 
       # Should be 32 bytes
       assert byte_size(decrypted_key) == 32
@@ -110,14 +110,14 @@ defmodule Mydia.RemoteAccessTest do
 
     test "decrypted private key matches original keypair" do
       # Generate a keypair directly
-      {public_key_direct, private_key_direct} = Mydia.Crypto.Noise.generate_keypair()
+      {public_key_direct, private_key_direct} = Mydia.Crypto.generate_keypair()
 
       # Get app secret
       secret_key_base = Application.get_env(:mydia, MydiaWeb.Endpoint)[:secret_key_base]
       app_secret = :crypto.hash(:sha256, secret_key_base)
 
       # Encrypt the private key
-      encrypted = Mydia.Crypto.Noise.encrypt_private_key(private_key_direct, app_secret)
+      encrypted = Mydia.Crypto.encrypt_private_key(private_key_direct, app_secret)
       encrypted_blob = <<encrypted.nonce::64>> <> encrypted.ciphertext
 
       # Store in config
@@ -280,6 +280,34 @@ defmodule Mydia.RemoteAccessTest do
 
     test "returns error for non-existent code" do
       assert {:error, :not_found} = RemoteAccess.validate_claim_code("INVALID-CODE")
+    end
+
+    test "validates 6-char code from relay (no dash)" do
+      # This tests the fix for MYD-17: relay generates 6-char codes without dashes
+      # and we need to validate them without re-adding a dash
+      user = create_user()
+
+      # Directly create a claim with a 6-char code (like relay generates)
+      expires_at = DateTime.utc_now() |> DateTime.add(300, :second) |> DateTime.truncate(:second)
+
+      {:ok, claim} =
+        %PairingClaim{}
+        |> PairingClaim.changeset_with_code(%{
+          user_id: user.id,
+          code: "ABC123",
+          expires_at: expires_at
+        })
+        |> Repo.insert()
+
+      # Should find the claim with the exact code
+      assert {:ok, validated_claim} = RemoteAccess.validate_claim_code("ABC123")
+      assert validated_claim.id == claim.id
+
+      # Should also work with lowercase
+      assert {:ok, _} = RemoteAccess.validate_claim_code("abc123")
+
+      # Should also work if user adds a dash (normalization strips it)
+      assert {:ok, _} = RemoteAccess.validate_claim_code("ABC-123")
     end
 
     test "returns error for expired code" do

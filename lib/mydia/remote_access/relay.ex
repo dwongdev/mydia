@@ -28,8 +28,12 @@ defmodule Mydia.RemoteAccess.Relay do
 
   alias Mydia.RemoteAccess
 
-  # Heartbeat interval: 30 seconds
+  # Heartbeat interval: 30 seconds (matches Phoenix Channel defaults)
   @heartbeat_interval 30_000
+
+  # Heartbeat response timeout: 10 seconds
+  # If no pong received within this time, connection is considered dead
+  @heartbeat_timeout 10_000
 
   # Reconnect intervals with exponential backoff (in milliseconds)
   @initial_reconnect_delay 1_000
@@ -222,6 +226,8 @@ defmodule Mydia.RemoteAccess.Relay do
       registered: false,
       ws_pid: nil,
       heartbeat_timer: nil,
+      heartbeat_timeout_ref: nil,
+      pending_heartbeat: false,
       reconnect_delay: @initial_reconnect_delay,
       pending_claims: %{}
     }
@@ -313,6 +319,23 @@ defmodule Mydia.RemoteAccess.Relay do
 
   @impl GenServer
   def handle_cast({:send_relay_message, session_id, payload}, state) do
+    # Parse payload to get message info
+    message_info =
+      case Jason.decode(payload) do
+        {:ok, %{"type" => msg_type, "status" => status}} ->
+          "type=#{msg_type}, status=#{status}"
+
+        {:ok, %{"type" => msg_type}} ->
+          "type=#{msg_type}"
+
+        _ ->
+          "binary"
+      end
+
+    Logger.info(
+      "Relay sending message to client: session=#{session_id}, #{message_info}, payload_size=#{byte_size(payload)}"
+    )
+
     if state.ws_pid do
       msg =
         Jason.encode!(%{
@@ -321,7 +344,10 @@ defmodule Mydia.RemoteAccess.Relay do
           payload: Base.encode64(payload)
         })
 
+      Logger.info("Relay WebSocket frame sent: session=#{session_id}, frame_size=#{byte_size(msg)}")
       WebSockex.send_frame(state.ws_pid, {:text, msg})
+    else
+      Logger.warning("Cannot send relay_message: ws_pid is nil, session=#{session_id}")
     end
 
     {:noreply, state}
@@ -353,11 +379,32 @@ defmodule Mydia.RemoteAccess.Relay do
     if state.ws_pid && state.connected do
       msg = Jason.encode!(%{type: "ping"})
       WebSockex.send_frame(state.ws_pid, {:text, msg})
-    end
 
-    # Schedule next heartbeat
-    timer = Process.send_after(self(), :heartbeat, @heartbeat_interval)
-    {:noreply, %{state | heartbeat_timer: timer}}
+      # Schedule heartbeat response timeout
+      timeout_ref = Process.send_after(self(), :heartbeat_timeout, @heartbeat_timeout)
+
+      {:noreply, %{state | pending_heartbeat: true, heartbeat_timeout_ref: timeout_ref}}
+    else
+      # Not connected, schedule next heartbeat attempt
+      timer = Process.send_after(self(), :heartbeat, @heartbeat_interval)
+      {:noreply, %{state | heartbeat_timer: timer}}
+    end
+  end
+
+  @impl GenServer
+  def handle_info(:heartbeat_timeout, %{pending_heartbeat: true} = state) do
+    Logger.warning(
+      "Heartbeat timeout - no pong received within #{@heartbeat_timeout}ms, reconnecting"
+    )
+
+    state = handle_disconnect(state)
+    {:noreply, state}
+  end
+
+  @impl GenServer
+  def handle_info(:heartbeat_timeout, state) do
+    # Heartbeat was already acknowledged, ignore stale timeout
+    {:noreply, state}
   end
 
   @impl GenServer
@@ -426,7 +473,7 @@ defmodule Mydia.RemoteAccess.Relay do
 
   @impl GenServer
   def handle_info(msg, state) do
-    Logger.debug("Relay received unexpected message: #{inspect(msg)}")
+    Logger.info("Relay received unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
 
@@ -445,8 +492,14 @@ defmodule Mydia.RemoteAccess.Relay do
   end
 
   defp handle_relay_message(%{"type" => "pong"}, state) do
-    # Heartbeat acknowledged
-    state
+    # Heartbeat acknowledged - cancel timeout and schedule next heartbeat
+    if state.heartbeat_timeout_ref do
+      Process.cancel_timer(state.heartbeat_timeout_ref)
+    end
+
+    timer = Process.send_after(self(), :heartbeat, @heartbeat_interval)
+
+    %{state | pending_heartbeat: false, heartbeat_timeout_ref: nil, heartbeat_timer: timer}
   end
 
   defp handle_relay_message(
@@ -456,7 +509,11 @@ defmodule Mydia.RemoteAccess.Relay do
          } = msg,
          state
        ) do
-    Logger.info("Received relayed connection request: session_id=#{session_id}")
+    has_public_key = msg["client_public_key"] != nil && msg["client_public_key"] != ""
+
+    Logger.info(
+      "Relay received connection request: session=#{session_id}, has_client_public_key=#{has_public_key}"
+    )
 
     # Client public key is optional - it will be established during Noise handshake
     client_public_key =
@@ -475,7 +532,9 @@ defmodule Mydia.RemoteAccess.Relay do
       end
 
     # Broadcast relay connection event to the tunnel supervisor
-    Logger.info("Accepting relayed connection from client (session: #{session_id})")
+    Logger.info(
+      "Relay accepting connection: session=#{session_id}, client_public_key_length=#{byte_size(client_public_key)}, broadcasting to relay:connections"
+    )
 
     Phoenix.PubSub.broadcast(
       Mydia.PubSub,
@@ -483,6 +542,7 @@ defmodule Mydia.RemoteAccess.Relay do
       {:relay_connection, session_id, client_public_key, self()}
     )
 
+    Logger.info("Relay broadcast sent for session #{session_id}")
     state
   end
 
@@ -493,7 +553,37 @@ defmodule Mydia.RemoteAccess.Relay do
     # Forward relayed message to the appropriate session
     case Base.decode64(payload_b64) do
       {:ok, payload} ->
-        Logger.debug("Forwarding relay message for session #{session_id}")
+        # Try to parse and log message type for debugging
+        message_info =
+          case Jason.decode(payload) do
+            {:ok, %{"type" => msg_type} = msg} ->
+              extra =
+                case msg_type do
+                  "request" ->
+                    ", method=#{msg["method"]}, path=#{msg["path"]}, id=#{msg["id"]}"
+
+                  "pairing_handshake" ->
+                    ", initiating pairing"
+
+                  "handshake_init" ->
+                    ", initiating reconnection handshake"
+
+                  "claim_code" ->
+                    ", claiming code=#{msg["data"]["code"] || msg["code"]}"
+
+                  _ ->
+                    ""
+                end
+
+              "type=#{msg_type}#{extra}"
+
+            _ ->
+              "binary data"
+          end
+
+        Logger.info(
+          "Received relay_message for session #{session_id}: #{message_info}, payload_size=#{byte_size(payload)}"
+        )
 
         Phoenix.PubSub.broadcast(
           Mydia.PubSub,
@@ -502,7 +592,7 @@ defmodule Mydia.RemoteAccess.Relay do
         )
 
       :error ->
-        Logger.warning("Invalid payload in relay message")
+        Logger.warning("Invalid base64 payload in relay message for session #{session_id}")
     end
 
     state
@@ -545,7 +635,7 @@ defmodule Mydia.RemoteAccess.Relay do
   end
 
   defp handle_relay_message(msg, state) do
-    Logger.debug("Unhandled relay message: #{inspect(msg)}")
+    Logger.info("Relay received unhandled message type: #{msg["type"] || "unknown"}")
     state
   end
 
@@ -553,6 +643,11 @@ defmodule Mydia.RemoteAccess.Relay do
     # Cancel heartbeat timer
     if state.heartbeat_timer do
       Process.cancel_timer(state.heartbeat_timer)
+    end
+
+    # Cancel heartbeat timeout timer
+    if state.heartbeat_timeout_ref do
+      Process.cancel_timer(state.heartbeat_timeout_ref)
     end
 
     # Reply to any pending claims with error
@@ -569,6 +664,8 @@ defmodule Mydia.RemoteAccess.Relay do
         registered: false,
         ws_pid: nil,
         heartbeat_timer: nil,
+        heartbeat_timeout_ref: nil,
+        pending_heartbeat: false,
         pending_claims: %{}
     }
   end
@@ -584,7 +681,20 @@ defmodule Mydia.RemoteAccess.Relay do
       Process.cancel_timer(state.heartbeat_timer)
     end
 
-    %{state | connected: false, registered: false, ws_pid: nil, heartbeat_timer: nil}
+    # Cancel heartbeat timeout timer
+    if state.heartbeat_timeout_ref do
+      Process.cancel_timer(state.heartbeat_timeout_ref)
+    end
+
+    %{
+      state
+      | connected: false,
+        registered: false,
+        ws_pid: nil,
+        heartbeat_timer: nil,
+        heartbeat_timeout_ref: nil,
+        pending_heartbeat: false
+    }
   end
 
   defp schedule_reconnect(state) do

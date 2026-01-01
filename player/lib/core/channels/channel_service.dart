@@ -338,6 +338,77 @@ class ChannelService {
     }
   }
 
+  /// Sends a key exchange message for reconnection.
+  ///
+  /// The [channel] should be a reconnect channel obtained from [joinReconnectChannel].
+  /// The [clientPublicKey] is the client's X25519 public key (base64 encoded).
+  /// The [deviceToken] is the stored device token for authentication.
+  ///
+  /// Returns a [ChannelResult] with the server's public key and credentials.
+  Future<ChannelResult<KeyExchangeResponse>> sendKeyExchange(
+    PhoenixChannel channel,
+    String clientPublicKey,
+    String deviceToken,
+  ) async {
+    debugPrint('[ChannelService] Sending key_exchange for reconnect...');
+    try {
+      final push = channel.push(
+        'key_exchange',
+        {
+          'client_public_key': clientPublicKey,
+          'device_token': deviceToken,
+        },
+      );
+
+      // Use the Push.future property to properly await the response
+      final response = await push.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          debugPrint('[ChannelService] TIMEOUT waiting for key exchange');
+          throw TimeoutException('Key exchange timed out');
+        },
+      );
+
+      debugPrint('[ChannelService] Got key exchange response: ${response.status}');
+
+      if (response.isOk) {
+        final responseData = response.response;
+        if (responseData == null) {
+          debugPrint('[ChannelService] No response data');
+          return ChannelResult.error('No response data');
+        }
+
+        final serverPublicKey = responseData['server_public_key'] as String?;
+        final token = responseData['token'] as String?;
+        final deviceId = responseData['device_id'] as String?;
+
+        if (serverPublicKey == null || token == null || deviceId == null) {
+          debugPrint('[ChannelService] Incomplete response data');
+          return ChannelResult.error('Incomplete response data');
+        }
+
+        debugPrint('[ChannelService] Key exchange successful!');
+        return ChannelResult.success(
+          KeyExchangeResponse(
+            serverPublicKey: serverPublicKey,
+            mediaToken: token,
+            deviceId: deviceId,
+          ),
+        );
+      } else {
+        final error = response.response?['reason'] ?? 'Unknown error';
+        debugPrint('[ChannelService] Key exchange failed: $error');
+        return ChannelResult.error(_formatErrorReason(error));
+      }
+    } on TimeoutException {
+      debugPrint('[ChannelService] Key exchange timed out');
+      return ChannelResult.error('Key exchange failed: timeout');
+    } catch (e) {
+      debugPrint('[ChannelService] Exception in key exchange: $e');
+      return ChannelResult.error('Error in key exchange: $e');
+    }
+  }
+
   /// Submits a claim code to complete pairing.
   ///
   /// The [channel] should be a pairing channel with a completed handshake.
@@ -490,7 +561,7 @@ class PairingResponse {
   });
 }
 
-/// Response from a successful reconnection operation.
+/// Response from a successful reconnection operation (legacy Noise handshake).
 class ReconnectResponse {
   /// The server's handshake response message.
   final Uint8List message;
@@ -503,6 +574,24 @@ class ReconnectResponse {
 
   const ReconnectResponse({
     required this.message,
+    required this.mediaToken,
+    required this.deviceId,
+  });
+}
+
+/// Response from a successful key exchange operation.
+class KeyExchangeResponse {
+  /// The server's public key for ECDH (base64 encoded).
+  final String serverPublicKey;
+
+  /// The refreshed media access token.
+  final String mediaToken;
+
+  /// The device ID.
+  final String deviceId;
+
+  const KeyExchangeResponse({
+    required this.serverPublicKey,
     required this.mediaToken,
     required this.deviceId,
   });

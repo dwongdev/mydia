@@ -449,20 +449,12 @@ defmodule MetadataRelay.Relay do
     Plug.Crypto.KeyGenerator.generate(secret_key_base, "relay instance tokens", length: 32)
   end
 
-  # Normalizes a claim code to the expected format (XXXX-XXXX)
-  # Handles codes with or without hyphen, converts to uppercase
+  # Normalizes a claim code by removing whitespace/dashes and uppercasing.
+  # Codes are stored without dashes, so normalization only cleans user input.
   defp normalize_claim_code(code) when is_binary(code) do
-    # Remove any existing hyphens/spaces, uppercase
-    clean = code |> String.upcase() |> String.replace(~r/[-\s]/, "")
-
-    # Add hyphen in middle if it's 8 chars (expected format)
-    if String.length(clean) == 8 do
-      {first, second} = String.split_at(clean, 4)
-      "#{first}-#{second}"
-    else
-      # Return as-is (uppercased) for other lengths
-      String.upcase(code)
-    end
+    code
+    |> String.upcase()
+    |> String.replace(~r/[-\s]/, "")
   end
 
   defp normalize_claim_code(code), do: code

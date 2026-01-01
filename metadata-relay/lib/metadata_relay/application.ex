@@ -6,6 +6,9 @@ defmodule MetadataRelay.Application do
 
   @impl true
   def start(_type, _args) do
+    # Create ETS tables before supervision tree for O(1) connection lookups
+    create_ets_tables()
+
     # Determine cache adapter based on REDIS_URL environment variable
     {cache_adapter, cache_opts} = configure_cache()
 
@@ -112,5 +115,13 @@ defmodule MetadataRelay.Application do
       Logger.info("OpenSubtitles credentials not configured, subtitle support disabled")
       []
     end
+  end
+
+  defp create_ets_tables do
+    # Create ETS tables for O(1) relay connection lookups
+    # These must be created before the supervision tree starts
+    Logger.info("Creating ETS tables for relay connection registry")
+    MetadataRelay.Relay.ConnectionRegistry.create_table()
+    MetadataRelay.Relay.PendingRequests.create_table()
   end
 end

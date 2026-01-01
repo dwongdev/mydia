@@ -3,6 +3,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../core/graphql/graphql_provider.dart';
 import '../../../core/channels/pairing_service.dart';
 import '../../../core/auth/device_info_service.dart';
+import '../../../core/connection/connection_provider.dart';
 import '../../../core/relay/relay_service.dart';
 
 // Re-export QrPairingData so UI can import from one place
@@ -161,6 +162,7 @@ class LoginController extends _$LoginController {
 
       // Pairing successful - store credentials in auth service
       debugPrint('[LoginController] Pairing successful! Storing credentials...');
+      debugPrint('[LoginController] isRelayMode=${result.isRelayMode}');
       final credentials = result.credentials!;
       final authService = ref.read(authServiceProvider);
 
@@ -170,7 +172,27 @@ class LoginController extends _$LoginController {
         userId: credentials.deviceId, // Use device ID as user ID for now
         username: 'Device ${credentials.deviceId.substring(0, 8)}',
       );
-      debugPrint('[LoginController] Credentials stored, refreshing auth state...');
+      debugPrint('[LoginController] Credentials stored');
+
+      // If relay mode, set the tunnel in the connection provider
+      if (result.isRelayMode && result.relayTunnel != null) {
+        debugPrint('[LoginController] Setting relay tunnel in connection provider');
+        await ref.read(connectionProvider.notifier).setRelayTunnel(
+          result.relayTunnel!,
+          instanceId: credentials.instanceId,
+          relayUrl: relayUrl,
+        );
+        debugPrint('[LoginController] Relay tunnel set');
+        // Invalidate GraphQL providers to force rebuild with relay mode
+        ref.invalidate(graphqlClientProvider);
+        ref.invalidate(asyncGraphqlClientProvider);
+        debugPrint('[LoginController] GraphQL providers invalidated');
+      } else {
+        debugPrint('[LoginController] Direct mode, ensuring connection provider is in direct mode');
+        await ref.read(connectionProvider.notifier).setDirectMode();
+      }
+
+      debugPrint('[LoginController] Refreshing auth state...');
 
       if (!ref.mounted) {
         debugPrint('[LoginController] Not mounted after setSession, returning early');
@@ -312,6 +334,7 @@ class LoginController extends _$LoginController {
       if (!ref.mounted) return;
 
       // Pairing successful - store credentials in auth service
+      debugPrint('[LoginController] QR pairing successful! isRelayMode=${result.isRelayMode}');
       final credentials = result.credentials!;
       final authService = ref.read(authServiceProvider);
 
@@ -321,6 +344,22 @@ class LoginController extends _$LoginController {
         userId: credentials.deviceId,
         username: 'Device ${credentials.deviceId.substring(0, 8)}',
       );
+
+      // If relay mode, set the tunnel in the connection provider
+      if (result.isRelayMode && result.relayTunnel != null) {
+        debugPrint('[LoginController] Setting relay tunnel from QR pairing');
+        await ref.read(connectionProvider.notifier).setRelayTunnel(
+          result.relayTunnel!,
+          instanceId: credentials.instanceId,
+          relayUrl: qrData.relayUrl,
+        );
+        // Invalidate GraphQL providers to force rebuild with relay mode
+        ref.invalidate(graphqlClientProvider);
+        ref.invalidate(asyncGraphqlClientProvider);
+        debugPrint('[LoginController] GraphQL providers invalidated');
+      } else {
+        await ref.read(connectionProvider.notifier).setDirectMode();
+      }
 
       if (!ref.mounted) return;
 

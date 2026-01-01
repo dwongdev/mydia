@@ -155,6 +155,8 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
          state
        ) do
     # Alternative connection via claim code
+    Logger.info("Client connecting via claim code: #{code}")
+
     case Relay.redeem_claim(code) do
       {:ok, info} ->
         if info.online do
@@ -165,11 +167,15 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
           state = reset_timeout(state)
 
           # Notify the instance about the incoming connection
+          Logger.debug("Broadcasting relay_connection to relay:instance:#{info.instance_id}")
+
           Phoenix.PubSub.broadcast(
             MetadataRelay.PubSub,
             "relay:instance:#{info.instance_id}",
             {:relay_connection, state.session_id, <<>>}
           )
+
+          Logger.debug("Broadcast sent for session #{state.session_id}")
 
           response =
             Jason.encode!(%{
@@ -210,9 +216,17 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
 
   defp handle_message(%{"type" => "message", "payload" => payload_b64}, state)
        when state.connected do
+    Logger.debug(
+      "Received message from client, session: #{state.session_id}, connected: #{state.connected}"
+    )
+
     case Base.decode64(payload_b64) do
       {:ok, payload} ->
         state = reset_timeout(state)
+
+        Logger.debug(
+          "Forwarding message to instance #{state.instance_id}, payload size: #{byte_size(payload)}"
+        )
 
         # Forward message to instance via PubSub
         Phoenix.PubSub.broadcast(
@@ -220,6 +234,8 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
           "relay:instance:#{state.instance_id}",
           {:relay_message, state.session_id, payload}
         )
+
+        Logger.debug("Message forwarded to relay:instance:#{state.instance_id}")
 
         {:ok, state}
 

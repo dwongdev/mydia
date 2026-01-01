@@ -78,8 +78,6 @@ defmodule Mydia.MixProject do
       {:bcrypt_elixir, "~> 3.0"},
       # Password hashing for API keys
       {:argon2_elixir, "~> 4.0"},
-      # Noise Protocol for secure device pairing
-      {:decibel, "~> 0.2.4"},
 
       # HTTP Clients
       {:finch, "~> 0.16"},

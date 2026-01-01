@@ -12,6 +12,10 @@ defmodule Mydia.Application do
   def start(_type, _args) do
     # Suppress logger output in CLI mode
     if cli_mode?(), do: Logger.configure(level: :error)
+
+    # Create ETS tables before supervision tree for O(1) token lookups
+    create_ets_tables()
+
     # Load and validate configuration at startup
     config = load_config!()
 
@@ -33,6 +37,8 @@ defmodule Mydia.Application do
         Mydia.Metadata.Cache,
         Mydia.Metadata.ProviderIDRegistry,
         {Task.Supervisor, name: Mydia.TaskSupervisor},
+        # Request task supervisor for multiplexed request handling with independent timeouts
+        {Task.Supervisor, name: Mydia.RequestTaskSupervisor},
         Mydia.Hooks.Manager,
         {Registry, keys: :unique, name: Mydia.Streaming.HlsSessionRegistry},
         Mydia.Streaming.HlsSessionSupervisor,
@@ -365,5 +371,11 @@ defmodule Mydia.Application do
           unless cli_mode?(), do: IO.puts("✓ Reset #{count} stale job(s) to available state")
       end
     end
+  end
+
+  defp create_ets_tables do
+    # Create ETS tables for O(1) media token lookups
+    # These must be created before the supervision tree starts
+    Mydia.Media.TokenCache.create_table()
   end
 end

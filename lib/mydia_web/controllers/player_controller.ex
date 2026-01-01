@@ -3,19 +3,27 @@ defmodule MydiaWeb.PlayerController do
 
   alias Mydia.Auth.Guardian
 
+  require Logger
+
   @moduledoc """
   Serves the Flutter web player application.
 
-  This controller handles all /player/* routes and serves the Flutter
+  This controller handles the main /player route and serves the Flutter
   web app's index.html, allowing Flutter's hash-based routing to work.
 
   For authenticated users, the controller injects auth configuration
   into the HTML so the Flutter app can auto-authenticate without
   requiring manual login.
+
+  In development, fetches index.html from the Flutter dev server.
+  In production, serves from priv/static/player/.
   """
 
+  # Flutter dev server URL (Docker service name)
+  @flutter_dev_server "http://player:3000"
+
   @doc """
-  Serves the Flutter web player's index.html for all /player/* routes.
+  Serves the Flutter web player's index.html.
 
   The Flutter app uses hash-based routing (e.g., /player/#/movies/123),
   so all routes should serve the same index.html and let Flutter handle
@@ -27,26 +35,84 @@ defmodule MydiaWeb.PlayerController do
   - Server URL is auto-detected by Flutter from window.location.origin
   """
   def index(conn, _params) do
+    case fetch_player_html(conn) do
+      {:ok, html_content} ->
+        # Get auth info from session
+        auth_config = build_auth_config(conn)
+
+        # Inject auth config before the Flutter bootstrap
+        modified_html = inject_auth_config(html_content, auth_config)
+
+        conn
+        |> put_resp_content_type("text/html")
+        |> send_resp(200, modified_html)
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(:not_found)
+        |> put_view(html: MydiaWeb.ErrorHTML)
+        |> render(:"404")
+
+      {:error, reason} ->
+        Logger.error("Failed to fetch player HTML: #{inspect(reason)}")
+
+        conn
+        |> put_status(:service_unavailable)
+        |> put_view(html: MydiaWeb.ErrorHTML)
+        |> render(:"500")
+    end
+  end
+
+  # In development, fetch from Flutter dev server
+  # In production, read from static files
+  defp fetch_player_html(conn) do
+    if Application.get_env(:mydia, :dev_routes) do
+      fetch_from_dev_server(conn)
+    else
+      fetch_from_static_files()
+    end
+  end
+
+  defp fetch_from_dev_server(conn) do
+    case Req.get("#{@flutter_dev_server}/", receive_timeout: 30_000) do
+      {:ok, %Req.Response{status: 200, body: body}} ->
+        # Get the external host from the request
+        external_host = get_external_host(conn)
+
+        # Rewrite base href and internal URLs
+        # WebSocket paths need /player prefix to go through Phoenix proxy
+        rewritten =
+          body
+          |> String.replace(~s(<base href="/">), ~s(<base href="/player/">))
+          |> String.replace("ws://player:3000/", "ws://#{external_host}/player/")
+          |> String.replace("http://player:3000/", "http://#{external_host}/player/")
+          |> String.replace("player:3000", external_host)
+
+        {:ok, rewritten}
+
+      {:ok, %Req.Response{status: status}} ->
+        Logger.warning("Flutter dev server returned status #{status}")
+        {:error, :not_found}
+
+      {:error, reason} ->
+        Logger.error("Failed to connect to Flutter dev server: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  defp get_external_host(conn) do
+    host = get_req_header(conn, "host") |> List.first() || "localhost:4000"
+    # Remove port if it's 80 or 443
+    host
+  end
+
+  defp fetch_from_static_files do
     player_index_path = Path.join([:code.priv_dir(:mydia), "static", "player", "index.html"])
 
     if File.exists?(player_index_path) do
-      # Read the original Flutter index.html
-      html_content = File.read!(player_index_path)
-
-      # Get auth info from session
-      auth_config = build_auth_config(conn)
-
-      # Inject auth config before the Flutter bootstrap
-      modified_html = inject_auth_config(html_content, auth_config)
-
-      conn
-      |> put_resp_content_type("text/html")
-      |> send_resp(200, modified_html)
+      {:ok, File.read!(player_index_path)}
     else
-      conn
-      |> put_status(:not_found)
-      |> put_view(html: MydiaWeb.ErrorHTML)
-      |> render(:"404")
+      {:error, :not_found}
     end
   end
 

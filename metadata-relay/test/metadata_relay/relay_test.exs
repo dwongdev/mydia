@@ -156,6 +156,29 @@ defmodule MetadataRelay.RelayTest do
       assert {:error, :not_found} = Relay.redeem_claim("NONEXISTENT")
     end
 
+    test "normalizes claim code on redeem (case insensitive, strips dashes)" do
+      # MYD-17: codes are stored without dashes, so normalization should work
+      {:ok, instance} = create_instance()
+      {:ok, _} = Relay.set_online(instance)
+      user_id = "user-#{System.unique_integer()}"
+      {:ok, claim} = Relay.create_claim(instance, user_id)
+
+      # The code should be uppercase, 6 chars, no dash
+      assert String.length(claim.code) == 6
+      assert claim.code == String.upcase(claim.code)
+      refute String.contains?(claim.code, "-")
+
+      # Should work with lowercase
+      assert {:ok, _} = Relay.redeem_claim(String.downcase(claim.code))
+
+      # Create another claim to test with dash
+      {:ok, claim2} = Relay.create_claim(instance, user_id)
+
+      # Should work if user adds a dash
+      code_with_dash = String.slice(claim2.code, 0, 3) <> "-" <> String.slice(claim2.code, 3, 3)
+      assert {:ok, _} = Relay.redeem_claim(code_with_dash)
+    end
+
     test "returns error for consumed code" do
       {:ok, instance} = create_instance()
       {:ok, _} = Relay.set_online(instance)

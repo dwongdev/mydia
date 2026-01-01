@@ -41,14 +41,14 @@ defmodule Mydia.RemoteAccess do
 
   """
   def initialize_keypair do
-    # Generate a new Noise protocol keypair
-    {public_key, private_key} = Mydia.Crypto.Noise.generate_keypair()
+    # Generate a new X25519 keypair
+    {public_key, private_key} = Mydia.Crypto.generate_keypair()
 
     # Get the application secret for encryption
     app_secret = get_app_secret()
 
     # Encrypt the private key
-    encrypted = Mydia.Crypto.Noise.encrypt_private_key(private_key, app_secret)
+    encrypted = Mydia.Crypto.encrypt_private_key(private_key, app_secret)
 
     # Generate a unique instance ID
     instance_id = Ecto.UUID.generate()
@@ -123,7 +123,7 @@ defmodule Mydia.RemoteAccess do
 
         # Decrypt the private key
         encrypted_data = %{ciphertext: ciphertext, nonce: nonce}
-        Mydia.Crypto.Noise.decrypt_private_key(encrypted_data, app_secret)
+        Mydia.Crypto.decrypt_private_key(encrypted_data, app_secret)
     end
   end
 
@@ -441,21 +441,12 @@ defmodule Mydia.RemoteAccess do
   end
 
   # Normalize claim code by removing whitespace and dashes, converting to uppercase
+  # This only cleans user input - it doesn't re-add dashes since relay generates
+  # codes without dashes and stores them as-is
   defp normalize_code(code) do
     code
     |> String.replace(~r/[\s-]/, "")
     |> String.upcase()
-    |> then(fn normalized ->
-      # Re-add the dash in the middle for consistency with stored format
-      half = div(String.length(normalized), 2)
-
-      if half > 0 do
-        {first, second} = String.split_at(normalized, half)
-        "#{first}-#{second}"
-      else
-        normalized
-      end
-    end)
   end
 
   # Relay service management

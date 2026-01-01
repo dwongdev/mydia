@@ -3,8 +3,6 @@ FROM ghcr.io/cirruslabs/flutter:stable
 # Install development dependencies
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
-        inotify-tools \
-        python3 \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -31,71 +29,28 @@ else
     flutter pub run build_runner build --delete-conflicting-outputs || true
 fi
 
-MODE="${PLAYER_DEV_MODE:-watch}"
+echo ''
+echo '================================================='
+echo 'Flutter Web Development Server'
+echo '================================================='
+echo ''
+echo 'Access the player at: http://localhost:4000/player'
+echo ''
+echo 'Hot restart: Press "R" in this terminal'
+echo 'Hot reload:  Press "r" in this terminal'
+echo ''
+echo '================================================='
+echo ''
 
-case "$MODE" in
-    hot)
-        echo ''
-        echo '================================================='
-        echo 'Flutter Web Development Server (Hot Restart)'
-        echo '================================================='
-        echo ''
-        echo 'Access the player at: http://localhost:3000'
-        echo ''
-        echo 'Hot restart: Press "R" in this terminal'
-        echo 'Hot reload:  Press "r" in this terminal'
-        echo ''
-        echo '================================================='
-        echo ''
-
-        # Run Flutter web server with hot restart support
-        exec flutter run -d web-server \
-            --web-port=3000 \
-            --web-hostname=0.0.0.0
-        ;;
-
-    watch)
-        echo 'Initial Flutter web build...'
-        flutter build web --profile --no-web-resources-cdn --no-wasm-dry-run --dart-define=Dart2jsOptimization=O0 --base-href /player/
-        rm -rf /app/priv/static/player
-        mkdir -p /app/priv/static/player
-        cp -r build/web/* /app/priv/static/player/
-
-        echo ''
-        echo '================================================='
-        echo 'Flutter build complete!'
-        echo 'Files synced to priv/static/player/'
-        echo 'Access at http://localhost:4000/player'
-        echo ''
-        echo 'Watching for file changes in lib/...'
-        echo 'Refresh browser after build completes.'
-        echo '================================================='
-        echo ''
-
-        while true; do
-            inotifywait -r -e modify,create,delete --exclude '\.dart_tool|build|\.git|\.tmp|\.g\.dart' lib/ 2>/dev/null
-            echo ''
-            echo '>>> File change detected, rebuilding...'
-            if flutter build web --profile --no-web-resources-cdn --dart-define=Dart2jsOptimization=O0 --base-href /player/ 2>&1; then
-                rm -rf /app/priv/static/player
-                mkdir -p /app/priv/static/player
-                cp -r build/web/* /app/priv/static/player/
-                echo '>>> Build complete! Refresh browser to see changes.'
-            else
-                echo '>>> Build FAILED - check errors above'
-            fi
-        done
-        ;;
-
-    *)
-        echo "Unknown PLAYER_DEV_MODE: $MODE"
-        echo "Valid options: 'hot' or 'watch'"
-        exit 1
-        ;;
-esac
+# Run Flutter web server
+# Phoenix will reverse-proxy to this server
+exec flutter run -d web-server \
+    --web-port=3000 \
+    --web-hostname=0.0.0.0
 EOF
 
 RUN chmod +x /entrypoint.sh
 
-# Default command runs the entrypoint
+EXPOSE 3000
+
 CMD ["/entrypoint.sh"]

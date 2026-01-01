@@ -15,42 +15,32 @@ This is the Flutter web client for Mydia, built for streaming media playback.
 **Always use the `./dev` wrapper from the project root:**
 
 ```bash
-./dev up -d               # Start everything (Phoenix + Flutter build watcher)
-./dev player hot          # Start with hot restart (recommended for active dev)
-./dev player logs         # Follow Flutter build output
-./dev player restart      # Force restart Flutter container
-./dev player build        # Build AND deploy to Phoenix (use this!)
+./dev up -d               # Start everything (Phoenix + Flutter dev server)
+./dev player logs         # Follow Flutter dev server logs (press R for hot restart)
+./dev player restart      # Restart Flutter dev server
+./dev player setup        # Install deps and run code generation
+./dev player build        # Build AND deploy to Phoenix (for production)
 ./dev flutter pub get     # Install dependencies
 ./dev flutter analyze     # Run static analysis
 ./dev flutter test        # Run tests
 ```
 
-### Development Modes
+### Development
 
-**Hot Restart Mode (recommended for active development):**
-```bash
-./dev player hot
-```
-- Access player at `http://localhost:3000`
-- Press `R` in terminal for hot restart (full app restart)
-- Press `r` in terminal for hot reload (preserves state)
-- Much faster iteration than file-watch mode
+Access the player at: **http://localhost:4000/player**
 
-**Watch Mode (default):**
-```bash
-./dev up -d
-```
-- Access player at `http://localhost:4000/player`
-- Files rebuild automatically on change
-- Refresh browser to see changes
+Phoenix reverse-proxies to the Flutter dev server, giving you:
+- Hot restart support (press `R` in `./dev player logs`)
+- Proper auth injection (your session token is automatically passed to Flutter)
+- Single URL (no need to remember different ports)
 
 ### Production Builds
 
-**Always use `./dev player build`** for production builds. This command:
+**Use `./dev player build`** for production builds. This command:
 1. Runs `flutter build web --base-href /player/`
-2. Copies output to `priv/static/player/` (served by Phoenix)
+2. Copies output to `priv/static/player/` (served directly by Phoenix)
 
-**Never use `./dev flutter build web`** directly - it only builds without deploying to Phoenix.
+In production, Phoenix serves the static files without the dev server proxy.
 
 ## Architecture
 

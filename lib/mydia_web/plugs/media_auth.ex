@@ -35,6 +35,7 @@ defmodule MydiaWeb.Plugs.MediaAuth do
   import Phoenix.Controller, only: [json: 2]
 
   alias Mydia.RemoteAccess.MediaToken
+  alias Mydia.Media.TokenCache
 
   def init(opts), do: opts
 
@@ -46,7 +47,8 @@ defmodule MydiaWeb.Plugs.MediaAuth do
         unauthorized(conn, "Missing authentication token")
 
       token ->
-        case MediaToken.verify_token(token) do
+        # Use TokenCache for O(1) cached lookups, with DB fallback on cache miss
+        case TokenCache.validate(token) do
           {:ok, device, claims} ->
             if has_required_permissions?(claims, required_permissions) do
               conn

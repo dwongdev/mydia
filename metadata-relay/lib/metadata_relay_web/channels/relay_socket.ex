@@ -124,6 +124,10 @@ defmodule MetadataRelayWeb.RelaySocket do
   @impl true
   def handle_info({:relay_connection, session_id, client_public_key}, state) do
     # Forward incoming connection request to the instance
+    Logger.info(
+      "Forwarding relay_connection to instance #{state.instance_id}, session: #{session_id}"
+    )
+
     message =
       Jason.encode!(%{
         type: "connection",
@@ -131,12 +135,20 @@ defmodule MetadataRelayWeb.RelaySocket do
         client_public_key: Base.encode64(client_public_key)
       })
 
+    Logger.debug(
+      "Sending connection message to instance: #{inspect(String.slice(message, 0, 200))}"
+    )
+
     {:push, {:text, message}, state}
   end
 
   @impl true
   def handle_info({:relay_message, session_id, payload}, state) do
     # Forward relayed message to the instance
+    Logger.info(
+      "Forwarding relay_message to instance #{state.instance_id}, session: #{session_id}, size: #{byte_size(payload)}"
+    )
+
     message =
       Jason.encode!(%{
         type: "relay_message",

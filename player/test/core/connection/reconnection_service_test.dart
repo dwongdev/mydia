@@ -27,8 +27,7 @@ void main() {
         expect(result.error, equals('Connection failed'));
       });
 
-      // Note: Success result tests require a valid NoiseSession which needs
-      // mocking the noise protocol handshake. See integration test scenarios below.
+      // Note: Success result tests require a valid session. See integration test scenarios below.
     });
 
     group('credential loading', () {
@@ -57,6 +56,8 @@ void main() {
             .thenAnswer((_) async => testDeviceId);
         when(mockAuthStorage.read('pairing_media_token'))
             .thenAnswer((_) async => testMediaToken);
+        when(mockAuthStorage.read('pairing_device_token'))
+            .thenAnswer((_) async => null);
         when(mockAuthStorage.read('pairing_cert_fingerprint'))
             .thenAnswer((_) async => null);
         when(mockAuthStorage.read('instance_id'))
@@ -78,6 +79,8 @@ void main() {
             .thenAnswer((_) async => testDeviceId);
         when(mockAuthStorage.read('pairing_media_token'))
             .thenAnswer((_) async => testMediaToken);
+        when(mockAuthStorage.read('pairing_device_token'))
+            .thenAnswer((_) async => null);
         when(mockAuthStorage.read('pairing_cert_fingerprint'))
             .thenAnswer((_) async => null);
         when(mockAuthStorage.read('instance_id'))
@@ -99,6 +102,8 @@ void main() {
             .thenAnswer((_) async => testDeviceId);
         when(mockAuthStorage.read('pairing_media_token'))
             .thenAnswer((_) async => testMediaToken);
+        when(mockAuthStorage.read('pairing_device_token'))
+            .thenAnswer((_) async => null);
         when(mockAuthStorage.read('pairing_cert_fingerprint'))
             .thenAnswer((_) async => null);
         when(mockAuthStorage.read('instance_id'))

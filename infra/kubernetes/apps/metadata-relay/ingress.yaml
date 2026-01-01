@@ -1,3 +1,22 @@
+# ServersTransport for WebSocket connections (longer timeouts)
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: websocket-transport
+  namespace: metadata-relay
+  labels:
+    app.kubernetes.io/name: metadata-relay
+    app.kubernetes.io/component: relay-service
+spec:
+  # Disable HTTP/2 for WebSocket compatibility
+  maxIdleConnsPerHost: 100
+  # Forward flush for streaming/websocket
+  forwardingTimeouts:
+    # Time to wait for response headers (0 = no timeout)
+    responseHeaderTimeout: 0s
+    # Idle timeout for connections (5 minutes for WebSocket keep-alive)
+    idleConnTimeout: 300s
+---
 # Certificate for TLS
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -72,5 +91,6 @@ spec:
       services:
         - name: metadata-relay
           port: 4001
+          serversTransport: websocket-transport
   tls:
     secretName: metadata-relay-tls-secret

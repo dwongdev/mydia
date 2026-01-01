@@ -1,10 +1,10 @@
-/// Device pairing service using Noise protocol and Phoenix Channels.
+/// Device pairing service using X25519 key exchange and Phoenix Channels.
 ///
 /// This service orchestrates the complete device pairing flow:
 /// 1. Look up claim code via relay to get instance info
 /// 2. Connect to server WebSocket (using direct URLs from relay)
 /// 3. Join pairing channel
-/// 4. Perform Noise_NK handshake
+/// 4. Perform X25519 key exchange
 /// 5. Submit claim code
 /// 6. Receive and store device credentials
 /// 7. Consume claim on relay to mark it as used
@@ -16,7 +16,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 
 import 'channel_service.dart';
-import '../crypto/noise_service.dart';
+import '../crypto/crypto_manager.dart';
 import '../auth/auth_storage.dart';
 import '../relay/relay_service.dart';
 import '../relay/relay_tunnel_service.dart';
@@ -103,19 +103,27 @@ class PairingResult {
   final String? error;
   final PairingCredentials? credentials;
 
+  /// Active relay tunnel (if pairing was via relay and direct connection failed).
+  /// The caller should use this tunnel for ongoing communication.
+  final RelayTunnel? relayTunnel;
+
   const PairingResult._({
     required this.success,
     this.error,
     this.credentials,
+    this.relayTunnel,
   });
 
-  factory PairingResult.success(PairingCredentials credentials) {
-    return PairingResult._(success: true, credentials: credentials);
+  factory PairingResult.success(PairingCredentials credentials, {RelayTunnel? relayTunnel}) {
+    return PairingResult._(success: true, credentials: credentials, relayTunnel: relayTunnel);
   }
 
   factory PairingResult.error(String error) {
     return PairingResult._(success: false, error: error);
   }
+
+  /// Whether the pairing used relay mode (no direct connection available).
+  bool get isRelayMode => relayTunnel != null;
 }
 
 /// Credentials obtained from successful pairing.
@@ -166,8 +174,8 @@ class PairingCredentials {
 
 /// Service for pairing new devices with a Mydia server.
 ///
-/// This service handles the complete pairing flow using the Noise_NK protocol
-/// over Phoenix Channels. It integrates with [NoiseService] for cryptographic
+/// This service handles the complete pairing flow using X25519 key exchange
+/// over Phoenix Channels. It integrates with [CryptoManager] for cryptographic
 /// operations and [AuthStorage] for credential persistence.
 ///
 /// ## Pairing Flow
@@ -175,7 +183,7 @@ class PairingCredentials {
 /// 1. User obtains server URL and claim code (from QR code or manual entry)
 /// 2. [pairDevice] connects to server WebSocket
 /// 3. Joins the `device:pair` channel
-/// 4. Performs Noise_NK handshake with server
+/// 4. Performs X25519 key exchange with server
 /// 5. Submits claim code and device info
 /// 6. Receives device credentials (keypair and tokens)
 /// 7. Stores credentials securely
@@ -199,13 +207,11 @@ class PairingCredentials {
 class PairingService {
   PairingService({
     ChannelService? channelService,
-    NoiseService? noiseService,
     AuthStorage? authStorage,
     RelayService? relayService,
     ConnectionManager? connectionManager,
     String? relayUrl,
   })  : _channelService = channelService ?? ChannelService(),
-        _noiseService = noiseService ?? NoiseService(),
         _authStorage = authStorage ?? getAuthStorage(),
         _relayService = relayService ?? RelayService(),
         _connectionManager = connectionManager,
@@ -215,7 +221,6 @@ class PairingService {
         );
 
   final ChannelService _channelService;
-  final NoiseService _noiseService;
   final AuthStorage _authStorage;
   final RelayService _relayService;
   final ConnectionManager? _connectionManager;
@@ -244,6 +249,7 @@ class PairingService {
     String? platform,
     void Function(String status)? onStatusUpdate,
   }) async {
+    CryptoManager? cryptoManager;
     try {
       final devicePlatform = platform ?? _detectPlatform();
       debugPrint('[PairingService] === STEP 1: Looking up claim code via relay ===');
@@ -318,43 +324,28 @@ class PairingService {
       debugPrint('[PairingService] Channel joined successfully!');
       onStatusUpdate?.call('Step 3 done: Channel joined');
 
-      // Step 4: Perform Noise_NK handshake
-      debugPrint('[PairingService] === STEP 4: Performing Noise_NK handshake ===');
+      // Step 4: Perform X25519 key exchange
+      debugPrint('[PairingService] === STEP 4: Performing X25519 key exchange ===');
       onStatusUpdate?.call('Step 4: Creating secure session...');
-      debugPrint('[PairingService] Starting handshake with server public key...');
+      debugPrint('[PairingService] Generating client keypair...');
 
-      NoiseSession noiseSession;
+      cryptoManager = CryptoManager();
+      String clientPublicKeyB64;
       try {
-        noiseSession = await _noiseService
-            .startPairingHandshake(serverPublicKey)
-            .timeout(const Duration(seconds: 10), onTimeout: () {
-          throw TimeoutException('Noise session creation timed out');
-        });
+        clientPublicKeyB64 = await cryptoManager.generateKeyPair();
+        debugPrint('[PairingService] Client public key generated');
       } catch (e) {
-        debugPrint('[PairingService] ERROR: Failed to create noise session: $e');
+        debugPrint('[PairingService] ERROR: Failed to generate keypair: $e');
         onStatusUpdate?.call('Error: Failed to create session');
+        cryptoManager.dispose();
         rethrow;
       }
-      debugPrint('[PairingService] Noise session created');
-      onStatusUpdate?.call('Step 4b: Writing handshake...');
 
-      // Send handshake message to server
-      debugPrint('[PairingService] Writing handshake message...');
-      Uint8List handshakeMessage;
-      try {
-        handshakeMessage = await noiseSession
-            .writeHandshakeMessage()
-            .timeout(const Duration(seconds: 10), onTimeout: () {
-          throw TimeoutException('Handshake message creation timed out');
-        });
-      } catch (e) {
-        debugPrint('[PairingService] ERROR: Failed to write handshake message: $e');
-        onStatusUpdate?.call('Error: Failed to write handshake');
-        rethrow;
-      }
+      // Send client public key to server via handshake message
+      onStatusUpdate?.call('Step 4b: Sending key exchange...');
+      debugPrint('[PairingService] Sending client public key to server...');
+      final handshakeMessage = Uint8List.fromList(base64Decode(clientPublicKeyB64));
       debugPrint('[PairingService] Handshake message: ${handshakeMessage.length} bytes');
-      onStatusUpdate?.call('Step 4c: Sending handshake...');
-      debugPrint('[PairingService] Sending handshake to server...');
       final handshakeResult = await _channelService.sendPairingHandshake(
         channel,
         handshakeMessage,
@@ -362,18 +353,29 @@ class PairingService {
       debugPrint('[PairingService] Handshake result: success=${handshakeResult.success}, error=${handshakeResult.error}');
 
       if (!handshakeResult.success) {
+        cryptoManager.dispose();
         await _channelService.disconnect();
         return PairingResult.error(
-            handshakeResult.error ?? 'Handshake failed');
+            handshakeResult.error ?? 'Key exchange failed');
       }
 
-      // Process server's handshake response
-      await noiseSession.readHandshakeMessage(handshakeResult.data!);
-
-      if (!noiseSession.isComplete) {
+      // Derive session key from server's public key response
+      final serverHandshakePublicKey = base64Encode(handshakeResult.data!);
+      try {
+        await cryptoManager.deriveSessionKey(serverHandshakePublicKey);
+        debugPrint('[PairingService] Session key derived successfully');
+      } catch (e) {
+        debugPrint('[PairingService] ERROR: Failed to derive session key: $e');
+        cryptoManager.dispose();
         await _channelService.disconnect();
-        return PairingResult.error('Handshake incomplete');
+        return PairingResult.error('Failed to derive session key: $e');
       }
+      onStatusUpdate?.call('Step 4c: Session established');
+
+      // Dispose crypto manager - we don't need encryption for the channel
+      // (the server sends credentials in plaintext over the secure channel)
+      cryptoManager.dispose();
+      cryptoManager = null;
 
       // Step 5: Submit claim code
       onStatusUpdate?.call('Submitting claim code...');
@@ -424,6 +426,7 @@ class PairingService {
       debugPrint('[PairingService] === EXCEPTION in pairWithClaimCodeOnly ===');
       debugPrint('[PairingService] Error: $e');
       debugPrint('[PairingService] Stack trace: $st');
+      cryptoManager?.dispose();
       await _channelService.disconnect();
       return PairingResult.error('Pairing error: $e');
     }
@@ -454,6 +457,7 @@ class PairingService {
     String? platform,
     void Function(String status)? onStatusUpdate,
   }) async {
+    CryptoManager? cryptoManager;
     try {
       final devicePlatform = platform ?? _detectPlatform();
 
@@ -519,29 +523,27 @@ class PairingService {
       }
       final channel = joinResult.data!;
 
-      // Step 4: Perform Noise_NK handshake
+      // Step 4: Perform X25519 key exchange
       onStatusUpdate?.call('Establishing secure connection...');
-      final noiseSession =
-          await _noiseService.startPairingHandshake(serverPublicKey);
+      cryptoManager = CryptoManager();
+      final clientPublicKeyB64 = await cryptoManager.generateKeyPair();
 
-      final handshakeMessage = await noiseSession.writeHandshakeMessage();
+      final handshakeMessage = Uint8List.fromList(base64Decode(clientPublicKeyB64));
       final handshakeResult = await _channelService.sendPairingHandshake(
         channel,
         handshakeMessage,
       );
 
       if (!handshakeResult.success) {
+        cryptoManager.dispose();
         await _channelService.disconnect();
         return PairingResult.error(
-            handshakeResult.error ?? 'Handshake failed');
+            handshakeResult.error ?? 'Key exchange failed');
       }
 
-      await noiseSession.readHandshakeMessage(handshakeResult.data!);
-
-      if (!noiseSession.isComplete) {
-        await _channelService.disconnect();
-        return PairingResult.error('Handshake incomplete');
-      }
+      await cryptoManager.deriveSessionKey(base64Encode(handshakeResult.data!));
+      cryptoManager.dispose();
+      cryptoManager = null;
 
       // Step 5: Submit claim code
       onStatusUpdate?.call('Submitting claim code...');
@@ -589,6 +591,7 @@ class PairingService {
 
       return PairingResult.success(credentials);
     } catch (e) {
+      cryptoManager?.dispose();
       await _channelService.disconnect();
       return PairingResult.error('Pairing error: $e');
     }
@@ -612,6 +615,7 @@ class PairingService {
     required String deviceName,
     String? platform,
   }) async {
+    CryptoManager? cryptoManager;
     try {
       // Detect platform if not provided
       final devicePlatform = platform ?? _detectPlatform();
@@ -632,27 +636,25 @@ class PairingService {
       }
       final channel = joinResult.data!;
 
-      // Step 3: Perform Noise_NK handshake
-      final noiseSession =
-          await _noiseService.startPairingHandshake(serverPublicKey);
+      // Step 3: Perform X25519 key exchange
+      cryptoManager = CryptoManager();
+      final clientPublicKeyB64 = await cryptoManager.generateKeyPair();
 
       // Generate and send handshake message
-      final firstMessage = await noiseSession.writeHandshakeMessage();
+      final firstMessage = Uint8List.fromList(base64Decode(clientPublicKeyB64));
       final handshakeResult =
           await _channelService.sendPairingHandshake(channel, firstMessage);
       if (!handshakeResult.success) {
+        cryptoManager.dispose();
         await _channelService.disconnect();
         return PairingResult.error(
-            handshakeResult.error ?? 'Handshake failed');
+            handshakeResult.error ?? 'Key exchange failed');
       }
 
-      // Process server's handshake response
-      await noiseSession.readHandshakeMessage(handshakeResult.data!);
-
-      if (!noiseSession.isComplete) {
-        await _channelService.disconnect();
-        return PairingResult.error('Handshake incomplete');
-      }
+      // Derive session key from server's public key response
+      await cryptoManager.deriveSessionKey(base64Encode(handshakeResult.data!));
+      cryptoManager.dispose();
+      cryptoManager = null;
 
       // Step 4: Submit claim code
       final claimResult = await _channelService.submitClaimCode(
@@ -689,6 +691,7 @@ class PairingService {
 
       return PairingResult.success(credentials);
     } catch (e) {
+      cryptoManager?.dispose();
       await _channelService.disconnect();
       return PairingResult.error('Pairing error: $e');
     }
@@ -792,9 +795,9 @@ class PairingService {
   ///
   /// This method:
   /// 1. Connects to relay tunnel using the instance ID
-  /// 2. Performs Noise_NK handshake over the tunnel
-  /// 3. Sends encrypted claim code request
-  /// 4. Receives and decrypts pairing response
+  /// 2. Performs X25519 key exchange over the tunnel
+  /// 3. Sends claim code request
+  /// 4. Receives pairing response
   Future<PairingResult> _pairViaRelayTunnel({
     required String claimCode,
     required ClaimCodeInfo claimInfo,
@@ -804,6 +807,7 @@ class PairingService {
     void Function(String status)? onStatusUpdate,
   }) async {
     RelayTunnel? tunnel;
+    CryptoManager? cryptoManager;
 
     try {
       // Step 1: Connect to relay tunnel
@@ -818,19 +822,76 @@ class PairingService {
       }
 
       tunnel = tunnelResult.data!;
+      debugPrint('[RelayPairing] Tunnel connected: session=${tunnel.info.sessionId}');
 
-      // Step 2: Perform Noise_NK handshake over tunnel
+      // Listen for tunnel errors/closure for debugging
+      tunnel.errors.listen(
+        (error) {
+          debugPrint('[RelayPairing] Tunnel error: $error');
+        },
+        onError: (e, stackTrace) {
+          debugPrint('[RelayPairing] Error stream error: $e');
+          debugPrint('[RelayPairing] Error stream stack trace: $stackTrace');
+        },
+      );
+
+      // Check if tunnel is still active
+      debugPrint('[RelayPairing] Tunnel active: ${tunnel.isActive}');
+
+      // Step 2: Perform X25519 key exchange over tunnel
       onStatusUpdate?.call('Establishing secure connection...');
-      final noiseSession =
-          await _noiseService.startPairingHandshake(serverPublicKey);
+
+      // Validate server public key
+      debugPrint('[RelayPairing] Server public key length: ${serverPublicKey.length}');
+      if (serverPublicKey.length != 32) {
+        await tunnel.close();
+        return PairingResult.error(
+            'Invalid server public key: expected 32 bytes, got ${serverPublicKey.length}');
+      }
+
+      debugPrint('[RelayPairing] About to create CryptoManager, tunnel active: ${tunnel.isActive}');
+      try {
+        cryptoManager = CryptoManager();
+        debugPrint('[RelayPairing] CryptoManager created successfully');
+      } catch (e, stackTrace) {
+        debugPrint('[RelayPairing] CryptoManager creation failed: $e');
+        debugPrint('[RelayPairing] Stack trace: $stackTrace');
+        await tunnel.close();
+        return PairingResult.error('Failed to create crypto manager: $e');
+      }
+      debugPrint('[RelayPairing] CryptoManager created, tunnel active: ${tunnel.isActive}');
+      String clientPublicKeyB64;
+      try {
+        debugPrint('[RelayPairing] Starting keypair generation...');
+        clientPublicKeyB64 = await cryptoManager.generateKeyPair();
+        debugPrint('[RelayPairing] Client keypair generated, tunnel active: ${tunnel.isActive}');
+      } catch (e, stackTrace) {
+        debugPrint('[RelayPairing] Failed to generate keypair: $e');
+        debugPrint('[RelayPairing] Stack trace: $stackTrace');
+        cryptoManager.dispose();
+        await tunnel.close();
+        return PairingResult.error('Failed to initialize secure connection: $e');
+      }
+
+      // Generate and send handshake message
+      final handshakeMessage = Uint8List.fromList(base64Decode(clientPublicKeyB64));
+      debugPrint('[RelayPairing] Handshake message generated: ${handshakeMessage.length} bytes');
 
       // Send handshake message through tunnel (wrapped in JSON for server)
-      final handshakeMessage = await noiseSession.writeHandshakeMessage();
-      final handshakeRequest = jsonEncode({
-        'type': 'pairing_handshake',
-        'data': {'message': base64Encode(handshakeMessage)},
-      });
-      tunnel.sendMessage(Uint8List.fromList(utf8.encode(handshakeRequest)));
+      try {
+        final handshakeRequest = jsonEncode({
+          'type': 'pairing_handshake',
+          'data': {'message': base64Encode(handshakeMessage)},
+        });
+        debugPrint('[RelayPairing] Sending handshake request...');
+        tunnel.sendMessage(Uint8List.fromList(utf8.encode(handshakeRequest)));
+        debugPrint('[RelayPairing] Handshake request sent');
+      } catch (e) {
+        debugPrint('[RelayPairing] Failed to send handshake: $e');
+        cryptoManager.dispose();
+        await tunnel.close();
+        return PairingResult.error('Failed to send handshake: $e');
+      }
 
       // Wait for server's handshake response
       final handshakeResponseBytes = await tunnel.messages.first.timeout(
@@ -843,6 +904,7 @@ class PairingService {
           jsonDecode(utf8.decode(handshakeResponseBytes)) as Map<String, dynamic>;
 
       if (handshakeResponseJson['type'] == 'error') {
+        cryptoManager.dispose();
         await tunnel.close();
         return PairingResult.error(
             handshakeResponseJson['message'] as String? ?? 'Handshake failed');
@@ -850,20 +912,26 @@ class PairingService {
 
       final serverHandshakeB64 = handshakeResponseJson['message'] as String?;
       if (serverHandshakeB64 == null) {
+        cryptoManager.dispose();
         await tunnel.close();
         return PairingResult.error('Invalid handshake response');
       }
 
-      // Process server's handshake response
-      await noiseSession.readHandshakeMessage(
-          Uint8List.fromList(base64Decode(serverHandshakeB64)));
-
-      if (!noiseSession.isComplete) {
+      // Derive session key from server's public key
+      try {
+        await cryptoManager.deriveSessionKey(serverHandshakeB64);
+        debugPrint('[RelayPairing] Session key derived');
+      } catch (e) {
+        debugPrint('[RelayPairing] Failed to derive session key: $e');
+        cryptoManager.dispose();
         await tunnel.close();
-        return PairingResult.error('Handshake incomplete');
+        return PairingResult.error('Failed to derive session key: $e');
       }
 
-      // Step 3: Send claim code request (JSON-wrapped, transport-encrypted by Noise tunnel)
+      cryptoManager.dispose();
+      cryptoManager = null;
+
+      // Step 3: Send claim code request
       onStatusUpdate?.call('Submitting claim code...');
       final claimRequest = jsonEncode({
         'type': 'claim_code',
@@ -908,8 +976,6 @@ class PairingService {
         return PairingResult.error('Incomplete pairing response from relay');
       }
 
-      await tunnel.close();
-
       // Step 5: Build credentials
       // Use first direct URL as server URL, or relay URL if no direct URLs
       final serverUrl = claimInfo.directUrls.isNotEmpty
@@ -935,11 +1001,47 @@ class PairingService {
       onStatusUpdate?.call('Finalizing...');
       await _relayService.consumeClaim(claimInfo.claimId, deviceId);
 
-      // Store that we connected via relay
-      await _authStorage.write('connection_last_type', 'relay');
+      // Step 7: Try direct connection to see if we can use it instead of relay
+      // We already know direct URLs failed before (that's why we're here), but
+      // let's try once more in case network conditions have changed.
+      bool useDirectConnection = false;
+      final connectionManager = _connectionManager;
+      if (connectionManager != null && credentials.directUrls.isNotEmpty) {
+        onStatusUpdate?.call('Testing direct connection...');
+        try {
+          final result = await connectionManager.connect(
+            directUrls: credentials.directUrls,
+            instanceId: credentials.instanceId ?? '',
+            certFingerprint: credentials.certFingerprint,
+            relayUrl: null, // Don't fall back to relay during this test
+          );
 
-      return PairingResult.success(credentials);
-    } catch (e) {
+          if (result.success && result.isDirect) {
+            useDirectConnection = true;
+            debugPrint('[RelayPairing] Direct connection now works, using it');
+            await _channelService.disconnect();
+            await _authStorage.write('connection_last_type', 'direct');
+            await _authStorage.write('connection_last_url', result.connectedUrl!);
+          }
+        } catch (e) {
+          debugPrint('[RelayPairing] Direct connection test failed: $e');
+        }
+      }
+
+      if (useDirectConnection) {
+        // Direct connection works now, close tunnel and use direct
+        await tunnel.close();
+        return PairingResult.success(credentials);
+      } else {
+        // Direct connection still doesn't work, keep tunnel for ongoing communication
+        debugPrint('[RelayPairing] Keeping tunnel alive for ongoing relay communication');
+        await _authStorage.write('connection_last_type', 'relay');
+        return PairingResult.success(credentials, relayTunnel: tunnel);
+      }
+    } catch (e, stackTrace) {
+      debugPrint('[RelayPairing] UNCAUGHT ERROR: $e');
+      debugPrint('[RelayPairing] Stack trace: $stackTrace');
+      cryptoManager?.dispose();
       if (tunnel != null) {
         await tunnel.close();
       }

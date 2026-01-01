@@ -2,10 +2,13 @@ import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:graphql_flutter/graphql_flutter.dart';
 import '../auth/auth_service.dart';
+import '../auth/auth_storage.dart';
 import '../auth/media_token_service.dart';
 import '../config/web_config.dart';
+import '../connection/connection_provider.dart';
 import '../connection/reconnection_service.dart';
 import 'client.dart';
+import 'relay_link.dart';
 
 /// Provider for the auth service instance.
 final authServiceProvider = Provider<AuthService>((ref) {
@@ -63,18 +66,39 @@ final isAuthenticatedProvider = FutureProvider<bool>((ref) async {
 /// Returns null if either the server URL or auth token is not available.
 /// This provider automatically updates when the server URL or token changes.
 /// Includes 401 error handling with logout on auth failure.
+///
+/// When in relay mode (via [connectionProvider]), uses a [RelayLink] to
+/// route requests through the relay tunnel instead of direct HTTP.
 final graphqlClientProvider = Provider<GraphQLClient?>((ref) {
+  final connectionState = ref.watch(connectionProvider);
   final serverUrlAsync = ref.watch(serverUrlProvider);
   final authTokenAsync = ref.watch(authTokenProvider);
   final authService = ref.watch(authServiceProvider);
 
-  // Wait for both async providers to complete
+  // Check if we're in relay mode with an active tunnel
+  if (connectionState.isRelayMode && connectionState.isTunnelActive) {
+    return authTokenAsync.when(
+      data: (authToken) {
+        debugPrint('[graphqlClientProvider] Using relay mode');
+        final link = RelayLink(connectionState.tunnel!, authToken: authToken);
+        return GraphQLClient(
+          link: link,
+          cache: GraphQLCache(store: HiveStore()),
+        );
+      },
+      loading: () => null,
+      error: (_, __) => null,
+    );
+  }
+
+  // Wait for both async providers to complete (direct mode)
   return serverUrlAsync.when(
     data: (serverUrl) {
       if (serverUrl == null) return null;
 
       return authTokenAsync.when(
         data: (authToken) {
+          debugPrint('[graphqlClientProvider] Using direct mode');
           // Create client with 401 error handling
           return createGraphQLClient(
             serverUrl,
@@ -200,11 +224,17 @@ class AuthStateNotifier extends Notifier<AsyncValue<bool>> {
     final reconnectionService = ref.read(reconnectionServiceProvider);
 
     try {
-      final result = await reconnectionService.reconnect();
+      // Check if the stored connection mode was relay to prioritize that
+      final authStorage = getAuthStorage();
+      final storedMode = await authStorage.read('connection_mode');
+      final preferRelay = storedMode == 'relay';
+      debugPrint('[AuthStateNotifier] Stored connection mode: $storedMode, preferRelay: $preferRelay');
+
+      final result = await reconnectionService.reconnect(preferRelay: preferRelay);
 
       if (result.success && result.session != null) {
         final session = result.session!;
-        debugPrint('[AuthStateNotifier] Reconnection successful, updating auth session');
+        debugPrint('[AuthStateNotifier] Reconnection successful, isRelay=${session.isRelayConnection}');
 
         // Update auth service with the refreshed token
         await authService.setSession(
@@ -213,6 +243,19 @@ class AuthStateNotifier extends Notifier<AsyncValue<bool>> {
           userId: session.deviceId,
           username: 'Device ${session.deviceId.substring(0, 8)}',
         );
+
+        // Set the connection provider mode
+        if (session.isRelayConnection && session.relayTunnel != null) {
+          debugPrint('[AuthStateNotifier] Setting relay tunnel in connection provider');
+          await ref.read(connectionProvider.notifier).setRelayTunnel(
+            session.relayTunnel!,
+            instanceId: session.instanceId,
+            relayUrl: session.relayUrl,
+          );
+        } else {
+          debugPrint('[AuthStateNotifier] Setting direct mode in connection provider');
+          await ref.read(connectionProvider.notifier).setDirectMode();
+        }
 
         return true;
       } else {
@@ -301,6 +344,9 @@ final authStateProvider =
 ///
 /// Use this provider in async controllers that need to wait for the client
 /// to be available. This properly handles the async loading of auth state.
+///
+/// NOTE: Uses ref.watch for graphqlClientProvider to ensure updates when
+/// connection mode changes (e.g., from direct to relay mode after pairing).
 final asyncGraphqlClientProvider = FutureProvider<GraphQLClient>((ref) async {
   // Wait for auth check to complete (isAuthenticatedProvider is a FutureProvider)
   final isAuthenticated = await ref.watch(isAuthenticatedProvider.future);
@@ -316,8 +362,8 @@ final asyncGraphqlClientProvider = FutureProvider<GraphQLClient>((ref) async {
     throw Exception('Server URL not available');
   }
 
-  // Now read the sync provider - it should have data since auth is ready
-  final client = ref.read(graphqlClientProvider);
+  // Watch the sync provider to get updates when connection mode changes
+  final client = ref.watch(graphqlClientProvider);
   if (client == null) {
     // This shouldn't happen if auth is ready, but handle it gracefully
     throw Exception('GraphQL client not available');

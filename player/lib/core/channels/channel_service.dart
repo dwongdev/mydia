@@ -415,6 +415,7 @@ class ChannelService {
   /// The [claimCode] is the user-provided pairing code.
   /// The [deviceName] is a friendly name for this device.
   /// The [platform] identifies the device platform (e.g., 'android', 'ios', 'web').
+  /// The [staticPublicKey] is the client's static public key (base64).
   ///
   /// Returns a [ChannelResult] with the pairing credentials on success.
   Future<ChannelResult<PairingResponse>> submitClaimCode(
@@ -422,6 +423,7 @@ class ChannelService {
     required String claimCode,
     required String deviceName,
     required String platform,
+    required String staticPublicKey,
   }) async {
     debugPrint('[ChannelService] Submitting claim_code...');
     try {
@@ -429,6 +431,7 @@ class ChannelService {
         'code': claimCode,
         'device_name': deviceName,
         'platform': platform,
+        'static_public_key': staticPublicKey,
       });
 
       // Use the Push.future property to properly await the response
@@ -451,14 +454,8 @@ class ChannelService {
 
         final deviceId = responseData['device_id'] as String?;
         final mediaToken = responseData['media_token'] as String?;
-        final devicePublicKeyB64 = responseData['device_public_key'] as String?;
-        final devicePrivateKeyB64 =
-            responseData['device_private_key'] as String?;
 
-        if (deviceId == null ||
-            mediaToken == null ||
-            devicePublicKeyB64 == null ||
-            devicePrivateKeyB64 == null) {
+        if (deviceId == null || mediaToken == null) {
           debugPrint('[ChannelService] Incomplete pairing response');
           return ChannelResult.error('Incomplete pairing response');
         }
@@ -468,10 +465,6 @@ class ChannelService {
           PairingResponse(
             deviceId: deviceId,
             mediaToken: mediaToken,
-            devicePublicKey:
-                Uint8List.fromList(base64Decode(devicePublicKeyB64)),
-            devicePrivateKey:
-                Uint8List.fromList(base64Decode(devicePrivateKeyB64)),
           ),
         );
       } else {
@@ -540,6 +533,9 @@ class ChannelService {
 }
 
 /// Response from a successful pairing operation.
+///
+/// The client generates its own keypair, so the server only returns
+/// the device ID and media token. The client already has its keypair.
 class PairingResponse {
   /// The device ID assigned by the server.
   final String deviceId;
@@ -547,17 +543,9 @@ class PairingResponse {
   /// The media access token for API requests.
   final String mediaToken;
 
-  /// The device's public key (32 bytes).
-  final Uint8List devicePublicKey;
-
-  /// The device's private key (32 bytes).
-  final Uint8List devicePrivateKey;
-
   const PairingResponse({
     required this.deviceId,
     required this.mediaToken,
-    required this.devicePublicKey,
-    required this.devicePrivateKey,
   });
 }
 

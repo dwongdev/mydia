@@ -441,6 +441,13 @@ class ReconnectionService {
       // Derive session key from server's public key
       await cryptoManager.deriveSessionKey(serverPublicKey);
 
+      // Enable encryption on the tunnel for subsequent API calls
+      final sessionKeyBytes = await cryptoManager.getSessionKeyBytes();
+      if (sessionKeyBytes != null) {
+        tunnel.enableEncryption(sessionKeyBytes);
+        debugPrint('[ReconnectionService] Encryption enabled on relay tunnel');
+      }
+
       // Extract device ID and media token from response
       final deviceId =
           responseJson['device_id'] as String? ?? credentials.deviceId;

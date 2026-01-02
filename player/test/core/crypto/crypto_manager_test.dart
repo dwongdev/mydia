@@ -367,6 +367,181 @@ void main() {
       });
     });
 
+    group('Wire Format Encryption', () {
+      late CryptoManager clientCrypto;
+      late CryptoManager serverCrypto;
+
+      setUp(() async {
+        clientCrypto = CryptoManager();
+        serverCrypto = CryptoManager();
+
+        // Generate key pairs for both parties
+        final clientPublicKey = await clientCrypto.generateKeyPair();
+        final serverPublicKey = await serverCrypto.generateKeyPair();
+
+        // Derive session keys (each side uses the other's public key)
+        await clientCrypto.deriveSessionKey(serverPublicKey);
+        await serverCrypto.deriveSessionKey(clientPublicKey);
+      });
+
+      test('encryptForWire returns valid base64 with correct structure',
+          () async {
+        const plaintext = '{"type": "request", "data": "test"}';
+
+        final encrypted = await clientCrypto.encryptForWire(plaintext);
+
+        // Should be valid base64
+        final bytes = base64Decode(encrypted);
+
+        // Minimum length: 12 (nonce) + 0 (ciphertext) + 16 (mac) = 28
+        // With actual content it should be larger
+        expect(bytes.length, greaterThanOrEqualTo(28));
+      });
+
+      test('encryptForWire/decryptFromWire round trip', () async {
+        const plaintext = '{"type": "claim_code", "data": {"code": "ABC123"}}';
+
+        final encrypted = await clientCrypto.encryptForWire(plaintext);
+        final decrypted = await clientCrypto.decryptFromWire(encrypted);
+
+        expect(decrypted, equals(plaintext));
+      });
+
+      test('cross-party encryption works with shared session key', () async {
+        const plaintext = 'Message from client to server';
+
+        // Client encrypts
+        final encrypted = await clientCrypto.encryptForWire(plaintext);
+
+        // Server decrypts
+        final decrypted = await serverCrypto.decryptFromWire(encrypted);
+
+        expect(decrypted, equals(plaintext));
+      });
+
+      test('cross-party encryption works both directions', () async {
+        const clientMessage = 'Request from client';
+        const serverMessage = 'Response from server';
+
+        // Client to server
+        final encryptedRequest = await clientCrypto.encryptForWire(clientMessage);
+        final decryptedRequest =
+            await serverCrypto.decryptFromWire(encryptedRequest);
+        expect(decryptedRequest, equals(clientMessage));
+
+        // Server to client
+        final encryptedResponse =
+            await serverCrypto.encryptForWire(serverMessage);
+        final decryptedResponse =
+            await clientCrypto.decryptFromWire(encryptedResponse);
+        expect(decryptedResponse, equals(serverMessage));
+      });
+
+      test('encryptForWire produces different output for same plaintext',
+          () async {
+        const plaintext = 'Same message';
+
+        final encrypted1 = await clientCrypto.encryptForWire(plaintext);
+        final encrypted2 = await clientCrypto.encryptForWire(plaintext);
+
+        // Random nonce means different output each time
+        expect(encrypted1, isNot(equals(encrypted2)));
+      });
+
+      test('encryptForWire works with unicode and emoji', () async {
+        const plaintext = '{"message": "Hello 世界 🌍 Привет"}';
+
+        final encrypted = await clientCrypto.encryptForWire(plaintext);
+        final decrypted = await clientCrypto.decryptFromWire(encrypted);
+
+        expect(decrypted, equals(plaintext));
+      });
+
+      test('decryptFromWire throws on tampered payload', () async {
+        const plaintext = 'Secret message';
+
+        final encrypted = await clientCrypto.encryptForWire(plaintext);
+        final bytes = base64Decode(encrypted);
+
+        // Tamper with the ciphertext (after nonce, before mac)
+        bytes[15] ^= 0xFF;
+        final tampered = base64Encode(bytes);
+
+        expect(
+          () => clientCrypto.decryptFromWire(tampered),
+          throwsA(isA<SecretBoxAuthenticationError>()),
+        );
+      });
+
+      test('decryptFromWire throws on too short payload', () async {
+        // Less than 28 bytes (12 nonce + 16 mac minimum)
+        final shortPayload = base64Encode(List.filled(20, 0));
+
+        expect(
+          () => clientCrypto.decryptFromWire(shortPayload),
+          throwsArgumentError,
+        );
+      });
+
+      test('encryptForWire throws StateError without session key', () async {
+        final crypto = CryptoManager();
+        await crypto.generateKeyPair();
+
+        expect(
+          () => crypto.encryptForWire('Hello'),
+          throwsStateError,
+        );
+      });
+
+      test('decryptFromWire throws StateError without session key', () async {
+        final crypto = CryptoManager();
+        await crypto.generateKeyPair();
+
+        expect(
+          () => crypto.decryptFromWire('YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYQ=='),
+          throwsStateError,
+        );
+      });
+    });
+
+    group('Get Session Key Bytes', () {
+      test('getSessionKeyBytes returns null without session key', () async {
+        final crypto = CryptoManager();
+        await crypto.generateKeyPair();
+
+        final bytes = await crypto.getSessionKeyBytes();
+        expect(bytes, isNull);
+      });
+
+      test('getSessionKeyBytes returns 32 bytes after derivation', () async {
+        final crypto = CryptoManager();
+        await crypto.generateKeyPair();
+
+        final serverCrypto = CryptoManager();
+        final serverPublicKey = await serverCrypto.generateKeyPair();
+        await crypto.deriveSessionKey(serverPublicKey);
+
+        final bytes = await crypto.getSessionKeyBytes();
+
+        expect(bytes, isNotNull);
+        expect(bytes!.length, equals(32));
+      });
+
+      test('getSessionKeyBytes returns same key each time', () async {
+        final crypto = CryptoManager();
+        await crypto.generateKeyPair();
+
+        final serverCrypto = CryptoManager();
+        final serverPublicKey = await serverCrypto.generateKeyPair();
+        await crypto.deriveSessionKey(serverPublicKey);
+
+        final bytes1 = await crypto.getSessionKeyBytes();
+        final bytes2 = await crypto.getSessionKeyBytes();
+
+        expect(bytes1, equals(bytes2));
+      });
+    });
+
     group('Dispose', () {
       test('dispose clears key pair and session key', () async {
         final crypto = CryptoManager();

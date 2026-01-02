@@ -372,18 +372,26 @@ class PairingService {
       }
       onStatusUpdate?.call('Step 4c: Session established');
 
-      // Dispose crypto manager - we don't need encryption for the channel
-      // (the server sends credentials in plaintext over the secure channel)
+      // Dispose session crypto manager - we don't need it for claim submission
       cryptoManager.dispose();
       cryptoManager = null;
 
-      // Step 5: Submit claim code
+      // Step 5: Generate static device keypair (client-side key generation)
+      // The private key never leaves the device
+      onStatusUpdate?.call('Generating device keys...');
+      final staticCrypto = CryptoManager();
+      final staticPublicKeyB64 = await staticCrypto.generateStaticKeyPair();
+      final devicePublicKey = await staticCrypto.getStaticPublicKeyBytes();
+      final devicePrivateKey = await staticCrypto.getStaticPrivateKeyBytes();
+
+      // Step 6: Submit claim code with our public key
       onStatusUpdate?.call('Submitting claim code...');
       final claimResult = await _channelService.submitClaimCode(
         channel,
         claimCode: claimCode,
         deviceName: deviceName,
         platform: devicePlatform,
+        staticPublicKey: staticPublicKeyB64,
       );
 
       await _channelService.disconnect();
@@ -395,13 +403,13 @@ class PairingService {
 
       final response = claimResult.data!;
 
-      // Step 6: Store credentials
+      // Step 7: Store credentials with our locally-generated keypair
       final credentials = PairingCredentials(
         serverUrl: connectedUrl,
         deviceId: response.deviceId,
         mediaToken: response.mediaToken,
-        devicePublicKey: response.devicePublicKey,
-        devicePrivateKey: response.devicePrivateKey,
+        devicePublicKey: devicePublicKey,
+        devicePrivateKey: devicePrivateKey,
         serverPublicKey: serverPublicKey,
         directUrls: claimInfo.directUrls,
         certFingerprint: null, // TODO: Add cert_fingerprint to relay response
@@ -545,13 +553,21 @@ class PairingService {
       cryptoManager.dispose();
       cryptoManager = null;
 
-      // Step 5: Submit claim code
+      // Step 5: Generate static device keypair (client-side key generation)
+      onStatusUpdate?.call('Generating device keys...');
+      final staticCrypto = CryptoManager();
+      final staticPublicKeyB64 = await staticCrypto.generateStaticKeyPair();
+      final devicePublicKey = await staticCrypto.getStaticPublicKeyBytes();
+      final devicePrivateKey = await staticCrypto.getStaticPrivateKeyBytes();
+
+      // Step 6: Submit claim code with our public key
       onStatusUpdate?.call('Submitting claim code...');
       final claimResult = await _channelService.submitClaimCode(
         channel,
         claimCode: qrData.claimCode,
         deviceName: deviceName,
         platform: devicePlatform,
+        staticPublicKey: staticPublicKeyB64,
       );
 
       await _channelService.disconnect();
@@ -563,13 +579,13 @@ class PairingService {
 
       final response = claimResult.data!;
 
-      // Step 6: Store credentials
+      // Step 7: Store credentials with our locally-generated keypair
       final credentials = PairingCredentials(
         serverUrl: connectedUrl,
         deviceId: response.deviceId,
         mediaToken: response.mediaToken,
-        devicePublicKey: response.devicePublicKey,
-        devicePrivateKey: response.devicePrivateKey,
+        devicePublicKey: devicePublicKey,
+        devicePrivateKey: devicePrivateKey,
         serverPublicKey: serverPublicKey,
         directUrls: claimInfo.directUrls,
         certFingerprint: null,
@@ -579,11 +595,11 @@ class PairingService {
 
       await _storeCredentials(credentials);
 
-      // Step 7: Mark claim as consumed on relay
+      // Step 8: Mark claim as consumed on relay
       onStatusUpdate?.call('Finalizing...');
       await relayService.consumeClaim(claimInfo.claimId, response.deviceId);
 
-      // Step 8: Attempt to switch to direct connection
+      // Step 9: Attempt to switch to direct connection
       if (_connectionManager != null && credentials.directUrls.isNotEmpty) {
         onStatusUpdate?.call('Testing direct connection...');
         await _attemptDirectConnection(credentials);
@@ -656,12 +672,19 @@ class PairingService {
       cryptoManager.dispose();
       cryptoManager = null;
 
-      // Step 4: Submit claim code
+      // Step 4: Generate static device keypair (client-side key generation)
+      final staticCrypto = CryptoManager();
+      final staticPublicKeyB64 = await staticCrypto.generateStaticKeyPair();
+      final devicePublicKey = await staticCrypto.getStaticPublicKeyBytes();
+      final devicePrivateKey = await staticCrypto.getStaticPrivateKeyBytes();
+
+      // Step 5: Submit claim code with our public key
       final claimResult = await _channelService.submitClaimCode(
         channel,
         claimCode: claimCode,
         deviceName: deviceName,
         platform: devicePlatform,
+        staticPublicKey: staticPublicKeyB64,
       );
 
       await _channelService.disconnect();
@@ -673,13 +696,13 @@ class PairingService {
 
       final response = claimResult.data!;
 
-      // Step 5: Store credentials
+      // Step 6: Store credentials with our locally-generated keypair
       final credentials = PairingCredentials(
         serverUrl: serverUrl,
         deviceId: response.deviceId,
         mediaToken: response.mediaToken,
-        devicePublicKey: response.devicePublicKey,
-        devicePrivateKey: response.devicePrivateKey,
+        devicePublicKey: devicePublicKey,
+        devicePrivateKey: devicePrivateKey,
         serverPublicKey: serverPublicKey,
         directUrls: [serverUrl], // Use serverUrl as the only direct URL
         certFingerprint: null, // Not available in direct pairing
@@ -928,10 +951,29 @@ class PairingService {
         return PairingResult.error('Failed to derive session key: $e');
       }
 
+      // Enable encryption on the tunnel with the derived session key
+      final sessionKeyBytes = await cryptoManager.getSessionKeyBytes();
+      if (sessionKeyBytes == null) {
+        cryptoManager.dispose();
+        await tunnel.close();
+        return PairingResult.error('Failed to get session key');
+      }
+      tunnel.enableEncryption(sessionKeyBytes);
+      debugPrint('[RelayPairing] Encryption enabled on tunnel');
+
+      // Dispose session crypto manager - tunnel now handles encryption
       cryptoManager.dispose();
       cryptoManager = null;
 
-      // Step 3: Send claim code request
+      // Step 3: Generate static device keypair (client-side key generation)
+      // The private key never leaves the device
+      onStatusUpdate?.call('Generating device keys...');
+      final staticCrypto = CryptoManager();
+      final staticPublicKeyB64 = await staticCrypto.generateStaticKeyPair();
+      final devicePublicKey = await staticCrypto.getStaticPublicKeyBytes();
+      final devicePrivateKey = await staticCrypto.getStaticPrivateKeyBytes();
+
+      // Step 4: Send claim code request with static public key (encrypted)
       onStatusUpdate?.call('Submitting claim code...');
       final claimRequest = jsonEncode({
         'type': 'claim_code',
@@ -939,11 +981,12 @@ class PairingService {
           'code': claimCode,
           'device_name': deviceName,
           'platform': devicePlatform,
+          'static_public_key': staticPublicKeyB64,
         },
       });
-      tunnel.sendMessage(Uint8List.fromList(utf8.encode(claimRequest)));
+      await tunnel.sendJsonMessage(claimRequest);
 
-      // Step 4: Wait for response
+      // Step 5: Wait for response
       final responseBytes = await tunnel.messages.first.timeout(
         const Duration(seconds: 10),
         onTimeout: () => throw Exception('Claim code response timeout'),
@@ -962,21 +1005,16 @@ class PairingService {
         return PairingResult.error(_formatTunnelError(errorMsg));
       }
 
-      // Parse pairing response
+      // Parse pairing response (pairing_complete type)
       final deviceId = responseJson['device_id'] as String?;
       final mediaToken = responseJson['media_token'] as String?;
-      final devicePublicKeyB64 = responseJson['device_public_key'] as String?;
-      final devicePrivateKeyB64 = responseJson['device_private_key'] as String?;
 
-      if (deviceId == null ||
-          mediaToken == null ||
-          devicePublicKeyB64 == null ||
-          devicePrivateKeyB64 == null) {
+      if (deviceId == null || mediaToken == null) {
         await tunnel.close();
         return PairingResult.error('Incomplete pairing response from relay');
       }
 
-      // Step 5: Build credentials
+      // Step 6: Build credentials with locally-generated keypair
       // Use first direct URL as server URL, or relay URL if no direct URLs
       final serverUrl = claimInfo.directUrls.isNotEmpty
           ? claimInfo.directUrls.first
@@ -986,8 +1024,8 @@ class PairingService {
         serverUrl: serverUrl,
         deviceId: deviceId,
         mediaToken: mediaToken,
-        devicePublicKey: _base64ToBytes(devicePublicKeyB64),
-        devicePrivateKey: _base64ToBytes(devicePrivateKeyB64),
+        devicePublicKey: devicePublicKey,
+        devicePrivateKey: devicePrivateKey,
         serverPublicKey: serverPublicKey,
         directUrls: claimInfo.directUrls,
         certFingerprint: null,

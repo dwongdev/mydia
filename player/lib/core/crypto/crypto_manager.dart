@@ -34,6 +34,7 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
 import 'package:cryptography/dart.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 
 /// Pure Dart cryptography instance to avoid browser WebCrypto detection issues.
 final _dartCrypto = DartCryptography.defaultInstance;
@@ -60,8 +61,11 @@ class CryptoManager {
     outputLength: 32,
   );
 
-  /// The generated X25519 key pair.
+  /// The generated X25519 key pair (ephemeral, for session key derivation).
   SimpleKeyPair? _keyPair;
+
+  /// The static device key pair (persistent, for device identification).
+  SimpleKeyPair? _staticKeyPair;
 
   /// The derived session key for encryption/decryption.
   SecretKey? _sessionKey;
@@ -96,6 +100,94 @@ class CryptoManager {
     final publicKey = await _keyPair!.extractPublicKey();
     return base64Encode(publicKey.bytes);
   }
+
+  /// Generates a static X25519 key pair for device identification.
+  ///
+  /// This keypair is used for:
+  /// - Registering the device with the server (public key only)
+  /// - Reconnecting to the server (proving device identity)
+  ///
+  /// The private key never leaves the device.
+  ///
+  /// ## Returns
+  ///
+  /// A base64-encoded string representing the static public key (32 bytes).
+  Future<String> generateStaticKeyPair() async {
+    final random = Random.secure();
+    final seed = Uint8List(32);
+    for (var i = 0; i < 32; i++) {
+      seed[i] = random.nextInt(256);
+    }
+    _staticKeyPair = await _x25519.newKeyPairFromSeed(seed);
+    final publicKey = await _staticKeyPair!.extractPublicKey();
+    return base64Encode(publicKey.bytes);
+  }
+
+  /// Sets the static key pair from stored bytes.
+  ///
+  /// Used to restore the static keypair from secure storage.
+  ///
+  /// ## Parameters
+  ///
+  /// - `publicKeyBytes` - The 32-byte public key.
+  /// - `privateKeyBytes` - The 32-byte private key.
+  Future<void> setStaticKeyPair(
+    Uint8List publicKeyBytes,
+    Uint8List privateKeyBytes,
+  ) async {
+    if (publicKeyBytes.length != 32 || privateKeyBytes.length != 32) {
+      throw ArgumentError('Keys must be exactly 32 bytes');
+    }
+    _staticKeyPair = SimpleKeyPairData(
+      privateKeyBytes,
+      publicKey: SimplePublicKey(publicKeyBytes, type: KeyPairType.x25519),
+      type: KeyPairType.x25519,
+    );
+  }
+
+  /// Returns the static public key as a base64-encoded string.
+  ///
+  /// ## Throws
+  ///
+  /// - [StateError] if no static key pair exists.
+  Future<String> getStaticPublicKeyBase64() async {
+    if (_staticKeyPair == null) {
+      throw StateError('No static key pair. Call generateStaticKeyPair() first.');
+    }
+    final publicKey = await _staticKeyPair!.extractPublicKey();
+    return base64Encode(publicKey.bytes);
+  }
+
+  /// Returns the static public key as raw bytes.
+  ///
+  /// ## Throws
+  ///
+  /// - [StateError] if no static key pair exists.
+  Future<Uint8List> getStaticPublicKeyBytes() async {
+    if (_staticKeyPair == null) {
+      throw StateError('No static key pair. Call generateStaticKeyPair() first.');
+    }
+    final publicKey = await _staticKeyPair!.extractPublicKey();
+    return Uint8List.fromList(publicKey.bytes);
+  }
+
+  /// Returns the static private key as raw bytes.
+  ///
+  /// **Security:** Only use this for secure storage. Never transmit!
+  ///
+  /// ## Throws
+  ///
+  /// - [StateError] if no static key pair exists.
+  Future<Uint8List> getStaticPrivateKeyBytes() async {
+    if (_staticKeyPair == null) {
+      throw StateError('No static key pair. Call generateStaticKeyPair() first.');
+    }
+    final privateKey = await _staticKeyPair!.extractPrivateKeyBytes();
+    return Uint8List.fromList(privateKey);
+  }
+
+  /// Whether a static key pair has been generated or loaded.
+  bool get hasStaticKeyPair => _staticKeyPair != null;
 
   /// Derives a session key from the server's base64-encoded public key.
   ///
@@ -142,12 +234,32 @@ class CryptoManager {
       remotePublicKey: serverPublicKey,
     );
 
+    // Debug: Log shared secret fingerprint for cross-platform crypto troubleshooting
+    final sharedSecretBytes = await sharedSecret.extractBytes();
+    final sharedSecretHex = sharedSecretBytes
+        .take(8)
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join();
+    debugPrint(
+      '[CryptoManager] deriveSessionKey: shared_secret first_8_bytes=$sharedSecretHex',
+    );
+
     // Derive session key via HKDF-SHA256
     // Note: info must match Elixir's Mydia.Crypto module for interoperability
     _sessionKey = await _hkdf.deriveKey(
       secretKey: sharedSecret,
       nonce: Uint8List(0),
       info: utf8.encode('mydia-session-key'),
+    );
+
+    // Debug: Log session key fingerprint
+    final sessionKeyBytes = await _sessionKey!.extractBytes();
+    final sessionKeyHex = sessionKeyBytes
+        .take(8)
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join();
+    debugPrint(
+      '[CryptoManager] deriveSessionKey: session_key first_8_bytes=$sessionKeyHex',
     );
   }
 
@@ -263,6 +375,154 @@ class CryptoManager {
     );
 
     return utf8.decode(plaintextBytes);
+  }
+
+  /// Encrypts a plaintext message and returns the wire format.
+  ///
+  /// The wire format is: base64(nonce_12_bytes || ciphertext || mac_16_bytes)
+  ///
+  /// This is compatible with the server's expected format and provides
+  /// end-to-end encryption for relay tunnel messages.
+  ///
+  /// ## Parameters
+  ///
+  /// - `plaintext` - The message to encrypt.
+  /// - `aad` - Optional Additional Authenticated Data. If provided, the same
+  ///   AAD must be used during decryption. AAD binds the ciphertext to a
+  ///   specific context (e.g., session_id) preventing cross-session replay.
+  ///
+  /// ## Returns
+  ///
+  /// A base64-encoded string containing the nonce, ciphertext, and MAC.
+  ///
+  /// ## Throws
+  ///
+  /// - [StateError] if no session key has been derived.
+  ///
+  /// ## Example
+  ///
+  /// ```dart
+  /// final encrypted = await crypto.encryptForWire('{"type": "request", ...}');
+  /// // encrypted is a base64 string ready to send over the wire
+  ///
+  /// // With AAD for context binding
+  /// final encrypted = await crypto.encryptForWire(message, aad: 'session123');
+  /// ```
+  Future<String> encryptForWire(String plaintext, {List<int>? aad}) async {
+    if (_sessionKey == null) {
+      throw StateError(
+        'No session key derived. Call deriveSessionKey() first.',
+      );
+    }
+
+    final plaintextBytes = utf8.encode(plaintext);
+
+    // Generate 12-byte nonce using secure random
+    final random = Random.secure();
+    final nonce = Uint8List(12);
+    for (var i = 0; i < 12; i++) {
+      nonce[i] = random.nextInt(256);
+    }
+
+    final secretBox = await _cipher.encrypt(
+      plaintextBytes,
+      secretKey: _sessionKey!,
+      nonce: nonce,
+      aad: aad ?? const <int>[],
+    );
+
+    // Wire format: nonce (12 bytes) || ciphertext || mac (16 bytes)
+    final payload = Uint8List.fromList([
+      ...nonce,
+      ...secretBox.cipherText,
+      ...secretBox.mac.bytes,
+    ]);
+
+    return base64Encode(payload);
+  }
+
+  /// Decrypts a wire-format encrypted message.
+  ///
+  /// The wire format is: base64(nonce_12_bytes || ciphertext || mac_16_bytes)
+  ///
+  /// ## Parameters
+  ///
+  /// - `base64Payload` - The base64-encoded encrypted payload from the server.
+  /// - `aad` - Optional Additional Authenticated Data. Must match the AAD
+  ///   used during encryption, or decryption will fail with an authentication
+  ///   error.
+  ///
+  /// ## Returns
+  ///
+  /// The decrypted plaintext string.
+  ///
+  /// ## Throws
+  ///
+  /// - [StateError] if no session key has been derived.
+  /// - [FormatException] if the base64 string is invalid.
+  /// - [ArgumentError] if the payload is too short.
+  /// - [SecretBoxAuthenticationError] if MAC verification fails
+  ///   (indicating tampering, wrong key, or mismatched AAD).
+  ///
+  /// ## Example
+  ///
+  /// ```dart
+  /// final plaintext = await crypto.decryptFromWire(encryptedPayload);
+  /// final json = jsonDecode(plaintext);
+  ///
+  /// // With AAD for context binding
+  /// final plaintext = await crypto.decryptFromWire(payload, aad: 'session123');
+  /// ```
+  Future<String> decryptFromWire(String base64Payload, {List<int>? aad}) async {
+    if (_sessionKey == null) {
+      throw StateError(
+        'No session key derived. Call deriveSessionKey() first.',
+      );
+    }
+
+    final binary = base64Decode(base64Payload);
+
+    // Minimum size: 12 (nonce) + 0 (empty ciphertext) + 16 (mac) = 28 bytes
+    if (binary.length < 28) {
+      throw ArgumentError(
+        'Payload too short: expected at least 28 bytes, got ${binary.length}',
+      );
+    }
+
+    // Extract components: nonce (12 bytes) || ciphertext || mac (16 bytes)
+    final nonce = Uint8List.fromList(binary.sublist(0, 12));
+    final ciphertextWithMac = binary.sublist(12);
+    final macStart = ciphertextWithMac.length - 16;
+    final ciphertext = Uint8List.fromList(ciphertextWithMac.sublist(0, macStart));
+    final mac = Uint8List.fromList(ciphertextWithMac.sublist(macStart));
+
+    final secretBox = SecretBox(
+      ciphertext,
+      nonce: nonce,
+      mac: Mac(mac),
+    );
+
+    final plaintextBytes = await _cipher.decrypt(
+      secretBox,
+      secretKey: _sessionKey!,
+      aad: aad ?? const <int>[],
+    );
+
+    return utf8.decode(plaintextBytes);
+  }
+
+  /// Returns the raw session key bytes for use by other components.
+  ///
+  /// This allows passing the session key to components like RelayTunnel
+  /// that need to perform their own encryption/decryption.
+  ///
+  /// ## Returns
+  ///
+  /// The 32-byte session key, or null if not derived.
+  Future<Uint8List?> getSessionKeyBytes() async {
+    if (_sessionKey == null) return null;
+    final bytes = await _sessionKey!.extractBytes();
+    return Uint8List.fromList(bytes);
   }
 
   /// Clears all stored keys from memory.

@@ -2,6 +2,7 @@ defmodule Mydia.RemoteAccess.MediaTokenTest do
   use Mydia.DataCase
 
   alias Mydia.RemoteAccess.MediaToken
+  alias Mydia.RemoteAccess.RemoteDevice
   alias Mydia.Accounts
 
   describe "create_token/2" do
@@ -76,11 +77,14 @@ defmodule Mydia.RemoteAccess.MediaTokenTest do
     end
 
     test "rejects expired token", %{device: device} do
-      # Create token that expires immediately
-      {:ok, token, _claims} = MediaToken.create_token(device, ttl: {-1, :second})
+      # Create token that expires in 1 second
+      {:ok, token, claims} = MediaToken.create_token(device, ttl: {1, :second})
 
-      # Wait a bit to ensure it's expired
-      Process.sleep(100)
+      # Verify the TTL was applied (exp should be about 1 second after iat)
+      assert claims["exp"] - claims["iat"] <= 2
+
+      # Wait longer than TTL + allowed_drift (2 seconds drift configured) + margin
+      Process.sleep(4000)
 
       assert {:error, :token_expired} = MediaToken.verify_token(token)
     end
@@ -88,7 +92,7 @@ defmodule Mydia.RemoteAccess.MediaTokenTest do
     test "rejects token for revoked device", %{device: device, token: token} do
       # Revoke the device
       device
-      |> Mydia.RemoteAccess.Device.revoke_changeset()
+      |> RemoteDevice.revoke_changeset()
       |> Repo.update!()
 
       assert {:error, :device_revoked} = MediaToken.verify_token(token)
@@ -135,15 +139,21 @@ defmodule Mydia.RemoteAccess.MediaTokenTest do
     end
 
     test "rejects refresh of expired token", %{device: device} do
-      {:ok, expired_token, _claims} = MediaToken.create_token(device, ttl: {-1, :second})
-      Process.sleep(100)
+      # Create token that expires in 1 second
+      {:ok, expired_token, claims} = MediaToken.create_token(device, ttl: {1, :second})
+
+      # Verify the TTL was applied (exp should be about 1 second after iat)
+      assert claims["exp"] - claims["iat"] <= 2
+
+      # Wait longer than TTL + allowed_drift (2 seconds drift configured) + margin
+      Process.sleep(4000)
 
       assert {:error, :token_expired} = MediaToken.refresh_token(expired_token)
     end
 
     test "rejects refresh of revoked device token", %{device: device, token: token} do
       device
-      |> Mydia.RemoteAccess.Device.revoke_changeset()
+      |> RemoteDevice.revoke_changeset()
       |> Repo.update!()
 
       assert {:error, :device_revoked} = MediaToken.refresh_token(token)
@@ -186,7 +196,7 @@ defmodule Mydia.RemoteAccess.MediaTokenTest do
     test "returns false for revoked device", %{device: device} do
       revoked_device =
         device
-        |> Mydia.RemoteAccess.Device.revoke_changeset()
+        |> RemoteDevice.revoke_changeset()
         |> Repo.update!()
 
       refute MediaToken.device_active?(revoked_device)
@@ -223,11 +233,8 @@ defmodule Mydia.RemoteAccess.MediaTokenTest do
       user_id: user.id
     }
 
-    # Use __MODULE__ to avoid cyclic dependency
-    device_module = Mydia.RemoteAccess.Device
-
-    struct!(device_module)
-    |> device_module.changeset(Map.merge(default_attrs, attrs))
+    %RemoteDevice{}
+    |> RemoteDevice.changeset(Map.merge(default_attrs, attrs))
     |> Repo.insert!()
   end
 end

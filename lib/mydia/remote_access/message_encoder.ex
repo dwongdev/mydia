@@ -60,7 +60,10 @@ defmodule Mydia.RemoteAccess.MessageEncoder do
       iex> MessageEncoder.encode_body(nil)
       %{body: nil, body_encoding: "raw"}
   """
-  @spec encode_body(binary() | map() | nil) :: %{body: String.t() | nil, body_encoding: String.t()}
+  @spec encode_body(binary() | map() | nil) :: %{
+          body: String.t() | nil,
+          body_encoding: String.t()
+        }
   def encode_body(body) when is_binary(body) do
     if String.valid?(body) do
       %{body: body, body_encoding: "raw"}

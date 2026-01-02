@@ -47,16 +47,12 @@ defmodule Mydia.RemoteAccess do
     # Get the application secret for encryption
     app_secret = get_app_secret()
 
-    # Encrypt the private key
-    encrypted = Mydia.Crypto.encrypt_private_key(private_key, app_secret)
+    # Encrypt the private key (returns a 60-byte binary blob)
+    # Format: <<nonce::binary-12, ciphertext::binary-32, mac::binary-16>>
+    encrypted_blob = Mydia.Crypto.encrypt_private_key(private_key, app_secret)
 
     # Generate a unique instance ID
     instance_id = Ecto.UUID.generate()
-
-    # Encode the encrypted data for storage
-    # We store both the ciphertext and nonce in a single binary field
-    # Format: <<nonce::64, ciphertext::binary>>
-    encrypted_blob = <<encrypted.nonce::64>> <> encrypted.ciphertext
 
     # Create the config with the keypair
     # Note: relay_url is read from METADATA_RELAY_URL env var at runtime
@@ -115,15 +111,11 @@ defmodule Mydia.RemoteAccess do
         {:error, :not_configured}
 
       config ->
-        # Extract nonce and ciphertext from the stored blob
-        <<nonce::64, ciphertext::binary>> = config.static_private_key_encrypted
-
         # Get the application secret
         app_secret = get_app_secret()
 
-        # Decrypt the private key
-        encrypted_data = %{ciphertext: ciphertext, nonce: nonce}
-        Mydia.Crypto.decrypt_private_key(encrypted_data, app_secret)
+        # Decrypt the private key (supports both old and new formats)
+        Mydia.Crypto.decrypt_private_key(config.static_private_key_encrypted, app_secret)
     end
   end
 
@@ -222,6 +214,28 @@ defmodule Mydia.RemoteAccess do
   """
   def get_device!(id) do
     Repo.get!(RemoteDevice, id)
+  end
+
+  @doc """
+  Gets an active (non-revoked) device by ID, preloading the user.
+
+  Returns `{:ok, device}` if found and active.
+  Returns `{:error, :not_found}` if device doesn't exist.
+  Returns `{:error, :revoked}` if device is revoked.
+  """
+  @spec get_active_device(String.t()) :: {:ok, RemoteDevice.t()} | {:error, :not_found | :revoked}
+  def get_active_device(device_id) do
+    case Repo.get(RemoteDevice, device_id) |> Repo.preload(:user) do
+      nil ->
+        {:error, :not_found}
+
+      device ->
+        if RemoteDevice.revoked?(device) do
+          {:error, :revoked}
+        else
+          {:ok, device}
+        end
+    end
   end
 
   @doc """

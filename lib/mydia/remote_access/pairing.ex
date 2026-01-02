@@ -32,8 +32,11 @@ defmodule Mydia.RemoteAccess.Pairing do
   - Provides forward secrecy via ephemeral keys during pairing
   """
 
+  require Logger
+
   alias Mydia.RemoteAccess
   alias Mydia.RemoteAccess.RemoteDevice
+  alias Mydia.RemoteAccess.MediaToken
   alias Mydia.Crypto
 
   @doc """
@@ -77,7 +80,7 @@ defmodule Mydia.RemoteAccess.Pairing do
   """
   @spec process_client_message(binary(), binary()) ::
           {:ok, binary(), RemoteDevice.t()}
-          | {:error, :device_not_found | :device_revoked | :handshake_failed | :invalid_key}
+          | {:error, :device_not_found | :handshake_failed | :invalid_key}
   def process_client_message(server_private_key, client_public_key)
       when byte_size(server_private_key) == 32 do
     # Decode client public key if base64 encoded
@@ -119,7 +122,7 @@ defmodule Mydia.RemoteAccess.Pairing do
 
   """
   @spec verify_device_key(binary()) ::
-          {:ok, RemoteDevice.t()} | {:error, :device_not_found | :device_revoked}
+          {:ok, RemoteDevice.t()} | {:error, :device_not_found}
   def verify_device_key(device_static_public_key) when is_binary(device_static_public_key) do
     case Mydia.Repo.get_by(RemoteDevice, device_static_public_key: device_static_public_key) do
       nil ->
@@ -127,7 +130,11 @@ defmodule Mydia.RemoteAccess.Pairing do
 
       device ->
         if RemoteDevice.revoked?(device) do
-          {:error, :device_revoked}
+          # Return same error as not found to prevent device enumeration
+          # An attacker should not be able to distinguish between
+          # "device doesn't exist" and "device exists but is revoked"
+          Logger.warning("Attempted reconnection with revoked device: #{device.id}")
+          {:error, :device_not_found}
         else
           {:ok, device}
         end
@@ -166,20 +173,12 @@ defmodule Mydia.RemoteAccess.Pairing do
     end
   end
 
-  # Generates a media access token for the device
-  # This is a placeholder - you should integrate with your actual token system
+  # Generates a JWT media access token for the device
   defp generate_media_token(device) do
-    # Generate a secure random token
-    # In production, this should be a JWT or similar with proper expiration
-    token_data = %{
-      device_id: device.id,
-      user_id: device.user_id,
-      issued_at: DateTime.utc_now() |> DateTime.to_unix()
-    }
-
-    # For now, we'll create a simple token
-    # You should replace this with proper JWT generation
-    Base.encode64(:erlang.term_to_binary(token_data))
+    case MediaToken.create_token(device) do
+      {:ok, token, _claims} -> token
+      {:error, _reason} -> raise "Failed to generate media token"
+    end
   end
 
   # ============================================================================
@@ -249,39 +248,37 @@ defmodule Mydia.RemoteAccess.Pairing do
 
   This function:
   1. Validates the claim code
-  2. Generates a new device keypair for the client
-  3. Registers the device with the user
-  4. Generates a fresh media access token
-  5. Consumes the claim code
+  2. Registers the device with the client-provided public key
+  3. Generates a fresh media access token
+  4. Consumes the claim code
 
-  The session key can be used for subsequent encrypted communication
-  to send the device keypair back to the client.
+  The client generates its own X25519 keypair and sends only the public key.
+  The private key never leaves the client device.
 
-  Returns `{:ok, device, token, client_keypair, session_key}` on success.
+  Returns `{:ok, device, token, session_key}` on success.
   Returns `{:error, reason}` if claim code validation or device creation fails.
 
   ## Parameters
 
   - `claim_code` - The claim code entered by the user
   - `device_attrs` - Map containing device information (device_name, platform)
+  - `client_static_public_key` - The client's static public key (32 bytes)
   - `session_key` - The derived session key (32 bytes)
 
   """
-  @spec complete_pairing(String.t(), map(), binary()) ::
-          {:ok, RemoteDevice.t(), String.t(), {binary(), binary()}, binary()}
-          | {:error, :not_found | :already_used | :expired | Ecto.Changeset.t()}
-  def complete_pairing(claim_code, device_attrs, session_key)
-      when byte_size(session_key) == 32 do
+  @spec complete_pairing(String.t(), map(), binary(), binary()) ::
+          {:ok, RemoteDevice.t(), String.t(), binary()}
+          | {:error, :not_found | :already_used | :expired | :invalid_key | Ecto.Changeset.t()}
+  def complete_pairing(claim_code, device_attrs, client_static_public_key, session_key)
+      when byte_size(session_key) == 32 and byte_size(client_static_public_key) == 32 do
     # Validate the claim code
     with {:ok, claim} <- RemoteAccess.validate_claim_code(claim_code),
-         # Generate a new keypair for the device using the simplified crypto
-         {device_public_key, device_private_key} = Crypto.generate_keypair(),
          # Generate a unique device token
          device_token = generate_device_token(),
-         # Register the device
+         # Register the device with the client's public key
          device_params =
            Map.merge(device_attrs, %{
-             device_static_public_key: device_public_key,
+             device_static_public_key: client_static_public_key,
              token: device_token,
              user_id: claim.user_id
            }),
@@ -291,10 +288,14 @@ defmodule Mydia.RemoteAccess.Pairing do
       # Generate media access token
       media_token = generate_media_token(device)
 
-      # Return the device, media token, and the device's new keypair
-      # The keypair needs to be sent to the client over the encrypted channel
-      {:ok, device, media_token, {device_public_key, device_private_key}, session_key}
+      # Return the device and media token (no keypair - client already has it)
+      {:ok, device, media_token, session_key}
     end
+  end
+
+  def complete_pairing(_claim_code, _device_attrs, client_static_public_key, _session_key)
+      when byte_size(client_static_public_key) != 32 do
+    {:error, :invalid_key}
   end
 
   # Generates a unique device token

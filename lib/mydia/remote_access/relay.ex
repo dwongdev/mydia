@@ -344,7 +344,10 @@ defmodule Mydia.RemoteAccess.Relay do
           payload: Base.encode64(payload)
         })
 
-      Logger.info("Relay WebSocket frame sent: session=#{session_id}, frame_size=#{byte_size(msg)}")
+      Logger.info(
+        "Relay WebSocket frame sent: session=#{session_id}, frame_size=#{byte_size(msg)}"
+      )
+
       WebSockex.send_frame(state.ws_pid, {:text, msg})
     else
       Logger.warning("Cannot send relay_message: ws_pid is nil, session=#{session_id}")

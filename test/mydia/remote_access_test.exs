@@ -615,6 +615,42 @@ defmodule Mydia.RemoteAccessTest do
     end
   end
 
+  describe "get_active_device/1" do
+    test "returns device with preloaded user for active device" do
+      user = create_user()
+      device = create_device(user.id)
+
+      assert {:ok, fetched_device} = RemoteAccess.get_active_device(device.id)
+      assert fetched_device.id == device.id
+      assert fetched_device.user.id == user.id
+    end
+
+    test "returns error for non-existent device" do
+      assert {:error, :not_found} = RemoteAccess.get_active_device(Ecto.UUID.generate())
+    end
+
+    test "returns error for revoked device" do
+      user = create_user()
+      device = create_device(user.id)
+
+      # Revoke the device
+      {:ok, _revoked} = RemoteAccess.revoke_device(device)
+
+      assert {:error, :revoked} = RemoteAccess.get_active_device(device.id)
+    end
+
+    test "preloads user association" do
+      user = create_user()
+      device = create_device(user.id)
+
+      {:ok, fetched_device} = RemoteAccess.get_active_device(device.id)
+
+      # User should be preloaded, not a reference
+      assert %Mydia.Accounts.User{} = fetched_device.user
+      assert fetched_device.user.email == user.email
+    end
+  end
+
   # Helper functions
 
   defp create_user do

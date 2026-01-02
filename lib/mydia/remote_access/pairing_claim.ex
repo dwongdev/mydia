@@ -91,14 +91,19 @@ defmodule Mydia.RemoteAccess.PairingClaim do
     |> format_code()
   end
 
-  # Generate a random string of the specified length using allowed characters
+  # Generate a cryptographically random string of the specified length using allowed characters
   defp generate_code_string(length) do
     chars = String.graphemes(@code_chars)
     count = length(chars)
 
-    1..length
-    |> Enum.map(fn _ ->
-      Enum.at(chars, :rand.uniform(count) - 1)
+    # Generate cryptographically secure random bytes
+    random_bytes = :crypto.strong_rand_bytes(length)
+
+    random_bytes
+    |> :binary.bin_to_list()
+    |> Enum.map(fn byte ->
+      # Use modulo to map byte value to character index
+      Enum.at(chars, rem(byte, count))
     end)
     |> Enum.join()
   end

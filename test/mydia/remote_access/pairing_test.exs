@@ -52,15 +52,17 @@ defmodule Mydia.RemoteAccess.PairingTest do
       assert {:error, :device_not_found} = Pairing.verify_device_key(random_key)
     end
 
-    test "returns error for revoked device", %{
+    test "returns device_not_found for revoked device (prevents enumeration)", %{
       device: device,
       device_public_key: device_public_key
     } do
       # Revoke the device
       {:ok, _revoked} = RemoteAccess.revoke_device(device)
 
-      # Verify should fail
-      assert {:error, :device_revoked} = Pairing.verify_device_key(device_public_key)
+      # Verify should return same error as not found to prevent device enumeration
+      # An attacker should not be able to distinguish between
+      # "device doesn't exist" and "device exists but is revoked"
+      assert {:error, :device_not_found} = Pairing.verify_device_key(device_public_key)
     end
   end
 
@@ -336,7 +338,7 @@ defmodule Mydia.RemoteAccess.PairingTest do
   end
 
   # These tests require the Relay service to be running
-  describe "complete_pairing/3" do
+  describe "complete_pairing/4" do
     @describetag :external
     setup do
       # Create a user
@@ -354,31 +356,37 @@ defmodule Mydia.RemoteAccess.PairingTest do
       # Generate a session key (as would be derived from ECDH)
       session_key = :crypto.strong_rand_bytes(32)
 
-      %{user: user, claim: claim, session_key: session_key}
+      # Generate client static keypair (as client would do)
+      {client_public_key, _client_private_key} = Crypto.generate_keypair()
+
+      %{
+        user: user,
+        claim: claim,
+        session_key: session_key,
+        client_public_key: client_public_key
+      }
     end
 
     test "successfully completes pairing with valid claim code", %{
       claim: claim,
-      session_key: session_key
+      session_key: session_key,
+      client_public_key: client_public_key
     } do
       device_attrs = %{
         device_name: "iPhone 15",
         platform: "iOS"
       }
 
-      assert {:ok, device, media_token, {device_public_key, device_private_key}, returned_key} =
-               Pairing.complete_pairing(claim.code, device_attrs, session_key)
+      assert {:ok, device, media_token, returned_key} =
+               Pairing.complete_pairing(claim.code, device_attrs, client_public_key, session_key)
 
       # Verify device was created
       assert device.device_name == "iPhone 15"
       assert device.platform == "iOS"
       assert device.user_id == claim.user_id
 
-      # Verify keypair was generated
-      assert is_binary(device_public_key)
-      assert byte_size(device_public_key) == 32
-      assert is_binary(device_private_key)
-      assert byte_size(device_private_key) == 32
+      # Verify device has the client's public key (not server-generated)
+      assert device.device_static_public_key == client_public_key
 
       # Verify token was generated
       assert is_binary(media_token)
@@ -393,17 +401,29 @@ defmodule Mydia.RemoteAccess.PairingTest do
       assert consumed_claim.device_id == device.id
     end
 
-    test "fails with invalid claim code", %{session_key: session_key} do
+    test "fails with invalid claim code", %{
+      session_key: session_key,
+      client_public_key: client_public_key
+    } do
       device_attrs = %{
         device_name: "iPhone 15",
         platform: "iOS"
       }
 
       assert {:error, :not_found} =
-               Pairing.complete_pairing("INVALID-CODE", device_attrs, session_key)
+               Pairing.complete_pairing(
+                 "INVALID-CODE",
+                 device_attrs,
+                 client_public_key,
+                 session_key
+               )
     end
 
-    test "fails with expired claim code", %{claim: claim, session_key: session_key} do
+    test "fails with expired claim code", %{
+      claim: claim,
+      session_key: session_key,
+      client_public_key: client_public_key
+    } do
       # Manually expire the claim
       past_time = DateTime.utc_now() |> DateTime.add(-10, :minute) |> DateTime.truncate(:second)
 
@@ -417,13 +437,14 @@ defmodule Mydia.RemoteAccess.PairingTest do
       }
 
       assert {:error, :expired} =
-               Pairing.complete_pairing(claim.code, device_attrs, session_key)
+               Pairing.complete_pairing(claim.code, device_attrs, client_public_key, session_key)
     end
 
     test "fails with already used claim code", %{
       claim: claim,
       user: user,
-      session_key: session_key
+      session_key: session_key,
+      client_public_key: client_public_key
     } do
       # Create a device and consume the claim
       {device_public_key, _} = Crypto.generate_keypair()
@@ -446,7 +467,23 @@ defmodule Mydia.RemoteAccess.PairingTest do
       }
 
       assert {:error, :already_used} =
-               Pairing.complete_pairing(claim.code, device_attrs, session_key)
+               Pairing.complete_pairing(claim.code, device_attrs, client_public_key, session_key)
+    end
+
+    test "fails with invalid public key size", %{
+      claim: claim,
+      session_key: session_key
+    } do
+      device_attrs = %{
+        device_name: "iPhone 15",
+        platform: "iOS"
+      }
+
+      # Invalid key size (not 32 bytes)
+      invalid_key = :crypto.strong_rand_bytes(16)
+
+      assert {:error, :invalid_key} =
+               Pairing.complete_pairing(claim.code, device_attrs, invalid_key, session_key)
     end
   end
 
@@ -469,66 +506,60 @@ defmodule Mydia.RemoteAccess.PairingTest do
       %{user: user, claim: claim}
     end
 
-    test "completes full X25519 pairing handshake", %{claim: claim} do
-      # Step 1: Server generates ephemeral keypair
+    test "completes full X25519 pairing handshake with client-side key generation", %{
+      claim: claim
+    } do
+      # Step 1: Server generates ephemeral keypair for session
       {:ok, server_public_key, server_private_key} = Pairing.start_pairing_handshake()
 
-      # Step 2: Client generates ephemeral keypair
-      {client_public_key, client_private_key} = Crypto.generate_keypair()
+      # Step 2: Client generates ephemeral keypair for session
+      {client_ephemeral_public, client_ephemeral_private} = Crypto.generate_keypair()
 
-      # Step 3: Client sends public key to server
+      # Step 3: Client sends ephemeral public key to server
       #         Server derives session key
       assert {:ok, server_session_key} =
-               Pairing.process_pairing_message(server_private_key, client_public_key)
+               Pairing.process_pairing_message(server_private_key, client_ephemeral_public)
 
       # Step 4: Client receives server's public key and derives same session key
-      client_session_key = Crypto.derive_session_key(client_private_key, server_public_key)
+      client_session_key = Crypto.derive_session_key(client_ephemeral_private, server_public_key)
 
       # Both parties should have the same session key
       assert server_session_key == client_session_key
 
-      # Step 5: Server completes pairing with claim code
+      # Step 5: Client generates STATIC keypair for device identification
+      # This keypair is persistent and never leaves the client
+      {client_static_public_key, _client_static_private_key} = Crypto.generate_keypair()
+
+      # Step 6: Client sends claim_code with static public key
       device_attrs = %{
         device_name: "Test Phone",
         platform: "iOS"
       }
 
-      assert {:ok, device, media_token, {device_public_key, device_private_key}, _session_key} =
-               Pairing.complete_pairing(claim.code, device_attrs, server_session_key)
+      assert {:ok, device, media_token, returned_session_key} =
+               Pairing.complete_pairing(
+                 claim.code,
+                 device_attrs,
+                 client_static_public_key,
+                 server_session_key
+               )
 
       # Verify device was created
       assert device.device_name == "Test Phone"
       assert device.platform == "iOS"
       assert device.user_id == claim.user_id
 
-      # Verify keypair was generated
-      assert byte_size(device_public_key) == 32
-      assert byte_size(device_private_key) == 32
+      # Verify the device has the CLIENT's static public key (not server-generated)
+      assert device.device_static_public_key == client_static_public_key
 
       # Verify token was generated
       assert is_binary(media_token)
 
-      # Step 6: Server encrypts device keypair and sends to client over secure channel
-      keypair_data =
-        Jason.encode!(%{
-          public_key: Base.encode64(device_public_key),
-          private_key: Base.encode64(device_private_key)
-        })
+      # Verify session key is returned
+      assert returned_session_key == server_session_key
 
-      encrypted = Crypto.encrypt(keypair_data, server_session_key)
-
-      # Client decrypts the keypair
-      {:ok, decrypted_data} =
-        Crypto.decrypt(
-          encrypted.ciphertext,
-          encrypted.nonce,
-          encrypted.mac,
-          client_session_key
-        )
-
-      decoded = Jason.decode!(decrypted_data)
-      assert decoded["public_key"] == Base.encode64(device_public_key)
-      assert decoded["private_key"] == Base.encode64(device_private_key)
+      # The client's private key stays on the client device - never transmitted!
+      # Server only stores the public key for reconnection verification
     end
   end
 end

@@ -116,7 +116,12 @@ defmodule MydiaWeb.DeviceChannel do
   @impl true
   def handle_in(
         "claim_code",
-        %{"code" => claim_code, "device_name" => device_name, "platform" => platform},
+        %{
+          "code" => claim_code,
+          "device_name" => device_name,
+          "platform" => platform,
+          "static_public_key" => static_public_key_b64
+        },
         socket
       ) do
     # Verify handshake is complete
@@ -124,56 +129,70 @@ defmodule MydiaWeb.DeviceChannel do
       Logger.warning("Claim code submitted before handshake completion")
       {:reply, {:error, %{reason: "handshake_incomplete"}}, socket}
     else
-      session_key = socket.assigns.session_key
+      # Decode client's static public key
+      case Base.decode64(static_public_key_b64) do
+        {:ok, client_static_public_key} ->
+          session_key = socket.assigns.session_key
 
-      device_attrs = %{
-        device_name: device_name,
-        platform: platform
-      }
+          device_attrs = %{
+            device_name: device_name,
+            platform: platform
+          }
 
-      # Complete the pairing process
-      case Pairing.complete_pairing(claim_code, device_attrs, session_key) do
-        {:ok, device, media_token, {device_public_key, device_private_key}, _session_key} ->
-          # Update socket with device info
-          socket =
-            socket
-            |> assign(:device_id, device.id)
-            |> assign(:user_id, device.user_id)
-            |> assign(:authenticated, true)
+          # Complete the pairing process with client's public key
+          case Pairing.complete_pairing(
+                 claim_code,
+                 device_attrs,
+                 client_static_public_key,
+                 session_key
+               ) do
+            {:ok, device, media_token, _session_key} ->
+              # Update socket with device info
+              socket =
+                socket
+                |> assign(:device_id, device.id)
+                |> assign(:user_id, device.user_id)
+                |> assign(:authenticated, true)
 
-          # Publish device connected event
-          Mydia.RemoteAccess.publish_device_event(device, :connected)
+              # Publish device connected event
+              Mydia.RemoteAccess.publish_device_event(device, :connected)
 
-          # Send the device keypair and tokens to the client
-          # The keypair should be encrypted over the secure channel
-          {:reply,
-           {:ok,
-            %{
-              device_id: device.id,
-              media_token: media_token,
-              device_public_key: Base.encode64(device_public_key),
-              device_private_key: Base.encode64(device_private_key)
-            }}, socket}
+              # No keypair in response - client already has its own keys
+              {:reply,
+               {:ok,
+                %{
+                  device_id: device.id,
+                  media_token: media_token
+                }}, socket}
 
-        {:error, :not_found} ->
-          Logger.warning("Pairing failed: claim code not found")
-          {:reply, {:error, %{reason: "invalid_claim_code"}}, socket}
+            {:error, :not_found} ->
+              Logger.warning("Pairing failed: claim code not found")
+              {:reply, {:error, %{reason: "invalid_claim_code"}}, socket}
 
-        {:error, :already_used} ->
-          Logger.warning("Pairing failed: claim code already used")
-          {:reply, {:error, %{reason: "claim_code_used"}}, socket}
+            {:error, :already_used} ->
+              Logger.warning("Pairing failed: claim code already used")
+              {:reply, {:error, %{reason: "claim_code_used"}}, socket}
 
-        {:error, :expired} ->
-          Logger.warning("Pairing failed: claim code expired")
-          {:reply, {:error, %{reason: "claim_code_expired"}}, socket}
+            {:error, :expired} ->
+              Logger.warning("Pairing failed: claim code expired")
+              {:reply, {:error, %{reason: "claim_code_expired"}}, socket}
 
-        {:error, %Ecto.Changeset{} = changeset} ->
-          Logger.error("Pairing failed: device creation error: #{inspect(changeset)}")
-          {:reply, {:error, %{reason: "device_creation_failed"}}, socket}
+            {:error, :invalid_key} ->
+              Logger.warning("Pairing failed: invalid public key")
+              {:reply, {:error, %{reason: "invalid_public_key"}}, socket}
 
-        {:error, reason} ->
-          Logger.error("Unexpected error during pairing: #{inspect(reason)}")
-          {:reply, {:error, %{reason: "internal_error"}}, socket}
+            {:error, %Ecto.Changeset{} = changeset} ->
+              Logger.error("Pairing failed: device creation error: #{inspect(changeset)}")
+              {:reply, {:error, %{reason: "device_creation_failed"}}, socket}
+
+            {:error, reason} ->
+              Logger.error("Unexpected error during pairing: #{inspect(reason)}")
+              {:reply, {:error, %{reason: "internal_error"}}, socket}
+          end
+
+        :error ->
+          Logger.warning("Pairing failed: invalid base64 public key")
+          {:reply, {:error, %{reason: "invalid_public_key"}}, socket}
       end
     end
   end
@@ -269,10 +288,13 @@ defmodule MydiaWeb.DeviceChannel do
     :ok
   end
 
-  # Private helper to verify device token
+  # Private helper to verify device token against stored hash
   defp verify_device_token(device, provided_token) do
-    # Compare the stored token with the provided one
-    # Use secure_compare to prevent timing attacks
-    Plug.Crypto.secure_compare(device.token || "", provided_token)
+    # Verify the provided token against the stored Argon2 hash
+    # Argon2.verify_pass is timing-safe
+    case device.token_hash do
+      nil -> false
+      hash -> Argon2.verify_pass(provided_token, hash)
+    end
   end
 end

@@ -80,11 +80,15 @@ defmodule MydiaWeb.DeviceChannelTest do
         })
 
       # Should receive successful reply with server's public key and token
-      assert_reply ref, :ok, %{
-        server_public_key: server_public_key_b64,
-        token: token,
-        device_id: device_id
-      }
+      # Note: Increased timeout to 500ms due to Argon2 token verification (~80ms)
+      assert_reply ref,
+                   :ok,
+                   %{
+                     server_public_key: server_public_key_b64,
+                     token: token,
+                     device_id: device_id
+                   },
+                   500
 
       # Verify we got valid response
       assert is_binary(server_public_key_b64)
@@ -136,8 +140,9 @@ defmodule MydiaWeb.DeviceChannelTest do
           "device_token" => device_token
         })
 
-      # Should receive error
-      assert_reply ref, :error, %{reason: "device_revoked"}
+      # Should receive error - returns "device_not_found" to prevent enumeration
+      # (revoked devices return same error as non-existent for security)
+      assert_reply ref, :error, %{reason: "device_not_found"}
     end
 
     test "rejects key exchange with invalid device token", %{
@@ -156,7 +161,8 @@ defmodule MydiaWeb.DeviceChannelTest do
         })
 
       # Should receive error
-      assert_reply ref, :error, %{reason: "invalid_device_token"}
+      # Note: Increased timeout due to Argon2 token verification (~80ms)
+      assert_reply ref, :error, %{reason: "invalid_device_token"}, 500
     end
   end
 
@@ -195,7 +201,8 @@ defmodule MydiaWeb.DeviceChannelTest do
           "device_token" => device_token
         })
 
-      assert_reply ref, :ok, %{device_id: device_id}
+      # Note: Increased timeout due to Argon2 token verification (~80ms)
+      assert_reply ref, :ok, %{device_id: device_id}, 500
 
       # Reload device and check last_seen_at was updated
       updated_device = RemoteAccess.get_device!(device_id)

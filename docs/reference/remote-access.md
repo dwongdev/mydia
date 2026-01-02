@@ -43,6 +43,208 @@ The remote access system provides a Plex-like experience for connecting mobile c
              └──────────────────────────────────────────┘
 ```
 
+## Protocol Versioning
+
+All messages in the remote access protocol include versioning to ensure forward compatibility and graceful protocol evolution.
+
+### Message Envelope
+
+Every message follows this envelope structure:
+
+```json
+{
+  "version": 1,
+  "type": "request",
+  "body_encoding": "json",
+  "payload": { ... }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `version` | integer | Yes | Protocol version number (currently `1`) |
+| `type` | string | Yes | Message type identifier |
+| `body_encoding` | string | Yes | Encoding of the payload: `"json"`, `"raw"`, or `"base64"` |
+| `payload` | object | Varies | Message-specific data (structure depends on `type`) |
+
+### Message Types
+
+| Type | Direction | Description |
+|------|-----------|-------------|
+| `pairing_handshake` | Both | Initial key exchange during pairing |
+| `handshake_init` | Client→Server | Reconnection handshake initiation |
+| `handshake_complete` | Server→Client | Handshake completion with session token |
+| `claim_code` | Client→Server | Claim code redemption request |
+| `pairing_complete` | Server→Client | Successful pairing response |
+| `request` | Client→Server | Proxied HTTP request through tunnel |
+| `response` | Server→Client | Response to a proxied request |
+| `ping` | Client→Server | Keep-alive ping |
+| `pong` | Server→Client | Keep-alive response |
+| `error` | Server→Client | Error response |
+| `close` | Both | Connection termination |
+
+### Body Encoding
+
+The `body_encoding` field specifies how the message body/payload is encoded:
+
+| Encoding | Description | Use Case |
+|----------|-------------|----------|
+| `json` | JSON-encoded object | Most messages (GraphQL, structured data) |
+| `raw` | UTF-8 text | Plain text responses |
+| `base64` | Base64-encoded binary | Binary data (images, encrypted blobs) |
+
+### Version Negotiation
+
+Version negotiation occurs during the initial handshake:
+
+1. **Client connects** and sends `pairing_handshake` or `handshake_init` with its supported version
+2. **Server responds** with its version in the handshake response
+3. **Protocol selection**: Both sides use the minimum of their versions
+
+```
+Client (v2)                    Server (v1)
+    │                              │
+    │  pairing_handshake           │
+    │  version: 2                  │
+    ├─────────────────────────────>│
+    │                              │
+    │  pairing_handshake           │
+    │  version: 1                  │
+    │<─────────────────────────────┤
+    │                              │
+    │  (Both use v1 protocol)      │
+```
+
+**Version selection rules:**
+
+- Use `min(client_version, server_version)` for the session
+- If `server_version < client_min_supported`, client should disconnect gracefully
+- If `client_version < server_min_supported`, server responds with error
+
+### Backward Compatibility Policy
+
+The protocol follows semantic versioning principles for compatibility:
+
+**Minor version changes (1.x → 1.y):**
+
+- New optional fields may be added to message payloads
+- New message types may be introduced
+- Existing message semantics remain unchanged
+- Clients/servers MUST ignore unknown fields
+- Clients/servers MUST ignore unknown message types (log and continue)
+
+**Major version changes (1.x → 2.x):**
+
+- Breaking changes to message structure
+- Removal of message types
+- Changed semantics of existing fields
+- Requires explicit version negotiation and fallback
+
+**Compatibility guarantees:**
+
+| Server Version | Client Version | Behavior |
+|----------------|----------------|----------|
+| 1 | 1 | Full compatibility |
+| 1 | 2 | Client uses v1 protocol |
+| 2 | 1 | Server uses v1 if supported, else error |
+| 2 | 2 | Full compatibility |
+
+**Implementation requirements:**
+
+1. Always include `version` in outgoing messages
+2. Always check `version` in incoming messages
+3. Log warnings for unknown fields (don't fail)
+4. Gracefully handle unknown message types
+5. Maintain backward compatibility for at least 2 major versions
+
+### Example Messages
+
+**Pairing handshake (client → server):**
+
+```json
+{
+  "version": 1,
+  "type": "pairing_handshake",
+  "body_encoding": "json",
+  "payload": {
+    "message": "base64-encoded-client-public-key"
+  }
+}
+```
+
+**Claim code (client → server):**
+
+```json
+{
+  "version": 1,
+  "type": "claim_code",
+  "body_encoding": "json",
+  "payload": {
+    "code": "ABC123",
+    "device_name": "iPhone 15 Pro",
+    "platform": "ios",
+    "static_public_key": "base64-encoded-key"
+  }
+}
+```
+
+**Request (client → server):**
+
+```json
+{
+  "version": 1,
+  "type": "request",
+  "body_encoding": "json",
+  "payload": {
+    "id": "req-123",
+    "method": "POST",
+    "path": "/api/graphql",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": "{\"query\": \"...\"}"
+  }
+}
+```
+
+**Response (server → client):**
+
+```json
+{
+  "version": 1,
+  "type": "response",
+  "body_encoding": "json",
+  "payload": {
+    "id": "req-123",
+    "status": 200,
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": "{\"data\": {...}}",
+    "body_encoding": "raw"
+  }
+}
+```
+
+**Binary response (server → client):**
+
+```json
+{
+  "version": 1,
+  "type": "response",
+  "body_encoding": "json",
+  "payload": {
+    "id": "req-456",
+    "status": 200,
+    "headers": {
+      "content-type": "image/jpeg"
+    },
+    "body": "base64-encoded-image-data",
+    "body_encoding": "base64"
+  }
+}
+```
+
 ## Connection Modes
 
 ### Mode Selection

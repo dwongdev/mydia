@@ -228,6 +228,19 @@ config :mydia, Mydia.Auth.Guardian,
   verify_issuer: true,
   secret_key: "REPLACE_IN_RUNTIME_CONFIG"
 
+# Configure Guardian for media tokens (remote device access)
+config :mydia, Mydia.RemoteAccess.MediaToken,
+  issuer: "mydia",
+  ttl: {24, :hours},
+  allowed_drift: 2000,
+  verify_issuer: true,
+  secret_key: "REPLACE_IN_RUNTIME_CONFIG"
+
+# Relay tunnel shared secret for defense-in-depth authentication
+# Used to sign internal relay tunnel requests with HMAC-SHA256
+# This provides additional security beyond localhost IP checks
+config :mydia, :relay_tunnel_secret, "REPLACE_IN_RUNTIME_CONFIG"
+
 # Configure Oban for background job processing
 # Use Lite engine for SQLite, Basic engine for PostgreSQL
 oban_engine =

@@ -312,6 +312,15 @@ config :mydia, Mydia.Auth.Guardian,
   secret_key: guardian_secret,
   ttl: {30, :days}
 
+config :mydia, Mydia.RemoteAccess.MediaToken,
+  issuer: "mydia",
+  secret_key: guardian_secret,
+  ttl: {24, :hours}
+
+# Relay tunnel shared secret for development
+# This secret is used to sign internal relay tunnel requests with HMAC-SHA256
+config :mydia, :relay_tunnel_secret, "dev-relay-tunnel-secret-not-for-production"
+
 # Ueberauth OIDC configuration for development
 # These are read from environment variables set in Docker
 # Support both OIDC_ISSUER and OIDC_DISCOVERY_DOCUMENT_URI

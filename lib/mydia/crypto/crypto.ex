@@ -103,8 +103,25 @@ defmodule Mydia.Crypto do
     # Compute ECDH shared secret
     shared_secret = :crypto.compute_key(:ecdh, peer_public_key, private_key, :x25519)
 
+    # Debug: Log shared secret fingerprint for cross-platform crypto troubleshooting
+    shared_secret_hex = Base.encode16(shared_secret, case: :lower)
+
+    require Logger
+
+    Logger.debug(
+      "Crypto.derive_session_key: shared_secret first_8_bytes=#{String.slice(shared_secret_hex, 0, 16)}, salt_size=#{byte_size(salt)}, info=#{inspect(info)}"
+    )
+
     # Derive session key using HKDF-SHA256
-    hkdf_sha256(shared_secret, salt, info, @key_size)
+    session_key = hkdf_sha256(shared_secret, salt, info, @key_size)
+
+    session_key_hex = Base.encode16(session_key, case: :lower)
+
+    Logger.debug(
+      "Crypto.derive_session_key: session_key first_8_bytes=#{String.slice(session_key_hex, 0, 16)}"
+    )
+
+    session_key
   end
 
   @doc """
@@ -116,6 +133,9 @@ defmodule Mydia.Crypto do
 
   - `plaintext` - The data to encrypt (binary or string)
   - `key` - 32-byte symmetric key (from `derive_session_key/2`)
+  - `aad` - Additional Authenticated Data (optional, default: empty)
+            This data is authenticated but not encrypted. Use it to bind
+            the ciphertext to a specific context (e.g., session_id, message type).
 
   ## Returns
 
@@ -133,18 +153,45 @@ defmodule Mydia.Crypto do
       iex> is_binary(encrypted.ciphertext) and byte_size(encrypted.nonce) == 12
       true
 
-  """
-  @spec encrypt(binary(), binary()) :: encrypted_data()
-  def encrypt(plaintext, key) when byte_size(key) == @key_size do
-    nonce = :crypto.strong_rand_bytes(@nonce_size)
+      # With AAD for context binding
+      iex> encrypted = Mydia.Crypto.encrypt("secret", key, "session123:request")
+      iex> byte_size(encrypted.nonce) == 12
+      true
 
+  """
+  @spec encrypt(binary(), binary(), binary()) :: encrypted_data()
+  def encrypt(plaintext, key, aad \\ <<>>) when byte_size(key) == @key_size and is_binary(aad) do
+    nonce = :crypto.strong_rand_bytes(@nonce_size)
+    encrypt_with_nonce(plaintext, key, nonce, aad)
+  end
+
+  @doc """
+  Encrypts plaintext with a specified nonce.
+
+  This is primarily for testing purposes to create reproducible test vectors.
+  In production, use `encrypt/2` or `encrypt/3` which generates a random nonce.
+
+  ## Parameters
+
+  - `plaintext` - The data to encrypt
+  - `key` - 32-byte symmetric key
+  - `nonce` - 12-byte nonce
+  - `aad` - Additional Authenticated Data (optional)
+
+  ## Returns
+
+  Same as `encrypt/2` - a map with `:ciphertext`, `:nonce`, and `:mac`.
+  """
+  @spec encrypt_with_nonce(binary(), binary(), binary(), binary()) :: encrypted_data()
+  def encrypt_with_nonce(plaintext, key, nonce, aad \\ <<>>)
+      when byte_size(key) == @key_size and byte_size(nonce) == @nonce_size and is_binary(aad) do
     {ciphertext, mac} =
       :crypto.crypto_one_time_aead(
         :chacha20_poly1305,
         key,
         nonce,
         plaintext,
-        _aad = <<>>,
+        aad,
         _encrypt = true
       )
 
@@ -158,7 +205,8 @@ defmodule Mydia.Crypto do
   @doc """
   Decrypts ciphertext using ChaCha20-Poly1305 authenticated encryption.
 
-  Verifies the MAC before returning the plaintext.
+  Verifies the MAC before returning the plaintext. If AAD was used during
+  encryption, the same AAD must be provided for decryption.
 
   ## Parameters
 
@@ -166,6 +214,8 @@ defmodule Mydia.Crypto do
   - `nonce` - The 12-byte nonce used during encryption
   - `mac` - The 16-byte authentication tag
   - `key` - 32-byte symmetric key
+  - `aad` - Additional Authenticated Data (optional, default: empty)
+            Must match the AAD used during encryption.
 
   ## Returns
 
@@ -182,19 +232,27 @@ defmodule Mydia.Crypto do
       iex> Mydia.Crypto.decrypt(encrypted.ciphertext, encrypted.nonce, encrypted.mac, bob_key)
       {:ok, "hello"}
 
+      # With AAD - must match during decryption
+      iex> encrypted = Mydia.Crypto.encrypt("hello", alice_key, "context")
+      iex> Mydia.Crypto.decrypt(encrypted.ciphertext, encrypted.nonce, encrypted.mac, bob_key, "context")
+      {:ok, "hello"}
+
   """
-  @spec decrypt(binary(), binary(), binary(), binary()) ::
+  @spec decrypt(binary(), binary(), binary(), binary(), binary()) ::
           {:ok, binary()} | {:error, :decryption_failed}
-  def decrypt(ciphertext, nonce, mac, key)
+  def decrypt(ciphertext, nonce, mac, key, aad \\ <<>>)
+
+  def decrypt(ciphertext, nonce, mac, key, aad)
       when byte_size(nonce) == @nonce_size and
              byte_size(mac) == @mac_size and
-             byte_size(key) == @key_size do
+             byte_size(key) == @key_size and
+             is_binary(aad) do
     case :crypto.crypto_one_time_aead(
            :chacha20_poly1305,
            key,
            nonce,
            ciphertext,
-           _aad = <<>>,
+           aad,
            mac,
            _encrypt = false
          ) do
@@ -203,7 +261,7 @@ defmodule Mydia.Crypto do
     end
   end
 
-  def decrypt(_ciphertext, _nonce, _mac, _key) do
+  def decrypt(_ciphertext, _nonce, _mac, _key, _aad) do
     {:error, :decryption_failed}
   end
 
@@ -211,11 +269,16 @@ defmodule Mydia.Crypto do
   # Private Key Storage Functions
   # ============================================================================
 
+  # Old format: 8-byte nonce (zero-padded to 12) + 32-byte ciphertext + 16-byte MAC = 56 bytes
+  @legacy_blob_size 56
+  # New format: 12-byte nonce + 32-byte ciphertext + 16-byte MAC = 60 bytes
+  @new_blob_size 60
+
   @doc """
   Encrypts a private key for secure storage.
 
-  Uses ChaCha20-Poly1305 with a 64-bit random nonce. This format is designed
-  for storing private keys in the database with the nonce as an integer.
+  Uses ChaCha20-Poly1305 with a full 96-bit (12-byte) cryptographically secure
+  random nonce for maximum security.
 
   ## Parameters
 
@@ -224,57 +287,47 @@ defmodule Mydia.Crypto do
 
   ## Returns
 
-  A map containing:
-  - `:ciphertext` - The encrypted private key with MAC appended
-  - `:nonce` - A 64-bit integer nonce
-
-  ## Storage Format
-
-  The result is typically stored as: `<<nonce::64, ciphertext::binary>>`
+  A binary blob containing: `<<nonce::binary-12, ciphertext::binary-32, mac::binary-16>>`
+  Total size: 60 bytes
 
   ## Examples
 
       iex> {_pub, priv} = Mydia.Crypto.generate_keypair()
       iex> key = :crypto.strong_rand_bytes(32)
       iex> encrypted = Mydia.Crypto.encrypt_private_key(priv, key)
-      iex> is_integer(encrypted.nonce) and is_binary(encrypted.ciphertext)
+      iex> byte_size(encrypted) == 60
       true
 
   """
-  @spec encrypt_private_key(binary(), binary()) :: %{ciphertext: binary(), nonce: integer()}
+  @spec encrypt_private_key(binary(), binary()) :: binary()
   def encrypt_private_key(private_key, encryption_key)
       when byte_size(private_key) == 32 and byte_size(encryption_key) == 32 do
-    # Generate a random 64-bit nonce (as integer for storage compatibility)
-    nonce_int = :rand.uniform(0xFFFFFFFFFFFFFFFF)
-    # Convert to 8-byte binary for crypto operations
-    nonce_bin = <<nonce_int::64>>
-
-    # Encrypt using ChaCha20-Poly1305
-    # Note: ChaCha20-Poly1305 normally uses 12-byte nonce, but we pad with zeros
-    nonce_padded = nonce_bin <> <<0::32>>
+    # Generate a full 96-bit (12-byte) cryptographically secure random nonce
+    nonce = :crypto.strong_rand_bytes(@nonce_size)
 
     {ciphertext, mac} =
       :crypto.crypto_one_time_aead(
         :chacha20_poly1305,
         encryption_key,
-        nonce_padded,
+        nonce,
         private_key,
         _aad = <<>>,
         _encrypt = true
       )
 
-    %{
-      ciphertext: ciphertext <> mac,
-      nonce: nonce_int
-    }
+    # Return as a single binary blob: nonce || ciphertext || mac
+    nonce <> ciphertext <> mac
   end
 
   @doc """
   Decrypts a private key that was encrypted with `encrypt_private_key/2`.
 
+  Supports both the new format (96-bit nonce, 60 bytes total) and legacy format
+  (64-bit nonce zero-padded to 96-bit, 56 bytes total) for backward compatibility.
+
   ## Parameters
 
-  - `encrypted_data` - Map with `:ciphertext` and `:nonce` (as integer)
+  - `encrypted_blob` - Binary blob from `encrypt_private_key/2`
   - `encryption_key` - The 32-byte key used for encryption
 
   ## Returns
@@ -292,8 +345,32 @@ defmodule Mydia.Crypto do
       true
 
   """
-  @spec decrypt_private_key(%{ciphertext: binary(), nonce: integer()}, binary()) ::
+  @spec decrypt_private_key(binary(), binary()) ::
           {:ok, binary()} | {:error, :decryption_failed}
+  def decrypt_private_key(encrypted_blob, encryption_key)
+      when is_binary(encrypted_blob) and byte_size(encryption_key) == 32 do
+    case byte_size(encrypted_blob) do
+      @new_blob_size ->
+        # New format: full 96-bit nonce
+        <<nonce::binary-size(@nonce_size), ciphertext::binary-32, mac::binary-size(@mac_size)>> =
+          encrypted_blob
+
+        decrypt_with_nonce(ciphertext, nonce, mac, encryption_key)
+
+      @legacy_blob_size ->
+        # Legacy format: 64-bit nonce zero-padded to 96-bit
+        <<nonce_64::binary-8, ciphertext::binary-32, mac::binary-size(@mac_size)>> =
+          encrypted_blob
+
+        nonce_padded = nonce_64 <> <<0::32>>
+        decrypt_with_nonce(ciphertext, nonce_padded, mac, encryption_key)
+
+      _ ->
+        {:error, :decryption_failed}
+    end
+  end
+
+  # Legacy format support: decrypt using map with integer nonce
   def decrypt_private_key(%{ciphertext: ciphertext_with_mac, nonce: nonce_int}, encryption_key)
       when is_integer(nonce_int) and byte_size(encryption_key) == 32 do
     # Ciphertext includes the 16-byte MAC at the end
@@ -304,10 +381,19 @@ defmodule Mydia.Crypto do
     nonce_bin = <<nonce_int::64>>
     nonce_padded = nonce_bin <> <<0::32>>
 
+    decrypt_with_nonce(ciphertext, nonce_padded, mac, encryption_key)
+  end
+
+  def decrypt_private_key(_encrypted_data, _encryption_key) do
+    {:error, :decryption_failed}
+  end
+
+  # Helper function for decryption
+  defp decrypt_with_nonce(ciphertext, nonce, mac, encryption_key) do
     case :crypto.crypto_one_time_aead(
            :chacha20_poly1305,
            encryption_key,
-           nonce_padded,
+           nonce,
            ciphertext,
            _aad = <<>>,
            mac,
@@ -316,10 +402,6 @@ defmodule Mydia.Crypto do
       :error -> {:error, :decryption_failed}
       plaintext when is_binary(plaintext) -> {:ok, plaintext}
     end
-  end
-
-  def decrypt_private_key(_encrypted_data, _encryption_key) do
-    {:error, :decryption_failed}
   end
 
   # Private helper functions

@@ -2,16 +2,15 @@ defmodule Mydia.Streaming.FfmpegHlsTranscoder do
   @moduledoc """
   FFmpeg-based HLS transcoding backend.
 
-  This module provides a simple, robust alternative to the Membrane Framework for
-  HLS transcoding. It uses FFmpeg directly to transcode video files to HLS format,
+  This module uses FFmpeg directly to transcode video files to HLS format,
   supporting virtually all codecs and container formats.
 
-  ## Benefits over Membrane
+  ## Features
 
   - **Universal codec support**: Works with any format FFmpeg supports (H264, HEVC, VP9, AAC, EAC3, DTS, AC3, etc.)
   - **Production-ready**: FFmpeg is battle-tested and widely used
-  - **Simple implementation**: Single command vs complex pipeline state
-  - **Clear error messages**: FFmpeg provides detailed error output
+  - **Simple implementation**: Single command with clear error messages
+  - **Efficient**: Supports stream copy for compatible codecs (10-100x faster)
 
   ## Usage
 

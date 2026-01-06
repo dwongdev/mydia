@@ -93,21 +93,6 @@ defmodule Mydia.MixProject do
       {:floki, "~> 0.36"},
       {:nimble_parsec, "~> 1.4"},
 
-      # Streaming & Media Processing
-      {:membrane_core, "~> 1.1"},
-      {:membrane_file_plugin, "~> 0.17"},
-      {:membrane_mp4_plugin, "~> 0.35"},
-      {:membrane_matroska_plugin, "~> 0.6"},
-      {:membrane_h26x_plugin, "~> 0.10"},
-      {:membrane_h264_ffmpeg_plugin, "~> 0.32"},
-      {:membrane_h265_ffmpeg_plugin, "~> 0.4"},
-      {:membrane_aac_plugin, "~> 0.18"},
-      {:membrane_aac_fdk_plugin, "~> 0.18"},
-      {:membrane_http_adaptive_stream_plugin, "~> 0.18"},
-      {:membrane_realtimer_plugin, "~> 0.9"},
-      {:membrane_ffmpeg_swscale_plugin, "~> 0.16"},
-      {:membrane_ffmpeg_swresample_plugin, "~> 0.20"},
-
       # Telemetry & Monitoring
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},

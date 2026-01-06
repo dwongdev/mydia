@@ -3,26 +3,15 @@ defmodule Mydia.Streaming.HlsSession do
   GenServer managing individual HLS transcoding sessions.
 
   Each session represents a single user streaming a specific media file.
-  The session starts a transcoding backend (FFmpeg or Membrane) to transcode
+  The session starts an FFmpeg transcoding backend to transcode
   the file on-demand, manages temporary storage for HLS segments, and
   automatically terminates after a period of inactivity.
-
-  ## Backends
-
-  Two transcoding backends are supported:
-
-  - **FFmpeg** (default): Universal codec support, production-ready, simpler implementation
-  - **Membrane**: Experimental, limited codec support, more granular control
-
-  The backend is configured via application config:
-
-      config :mydia, :streaming, hls_backend: :ffmpeg
 
   ## Lifecycle
 
   1. Session started with media_file_id
   2. Creates unique session directory in /tmp
-  3. Starts transcoding backend (FFmpeg or Membrane)
+  3. Starts FFmpeg transcoding backend
   4. Tracks activity via heartbeat messages
   5. Auto-terminates after 10 minutes of inactivity
   6. Cleans up temp files on termination
@@ -43,7 +32,7 @@ defmodule Mydia.Streaming.HlsSession do
   require Logger
 
   alias Mydia.Library
-  alias Mydia.Streaming.{HlsPipeline, FfmpegHlsTranscoder}
+  alias Mydia.Streaming.FfmpegHlsTranscoder
 
   # Get session timeout and temp dir from config or use defaults
   # Default timeout is 10 minutes - sessions are kept alive via heartbeats during active playback
@@ -74,7 +63,7 @@ defmodule Mydia.Streaming.HlsSession do
             media_file: Mydia.Library.MediaFile.t(),
             media_file_id: integer(),
             user_id: integer(),
-            backend: :ffmpeg | :membrane,
+            backend: :ffmpeg,
             backend_pid: pid() | nil,
             temp_dir: String.t(),
             last_activity: DateTime.t(),
@@ -192,16 +181,10 @@ defmodule Mydia.Streaming.HlsSession do
           )
 
           Logger.info("Temp directory: #{temp_dir}")
+          Logger.info("Starting HLS transcoding with FFmpeg backend")
 
-          # Get backend from config (default to :ffmpeg)
-          backend =
-            Application.get_env(:mydia, :streaming, [])
-            |> Keyword.get(:hls_backend, :ffmpeg)
-
-          Logger.info("Starting HLS transcoding with backend: #{backend}")
-
-          # Start the appropriate backend
-          case start_backend(backend, media_file, temp_dir) do
+          # Start FFmpeg backend
+          case start_backend(:ffmpeg, media_file, temp_dir) do
             {:ok, backend_pid} ->
               # Link to backend process so we terminate if it crashes
               Process.link(backend_pid)
@@ -211,7 +194,7 @@ defmodule Mydia.Streaming.HlsSession do
                 media_file: media_file,
                 media_file_id: media_file_id,
                 user_id: user_id,
-                backend: backend,
+                backend: :ffmpeg,
                 backend_pid: backend_pid,
                 temp_dir: temp_dir,
                 last_activity: DateTime.utc_now()
@@ -224,7 +207,7 @@ defmodule Mydia.Streaming.HlsSession do
 
             {:error, reason} ->
               Logger.error(
-                "Failed to start #{backend} backend for session #{session_id}: #{inspect(reason)}"
+                "Failed to start FFmpeg backend for session #{session_id}: #{inspect(reason)}"
               )
 
               File.rm_rf!(temp_dir)
@@ -323,7 +306,7 @@ defmodule Mydia.Streaming.HlsSession do
 
   ## Private Functions
 
-  # Start the appropriate backend based on configuration
+  # Start FFmpeg backend
   defp start_backend(:ffmpeg, media_file, temp_dir) do
     # Resolve absolute path for FFmpeg input
     absolute_path = Mydia.Library.MediaFile.absolute_path(media_file)
@@ -348,45 +331,10 @@ defmodule Mydia.Streaming.HlsSession do
     end
   end
 
-  defp start_backend(:membrane, media_file, temp_dir) do
-    # Resolve absolute path for Membrane pipeline input
-    absolute_path = Mydia.Library.MediaFile.absolute_path(media_file)
-    Logger.info("Starting Membrane backend for #{absolute_path}")
-
-    pipeline_opts = [
-      source_path: absolute_path,
-      output_dir: temp_dir,
-      media_file: media_file
-    ]
-
-    case Membrane.Pipeline.start_link(HlsPipeline, pipeline_opts) do
-      {:ok, _supervisor_pid, pipeline_pid} ->
-        {:ok, pipeline_pid}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp start_backend(backend, _media_file, _temp_dir) do
-    Logger.error("Unknown backend: #{backend}")
-    {:error, :unknown_backend}
-  end
-
   # Stop the backend process
   defp stop_backend(:ffmpeg, backend_pid) do
     Logger.info("Stopping FFmpeg backend")
     FfmpegHlsTranscoder.stop_transcoding(backend_pid)
-  end
-
-  defp stop_backend(:membrane, backend_pid) do
-    Logger.info("Stopping Membrane backend")
-    Membrane.Pipeline.terminate(backend_pid)
-  end
-
-  defp stop_backend(backend, _backend_pid) do
-    Logger.warning("Unknown backend to stop: #{backend}")
-    :ok
   end
 
   defp generate_session_id do

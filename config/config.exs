@@ -280,11 +280,7 @@ config :mydia, Oban,
 config :mydia, :event_retention_days, 90
 
 # HLS Streaming configuration
-# Backend can be :ffmpeg or :membrane
-# :ffmpeg is the default as it supports more codecs and is more reliable
-# :membrane is experimental and has limited codec support but provides more granular control
 config :mydia, :streaming,
-  hls_backend: :ffmpeg,
   # Session timeout (30 minutes of inactivity)
   session_timeout: :timer.minutes(30),
   # Temp directory for HLS segments

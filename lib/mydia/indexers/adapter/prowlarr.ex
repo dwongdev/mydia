@@ -29,13 +29,19 @@ defmodule Mydia.Indexers.Adapter.Prowlarr do
         api_key: "your-api-key",
         use_ssl: false,
         options: %{
-          indexer_ids: [],  # Empty = all enabled indexers
+          indexer_ids: [],  # Empty = all enabled indexers. Must be integers (e.g., [1, 2, 3])
           categories: [],    # Empty = all categories
           timeout: 30_000
         }
       }
 
       {:ok, results} = Prowlarr.search(config, "Ubuntu 22.04")
+
+  ## Important Notes
+
+  - **Indexer IDs**: Prowlarr expects integer indexer IDs (e.g., 1, 2, 3), not UUIDs.
+    You can find these IDs in your Prowlarr instance at Settings > Indexers.
+    Invalid IDs (UUIDs, strings) will be filtered out with a warning logged.
   """
 
   @behaviour Mydia.Indexers.Adapter
@@ -156,10 +162,14 @@ defmodule Mydia.Indexers.Adapter.Prowlarr do
   defp build_search_url(config, query, opts) do
     # Note: We intentionally do NOT use opts[:indexer_ids] here.
     # opts[:indexer_ids] contains mydia config IDs (for filtering which indexer configs to search),
-    # while config.options.indexer_ids contains Prowlarr's internal indexer UUIDs.
-    indexer_ids = get_in(config, [:options, :indexer_ids]) || []
+    # while config.options.indexer_ids contains Prowlarr's internal indexer IDs.
+    raw_indexer_ids = get_in(config, [:options, :indexer_ids]) || []
     categories = opts[:categories] || get_in(config, [:options, :categories]) || []
     limit = opts[:limit] || 100
+
+    # Prowlarr expects integer indexer IDs, not UUIDs or strings
+    # Filter and convert to integers, logging warnings for invalid values
+    indexer_ids = validate_and_convert_indexer_ids(raw_indexer_ids, config.name)
 
     params =
       []
@@ -183,6 +193,45 @@ defmodule Mydia.Indexers.Adapter.Prowlarr do
   defp maybe_add_list_param(params, key, list) when is_list(list) do
     [{key, Enum.join(list, ",")} | params]
   end
+
+  # Validates and converts indexer IDs to integers.
+  # Prowlarr's API expects integer IDs, not UUIDs or arbitrary strings.
+  # This function filters out invalid values and logs warnings.
+  defp validate_and_convert_indexer_ids([], _config_name), do: []
+
+  defp validate_and_convert_indexer_ids(ids, config_name) when is_list(ids) do
+    {valid_ids, invalid_ids} =
+      ids
+      |> Enum.reduce({[], []}, fn id, {valid, invalid} ->
+        case parse_indexer_id(id) do
+          {:ok, int_id} -> {[int_id | valid], invalid}
+          :error -> {valid, [id | invalid]}
+        end
+      end)
+
+    # Log warnings for invalid IDs
+    if invalid_ids != [] do
+      Logger.warning(
+        "Prowlarr indexer '#{config_name}' has invalid indexer IDs: #{inspect(invalid_ids)}. " <>
+          "Prowlarr expects integer IDs (e.g., 1, 2, 3), not UUIDs or strings. " <>
+          "These IDs will be ignored. Check your Prowlarr instance to find the correct indexer IDs."
+      )
+    end
+
+    Enum.reverse(valid_ids)
+  end
+
+  # Attempts to parse an indexer ID to an integer
+  defp parse_indexer_id(id) when is_integer(id), do: {:ok, id}
+
+  defp parse_indexer_id(id) when is_binary(id) do
+    case Integer.parse(id) do
+      {int_id, ""} -> {:ok, int_id}
+      _ -> :error
+    end
+  end
+
+  defp parse_indexer_id(_), do: :error
 
   defp parse_search_response(body, indexer_name) when is_list(body) do
     results =

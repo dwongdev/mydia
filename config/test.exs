@@ -6,18 +6,18 @@ import Config
 # The MIX_TEST_PARTITION environment variable can be used
 # to provide built-in test partitioning in CI environment.
 # Run `mix help test` for more information.
-database_type =
+database_adapter =
   case System.get_env("DATABASE_TYPE") do
-    "postgres" -> :postgres
-    "postgresql" -> :postgres
-    _ -> :sqlite
+    "postgres" -> Ecto.Adapters.Postgres
+    "postgresql" -> Ecto.Adapters.Postgres
+    _ -> Ecto.Adapters.SQLite3
   end
 
-# Set database_type for runtime helpers (used by Mydia.DB and migrations)
-config :mydia, :database_type, database_type
+# Set database_adapter for runtime helpers (used by Mydia.DB and migrations)
+config :mydia, :database_adapter, database_adapter
 
-case database_type do
-  :postgres ->
+case database_adapter do
+  Ecto.Adapters.Postgres ->
     config :mydia, Mydia.Repo,
       hostname: System.get_env("DATABASE_HOST") || "localhost",
       port: String.to_integer(System.get_env("DATABASE_PORT") || "5433"),
@@ -30,7 +30,7 @@ case database_type do
       pool_timeout: 60_000,
       timeout: 60_000
 
-  :sqlite ->
+  Ecto.Adapters.SQLite3 ->
     config :mydia, Mydia.Repo,
       database: Path.expand("../mydia_test.db", __DIR__),
       pool_size: 5,

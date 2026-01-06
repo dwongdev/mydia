@@ -4,6 +4,8 @@
 FROM elixir:1.18-alpine AS builder
 
 # Database type: sqlite (default) or postgres
+# This is a BUILD-TIME argument that determines which database adapter is compiled into the release
+# It CANNOT be changed at runtime - each Docker image is built for a specific database
 ARG DATABASE_TYPE=sqlite
 
 # Install build dependencies
@@ -70,6 +72,7 @@ RUN mix release
 FROM erlang:27-alpine
 
 # Database type: sqlite (default) or postgres
+# This argument is only used for image labels - the actual adapter is already compiled
 ARG DATABASE_TYPE=sqlite
 
 # Add OCI labels following LinuxServer.io standards
@@ -119,11 +122,11 @@ COPY scripts/mydia-cli.sh /usr/local/bin/mydia-cli
 RUN chmod +x /usr/local/bin/mydia-cli
 
 # Set environment variables
-# DATABASE_TYPE is set to the value used at build time for proper adapter selection
+# Note: DATABASE_TYPE is NOT set here - it's a build-time argument only
+# The database adapter is compiled into the release and cannot be changed at runtime
 ENV HOME=/app \
     MIX_ENV=prod \
     PHX_SERVER=true \
-    DATABASE_TYPE=${DATABASE_TYPE} \
     DATABASE_PATH=/config/mydia.db \
     PORT=4000 \
     PUID=1000 \

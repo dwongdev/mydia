@@ -2,18 +2,18 @@ import Config
 
 # Configure your database based on DATABASE_TYPE environment variable
 # Use DATABASE_TYPE=postgres to use PostgreSQL, otherwise SQLite is used
-database_type =
+database_adapter =
   case System.get_env("DATABASE_TYPE") do
-    "postgres" -> :postgres
-    "postgresql" -> :postgres
-    _ -> :sqlite
+    "postgres" -> Ecto.Adapters.Postgres
+    "postgresql" -> Ecto.Adapters.Postgres
+    _ -> Ecto.Adapters.SQLite3
   end
 
-# Set database_type for runtime helpers (used by Mydia.DB and migrations)
-config :mydia, :database_type, database_type
+# Set database_adapter for runtime helpers (used by Mydia.DB and migrations)
+config :mydia, :database_adapter, database_adapter
 
-case database_type do
-  :postgres ->
+case database_adapter do
+  Ecto.Adapters.Postgres ->
     config :mydia, Mydia.Repo,
       hostname: System.get_env("DATABASE_HOST") || "localhost",
       port: String.to_integer(System.get_env("DATABASE_PORT") || "5433"),
@@ -25,7 +25,7 @@ case database_type do
       show_sensitive_data_on_connection_error: true,
       timeout: 60_000
 
-  :sqlite ->
+  Ecto.Adapters.SQLite3 ->
     config :mydia, Mydia.Repo,
       database: Path.expand("../mydia_dev.db", __DIR__),
       pool_size: 5,

@@ -6,45 +6,43 @@ defmodule Mydia.DB do
   between SQLite and PostgreSQL, allowing the application code to remain
   database-agnostic.
 
-  ## Runtime vs Compile-time Selection
+  ## Compile-time Selection
 
-  This module provides two APIs:
+  This module uses macros that expand at compile time based on the configured
+  database adapter. The appropriate SQL syntax for the target database is
+  selected during compilation.
 
-  ### Runtime Functions (Recommended for new code)
-
-  Functions that return `Ecto.Query.dynamic/2` expressions, evaluated at runtime.
-  These support switching databases without recompilation:
-
-      from d in Download,
-        where: ^Mydia.DB.json_equals(:metadata, "$.download_client", client_name)
-
-  ### Compile-time Macros (Legacy)
-
-  Macros that expand at compile time. These require recompilation when switching
-  databases but offer a more familiar syntax:
+  Usage:
 
       import Mydia.DB
+
       from d in Download,
         where: json_extract(d.metadata, "$.download_client") == ^client_name
+
+      from j in Job,
+        select: avg_timestamp_diff_seconds(j.completed_at, j.attempted_at)
 
   ## Supported Databases
 
   - SQLite (via Ecto.Adapters.SQLite3) - Default
   - PostgreSQL (via Ecto.Adapters.Postgres) - Configurable
 
-  The adapter is configured via `:database_type` application env.
-
   ## Configuration
 
-  Set the database type in your runtime.exs:
+  The database adapter is configured at compile time via the `DATABASE_TYPE`
+  environment variable, which sets `:database_adapter` in config/config.exs:
 
-      config :mydia, :database_type, :postgres  # or :sqlite (default)
+      # Set during compilation (e.g., Docker build)
+      DATABASE_TYPE=postgres mix compile
 
-  For runtime functions, this takes effect immediately. For macros, recompilation
-  is required after changing the configuration.
+  Different Docker images are built for each database type, with the appropriate
+  adapter compiled into each release.
   """
 
   import Ecto.Query
+
+  # Capture the database adapter at compile time for use in macros
+  @database_adapter Application.compile_env(:mydia, :database_adapter, Ecto.Adapters.SQLite3)
 
   @doc """
   Returns the current database adapter type.
@@ -61,7 +59,10 @@ defmodule Mydia.DB do
   """
   @spec adapter_type() :: :sqlite | :postgres
   def adapter_type do
-    Application.get_env(:mydia, :database_type, :sqlite)
+    case Application.get_env(:mydia, :database_adapter, Ecto.Adapters.SQLite3) do
+      Ecto.Adapters.Postgres -> :postgres
+      _ -> :sqlite
+    end
   end
 
   @doc """
@@ -73,7 +74,9 @@ defmodule Mydia.DB do
       true
   """
   @spec sqlite?() :: boolean()
-  def sqlite?, do: adapter_type() == :sqlite
+  def sqlite? do
+    Application.get_env(:mydia, :database_adapter, Ecto.Adapters.SQLite3) == Ecto.Adapters.SQLite3
+  end
 
   @doc """
   Returns true if using PostgreSQL adapter.
@@ -84,7 +87,10 @@ defmodule Mydia.DB do
       false
   """
   @spec postgres?() :: boolean()
-  def postgres?, do: adapter_type() == :postgres
+  def postgres? do
+    Application.get_env(:mydia, :database_adapter, Ecto.Adapters.SQLite3) ==
+      Ecto.Adapters.Postgres
+  end
 
   # ===========================================================================
   # Runtime Functions (Recommended)
@@ -266,10 +272,11 @@ defmodule Mydia.DB do
   end
 
   # ===========================================================================
-  # Compile-time Macros (Legacy)
+  # Compile-time Macros
   #
-  # These macros expand at compile time. They require recompilation when
-  # switching databases. New code should prefer the runtime functions above.
+  # These macros expand at compile time based on the configured database adapter.
+  # The adapter is selected during compilation via the DATABASE_TYPE environment
+  # variable, which sets :database_adapter in config/config.exs.
   # ===========================================================================
 
   @doc """
@@ -417,85 +424,6 @@ defmodule Mydia.DB do
   end
 
   @doc """
-  Calculates the average difference in seconds between two timestamp fields.
-
-  This is designed for use in aggregate queries to calculate average durations.
-
-  ## Parameters
-
-  - `end_field` - The ending timestamp field (e.g., `j.completed_at`)
-  - `start_field` - The starting timestamp field (e.g., `j.attempted_at`)
-
-  ## Examples
-
-      from j in Job,
-        where: j.state == "completed",
-        select: avg_timestamp_diff_seconds(j.completed_at, j.attempted_at)
-
-  ## Database-specific behavior
-
-  - **SQLite**: Uses `AVG((julianday(end) - julianday(start)) * 86400)`
-  - **PostgreSQL**: Uses `AVG(EXTRACT(EPOCH FROM (end - start)))`
-  """
-  defmacro avg_timestamp_diff_seconds(end_field, start_field) do
-    if postgres_configured?() do
-      quote do
-        fragment(
-          "AVG(EXTRACT(EPOCH FROM (? - ?)))",
-          unquote(end_field),
-          unquote(start_field)
-        )
-      end
-    else
-      quote do
-        # SQLite: use julianday() to properly calculate time difference
-        # julianday returns days, multiply by 86400 to get seconds
-        fragment(
-          "AVG((julianday(?) - julianday(?)) * 86400)",
-          unquote(end_field),
-          unquote(start_field)
-        )
-      end
-    end
-  end
-
-  @doc """
-  Calculates the difference in seconds between two timestamp fields.
-
-  ## Parameters
-
-  - `end_field` - The ending timestamp field (e.g., `j.completed_at`)
-  - `start_field` - The starting timestamp field (e.g., `j.attempted_at`)
-
-  ## Examples
-
-      from j in Job,
-        select: timestamp_diff_seconds(j.completed_at, j.attempted_at)
-
-  ## Database-specific behavior
-
-  - **SQLite**: Uses `(julianday(end) - julianday(start)) * 86400`
-  - **PostgreSQL**: Uses `EXTRACT(EPOCH FROM (end - start))`
-  """
-  defmacro timestamp_diff_seconds(end_field, start_field) do
-    if postgres_configured?() do
-      quote do
-        fragment("EXTRACT(EPOCH FROM (? - ?))", unquote(end_field), unquote(start_field))
-      end
-    else
-      quote do
-        # SQLite: use julianday() to properly calculate time difference
-        # julianday returns days, multiply by 86400 to get seconds
-        fragment(
-          "(julianday(?) - julianday(?)) * 86400",
-          unquote(end_field),
-          unquote(start_field)
-        )
-      end
-    end
-  end
-
-  @doc """
   Casts an expression to a floating-point number (REAL).
 
   ## Parameters
@@ -554,6 +482,89 @@ defmodule Mydia.DB do
   end
 
   @doc """
+  Calculates the average difference in seconds between two timestamp fields.
+
+  This is a macro that generates the appropriate SQL for averaging timestamp
+  differences based on the configured database adapter.
+
+  ## Parameters
+
+  - `end_field` - The ending timestamp field (e.g., `j.completed_at`)
+  - `start_field` - The starting timestamp field (e.g., `j.attempted_at`)
+
+  ## Examples
+
+      from j in Job,
+        where: j.state == "completed",
+        select: avg_timestamp_diff_seconds(j.completed_at, j.attempted_at)
+
+  ## Database-specific behavior
+
+  - **SQLite**: Uses `AVG((julianday(end) - julianday(start)) * 86400)`
+  - **PostgreSQL**: Uses `AVG(EXTRACT(EPOCH FROM (end - start)))`
+  """
+  defmacro avg_timestamp_diff_seconds(end_field, start_field) do
+    if postgres_configured?() do
+      quote do
+        fragment(
+          "AVG(EXTRACT(EPOCH FROM (? - ?)))",
+          unquote(end_field),
+          unquote(start_field)
+        )
+      end
+    else
+      quote do
+        # SQLite: use julianday() to properly calculate time difference
+        # julianday returns days, multiply by 86400 to get seconds
+        fragment(
+          "AVG((julianday(?) - julianday(?)) * 86400)",
+          unquote(end_field),
+          unquote(start_field)
+        )
+      end
+    end
+  end
+
+  @doc """
+  Calculates the difference in seconds between two timestamp fields.
+
+  This is a macro that generates the appropriate SQL for timestamp differences
+  based on the configured database adapter.
+
+  ## Parameters
+
+  - `end_field` - The ending timestamp field (e.g., `j.completed_at`)
+  - `start_field` - The starting timestamp field (e.g., `j.attempted_at`)
+
+  ## Examples
+
+      from j in Job,
+        select: timestamp_diff_seconds(j.completed_at, j.attempted_at)
+
+  ## Database-specific behavior
+
+  - **SQLite**: Uses `(julianday(end) - julianday(start)) * 86400`
+  - **PostgreSQL**: Uses `EXTRACT(EPOCH FROM (end - start))`
+  """
+  defmacro timestamp_diff_seconds(end_field, start_field) do
+    if postgres_configured?() do
+      quote do
+        fragment("EXTRACT(EPOCH FROM (? - ?))", unquote(end_field), unquote(start_field))
+      end
+    else
+      quote do
+        # SQLite: use julianday() to properly calculate time difference
+        # julianday returns days, multiply by 86400 to get seconds
+        fragment(
+          "(julianday(?) - julianday(?)) * 86400",
+          unquote(end_field),
+          unquote(start_field)
+        )
+      end
+    end
+  end
+
+  @doc """
   Checks if a subquery exists and returns a boolean.
 
   This generates a CASE WHEN EXISTS(...) THEN true ELSE false END expression.
@@ -596,6 +607,6 @@ defmodule Mydia.DB do
   # Returns true if PostgreSQL is configured (used at macro expansion time)
   @doc false
   defp postgres_configured? do
-    Application.get_env(:mydia, :database_type, :sqlite) == :postgres
+    @database_adapter == Ecto.Adapters.Postgres
   end
 end

@@ -20,22 +20,45 @@ if System.get_env("PHX_SERVER") do
   config :mydia, MydiaWeb.Endpoint, server: true
 end
 
-# Database type configuration (all environments)
-# Used by Mydia.DB runtime functions to select appropriate SQL syntax
-# Valid values: "sqlite" (default), "postgres"
-database_type =
-  case System.get_env("DATABASE_TYPE") do
-    "postgres" -> :postgres
-    "postgresql" -> :postgres
-    _ -> :sqlite
-  end
+# Database adapter is configured at compile time only
+# The adapter cannot be changed at runtime - it's baked into the compiled release
+# Each Docker image is built for a specific database type
+compiled_adapter = Application.compile_env(:mydia, :database_adapter, Ecto.Adapters.SQLite3)
 
-config :mydia, :database_type, database_type
+# Warn if user tries to set DATABASE_TYPE at runtime differently than compile time
+if config_env() == :prod do
+  runtime_database_type = System.get_env("DATABASE_TYPE")
+
+  if runtime_database_type do
+    runtime_adapter =
+      case runtime_database_type do
+        "postgres" -> Ecto.Adapters.Postgres
+        "postgresql" -> Ecto.Adapters.Postgres
+        _ -> Ecto.Adapters.SQLite3
+      end
+
+    if runtime_adapter != compiled_adapter do
+      require Logger
+
+      Logger.warning("""
+      DATABASE_TYPE environment variable is set to "#{runtime_database_type}" at runtime,
+      but this application was compiled with #{inspect(compiled_adapter)}.
+
+      The database adapter is determined at compile time and cannot be changed at runtime.
+      This setting will be ignored.
+
+      To use a different database adapter:
+      - For SQLite: Use the 'latest' or version-tagged Docker images (e.g., 'v0.8.0')
+      - For PostgreSQL: Use the '-pg' suffixed images (e.g., 'latest-pg' or 'v0.8.0-pg')
+      """)
+    end
+  end
+end
 
 if config_env() == :prod do
-  # Database configuration based on DATABASE_TYPE
-  case database_type do
-    :postgres ->
+  # Database configuration based on compile-time adapter
+  case compiled_adapter do
+    Ecto.Adapters.Postgres ->
       config :mydia, Mydia.Repo,
         hostname: System.get_env("DATABASE_HOST") || "localhost",
         port: String.to_integer(System.get_env("DATABASE_PORT") || "5432"),
@@ -46,7 +69,7 @@ if config_env() == :prod do
         # Increased timeout to handle long-running library scans (60 seconds)
         timeout: 60_000
 
-    :sqlite ->
+    Ecto.Adapters.SQLite3 ->
       database_path =
         System.get_env("DATABASE_PATH") ||
           raise """

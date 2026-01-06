@@ -131,8 +131,9 @@ defmodule MydiaWeb.Plugs.MediaAuthTest do
     setup do
       user = create_user()
       device = create_device(user)
-      {:ok, token, _claims} = MediaToken.create_token(device, ttl: {-1, :second})
-      Process.sleep(100)
+      {:ok, token, _claims} = MediaToken.create_token(device, ttl: {1, :second})
+      # Sleep long enough for token to expire
+      Process.sleep(1500)
 
       %{token: token}
     end
@@ -160,8 +161,8 @@ defmodule MydiaWeb.Plugs.MediaAuthTest do
 
       # Revoke the device
       device
-      |> Mydia.RemoteAccess.Device.revoke_changeset()
-      |> Repo.update!()
+      |> Mydia.RemoteAccess.RemoteDevice.revoke_changeset()
+      |> Mydia.Repo.update!()
 
       %{token: token}
     end
@@ -188,7 +189,7 @@ defmodule MydiaWeb.Plugs.MediaAuthTest do
       {:ok, token, _claims} = MediaToken.create_token(device)
 
       # Delete the device
-      Repo.delete!(device)
+      Mydia.Repo.delete!(device)
 
       %{token: token}
     end
@@ -308,10 +309,10 @@ defmodule MydiaWeb.Plugs.MediaAuthTest do
     }
 
     # Use struct!/1 to avoid cyclic dependency
-    device_module = Mydia.RemoteAccess.Device
+    device_module = Mydia.RemoteAccess.RemoteDevice
 
     struct!(device_module)
     |> device_module.changeset(Map.merge(default_attrs, attrs))
-    |> Repo.insert!()
+    |> Mydia.Repo.insert!()
   end
 end

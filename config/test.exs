@@ -85,12 +85,14 @@ config :mydia,
 config :mydia, Mydia.Auth.Guardian,
   issuer: "mydia",
   secret_key: "test-secret-key-for-jwt-signing",
-  ttl: {30, :days}
+  ttl: {30, :days},
+  allowed_drift: 0
 
 config :mydia, Mydia.RemoteAccess.MediaToken,
   issuer: "mydia",
   secret_key: "test-secret-key-for-jwt-signing",
-  ttl: {24, :hours}
+  ttl: {24, :hours},
+  allowed_drift: 0
 
 # Relay tunnel shared secret for tests
 config :mydia, :relay_tunnel_secret, "test-relay-tunnel-secret"

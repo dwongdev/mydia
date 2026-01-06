@@ -350,8 +350,9 @@ defmodule Mydia.Config.SchemaTest do
       assert defaults.database.journal_mode == "wal"
       assert defaults.auth.local_enabled == true
       assert defaults.auth.oidc_enabled == false
-      assert defaults.media.movies_path == "/media/movies"
-      assert defaults.media.tv_path == "/media/tv"
+      # movies_path and tv_path are now optional legacy fields with no defaults
+      assert defaults.media.movies_path == nil
+      assert defaults.media.tv_path == nil
       assert defaults.logging.level == "info"
       assert defaults.download_clients == []
     end

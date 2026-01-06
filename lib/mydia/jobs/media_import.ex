@@ -1086,10 +1086,9 @@ defmodule Mydia.Jobs.MediaImport do
 
   # Formats changeset errors for logging
   defp format_changeset_errors(changeset) do
-    Enum.map(changeset.errors, fn {field, {message, _opts}} ->
+    Enum.map_join(changeset.errors, ", ", fn {field, {message, _opts}} ->
       "#{field}: #{message}"
     end)
-    |> Enum.join(", ")
   end
 
   # Calculate exponential backoff based on attempt number

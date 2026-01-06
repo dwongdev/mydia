@@ -392,7 +392,7 @@ defmodule Mydia.Repo.Migrations.Helpers do
         column_names
       end
 
-    columns_str = column_names |> Enum.map(&to_string/1) |> Enum.join(", ")
+    columns_str = Enum.map_join(column_names, ", ", &to_string/1)
 
     # Step 1: Rename existing table
     rename table(table_name), to: table(old_table)

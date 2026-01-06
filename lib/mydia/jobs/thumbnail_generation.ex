@@ -387,9 +387,7 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
     include_previews = Map.get(opts, :include_previews, false)
 
     # Check if FFmpeg is available
-    unless ThumbnailGenerator.ffmpeg_available?() do
-      {:error, :ffmpeg_not_found}
-    else
+    if ThumbnailGenerator.ffmpeg_available?() do
       # Generate cover thumbnail
       with {:ok, cover_checksum} <- ThumbnailGenerator.generate_cover(media_file) do
         # Update media file with cover checksum
@@ -433,6 +431,8 @@ defmodule Mydia.Jobs.ThumbnailGeneration do
 
         Library.update_media_file(media_file, attrs)
       end
+    else
+      {:error, :ffmpeg_not_found}
     end
   end
 

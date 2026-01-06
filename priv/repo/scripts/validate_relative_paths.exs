@@ -206,7 +206,7 @@ defmodule RelativePathValidator do
     issues = if not Enum.empty?(duplicates) do
       IO.puts("   ⚠️  Found #{length(duplicates)} duplicate library path records")
       Enum.each(duplicates, fn {path, paths} ->
-        ids = Enum.map(paths, & &1.id) |> Enum.join(", ")
+        ids = Enum.map_join(paths, ", ", & &1.id)
         IO.puts("      - Path: #{path} (IDs: #{ids})")
       end)
       issues ++ ["#{length(duplicates)} duplicate library paths"]

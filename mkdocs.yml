@@ -3,7 +3,7 @@ site_description: A modern, self-hosted media management platform for tracking, 
 site_url: https://getmydia.github.io/mydia
 repo_url: https://github.com/getmydia/mydia
 repo_name: getmydia/mydia
-docs_dir: mkdocs-docs
+docs_dir: docs
 
 theme:
   name: material

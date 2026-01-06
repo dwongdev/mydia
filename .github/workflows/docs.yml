@@ -5,7 +5,7 @@ on:
     branches:
       - master
     paths:
-      - 'mkdocs-docs/**'
+      - 'docs/**'
       - 'mkdocs.yml'
       - '.github/workflows/docs.yml'
   release:
@@ -39,7 +39,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
-        run: uv sync --frozen --project mkdocs-docs
+        run: uv sync --frozen --project docs
 
       - name: Configure Git
         run: |
@@ -53,15 +53,15 @@ jobs:
       - name: Deploy latest (push to master)
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         run: |
-          uv run --project mkdocs-docs mike deploy --push --update-aliases dev
-          uv run --project mkdocs-docs mike set-default --push dev
+          uv run --project docs mike deploy --push --update-aliases dev
+          uv run --project docs mike set-default --push dev
 
       - name: Cleanup stale latest version
         if: github.event_name == 'release'
         run: |
           # Delete "latest" if it exists as a version (from old workflow bug)
           # This allows us to use "latest" as an alias instead
-          uv run --project mkdocs-docs mike delete --push latest || true
+          uv run --project docs mike delete --push latest || true
 
       - name: Deploy release version
         if: github.event_name == 'release'
@@ -69,19 +69,19 @@ jobs:
           VERSION="${{ github.event.release.tag_name }}"
           # Remove 'v' prefix if present
           VERSION="${VERSION#v}"
-          uv run --project mkdocs-docs mike deploy --push --update-aliases "$VERSION" latest
-          uv run --project mkdocs-docs mike set-default --push latest
+          uv run --project docs mike deploy --push --update-aliases "$VERSION" latest
+          uv run --project docs mike set-default --push latest
 
       - name: Deploy manual version
         if: github.event_name == 'workflow_dispatch'
         run: |
           VERSION="${{ github.event.inputs.version }}"
           if [ "$VERSION" = "dev" ]; then
-            uv run --project mkdocs-docs mike deploy --push --update-aliases dev
-            uv run --project mkdocs-docs mike set-default --push dev
+            uv run --project docs mike deploy --push --update-aliases dev
+            uv run --project docs mike set-default --push dev
           else
             # Delete stale "latest" version if it exists (from old workflow bug)
-            uv run --project mkdocs-docs mike delete --push latest || true
-            uv run --project mkdocs-docs mike deploy --push --update-aliases "$VERSION" latest
-            uv run --project mkdocs-docs mike set-default --push latest
+            uv run --project docs mike delete --push latest || true
+            uv run --project docs mike deploy --push --update-aliases "$VERSION" latest
+            uv run --project docs mike set-default --push latest
           fi

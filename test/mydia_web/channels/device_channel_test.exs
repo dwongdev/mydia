@@ -1,6 +1,9 @@
 defmodule MydiaWeb.DeviceChannelTest do
   use MydiaWeb.ChannelCase
 
+  # These tests require relay connection for claim code generation
+  @moduletag :requires_relay
+
   alias Mydia.RemoteAccess
   alias Mydia.Accounts
 

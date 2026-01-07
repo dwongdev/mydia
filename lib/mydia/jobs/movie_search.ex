@@ -473,6 +473,10 @@ defmodule Mydia.Jobs.MovieSearch do
   end
 
   # Convert a map with atom keys to string keys for JSON serialization
+  defp stringify_keys(%{__struct__: _} = struct) do
+    struct |> Map.from_struct() |> stringify_keys()
+  end
+
   defp stringify_keys(map) when is_map(map) do
     Map.new(map, fn {k, v} -> {to_string(k), v} end)
   end

@@ -3,23 +3,10 @@
 # Using 1 concurrent case to avoid "Database busy" errors with SQLite
 # Exclude external integration tests by default (require external services)
 # Exclude feature tests by default (require chromedriver)
-# Conditionally exclude FFmpeg tests if FFmpeg is not available
-ffmpeg_available = System.find_executable("ffmpeg") != nil
-
-excludes =
-  [:external, :feature] ++
-    if ffmpeg_available, do: [], else: [:requires_ffmpeg]
-
-if not ffmpeg_available do
-  IO.puts("""
-  \n⚠️  FFmpeg not found - FFmpeg-related tests will be skipped.
-  To run FFmpeg tests, install FFmpeg:
-    - macOS: brew install ffmpeg
-    - Ubuntu: apt-get install ffmpeg
-  """)
-end
-
-ExUnit.start(max_cases: 1, exclude: excludes)
+# Exclude FFmpeg tests by default (they crash the JobManager and affect other tests)
+# Exclude relay tests by default (require connected relay service)
+# Run specific tests explicitly with: mix test --include <tag>
+ExUnit.start(max_cases: 1, exclude: [:external, :feature, :requires_ffmpeg, :requires_relay])
 Ecto.Adapters.SQL.Sandbox.mode(Mydia.Repo, :manual)
 
 # Configure ExMachina

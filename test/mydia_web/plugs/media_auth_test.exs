@@ -1,8 +1,9 @@
 defmodule MydiaWeb.Plugs.MediaAuthTest do
   use MydiaWeb.ConnCase, async: false
 
-  alias Mydia.RemoteAccess.MediaToken
+  alias Mydia.RemoteAccess.{MediaToken, RemoteDevice}
   alias Mydia.Accounts
+  alias Mydia.Repo
   alias MydiaWeb.Plugs.MediaAuth
 
   describe "call/2 with valid token in Authorization header" do
@@ -135,7 +136,7 @@ defmodule MydiaWeb.Plugs.MediaAuthTest do
       user = create_user()
       device = create_device(user)
       {:ok, token, _claims} = MediaToken.create_token(device, ttl: {1, :second})
-      # Sleep long enough for token to expire (2 seconds to be safe)
+      # Sleep long enough for token to expire (add extra margin for test reliability)
       Process.sleep(2000)
 
       %{token: token}
@@ -164,8 +165,8 @@ defmodule MydiaWeb.Plugs.MediaAuthTest do
 
       # Revoke the device
       device
-      |> Mydia.RemoteAccess.RemoteDevice.revoke_changeset()
-      |> Mydia.Repo.update!()
+      |> RemoteDevice.revoke_changeset()
+      |> Repo.update!()
 
       %{token: token}
     end
@@ -312,7 +313,7 @@ defmodule MydiaWeb.Plugs.MediaAuthTest do
     }
 
     # Use struct!/1 to avoid cyclic dependency
-    device_module = Mydia.RemoteAccess.RemoteDevice
+    device_module = RemoteDevice
 
     struct!(device_module)
     |> device_module.changeset(Map.merge(default_attrs, attrs))

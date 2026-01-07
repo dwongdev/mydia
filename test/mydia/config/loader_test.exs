@@ -566,8 +566,8 @@ defmodule Mydia.Config.LoaderTest do
       # - movies_path comes from YAML (no db or env override)
       assert config.media.movies_path == "/yaml/movies"
 
-      # - tv_path comes from defaults (no yaml, db, or env override)
-      assert config.media.tv_path == "/media/tv"
+      # - tv_path is nil (legacy paths have no defaults, no yaml/db/env override)
+      assert config.media.tv_path == nil
     end
 
     test "handles database unavailability gracefully" do

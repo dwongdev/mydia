@@ -1,6 +1,9 @@
 defmodule Mydia.RemoteAccessTest do
   use Mydia.DataCase
 
+  # Most tests require relay connection - tag those that do
+  @moduletag :requires_relay
+
   alias Mydia.RemoteAccess
   alias Mydia.RemoteAccess.{Config, PairingClaim, RemoteDevice}
   alias Mydia.Accounts

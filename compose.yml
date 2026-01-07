@@ -40,6 +40,9 @@ services:
       # For interactive debugging
       MIX_HOME: /app/.mix
       HEX_HOME: /app/.hex
+
+      # Flutter cache
+      PUB_CACHE: /app/player/.pub-cache
     ports:
       - "4000:4000"
     volumes:
@@ -54,6 +57,8 @@ services:
       - node_modules:/app/assets/node_modules
       # Persist NIF cache to avoid redownloading/recompiling on every run
       - elixir_make_cache:/root/.cache/elixir_make
+      # Persist Flutter pub cache
+      - player_pub_cache:/app/player/.pub-cache
     stdin_open: true
     tty: true
     restart: unless-stopped
@@ -62,29 +67,6 @@ services:
       interval: 30s
       timeout: 3s
       start_period: 40s
-      retries: 3
-
-  player:
-    build:
-      context: player
-      dockerfile: Dockerfile.dev
-    container_name: mydia_player
-    environment:
-      PUB_CACHE: /app/player/.pub-cache
-    ports:
-      # Expose for hot reload WebSocket (browser needs direct access)
-      - "3000:3000"
-    volumes:
-      - .:/app
-      - player_pub_cache:/app/player/.pub-cache
-    stdin_open: true
-    tty: true
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
-      interval: 30s
-      timeout: 3s
-      start_period: 120s
       retries: 3
 
 volumes:

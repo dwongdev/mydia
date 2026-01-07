@@ -95,6 +95,7 @@ defmodule Mydia.MixProject do
       {:floki, "~> 0.36"},
       {:nimble_parsec, "~> 1.4"},
       {:eqrcode, "~> 0.2.1"},
+      {:file_system, "~> 1.0", only: [:dev, :test]},
 
       # Telemetry & Monitoring
       {:telemetry_metrics, "~> 1.0"},

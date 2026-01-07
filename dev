@@ -75,19 +75,20 @@ ${YELLOW}User Management:${NC}
   user reset-password <id> [--password=P]
                        Reset a user's password
 
-${YELLOW}Player (Flutter in Docker):${NC}
-  flutter <args>       Run any flutter command in Docker container
+${YELLOW}Player (Flutter in App Container):${NC}
+  flutter <args>       Run any flutter command in app container
   player setup         Install deps and run code generation
-  player build         Build and deploy web assets to Phoenix (for production)
-  player shell         Open shell in player container
-  player logs          Follow Flutter dev server logs
-  player restart       Restart player dev server
+  player build         Build web assets (FlutterWatcher handles deployment)
+  player shell         Open shell in player directory
+  player logs          Follow build_runner logs
+  player restart       Restart app container (includes build_runner)
   player e2e           Run player E2E integration tests
   player e2e-build     Pre-build E2E images (faster subsequent runs)
 
 ${YELLOW}Player Development:${NC}
-  Access: http://localhost:4000/player (proxied through Phoenix)
-  Hot restart: Press "R" in player logs, or restart container
+  Access: http://localhost:4000/player
+  - FlutterWatcher auto-builds on file changes
+  - build_runner watch handles code generation
 
 ${YELLOW}Docker Compose Commands:${NC}
   exec <service> <cmd> Execute command in running service
@@ -106,8 +107,8 @@ ${YELLOW}Examples:${NC}
   ./dev user list                # List all users
   ./dev user add me@example.com myuser --password=secret123 --role=admin
   ./dev user reset-password admin --password=newpassword
-  ./dev player logs              # Follow Flutter dev server logs
-  ./dev player build             # Build Flutter web assets for prod
+  ./dev player logs              # Follow build_runner logs
+  ./dev player build             # Build Flutter web assets
 
 Any other command will be forwarded directly to docker compose.
 
@@ -208,46 +209,38 @@ case "$COMMAND" in
         run_in_container mix mydia.user "$@"
         ;;
 
-    # Flutter commands (runs in Docker container)
+    # Flutter commands (runs in app container)
     flutter)
-        echo -e "${GREEN}Running flutter command in Docker container...${NC}"
-        docker compose exec player flutter "$@" || \
-            docker compose run --rm player flutter "$@"
+        echo -e "${GREEN}Running flutter command in app container...${NC}"
+        run_in_container sh -c "cd player && flutter $*"
         ;;
 
     player)
         case "$1" in
             logs)
-                echo -e "${GREEN}Following player build logs...${NC}"
-                docker compose logs -f player
+                echo -e "${GREEN}Following build_runner logs from app container...${NC}"
+                docker compose exec "$SERVICE_NAME" tail -f /tmp/build_runner.log
                 ;;
             build)
                 echo -e "${GREEN}Building player web assets...${NC}"
-                docker compose exec player flutter build web --base-href /player/ || \
-                    docker compose run --rm player flutter build web --base-href /player/
-                echo -e "${GREEN}Copying assets to priv/static/player...${NC}"
-                rm -rf priv/static/player
-                mkdir -p priv/static/player
-                cp -r player/build/web/* priv/static/player/
+                run_in_container sh -c "cd player && flutter build web --base-href /player/"
                 echo -e "${GREEN}Player web assets built successfully!${NC}"
+                echo -e "${YELLOW}Note: FlutterWatcher will automatically copy assets to priv/static/player${NC}"
                 ;;
             setup)
                 echo -e "${GREEN}Setting up player project (pub get + build_runner)...${NC}"
-                docker compose exec player flutter pub get || \
-                    docker compose run --rm player flutter pub get
-                docker compose exec player flutter pub run build_runner build --delete-conflicting-outputs || \
-                    docker compose run --rm player flutter pub run build_runner build --delete-conflicting-outputs
+                run_in_container sh -c "cd player && flutter pub get"
+                run_in_container sh -c "cd player && flutter pub run build_runner build --delete-conflicting-outputs"
                 echo -e "${GREEN}Player project setup complete!${NC}"
                 ;;
             shell)
-                echo -e "${GREEN}Opening shell in player container...${NC}"
-                docker compose exec player bash || \
-                    docker compose run --rm player bash
+                echo -e "${GREEN}Opening shell in player directory (app container)...${NC}"
+                run_in_container sh -c "cd player && exec bash"
                 ;;
             restart)
-                echo -e "${GREEN}Restarting player dev server...${NC}"
-                docker compose restart player
-                echo -e "${GREEN}Player dev server restarted. Follow logs with: ./dev player logs${NC}"
+                echo -e "${GREEN}Restarting app container (includes build_runner)...${NC}"
+                docker compose restart "$SERVICE_NAME"
+                echo -e "${GREEN}App container restarted. Follow build_runner logs with: ./dev player logs${NC}"
                 ;;
             e2e)
                 echo -e "${GREEN}Running player E2E integration tests...${NC}"

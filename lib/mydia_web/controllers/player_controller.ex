@@ -15,12 +15,10 @@ defmodule MydiaWeb.PlayerController do
   into the HTML so the Flutter app can auto-authenticate without
   requiring manual login.
 
-  In development, fetches index.html from the Flutter dev server.
-  In production, serves from priv/static/player/.
+  Serves from priv/static/player/ in all environments. In development,
+  the FlutterWatcher GenServer automatically rebuilds the player when
+  files change.
   """
-
-  # Flutter dev server URL (Docker service name)
-  @flutter_dev_server "http://player:3000"
 
   @doc """
   Serves the Flutter web player's index.html.
@@ -63,50 +61,9 @@ defmodule MydiaWeb.PlayerController do
     end
   end
 
-  # In development, fetch from Flutter dev server
-  # In production, read from static files
-  defp fetch_player_html(conn) do
-    if Application.get_env(:mydia, :dev_routes) do
-      fetch_from_dev_server(conn)
-    else
-      fetch_from_static_files()
-    end
-  end
-
-  defp fetch_from_dev_server(conn) do
-    case Req.get("#{@flutter_dev_server}/", receive_timeout: 30_000) do
-      {:ok, %Req.Response{status: 200, body: body}} ->
-        # Get the external host from the request
-        external_host = get_external_host(conn)
-
-        # Rewrite base href and internal URLs
-        # WebSocket paths need /player prefix to go through Phoenix proxy
-        rewritten =
-          body
-          |> String.replace(~s(<base href="/">), ~s(<base href="/player/">))
-          |> String.replace("ws://player:3000/", "ws://#{external_host}/player/")
-          |> String.replace("http://player:3000/", "http://#{external_host}/player/")
-          |> String.replace("player:3000", external_host)
-
-        {:ok, rewritten}
-
-      {:ok, %Req.Response{status: status}} ->
-        Logger.warning("Flutter dev server returned status #{status}")
-        {:error, :not_found}
-
-      {:error, reason} ->
-        Logger.error("Failed to connect to Flutter dev server: #{inspect(reason)}")
-        {:error, reason}
-    end
-  end
-
-  defp get_external_host(conn) do
-    host = get_req_header(conn, "host") |> List.first() || "localhost:4000"
-    # Remove port if it's 80 or 443
-    host
-  end
-
-  defp fetch_from_static_files do
+  # Always serve from static files (same in dev and prod)
+  # In development, FlutterWatcher rebuilds automatically on file changes
+  defp fetch_player_html(_conn) do
     player_index_path = Path.join([:code.priv_dir(:mydia), "static", "player", "index.html"])
 
     if File.exists?(player_index_path) do

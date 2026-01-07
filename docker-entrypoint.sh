@@ -68,6 +68,27 @@ if [ "$FULL_SETUP" = true ]; then
         mix assets.build
     fi
 
+    # Setup Flutter player
+    echo "==> Setting up Flutter player..."
+    cd player
+
+    # Install Flutter dependencies
+    flutter pub get
+
+    # Run initial code generation if needed
+    if [ -f "lib/graphql/schema.graphql.dart" ]; then
+        echo "==> GraphQL codegen already exists, skipping initial build..."
+    else
+        echo "==> Running initial code generation (GraphQL, Riverpod)..."
+        flutter pub run build_runner build --delete-conflicting-outputs || true
+    fi
+
+    # Start build_runner watch in background
+    echo "==> Starting build_runner watch in background..."
+    flutter pub run build_runner watch --delete-conflicting-outputs > /tmp/build_runner.log 2>&1 &
+
+    cd ..
+
     echo "==> Starting Phoenix server..."
 fi
 

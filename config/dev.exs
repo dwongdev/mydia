@@ -59,7 +59,8 @@ config :mydia, MydiaWeb.Endpoint,
   secret_key_base: "VlPUd2fbnWjh6Di+7SGc2SSXpNhI0hN766FFAlct65wU5ARyiGvK9r3TqSqKyu0K",
   watchers: [
     esbuild: {Esbuild, :install_and_run, [:mydia, ~w(--sourcemap=inline --watch)]},
-    tailwind: {Tailwind, :install_and_run, [:mydia, ~w(--watch)]}
+    tailwind: {Tailwind, :install_and_run, [:mydia, ~w(--watch)]},
+    flutter: {MydiaWeb.FlutterWatcher, :start_link, [[]]}
   ]
 
 # ## SSL Support

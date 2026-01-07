@@ -18,39 +18,54 @@ set -e
 
 cd /app/player
 
+echo ''
+echo '================================================='
+echo 'Flutter Player - Development Environment'
+echo '================================================='
+echo ''
+
 # Install dependencies
+echo '→ Installing Flutter dependencies...'
 flutter pub get
 
-# Run build_runner for code generation if needed
+# Run initial code generation if needed
 if [ -f "lib/graphql/schema.graphql.dart" ]; then
-    echo "GraphQL codegen already exists, skipping build_runner..."
+    echo '→ GraphQL codegen already exists, skipping initial build...'
 else
-    echo "Running build_runner for code generation..."
+    echo '→ Running initial code generation (GraphQL, Riverpod)...'
     flutter pub run build_runner build --delete-conflicting-outputs || true
 fi
 
 echo ''
 echo '================================================='
-echo 'Flutter Web Development Server'
+echo 'Development Workflow'
 echo '================================================='
+echo ''
+echo 'The build_runner is now watching for code changes.'
+echo 'GraphQL and Riverpod files will regenerate automatically.'
+echo ''
+echo 'The Phoenix FlutterWatcher will trigger production builds'
+echo 'when you edit Flutter source files (lib/, web/, pubspec.yaml).'
 echo ''
 echo 'Access the player at: http://localhost:4000/player'
 echo ''
-echo 'Hot restart: Press "R" in this terminal'
-echo 'Hot reload:  Press "r" in this terminal'
+echo 'After making changes:'
+echo '  1. Save your files'
+echo '  2. Wait ~20-30 seconds for the build to complete'
+echo '  3. Refresh your browser'
 echo ''
 echo '================================================='
 echo ''
+echo '→ Starting build_runner watch...'
+echo ''
 
-# Run Flutter web server
-# Phoenix will reverse-proxy to this server
-exec flutter run -d web-server \
-    --web-port=3000 \
-    --web-hostname=0.0.0.0
+# Start build_runner watch in the background
+flutter pub run build_runner watch --delete-conflicting-outputs &
+
+# Keep container alive
+exec tail -f /dev/null
 EOF
 
 RUN chmod +x /entrypoint.sh
-
-EXPOSE 3000
 
 CMD ["/entrypoint.sh"]

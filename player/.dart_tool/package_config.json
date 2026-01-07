@@ -267,7 +267,7 @@
     },
     {
       "name": "flutter",
-      "rootUri": "file:///sdks/flutter/packages/flutter",
+      "rootUri": "file:///opt/flutter/packages/flutter",
       "packageUri": "lib/",
       "languageVersion": "3.8"
     },
@@ -285,7 +285,7 @@
     },
     {
       "name": "flutter_driver",
-      "rootUri": "file:///sdks/flutter/packages/flutter_driver",
+      "rootUri": "file:///opt/flutter/packages/flutter_driver",
       "packageUri": "lib/",
       "languageVersion": "3.8"
     },
@@ -345,13 +345,13 @@
     },
     {
       "name": "flutter_test",
-      "rootUri": "file:///sdks/flutter/packages/flutter_test",
+      "rootUri": "file:///opt/flutter/packages/flutter_test",
       "packageUri": "lib/",
       "languageVersion": "3.8"
     },
     {
       "name": "flutter_web_plugins",
-      "rootUri": "file:///sdks/flutter/packages/flutter_web_plugins",
+      "rootUri": "file:///opt/flutter/packages/flutter_web_plugins",
       "packageUri": "lib/",
       "languageVersion": "3.8"
     },
@@ -369,7 +369,7 @@
     },
     {
       "name": "fuchsia_remote_debug_protocol",
-      "rootUri": "file:///sdks/flutter/packages/fuchsia_remote_debug_protocol",
+      "rootUri": "file:///opt/flutter/packages/fuchsia_remote_debug_protocol",
       "packageUri": "lib/",
       "languageVersion": "3.8"
     },
@@ -519,7 +519,7 @@
     },
     {
       "name": "integration_test",
-      "rootUri": "file:///sdks/flutter/packages/integration_test",
+      "rootUri": "file:///opt/flutter/packages/integration_test",
       "packageUri": "lib/",
       "languageVersion": "3.8"
     },
@@ -651,7 +651,7 @@
     },
     {
       "name": "mime",
-      "rootUri": "file:///app/player/.pub-cache/hosted/pub.dev/mime-2.0.0",
+      "rootUri": "file:///app/player/.pub-cache/hosted/pub.dev/mime-1.0.6",
       "packageUri": "lib/",
       "languageVersion": "3.2"
     },
@@ -927,7 +927,7 @@
     },
     {
       "name": "sky_engine",
-      "rootUri": "file:///sdks/flutter/bin/cache/pkg/sky_engine",
+      "rootUri": "file:///opt/flutter/bin/cache/pkg/sky_engine",
       "packageUri": "lib/",
       "languageVersion": "3.8"
     },
@@ -1089,9 +1089,9 @@
     },
     {
       "name": "vm_service",
-      "rootUri": "file:///app/player/.pub-cache/hosted/pub.dev/vm_service-15.0.2",
+      "rootUri": "file:///app/player/.pub-cache/hosted/pub.dev/vm_service-14.3.1",
       "packageUri": "lib/",
-      "languageVersion": "3.5"
+      "languageVersion": "3.3"
     },
     {
       "name": "volume_controller",
@@ -1186,7 +1186,7 @@
   ],
   "generator": "pub",
   "generatorVersion": "3.10.4",
-  "flutterRoot": "file:///sdks/flutter",
+  "flutterRoot": "file:///opt/flutter",
   "flutterVersion": "3.38.5",
   "pubCache": "file:///app/player/.pub-cache"
 }

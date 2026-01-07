@@ -356,7 +356,7 @@ defmodule MydiaWeb.DashboardLive.Index do
     case Metadata.fetch_season(
            config,
            to_string(media_item.tmdb_id),
-           season[:season_number]
+           season.season_number
          ) do
       {:ok, season_data} ->
         episodes = season_data.episodes || []

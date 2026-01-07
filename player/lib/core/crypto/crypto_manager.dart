@@ -246,9 +246,12 @@ class CryptoManager {
 
     // Derive session key via HKDF-SHA256
     // Note: info must match Elixir's Mydia.Crypto module for interoperability
+    // Note: RFC 5869 specifies that when salt is not provided, it defaults to
+    // a string of zeros of HashLen octets (32 bytes for SHA-256).
+    // This must match the Elixir implementation which uses a 32-byte zero salt.
     _sessionKey = await _hkdf.deriveKey(
       secretKey: sharedSecret,
-      nonce: Uint8List(0),
+      nonce: Uint8List(32), // 32-byte zero salt (RFC 5869 default)
       info: utf8.encode('mydia-session-key'),
     );
 

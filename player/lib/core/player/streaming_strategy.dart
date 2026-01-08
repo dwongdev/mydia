@@ -63,9 +63,10 @@ class StreamingStrategyService {
   }) {
     final url = '$serverUrl/api/v1/stream/file/$fileId?strategy=${strategy.value}';
 
-    // Append media token if provided (for claim code mode)
+    // Append token if provided (for claim code mode)
+    // Server expects 'token' query parameter, not 'media_token'
     if (mediaToken != null) {
-      return '$url&media_token=$mediaToken';
+      return '$url&token=$mediaToken';
     }
 
     return url;

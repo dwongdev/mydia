@@ -40,37 +40,59 @@ defmodule MydiaWeb.Plugs.MediaAuth do
   def init(opts), do: opts
 
   def call(conn, opts) do
+    # Check if a user is already authenticated (e.g., via RelayDeviceAuth or AuthPipeline)
+    # If so, skip media token authentication
+    if user_already_authenticated?(conn) do
+      conn
+    else
+      # Check if a media token is provided
+      case extract_token(conn) do
+        nil ->
+          # No media token provided - pass through to let other auth mechanisms work
+          # or fail at EnsureAuthenticated if this is the last auth plug
+          conn
+
+        token ->
+          # Media token provided - validate it
+          authenticate_with_media_token(conn, token, opts)
+      end
+    end
+  end
+
+  defp user_already_authenticated?(conn) do
+    # Check both assigns (set by RelayDeviceAuth) and Guardian resource (set by AuthPipeline)
+    conn.assigns[:current_user] != nil ||
+      Mydia.Auth.Guardian.Plug.current_resource(conn) != nil
+  end
+
+  defp authenticate_with_media_token(conn, token, opts) do
     required_permissions = Keyword.get(opts, :permissions, [])
 
-    case extract_token(conn) do
-      nil ->
-        unauthorized(conn, "Missing authentication token")
-
-      token ->
-        # Use TokenCache for O(1) cached lookups, with DB fallback on cache miss
-        case TokenCache.validate(token) do
-          {:ok, device, claims} ->
-            if has_required_permissions?(claims, required_permissions) do
-              conn
-              |> assign(:media_device, device)
-              |> assign(:media_user, device.user)
-              |> assign(:media_token_claims, claims)
-            else
-              forbidden(conn, "Insufficient permissions")
-            end
-
-          {:error, :token_expired} ->
-            unauthorized(conn, "Token expired")
-
-          {:error, :device_revoked} ->
-            forbidden(conn, "Device access revoked")
-
-          {:error, :device_not_found} ->
-            unauthorized(conn, "Invalid device")
-
-          {:error, _reason} ->
-            unauthorized(conn, "Invalid token")
+    # Use TokenCache for O(1) cached lookups, with DB fallback on cache miss
+    case TokenCache.validate(token) do
+      {:ok, device, claims} ->
+        if has_required_permissions?(claims, required_permissions) do
+          conn
+          |> assign(:media_device, device)
+          |> assign(:media_user, device.user)
+          |> assign(:media_token_claims, claims)
+          # Also set Guardian resource so EnsureAuthenticated passes
+          |> Mydia.Auth.Guardian.Plug.put_current_resource(device.user)
+        else
+          forbidden(conn, "Insufficient permissions")
         end
+
+      {:error, :token_expired} ->
+        unauthorized(conn, "Token expired")
+
+      {:error, :device_revoked} ->
+        forbidden(conn, "Device access revoked")
+
+      {:error, :device_not_found} ->
+        unauthorized(conn, "Invalid device")
+
+      {:error, _reason} ->
+        unauthorized(conn, "Invalid token")
     end
   end
 

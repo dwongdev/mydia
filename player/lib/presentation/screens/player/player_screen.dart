@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -162,8 +164,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             _loadingMessage = 'Starting stream...';
           });
 
-          // Follow redirect to get the HLS playlist URL
-          final hlsUrl = await _followRedirectToHls(
+          // Get the HLS playlist URL from the server
+          final hlsUrl = await _getHlsPlaylistUrl(
             streamUrl,
             mediaToken != null ? {} : {'Authorization': 'Bearer $token'},
           );
@@ -358,53 +360,79 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
   }
 
-  /// Follow redirect to get the final HLS playlist URL.
-  /// Makes a HEAD request and follows redirects to get the final URL.
-  Future<String?> _followRedirectToHls(String streamUrl, Map<String, String> headers) async {
+  /// Get the HLS playlist URL from the stream endpoint.
+  /// On web, uses JSON response (browsers can't reliably follow redirects).
+  /// On native, follows redirects manually.
+  Future<String?> _getHlsPlaylistUrl(String streamUrl, Map<String, String> headers) async {
     try {
-      // Use a client that doesn't auto-follow redirects so we can capture the final URL
       final client = http.Client();
       try {
-        final request = http.Request('HEAD', Uri.parse(streamUrl));
-        request.headers.addAll(headers);
-        request.followRedirects = false;
+        if (kIsWeb) {
+          // On web, request JSON response instead of redirect
+          final uri = Uri.parse(streamUrl);
+          final resolveUri = uri.replace(
+            queryParameters: {...uri.queryParameters, 'resolve': 'json'},
+          );
 
-        var response = await client.send(request);
-        var currentUrl = streamUrl;
+          debugPrint('Requesting HLS URL via JSON: $resolveUri');
+          final response = await client.get(resolveUri, headers: headers);
 
-        // Follow redirects manually (up to 10 times)
-        int redirectCount = 0;
-        while (response.isRedirect && redirectCount < 10) {
-          final location = response.headers['location'];
-          if (location == null) break;
+          if (response.statusCode == 200) {
+            final json = jsonDecode(response.body) as Map<String, dynamic>;
+            final hlsPath = json['hls_url'] as String?;
+            if (hlsPath != null) {
+              // Convert relative path to absolute URL
+              if (hlsPath.startsWith('/')) {
+                return '${uri.scheme}://${uri.host}:${uri.port}$hlsPath';
+              }
+              return hlsPath;
+            }
+          }
+          debugPrint('Failed to get HLS URL from JSON response: ${response.statusCode}');
+          return null;
+        } else {
+          // On native, follow redirects manually
+          final request = http.Request('HEAD', Uri.parse(streamUrl));
+          request.headers.addAll(headers);
+          request.followRedirects = false;
 
-          // Handle relative URLs
-          if (location.startsWith('/')) {
-            final uri = Uri.parse(currentUrl);
-            currentUrl = '${uri.scheme}://${uri.host}:${uri.port}$location';
-          } else if (!location.startsWith('http')) {
-            final uri = Uri.parse(currentUrl);
-            final basePath = uri.path.substring(0, uri.path.lastIndexOf('/') + 1);
-            currentUrl = '${uri.scheme}://${uri.host}:${uri.port}$basePath$location';
-          } else {
-            currentUrl = location;
+          var response = await client.send(request);
+          var currentUrl = streamUrl;
+
+          // Follow redirects manually (up to 10 times)
+          int redirectCount = 0;
+          while (response.isRedirect && redirectCount < 10) {
+            final location = response.headers['location'];
+            if (location == null) break;
+
+            // Handle relative URLs
+            if (location.startsWith('/')) {
+              final uri = Uri.parse(currentUrl);
+              currentUrl = '${uri.scheme}://${uri.host}:${uri.port}$location';
+            } else if (!location.startsWith('http')) {
+              final uri = Uri.parse(currentUrl);
+              final basePath = uri.path.substring(0, uri.path.lastIndexOf('/') + 1);
+              currentUrl = '${uri.scheme}://${uri.host}:${uri.port}$basePath$location';
+            } else {
+              currentUrl = location;
+            }
+
+            debugPrint('Following redirect to: $currentUrl');
+
+            final nextRequest = http.Request('HEAD', Uri.parse(currentUrl));
+            nextRequest.headers.addAll(headers);
+            nextRequest.followRedirects = false;
+            response = await client.send(nextRequest);
+            redirectCount++;
           }
 
-          debugPrint('Following redirect to: $currentUrl');
-
-          final nextRequest = http.Request('HEAD', Uri.parse(currentUrl));
-          nextRequest.headers.addAll(headers);
-          nextRequest.followRedirects = false;
-          response = await client.send(nextRequest);
-          redirectCount++;
+          return currentUrl;
         }
-
-        return currentUrl;
       } finally {
         client.close();
       }
     } catch (e) {
-      debugPrint('Error following redirect: $e');
+      debugPrint('Error getting HLS URL: $e');
       return null;
     }
   }
@@ -780,7 +808,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           left: 8,
           child: IconButton(
             icon: const Icon(Icons.arrow_back, color: Colors.white),
-            onPressed: () => context.pop(),
+            onPressed: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/');
+              }
+            },
             style: IconButton.styleFrom(
               backgroundColor: Colors.black.withValues(alpha: 0.5),
             ),
@@ -928,7 +962,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           ),
           const SizedBox(height: 12),
           TextButton(
-            onPressed: () => context.pop(),
+            onPressed: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/');
+              }
+            },
             child: const Text('Go Back'),
           ),
         ],
@@ -1237,7 +1277,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           left: 8,
           child: IconButton(
             icon: const Icon(Icons.arrow_back, color: Colors.white),
-            onPressed: () => context.pop(),
+            onPressed: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/');
+              }
+            },
             style: IconButton.styleFrom(
               backgroundColor: Colors.black.withValues(alpha: 0.5),
             ),

@@ -89,15 +89,15 @@ defmodule MydiaWeb.Plugs.MediaAuthTest do
   end
 
   describe "call/2 with missing token" do
-    test "returns 401 unauthorized", %{conn: conn} do
+    test "passes through to allow other auth mechanisms", %{conn: conn} do
+      # When no media token is provided, the plug passes through
+      # to allow other authentication mechanisms (JWT, API key, etc.) to work
       conn = MediaAuth.call(conn, [])
 
-      assert conn.halted
-      assert conn.status == 401
-
-      response = Jason.decode!(conn.resp_body)
-      assert response["error"] == "Unauthorized"
-      assert response["message"] == "Missing authentication token"
+      refute conn.halted
+      # conn should be unchanged
+      refute Map.has_key?(conn.assigns, :media_device)
+      refute Map.has_key?(conn.assigns, :media_user)
     end
   end
 
@@ -129,11 +129,14 @@ defmodule MydiaWeb.Plugs.MediaAuthTest do
 
   describe "call/2 with expired token" do
     setup do
+      # Clear token cache to ensure we don't hit stale cached entries
+      Mydia.Media.TokenCache.clear()
+
       user = create_user()
       device = create_device(user)
       {:ok, token, _claims} = MediaToken.create_token(device, ttl: {1, :second})
-      # Sleep long enough for token to expire
-      Process.sleep(1500)
+      # Sleep long enough for token to expire (2 seconds to be safe)
+      Process.sleep(2000)
 
       %{token: token}
     end

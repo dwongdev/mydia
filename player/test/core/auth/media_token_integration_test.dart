@@ -19,7 +19,7 @@ void main() {
 
       expect(
         url,
-        equals('https://example.com/api/v1/stream/file/file-123?strategy=HLS_COPY&media_token=test-media-token'),
+        equals('https://example.com/api/v1/stream/file/file-123?strategy=HLS_COPY&token=test-media-token'),
       );
     });
 

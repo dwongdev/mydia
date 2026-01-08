@@ -339,7 +339,7 @@ void main() {
         strategy: StreamingStrategy.directPlay,
       );
 
-      expect(url, contains('media_token=media-token-abc'));
+      expect(url, contains('token=media-token-abc'));
     });
   });
 }

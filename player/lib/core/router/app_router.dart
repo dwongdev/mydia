@@ -295,7 +295,13 @@ GoRouter appRouter(Ref ref) {
                       const Text('No file selected for playback'),
                       const SizedBox(height: 24),
                       ElevatedButton(
-                        onPressed: () => context.pop(),
+                        onPressed: () {
+                          if (context.canPop()) {
+                            context.pop();
+                          } else {
+                            context.go('/');
+                          }
+                        },
                         child: const Text('Go Back'),
                       ),
                     ],

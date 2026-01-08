@@ -14,8 +14,9 @@ class MediaTokenService {
   final AuthStorage _storage;
   final GraphQLClient _graphqlClient;
 
-  static const _mediaTokenKey = 'media_token';
-  static const _mediaTokenExpiryKey = 'media_token_expiry';
+  // Use the same storage key as AuthService to ensure token is found after reconnection
+  static const _mediaTokenKey = 'auth_token';
+  static const _mediaTokenExpiryKey = 'auth_token_expiry';
 
   /// Threshold for proactive token refresh (1 hour before expiry).
   static const _refreshThresholdSeconds = 3600;
@@ -130,8 +131,9 @@ class MediaTokenService {
     }
 
     // Append token as query parameter for claim code mode
+    // Server expects 'token' query parameter
     final separator = path.contains('?') ? '&' : '?';
-    return '$baseUrl$path${separator}media_token=$token';
+    return '$baseUrl$path${separator}token=$token';
   }
 
   /// Check if token is expired.

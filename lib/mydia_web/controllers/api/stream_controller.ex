@@ -511,13 +511,20 @@ defmodule MydiaWeb.Api.StreamController do
                       ~p"/api/v1/hls/#{session_info.session_id}/index.m3u8?mode=#{hls_mode}"
 
                     Logger.info(
-                      "HLS session started (#{hls_mode}), redirecting to master playlist: #{master_playlist_path}"
+                      "HLS session started (#{hls_mode}), master playlist: #{master_playlist_path}"
                     )
 
-                    # Redirect to master playlist
-                    conn
-                    |> put_resp_header("location", master_playlist_path)
-                    |> send_resp(302, "")
+                    # Check if client wants JSON response instead of redirect
+                    # Web browsers can't reliably follow redirects with fetch API
+                    if conn.query_params["resolve"] == "json" do
+                      # Return the HLS URL as JSON for web clients
+                      json(conn, %{hls_url: master_playlist_path})
+                    else
+                      # Redirect to master playlist (native clients)
+                      conn
+                      |> put_resp_header("location", master_playlist_path)
+                      |> send_resp(302, "")
+                    end
 
                   {:error, error} ->
                     Logger.error("Failed to get session info: #{inspect(error)}")

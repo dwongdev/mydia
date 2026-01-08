@@ -89,7 +89,7 @@ defmodule MydiaWeb.Endpoint do
   plug Corsica,
     origins: "*",
     allow_headers: ["content-type", "authorization", "x-request-id"],
-    allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allow_methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"]
 
   plug MydiaWeb.Router
 end

@@ -192,7 +192,13 @@ class ShowDetailScreen extends ConsumerWidget {
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
-          onTap: () => context.pop(),
+          onTap: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/');
+            }
+          },
           child: const Padding(
             padding: EdgeInsets.all(8),
             child: Icon(Icons.arrow_back_rounded, color: Colors.white),

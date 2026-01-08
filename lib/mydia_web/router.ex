@@ -51,6 +51,14 @@ defmodule MydiaWeb.Router do
     plug MydiaWeb.Plugs.ApiAuth
   end
 
+  # Media API authentication pipeline - supports JWT, API keys, and media tokens
+  # Used for streaming endpoints that need to accept media tokens from remote devices
+  pipeline :media_api_auth do
+    plug MydiaWeb.Plugs.AuthPipeline
+    plug MydiaWeb.Plugs.ApiAuth
+    plug MydiaWeb.Plugs.MediaAuth, permissions: ["stream"]
+  end
+
   # Health check endpoint (no authentication required)
   scope "/", MydiaWeb do
     pipe_through :api
@@ -198,13 +206,6 @@ defmodule MydiaWeb.Router do
     get "/media/:id", MediaController, :show
     post "/media/:id/match", MediaController, :match
 
-    # Streaming
-    get "/stream/movie/:id", StreamController, :stream_movie
-    get "/stream/episode/:id", StreamController, :stream_episode
-    get "/stream/file/:id", StreamController, :stream
-    get "/stream/:id", StreamController, :stream
-    get "/stream/:content_type/:id/candidates", StreamController, :candidates
-
     # Playback progress
     get "/playback/movie/:id", PlaybackController, :show_movie
     get "/playback/episode/:id", PlaybackController, :show_episode
@@ -217,6 +218,26 @@ defmodule MydiaWeb.Router do
     get "/media/:id/thumbnails.vtt", ThumbnailController, :show_vtt
     get "/media/:id/thumbnails.jpg", ThumbnailController, :show_sprite
 
+    # Media downloads
+    get "/download/:content_type/:id/options", DownloadController, :options
+    post "/download/:content_type/:id/prepare", DownloadController, :prepare
+    get "/download/job/:job_id/status", DownloadController, :job_status
+    delete "/download/job/:job_id", DownloadController, :cancel_job
+    get "/download/job/:job_id/file", DownloadController, :download_file
+  end
+
+  # Streaming routes - supports JWT, API keys, and media tokens (for remote devices)
+  # Media tokens allow remote devices to stream content via direct HTTP requests
+  scope "/api/v1", MydiaWeb.Api do
+    pipe_through [:api, :media_api_auth, :require_authenticated]
+
+    # Streaming
+    get "/stream/movie/:id", StreamController, :stream_movie
+    get "/stream/episode/:id", StreamController, :stream_episode
+    get "/stream/file/:id", StreamController, :stream
+    get "/stream/:id", StreamController, :stream
+    get "/stream/:content_type/:id/candidates", StreamController, :candidates
+
     # HLS streaming
     post "/hls/start", HlsController, :start_session
     delete "/hls/:session_id", HlsController, :terminate_session
@@ -225,13 +246,6 @@ defmodule MydiaWeb.Router do
     get "/hls/:session_id/:track_id/:segment", HlsController, :segment
     # Support FFmpeg's flat structure (segments in root directory)
     get "/hls/:session_id/:segment", HlsController, :root_segment
-
-    # Media downloads
-    get "/download/:content_type/:id/options", DownloadController, :options
-    post "/download/:content_type/:id/prepare", DownloadController, :prepare
-    get "/download/job/:job_id/status", DownloadController, :job_status
-    delete "/download/job/:job_id", DownloadController, :cancel_job
-    get "/download/job/:job_id/file", DownloadController, :download_file
   end
 
   # API routes - admin only

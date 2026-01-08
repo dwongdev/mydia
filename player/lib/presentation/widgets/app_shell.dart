@@ -1,9 +1,11 @@
 import 'dart:ui';
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/auth/auth_status.dart';
 import '../../core/config/web_config.dart';
+import '../../core/connection/connection_provider.dart';
 import '../../core/downloads/download_service.dart' show isDownloadSupported;
 import '../../core/graphql/graphql_provider.dart';
 import '../../core/layout/breakpoints.dart';
@@ -27,6 +29,39 @@ class AppShell extends ConsumerStatefulWidget {
 }
 
 class _AppShellState extends ConsumerState<AppShell> {
+  AppLifecycleListener? _lifecycleListener;
+
+  @override
+  void initState() {
+    super.initState();
+    // Only add lifecycle listener on native platforms (not web)
+    if (!kIsWeb) {
+      _lifecycleListener = AppLifecycleListener(
+        onResume: _onAppResume,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _lifecycleListener?.dispose();
+    super.dispose();
+  }
+
+  /// Called when app resumes from background.
+  /// Checks if relay tunnel is dead and triggers reconnection.
+  void _onAppResume() {
+    debugPrint('[AppShell] App resumed from background');
+    final connectionState = ref.read(connectionProvider);
+
+    // Check if we were in relay mode but tunnel is now dead
+    if (connectionState.isRelayMode && !connectionState.isTunnelActive) {
+      debugPrint('[AppShell] Relay tunnel died while in background, reconnecting...');
+      // Trigger full reconnection (includes key exchange)
+      ref.read(authStateProvider.notifier).retryConnection();
+    }
+  }
+
   int _getSelectedIndex() {
     final location = widget.location;
     if (location.startsWith('/movies')) return 1;

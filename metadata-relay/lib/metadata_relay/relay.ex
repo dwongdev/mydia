@@ -12,6 +12,8 @@ defmodule MetadataRelay.Relay do
   even when behind NAT, using claim codes for secure device pairing.
   """
 
+  require Logger
+
   import Ecto.Query
   alias MetadataRelay.Repo
   alias MetadataRelay.Relay.{Instance, Claim}
@@ -185,35 +187,57 @@ defmodule MetadataRelay.Relay do
         preload: [:instance]
       )
 
-    case Repo.one(query) do
-      nil ->
-        {:error, :not_found}
+    result =
+      case Repo.one(query) do
+        nil ->
+          {:error, :not_found}
 
-      claim ->
-        cond do
-          Claim.consumed?(claim) ->
-            {:error, :already_consumed}
+        claim ->
+          cond do
+            Claim.consumed?(claim) ->
+              {:error, :already_consumed}
 
-          Claim.expired?(claim) ->
-            {:error, :expired}
+            Claim.expired?(claim) ->
+              {:error, :expired}
 
-          true ->
-            instance = claim.instance
+            true ->
+              instance = claim.instance
 
-            # Enrich direct_urls with public IP (Plex-like auto-discovery)
-            enriched_urls = build_enriched_urls(instance)
+              # Enrich direct_urls with public IP (Plex-like auto-discovery)
+              enriched_urls = build_enriched_urls(instance)
 
-            {:ok,
-             %{
-               claim_id: claim.id,
-               instance_id: instance.instance_id,
-               public_key: Base.encode64(instance.public_key),
-               direct_urls: enriched_urls,
-               online: instance.online,
-               user_id: claim.user_id
-             }}
-        end
-    end
+              {:ok,
+               %{
+                 claim_id: claim.id,
+                 instance_id: instance.instance_id,
+                 public_key: Base.encode64(instance.public_key),
+                 direct_urls: enriched_urls,
+                 online: instance.online,
+                 user_id: claim.user_id
+               }}
+          end
+      end
+
+    # Security audit logging - log only code prefix to avoid exposing full codes
+    log_claim_attempt(code, result)
+
+    result
+  end
+
+  # Log claim redemption attempts for security monitoring
+  # Only logs code prefix (first 2 chars) to avoid exposing sensitive codes
+  defp log_claim_attempt(code, {:ok, %{instance_id: instance_id}}) do
+    Logger.info("Claim redeemed successfully",
+      code_prefix: String.slice(code, 0, 2),
+      instance_id: instance_id
+    )
+  end
+
+  defp log_claim_attempt(code, {:error, reason}) do
+    Logger.warning("Claim redemption failed",
+      code_prefix: String.slice(code, 0, 2),
+      reason: reason
+    )
   end
 
   # Builds enriched URL list by adding public IP URL to stored direct_urls

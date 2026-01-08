@@ -83,13 +83,18 @@ defmodule MetadataRelay.Relay.Claim do
   end
 
   @doc """
-  Generates a random claim code.
-  """
-  def generate_code(length \\ 6) do
-    alphabet = ~c"ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+  Generates a cryptographically secure random claim code.
 
-    1..length
-    |> Enum.map(fn _ -> Enum.random(alphabet) end)
+  Uses `:crypto.strong_rand_bytes/1` for secure random number generation.
+  Default length is 8 characters providing ~41 bits of entropy.
+  """
+  def generate_code(length \\ 8) do
+    alphabet = ~c"ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    char_count = length(alphabet)
+
+    :crypto.strong_rand_bytes(length)
+    |> :binary.bin_to_list()
+    |> Enum.map(fn byte -> Enum.at(alphabet, rem(byte, char_count)) end)
     |> List.to_string()
   end
 

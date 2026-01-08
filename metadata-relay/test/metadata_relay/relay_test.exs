@@ -120,7 +120,7 @@ defmodule MetadataRelay.RelayTest do
       assert {:ok, claim} = Relay.create_claim(instance, user_id)
       assert claim.user_id == user_id
       assert claim.instance_id == instance.id
-      assert String.length(claim.code) == 6
+      assert String.length(claim.code) == 8
       assert claim.expires_at != nil
       assert claim.consumed_at == nil
     end
@@ -163,8 +163,8 @@ defmodule MetadataRelay.RelayTest do
       user_id = "user-#{System.unique_integer()}"
       {:ok, claim} = Relay.create_claim(instance, user_id)
 
-      # The code should be uppercase, 6 chars, no dash
-      assert String.length(claim.code) == 6
+      # The code should be uppercase, 8 chars, no dash
+      assert String.length(claim.code) == 8
       assert claim.code == String.upcase(claim.code)
       refute String.contains?(claim.code, "-")
 
@@ -174,8 +174,8 @@ defmodule MetadataRelay.RelayTest do
       # Create another claim to test with dash
       {:ok, claim2} = Relay.create_claim(instance, user_id)
 
-      # Should work if user adds a dash
-      code_with_dash = String.slice(claim2.code, 0, 3) <> "-" <> String.slice(claim2.code, 3, 3)
+      # Should work if user adds a dash (e.g., "ABCD-EFGH")
+      code_with_dash = String.slice(claim2.code, 0, 4) <> "-" <> String.slice(claim2.code, 4, 4)
       assert {:ok, _} = Relay.redeem_claim(code_with_dash)
     end
 

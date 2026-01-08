@@ -160,14 +160,13 @@ defmodule MetadataRelay.Relay.Handler do
       {:ok, info} ->
         {:ok, info}
 
-      {:error, :not_found} ->
-        {:error, :not_found}
-
-      {:error, :already_consumed} ->
-        {:error, {:validation, "Claim code has already been used"}}
-
-      {:error, :expired} ->
-        {:error, {:validation, "Claim code has expired"}}
+      # Return generic error for all failure modes to prevent timing attacks.
+      # This prevents an attacker from distinguishing between:
+      # - code doesn't exist
+      # - code exists but expired
+      # - code exists but already used
+      {:error, _reason} ->
+        {:error, {:validation, "Invalid or expired claim code"}}
     end
   end
 

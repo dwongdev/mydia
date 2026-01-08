@@ -2,6 +2,13 @@
 cmake_minimum_required(VERSION 3.13)
 project(runner LANGUAGES CXX)
 
+# Use mimalloc to prevent memory leaks with media_kit on Linux
+# https://pub.dev/packages/media_kit#linux
+set(MIMALLOC_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../build/linux/x64/release/bundle/lib/libmimalloc.so")
+if(EXISTS ${MIMALLOC_LIB})
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--whole-archive ${MIMALLOC_LIB} -Wl,--no-whole-archive")
+endif()
+
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
 set(BINARY_NAME "player")

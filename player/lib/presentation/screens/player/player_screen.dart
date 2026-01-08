@@ -777,10 +777,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       );
     }
 
-    Widget videoPlayer = Center(
+    // Video widget fills available space with black background
+    // Using SizedBox.expand ensures proper sizing on all platforms
+    Widget videoPlayer = SizedBox.expand(
       child: Video(
         controller: _videoController!,
         controls: MaterialVideoControls,
+        fill: Colors.black,
       ),
     );
 

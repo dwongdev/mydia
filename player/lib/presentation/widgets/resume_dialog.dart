@@ -17,7 +17,13 @@ class ResumeDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final positionText = _formatDuration(savedPositionSeconds);
-    final percentage = (savedPositionSeconds / totalDurationSeconds * 100).round();
+    // Guard against division by zero
+    final percentage = totalDurationSeconds > 0
+        ? ((savedPositionSeconds / totalDurationSeconds * 100).clamp(0, 100)).round()
+        : 0;
+    final progressValue = totalDurationSeconds > 0
+        ? (savedPositionSeconds / totalDurationSeconds).clamp(0.0, 1.0)
+        : 0.0;
 
     return AlertDialog(
       title: const Text('Resume Playback'),
@@ -36,7 +42,7 @@ class ResumeDialog extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           LinearProgressIndicator(
-            value: savedPositionSeconds / totalDurationSeconds,
+            value: progressValue,
             backgroundColor: AppColors.surfaceVariant,
             valueColor: const AlwaysStoppedAnimation<Color>(
               AppColors.primary,

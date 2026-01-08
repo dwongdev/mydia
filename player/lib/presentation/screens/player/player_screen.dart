@@ -213,8 +213,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       await Future.delayed(const Duration(milliseconds: 500));
 
       // Check if we should show resume dialog
-      if (mounted && _savedPositionSeconds != null && _savedPositionSeconds! > 30) {
-        final duration = _player!.state.duration.inSeconds;
+      // Only show if we have valid duration and saved position
+      final duration = _player!.state.duration.inSeconds;
+      if (mounted &&
+          _savedPositionSeconds != null &&
+          _savedPositionSeconds! > 30 &&
+          duration > 0) {
         final shouldResume = await showResumeDialog(
           context,
           _savedPositionSeconds!,

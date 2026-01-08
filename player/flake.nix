@@ -52,17 +52,6 @@
       in {
         devShells.default = pkgs.mkShell {
           buildInputs = [ pkgs.flutter ] ++ linuxBuildDeps;
-
-          shellHook = ''
-            echo "Mydia Player development shell"
-            echo "Flutter: $(flutter --version | head -1)"
-            echo ""
-            echo "Commands:"
-            echo "  flutter build linux --release  # Build Linux app"
-            echo "  flutter run -d linux           # Run Linux app"
-            echo "  flutter pub get                # Get dependencies"
-            echo ""
-          '';
         };
 
         packages.default = pkgs.flutter.buildFlutterApplication {

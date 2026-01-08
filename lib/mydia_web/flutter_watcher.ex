@@ -13,12 +13,10 @@ defmodule MydiaWeb.FlutterWatcher do
   use GenServer
   require Logger
 
-  @player_root "player"
   @build_output "player/build/web"
   @static_output "priv/static/player"
 
   # Build configuration
-  @build_timeout_seconds 120
   @debounce_delay 300
 
   # File watching patterns

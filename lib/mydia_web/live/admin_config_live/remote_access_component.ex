@@ -65,6 +65,8 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
       |> assign_new(:show_add_url_modal, fn -> false end)
       |> assign_new(:new_url, fn -> "" end)
       |> assign_new(:show_advanced, fn -> false end)
+      |> assign_new(:show_all_devices, fn -> false end)
+      |> assign_new(:show_clear_inactive_modal, fn -> false end)
       |> assign_new(:port_status, fn -> :unknown end)
       |> assign_new(:checking_port, fn -> false end)
       # Read relay URL from environment, not database
@@ -262,11 +264,14 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
 
           <%!-- Relay-only warning when port is not accessible --%>
           <%= if @port_status == :closed do %>
-            <div class="mt-3 flex items-center gap-2 text-sm text-warning">
-              <.icon name="hero-exclamation-triangle" class="w-4 h-4 shrink-0" />
-              <span>
-                Media playback requires direct connection. Set up port forwarding to enable.
-              </span>
+            <div class="alert alert-warning alert-soft mt-3">
+              <.icon name="hero-exclamation-triangle" class="w-5 h-5" />
+              <div>
+                <p class="font-medium">Media playback requires a direct connection</p>
+                <p class="text-xs opacity-80">
+                  Set up port forwarding or add a Direct URL below. Note: this is a basic test and may not reflect actual accessibility.
+                </p>
+              </div>
             </div>
           <% end %>
         </div>
@@ -374,190 +379,301 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
         <% end %>
 
         <%!-- Devices Section --%>
-        <div class="space-y-3">
-          <h3 class="text-sm font-medium text-base-content/70 flex items-center gap-2">
-            <.icon name="hero-device-phone-mobile" class="w-4 h-4" /> Paired Devices
-            <span class="badge badge-ghost badge-sm">{length(@devices)}</span>
-          </h3>
+        <% device_count = length(@devices)
+        visible_devices = if @show_all_devices, do: @devices, else: Enum.take(@devices, 10)
+        hidden_count = device_count - length(visible_devices)
+
+        inactive_devices =
+          Enum.reject(@devices, fn d ->
+            is_recent_activity?(d.last_seen_at) && is_nil(d.revoked_at)
+          end)
+
+        inactive_count = length(inactive_devices) %>
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-medium text-base-content/70 flex items-center gap-2">
+              <.icon name="hero-device-phone-mobile" class="w-4 h-4" /> Paired Devices
+              <span class="badge badge-ghost badge-sm">{device_count}</span>
+            </h3>
+            <%= if inactive_count > 0 do %>
+              <button
+                class="btn btn-ghost btn-xs text-base-content/60"
+                phx-click="open_clear_inactive_modal"
+                phx-target={@myself}
+              >
+                <.icon name="hero-trash" class="w-3 h-3" /> Clear inactive ({inactive_count})
+              </button>
+            <% end %>
+          </div>
 
           <%= if @devices == [] do %>
-            <div class="alert">
-              <.icon name="hero-information-circle" class="w-5 h-5 opacity-60" />
-              <span>
-                No devices paired yet. Generate a pairing code above to connect your first device.
-              </span>
+            <div class="card bg-base-200">
+              <div class="card-body items-center text-center py-8">
+                <div class="w-16 h-16 rounded-full bg-base-300 flex items-center justify-center mb-2">
+                  <.icon name="hero-device-phone-mobile" class="w-8 h-8 opacity-40" />
+                </div>
+                <h4 class="font-medium text-base-content/70">No Devices Paired</h4>
+                <p class="text-sm text-base-content/50 max-w-xs">
+                  Generate a pairing code above to connect your first device.
+                </p>
+              </div>
             </div>
           <% else %>
-            <div class="bg-base-200 rounded-box divide-y divide-base-300">
-              <%= for device <- @devices do %>
-                <div class={["p-3 sm:p-4", RemoteAccess.RemoteDevice.revoked?(device) && "opacity-50"]}>
-                  <div class="flex flex-col sm:flex-row sm:items-center gap-3">
-                    <div class="flex-1 min-w-0">
-                      <div class="font-semibold flex items-center gap-2 flex-wrap">
-                        <.icon name={platform_icon(device.platform)} class="w-4 h-4 opacity-60" />
-                        {device.device_name}
-                        <%= if RemoteAccess.RemoteDevice.revoked?(device) do %>
-                          <span class="badge badge-error badge-xs">Revoked</span>
-                        <% end %>
-                      </div>
-                      <div class="text-xs opacity-60 mt-0.5">
-                        <%= cond do %>
-                          <% RemoteAccess.RemoteDevice.revoked?(device) -> %>
-                            Access revoked
-                          <% is_recent_activity?(device.last_seen_at) -> %>
-                            Last active {format_relative_time(device.last_seen_at)}
-                          <% true -> %>
-                            Inactive since {format_datetime(device.last_seen_at)}
-                        <% end %>
-                      </div>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <span class={[
-                        "badge badge-sm",
-                        if(is_recent_activity?(device.last_seen_at) && is_nil(device.revoked_at),
-                          do: "badge-success",
-                          else: "badge-ghost"
-                        )
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              <%= for device <- visible_devices do %>
+                <div class={[
+                  "group card bg-base-200 transition-all duration-200",
+                  if(RemoteAccess.RemoteDevice.revoked?(device),
+                    do: "opacity-60",
+                    else: "hover:bg-base-300/50"
+                  )
+                ]}>
+                  <div class="card-body p-3">
+                    <div class="flex items-center gap-3">
+                      <%!-- Device Icon --%>
+                      <div class={[
+                        "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
+                        cond do
+                          RemoteAccess.RemoteDevice.revoked?(device) -> "bg-error/10 text-error"
+                          is_recent_activity?(device.last_seen_at) -> "bg-success/10 text-success"
+                          true -> "bg-base-300 text-base-content/50"
+                        end
                       ]}>
-                        {if is_recent_activity?(device.last_seen_at) && is_nil(device.revoked_at),
-                          do: "Active",
-                          else: "Inactive"}
-                      </span>
-                      <div class="join">
-                        <%= if is_nil(device.revoked_at) do %>
-                          <button
-                            class="btn btn-sm btn-ghost join-item"
-                            phx-click="open_revoke_modal"
-                            phx-target={@myself}
-                            phx-value-id={device.id}
-                            title="Revoke Access"
-                          >
-                            <.icon name="hero-no-symbol" class="w-4 h-4" />
-                          </button>
-                        <% end %>
-                        <button
-                          class="btn btn-sm btn-ghost join-item text-error"
-                          phx-click="open_delete_modal"
-                          phx-target={@myself}
-                          phx-value-id={device.id}
-                          title="Remove Device"
+                        <.icon name={platform_icon(device.platform)} class="w-5 h-5" />
+                      </div>
+
+                      <%!-- Device Info --%>
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-1.5">
+                          <span class="font-medium text-sm truncate">{device.device_name}</span>
+                          <%= if RemoteAccess.RemoteDevice.revoked?(device) do %>
+                            <span class="badge badge-error badge-xs">Revoked</span>
+                          <% else %>
+                            <%= if is_recent_activity?(device.last_seen_at) do %>
+                              <span class="w-1.5 h-1.5 rounded-full bg-success animate-pulse shrink-0">
+                              </span>
+                            <% end %>
+                          <% end %>
+                        </div>
+                        <div class="text-xs text-base-content/50 truncate">
+                          <%= cond do %>
+                            <% RemoteAccess.RemoteDevice.revoked?(device) -> %>
+                              Access revoked
+                            <% is_recent_activity?(device.last_seen_at) -> %>
+                              {format_relative_time(device.last_seen_at)}
+                            <% true -> %>
+                              Inactive
+                          <% end %>
+                        </div>
+                      </div>
+
+                      <%!-- Actions dropdown --%>
+                      <div class="dropdown dropdown-end">
+                        <div
+                          tabindex="0"
+                          role="button"
+                          class="btn btn-ghost btn-xs btn-square opacity-50 group-hover:opacity-100"
                         >
-                          <.icon name="hero-trash" class="w-4 h-4" />
-                        </button>
+                          <.icon name="hero-ellipsis-vertical" class="w-4 h-4" />
+                        </div>
+                        <ul
+                          tabindex="0"
+                          class="dropdown-content menu bg-base-100 rounded-box z-10 w-40 p-1 shadow-lg border border-base-300"
+                        >
+                          <%= if is_nil(device.revoked_at) do %>
+                            <li>
+                              <button
+                                class="text-warning"
+                                phx-click="open_revoke_modal"
+                                phx-target={@myself}
+                                phx-value-id={device.id}
+                              >
+                                <.icon name="hero-no-symbol" class="w-4 h-4" /> Revoke
+                              </button>
+                            </li>
+                          <% end %>
+                          <li>
+                            <button
+                              class="text-error"
+                              phx-click="open_delete_modal"
+                              phx-target={@myself}
+                              phx-value-id={device.id}
+                            >
+                              <.icon name="hero-trash" class="w-4 h-4" /> Remove
+                            </button>
+                          </li>
+                        </ul>
                       </div>
                     </div>
                   </div>
                 </div>
               <% end %>
             </div>
+            <%= if hidden_count > 0 do %>
+              <button
+                class="btn btn-ghost btn-sm w-full gap-2"
+                phx-click="toggle_show_all_devices"
+                phx-target={@myself}
+              >
+                <.icon name="hero-chevron-down" class="w-4 h-4" />
+                Show {hidden_count} more device{if hidden_count == 1, do: "", else: "s"}
+              </button>
+            <% end %>
+            <%= if @show_all_devices && device_count > 10 do %>
+              <button
+                class="btn btn-ghost btn-sm w-full gap-2"
+                phx-click="toggle_show_all_devices"
+                phx-target={@myself}
+              >
+                <.icon name="hero-chevron-up" class="w-4 h-4" /> Show less
+              </button>
+            <% end %>
           <% end %>
         </div>
 
-        <%!-- Advanced Settings --%>
-        <div class="space-y-3">
-          <button
-            class="text-sm font-medium text-base-content/70 flex items-center gap-2 hover:text-base-content transition-colors"
-            phx-click="toggle_advanced"
-            phx-target={@myself}
-          >
-            <.icon
-              name={if @show_advanced, do: "hero-chevron-down", else: "hero-chevron-right"}
-              class="w-4 h-4"
-            /> Advanced Settings
-          </button>
+        <%!-- Settings --%>
+        <div class="space-y-4">
+          <h3 class="text-sm font-medium text-base-content/70 flex items-center gap-2">
+            <.icon name="hero-cog-6-tooth" class="w-4 h-4" /> Settings
+          </h3>
 
-          <%= if @show_advanced do %>
-            <div class="bg-base-200 rounded-box divide-y divide-base-300">
-              <%!-- Public Port --%>
-              <form phx-submit="update_public_port" phx-target={@myself} class="p-3 sm:p-4">
-                <div class="flex flex-col sm:flex-row sm:items-center gap-3">
-                  <div class="flex-1 min-w-0">
-                    <div class="font-medium text-sm">Public Port</div>
-                    <div class="text-xs opacity-60">Override if external port differs (NAT)</div>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <input
-                      type="number"
-                      name="public_port"
-                      placeholder="Auto"
-                      class="input input-sm input-bordered w-24 text-center font-mono"
-                      value={@ra_config.public_port}
-                      min="1"
-                      max="65535"
-                    />
-                    <button type="submit" class="btn btn-sm btn-primary">Save</button>
-                  </div>
-                </div>
-              </form>
-
-              <%!-- Direct URLs --%>
-              <div class="p-3 sm:p-4">
-                <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-2">
-                  <div class="flex-1 min-w-0">
-                    <div class="font-medium text-sm">Direct URLs</div>
-                    <div class="text-xs opacity-60">Bypass relay when on same network</div>
-                  </div>
-                  <button
-                    class="btn btn-sm btn-ghost"
-                    phx-click="open_add_url_modal"
-                    phx-target={@myself}
-                  >
-                    <.icon name="hero-plus" class="w-4 h-4" /> Add
-                  </button>
-                </div>
-                <%= if @ra_config.direct_urls && @ra_config.direct_urls != [] do %>
-                  <div class="space-y-1 mt-2">
-                    <%= for url <- @ra_config.direct_urls do %>
-                      <div class="flex items-center justify-between p-2 bg-base-300 rounded text-sm">
-                        <code class="font-mono text-xs truncate">{url}</code>
-                        <button
-                          class="btn btn-xs btn-ghost text-error shrink-0"
-                          phx-click="remove_direct_url"
-                          phx-target={@myself}
-                          phx-value-url={url}
-                        >
-                          <.icon name="hero-x-mark" class="w-3 h-3" />
-                        </button>
-                      </div>
-                    <% end %>
-                  </div>
-                <% else %>
-                  <p class="text-xs text-base-content/50 italic mt-2">None configured</p>
-                <% end %>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <%!-- Public Port Card --%>
+            <div class="card bg-base-200">
+              <div class="card-body p-4">
+                <h4 class="card-title text-sm">
+                  <.icon name="hero-globe-alt" class="w-4 h-4 opacity-60" /> Public Port
+                </h4>
+                <p class="text-xs text-base-content/60">
+                  Override if your external port differs from the internal port (NAT/port forwarding).
+                </p>
+                <form
+                  phx-submit="update_public_port"
+                  phx-target={@myself}
+                  class="card-actions justify-end items-center mt-2"
+                >
+                  <input
+                    type="number"
+                    name="public_port"
+                    placeholder="Auto"
+                    class="input input-sm input-bordered w-24 text-center font-mono"
+                    value={@ra_config.public_port}
+                    min="1"
+                    max="65535"
+                  />
+                  <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                </form>
               </div>
+            </div>
 
-              <%!-- Connection Info --%>
-              <div class="p-3 sm:p-4">
-                <div class="font-medium text-sm mb-2">Connection Details</div>
-                <div class="grid gap-1.5 text-xs">
-                  <div class="flex justify-between items-center">
+            <%!-- Connection Details Card --%>
+            <div class="card bg-base-200">
+              <div class="card-body p-4">
+                <h4 class="card-title text-sm">
+                  <.icon name="hero-information-circle" class="w-4 h-4 opacity-60" />
+                  Connection Details
+                </h4>
+                <div class="space-y-2 mt-1">
+                  <div class="flex justify-between items-center text-xs">
                     <span class="text-base-content/60">Instance ID</span>
                     <div class="flex items-center gap-1">
-                      <code class="font-mono">{String.slice(@ra_config.instance_id, 0..11)}...</code>
+                      <code class="font-mono bg-base-300 px-1.5 py-0.5 rounded">
+                        {String.slice(@ra_config.instance_id, 0..11)}...
+                      </code>
                       <button
-                        class="btn btn-xs btn-ghost"
+                        class="btn btn-xs btn-ghost btn-square"
                         phx-click="copy_instance_id"
                         phx-target={@myself}
                         onclick={"navigator.clipboard.writeText('#{@ra_config.instance_id}')"}
+                        title="Copy"
                       >
                         <.icon name="hero-clipboard" class="w-3 h-3" />
                       </button>
                     </div>
                   </div>
-                  <div class="flex justify-between items-center">
+                  <div class="flex justify-between items-center text-xs">
                     <span class="text-base-content/60">Relay</span>
-                    <code class="font-mono">{@relay_url}</code>
+                    <code class="font-mono bg-base-300 px-1.5 py-0.5 rounded truncate max-w-[180px]">
+                      {@relay_url}
+                    </code>
                   </div>
-                  <div class="flex justify-between items-center">
+                  <div class="flex justify-between items-center text-xs">
                     <span class="text-base-content/60">Status</span>
-                    <span class={if(@relay_ready, do: "text-success", else: "text-warning")}>
+                    <span class={[
+                      "badge badge-sm",
+                      if(@relay_ready, do: "badge-success", else: "badge-warning")
+                    ]}>
                       {if @relay_ready, do: "Registered", else: "Not registered"}
                     </span>
                   </div>
                 </div>
               </div>
             </div>
-          <% end %>
+          </div>
+
+          <%!-- Direct URLs Card (full width) --%>
+          <div class="card bg-base-200">
+            <div class="card-body p-4">
+              <div class="flex items-center justify-between">
+                <h4 class="card-title text-sm">
+                  <.icon name="hero-link" class="w-4 h-4 opacity-60" /> Direct URLs
+                </h4>
+                <button
+                  class="btn btn-sm btn-ghost"
+                  phx-click="open_add_url_modal"
+                  phx-target={@myself}
+                >
+                  <.icon name="hero-plus" class="w-4 h-4" /> Add URL
+                </button>
+              </div>
+              <p class="text-xs text-base-content/60">
+                Direct URLs allow the app to bypass the relay when on the same network for faster streaming.
+              </p>
+
+              <%= if @ra_config.direct_urls && @ra_config.direct_urls != [] do %>
+                <div class="flex flex-wrap gap-2 mt-2">
+                  <%= for url <- @ra_config.direct_urls do %>
+                    <div class="badge badge-lg gap-2 pr-1">
+                      <code class="font-mono text-xs">{url}</code>
+                      <button
+                        class="btn btn-xs btn-ghost btn-circle"
+                        phx-click="remove_direct_url"
+                        phx-target={@myself}
+                        phx-value-url={url}
+                        title="Remove"
+                      >
+                        <.icon name="hero-x-mark" class="w-3 h-3" />
+                      </button>
+                    </div>
+                  <% end %>
+                </div>
+              <% else %>
+                <div class="text-xs text-base-content/50 italic">No direct URLs configured</div>
+              <% end %>
+
+              <div class="divider my-2"></div>
+
+              <div class="alert alert-info alert-soft py-2">
+                <.icon name="hero-light-bulb" class="w-5 h-5" />
+                <div class="text-xs">
+                  <span class="font-semibold">Tip:</span>
+                  Use
+                  <a
+                    href="https://tailscale.com"
+                    target="_blank"
+                    rel="noopener"
+                    class="link font-medium"
+                  >
+                    Tailscale
+                  </a>
+                  for secure access anywhere. Add your Tailscale address, e.g.
+                  <code class="bg-info/20 px-1 py-0.5 rounded font-mono">
+                    http://mydia.tail1234.ts.net:4000
+                  </code>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       <% else %>
         <%!-- Disabled state --%>
@@ -616,6 +732,50 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
         </div>
       <% end %>
 
+      <%!-- Clear Inactive Devices Modal --%>
+      <%= if @show_clear_inactive_modal do %>
+        <% inactive_to_clear =
+          Enum.reject(@devices, fn d ->
+            is_recent_activity?(d.last_seen_at) && is_nil(d.revoked_at)
+          end) %>
+        <div class="modal modal-open">
+          <div class="modal-box">
+            <h3 class="font-bold text-lg mb-4">Clear Inactive Devices?</h3>
+            <p class="text-base-content/70 mb-3">
+              This will remove <strong>{length(inactive_to_clear)}</strong>
+              inactive device{if length(inactive_to_clear) == 1, do: "", else: "s"}.
+              They will need to be paired again to reconnect.
+            </p>
+            <div class="text-sm text-base-content/50 max-h-32 overflow-y-auto">
+              <%= for device <- inactive_to_clear do %>
+                <div class="flex items-center gap-2 py-1">
+                  <.icon name={platform_icon(device.platform)} class="w-3 h-3 opacity-60" />
+                  <span class="truncate">{device.device_name}</span>
+                </div>
+              <% end %>
+            </div>
+            <div class="modal-action">
+              <button
+                phx-click="close_clear_inactive_modal"
+                phx-target={@myself}
+                class="btn btn-ghost"
+              >
+                Cancel
+              </button>
+              <button phx-click="submit_clear_inactive" phx-target={@myself} class="btn btn-error">
+                Clear All
+              </button>
+            </div>
+          </div>
+          <div
+            class="modal-backdrop"
+            phx-click="close_clear_inactive_modal"
+            phx-target={@myself}
+          >
+          </div>
+        </div>
+      <% end %>
+
       <%!-- Add Direct URL Modal --%>
       <%= if @show_add_url_modal do %>
         <div class="modal modal-open">
@@ -624,27 +784,35 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
             <p class="text-sm text-base-content/70 mb-4">
               Add a URL where your server can be reached directly (e.g., on the same network).
             </p>
-            <input
-              type="url"
-              placeholder="https://mydia.local:4000"
-              class="input input-bordered w-full"
-              value={@new_url}
+            <.form
+              for={%{}}
+              as={:direct_url}
+              id="add-direct-url-form"
               phx-change="update_new_url"
+              phx-submit="add_direct_url"
               phx-target={@myself}
-            />
-            <div class="modal-action">
-              <button phx-click="close_add_url_modal" phx-target={@myself} class="btn btn-ghost">
-                Cancel
-              </button>
-              <button
-                phx-click="add_direct_url"
-                phx-target={@myself}
-                class="btn btn-primary"
-                disabled={@new_url == ""}
-              >
-                Add
-              </button>
-            </div>
+            >
+              <input
+                type="url"
+                name="url"
+                placeholder="https://mydia.local:4000"
+                class="input input-bordered w-full"
+                value={@new_url}
+              />
+              <div class="modal-action">
+                <button
+                  type="button"
+                  phx-click="close_add_url_modal"
+                  phx-target={@myself}
+                  class="btn btn-ghost"
+                >
+                  Cancel
+                </button>
+                <button type="submit" class="btn btn-primary" disabled={@new_url == ""}>
+                  Add
+                </button>
+              </div>
+            </.form>
           </div>
           <div class="modal-backdrop" phx-click="close_add_url_modal" phx-target={@myself}></div>
         </div>
@@ -780,6 +948,42 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
     end
   end
 
+  def handle_event("open_clear_inactive_modal", _params, socket) do
+    {:noreply, assign(socket, :show_clear_inactive_modal, true)}
+  end
+
+  def handle_event("close_clear_inactive_modal", _params, socket) do
+    {:noreply, assign(socket, :show_clear_inactive_modal, false)}
+  end
+
+  def handle_event("submit_clear_inactive", _params, socket) do
+    devices = socket.assigns.devices
+
+    # Find inactive devices (not recently active or revoked)
+    inactive_devices =
+      Enum.reject(devices, fn d ->
+        is_recent_activity?(d.last_seen_at) && is_nil(d.revoked_at)
+      end)
+
+    # Delete all inactive devices
+    deleted_count =
+      Enum.reduce(inactive_devices, 0, fn device, count ->
+        case RemoteAccess.delete_device(device) do
+          {:ok, _} -> count + 1
+          {:error, _} -> count
+        end
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:show_clear_inactive_modal, false)
+     |> put_flash(
+       :info,
+       "Removed #{deleted_count} inactive device#{if deleted_count == 1, do: "", else: "s"}."
+     )
+     |> load_devices()}
+  end
+
   def handle_event("open_add_url_modal", _params, socket) do
     {:noreply,
      socket
@@ -794,7 +998,11 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
      |> assign(:new_url, "")}
   end
 
-  def handle_event("update_new_url", %{"value" => value}, socket) do
+  def handle_event("update_new_url", %{"url" => value}, socket) do
+    {:noreply, assign(socket, :new_url, value)}
+  end
+
+  def handle_event("update_new_url", %{"direct_url" => %{"url" => value}}, socket) do
     {:noreply, assign(socket, :new_url, value)}
   end
 
@@ -877,6 +1085,10 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
 
   def handle_event("toggle_advanced", _params, socket) do
     {:noreply, assign(socket, :show_advanced, !socket.assigns.show_advanced)}
+  end
+
+  def handle_event("toggle_show_all_devices", _params, socket) do
+    {:noreply, assign(socket, :show_all_devices, !socket.assigns.show_all_devices)}
   end
 
   def handle_event("check_port", _params, socket) do
@@ -1059,8 +1271,6 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
     secs = rem(seconds, 60)
     "#{minutes}:#{String.pad_leading(Integer.to_string(secs), 2, "0")}"
   end
-
-  defp format_datetime(nil), do: "Never"
 
   defp format_datetime(%DateTime{} = dt) do
     Calendar.strftime(dt, "%b %d, %Y at %I:%M %p")

@@ -62,6 +62,7 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
       |> assign_new(:selected_device, fn -> nil end)
       |> assign_new(:show_delete_modal, fn -> false end)
       |> assign_new(:device_to_delete, fn -> nil end)
+      |> assign_new(:show_pairing_modal, fn -> false end)
       |> assign_new(:show_add_url_modal, fn -> false end)
       |> assign_new(:new_url, fn -> "" end)
       |> assign_new(:show_advanced, fn -> false end)
@@ -296,84 +297,31 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
       <% end %>
 
       <%= if @ra_config && @ra_config.enabled do %>
-        <%!-- Pair New Device - only shown when relay is ready --%>
+        <%!-- Pair New Device - Compact trigger card --%>
         <%= if @relay_ready do %>
-          <div class="space-y-3">
-            <h3 class="text-sm font-medium text-base-content/70 flex items-center gap-2">
-              <.icon name="hero-qr-code" class="w-4 h-4" /> Pair New Device
-            </h3>
-            <div class="bg-base-200 rounded-box p-4">
-              <%= if @claim_code do %>
-                <%!-- Active pairing code - show QR and code together --%>
-                <div class="flex flex-col sm:flex-row gap-6 items-center sm:items-start">
-                  <%!-- QR Code - only shown when claim_code exists (rotates with each generation) --%>
-                  <%= if qr_svg = generate_qr_code(@ra_config, @relay_url, @claim_code) do %>
-                    <div class="shrink-0">
-                      <div class="p-2 bg-white rounded-lg">
-                        {Phoenix.HTML.raw(qr_svg)}
-                      </div>
-                      <p class="text-xs text-base-content/50 mt-2 text-center">Scan to pair</p>
-                    </div>
-                  <% end %>
-
-                  <%!-- Pairing Code --%>
-                  <div class="flex-1 text-center sm:text-left">
-                    <p class="text-sm text-base-content/60 mb-2">Or enter this code:</p>
-                    <div class="flex items-center gap-2 justify-center sm:justify-start">
-                      <code class="text-2xl font-bold tracking-[0.25em] bg-base-300 px-4 py-2 rounded-lg font-mono">
-                        {@claim_code}
-                      </code>
-                      <button
-                        class="btn btn-ghost btn-sm btn-square"
-                        phx-click="copy_claim_code"
-                        phx-target={@myself}
-                        onclick={"navigator.clipboard.writeText('#{@claim_code}')"}
-                        title="Copy"
-                      >
-                        <.icon name="hero-clipboard" class="w-4 h-4" />
-                      </button>
-                    </div>
-                    <div class="flex items-center gap-2 mt-2 text-sm text-base-content/50 justify-center sm:justify-start">
-                      <.icon name="hero-clock" class="w-4 h-4" />
-                      <span>
-                        Expires in
-                        <span class="font-mono">{format_countdown(@countdown_seconds)}</span>
-                      </span>
-                    </div>
-                    <button
-                      id="regenerate-pairing-code-btn"
-                      class="btn btn-ghost btn-xs mt-2"
-                      phx-click="generate_claim_code"
-                      phx-target={@myself}
-                      phx-disable-with="..."
-                    >
-                      <.icon name="hero-arrow-path" class="w-3 h-3" /> New Code
-                    </button>
-                  </div>
-                </div>
-              <% else %>
-                <%!-- No active code - show generate button --%>
-                <div class="text-center py-4">
-                  <%= if @pairing_error do %>
-                    <div class="alert alert-error alert-sm mb-4 text-left">
-                      <.icon name="hero-exclamation-circle" class="w-4 h-4" />
-                      <span class="text-sm">{@pairing_error}</span>
-                    </div>
-                  <% end %>
-                  <p class="text-sm text-base-content/60 mb-4">
-                    Generate a pairing code to connect a new device. The code and QR will expire after 5 minutes.
-                  </p>
-                  <button
-                    id="generate-pairing-code-btn"
-                    class="btn btn-primary"
-                    phx-click="generate_claim_code"
-                    phx-target={@myself}
-                    phx-disable-with="Generating..."
-                  >
-                    <.icon name="hero-key" class="w-4 h-4" /> Generate Pairing Code
-                  </button>
-                </div>
-              <% end %>
+          <div
+            class="group card bg-gradient-to-br from-primary/5 via-base-200 to-secondary/5 border border-primary/10 hover:border-primary/30 transition-all duration-300 cursor-pointer hover:shadow-lg hover:shadow-primary/5"
+            phx-click="open_pairing_modal"
+            phx-target={@myself}
+          >
+            <div class="card-body p-4 flex-row items-center gap-4">
+              <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300">
+                <.icon name="hero-qr-code" class="w-6 h-6 text-primary-content" />
+              </div>
+              <div class="flex-1">
+                <h3 class="font-semibold text-base-content group-hover:text-primary transition-colors">
+                  Pair New Device
+                </h3>
+                <p class="text-sm text-base-content/60">
+                  Scan QR or enter code in the Mydia app
+                </p>
+              </div>
+              <div class="shrink-0">
+                <.icon
+                  name="hero-arrow-right"
+                  class="w-5 h-5 text-base-content/30 group-hover:text-primary group-hover:translate-x-1 transition-all duration-300"
+                />
+              </div>
             </div>
           </div>
         <% end %>
@@ -817,6 +765,130 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
           <div class="modal-backdrop" phx-click="close_add_url_modal" phx-target={@myself}></div>
         </div>
       <% end %>
+
+      <%!-- Pair New Device Modal --%>
+      <%= if @show_pairing_modal do %>
+        <div class="modal modal-open">
+          <div class="modal-box max-w-md shadow-2xl">
+            <%!-- Header --%>
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <.icon name="hero-device-phone-mobile" class="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h3 class="text-lg font-semibold">Pair New Device</h3>
+                  <p class="text-sm text-base-content/50">Open the Mydia app to connect</p>
+                </div>
+              </div>
+              <button
+                class="btn btn-sm btn-circle btn-ghost"
+                phx-click="close_pairing_modal"
+                phx-target={@myself}
+              >
+                <.icon name="hero-x-mark" class="w-5 h-5" />
+              </button>
+            </div>
+
+            <%= if @claim_code do %>
+              <%!-- Active pairing code --%>
+              <div class="space-y-5 pt-4">
+                <%!-- QR Code --%>
+                <%= if qr_svg = generate_qr_code(@ra_config, @relay_url, @claim_code) do %>
+                  <div class="flex justify-center">
+                    <div class="p-3 bg-white rounded-xl shadow-md">
+                      {Phoenix.HTML.raw(qr_svg)}
+                    </div>
+                  </div>
+                <% end %>
+
+                <%!-- Divider --%>
+                <div class="flex items-center gap-3">
+                  <div class="flex-1 h-px bg-base-300"></div>
+                  <span class="text-xs text-base-content/40 uppercase tracking-wider">
+                    or enter code
+                  </span>
+                  <div class="flex-1 h-px bg-base-300"></div>
+                </div>
+
+                <%!-- Pairing Code --%>
+                <div class="text-center">
+                  <div class="inline-flex items-center gap-2 bg-base-200 rounded-xl px-5 py-3">
+                    <code class="text-2xl font-bold tracking-[0.25em] font-mono">
+                      {@claim_code}
+                    </code>
+                    <button
+                      class="btn btn-ghost btn-sm btn-square"
+                      phx-click="copy_claim_code"
+                      phx-target={@myself}
+                      onclick={"navigator.clipboard.writeText('#{@claim_code}')"}
+                      title="Copy code"
+                    >
+                      <.icon name="hero-clipboard-document" class="w-4 h-4 opacity-50" />
+                    </button>
+                  </div>
+                </div>
+
+                <%!-- Countdown & Regenerate --%>
+                <div class="flex items-center justify-center gap-4">
+                  <div class="flex items-center gap-3">
+                    <div
+                      class={[
+                        "radial-progress text-xs",
+                        if(@countdown_seconds > 60, do: "text-success", else: "text-warning")
+                      ]}
+                      style={"--value:#{min(100, @countdown_seconds / 3)}; --size:2.5rem; --thickness:3px;"}
+                      role="progressbar"
+                    >
+                      <.icon name="hero-clock" class="w-4 h-4" />
+                    </div>
+                    <div class="text-sm">
+                      <span class="text-base-content/60">Expires in</span>
+                      <span class={[
+                        "font-mono font-semibold ml-1",
+                        if(@countdown_seconds > 60, do: "text-base-content", else: "text-warning")
+                      ]}>
+                        {format_countdown(@countdown_seconds)}
+                      </span>
+                    </div>
+                  </div>
+                  <span class="text-base-content/20">•</span>
+                  <button
+                    id="regenerate-pairing-code-btn"
+                    class="link link-hover text-sm text-base-content/60"
+                    phx-click="generate_claim_code"
+                    phx-target={@myself}
+                    phx-disable-with="..."
+                  >
+                    New Code
+                  </button>
+                </div>
+              </div>
+            <% else %>
+              <%!-- Error or loading state --%>
+              <div class="text-center py-8 space-y-4">
+                <%= if @pairing_error do %>
+                  <div class="alert alert-error text-left text-sm">
+                    <.icon name="hero-exclamation-circle" class="w-4 h-4" />
+                    <span>{@pairing_error}</span>
+                  </div>
+                <% end %>
+
+                <div class="flex justify-center">
+                  <span class="loading loading-spinner loading-lg text-primary/50"></span>
+                </div>
+                <p class="text-sm text-base-content/50">Generating pairing code...</p>
+              </div>
+            <% end %>
+          </div>
+          <div
+            class="modal-backdrop bg-base-300/60 backdrop-blur-sm"
+            phx-click="close_pairing_modal"
+            phx-target={@myself}
+          >
+          </div>
+        </div>
+      <% end %>
     </div>
     """
   end
@@ -982,6 +1054,24 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
        "Removed #{deleted_count} inactive device#{if deleted_count == 1, do: "", else: "s"}."
      )
      |> load_devices()}
+  end
+
+  def handle_event("open_pairing_modal", _params, socket) do
+    # Open modal and immediately generate a code if we don't have one
+    socket = assign(socket, :show_pairing_modal, true)
+
+    socket =
+      if is_nil(socket.assigns.claim_code) do
+        do_generate_claim_code(socket)
+      else
+        socket
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("close_pairing_modal", _params, socket) do
+    {:noreply, assign(socket, :show_pairing_modal, false)}
   end
 
   def handle_event("open_add_url_modal", _params, socket) do

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/graphql/graphql_provider.dart';
+import '../widgets/connection_status_indicator.dart';
 import 'settings/settings_controller.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -133,6 +134,11 @@ class SettingsScreen extends ConsumerWidget {
                     .setAutoPlayNext(value);
               },
             ),
+            const Divider(),
+
+            // Connection section
+            const _SectionHeader(title: 'Connection'),
+            const ConnectionStatusTile(),
             const Divider(),
 
             // About section

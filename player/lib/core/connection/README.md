@@ -1,136 +1,210 @@
 # Connection Management
 
-This directory contains the connection management infrastructure for establishing connections to Mydia instances using a direct-first, relay-fallback strategy.
+This directory contains the connection management infrastructure for establishing connections to Mydia instances using a **relay-first, hot-swap-to-direct** strategy.
+
+## Overview
+
+The connection strategy prioritizes:
+
+1. **Immediate connectivity** via relay tunnel (works regardless of network topology)
+2. **Optimal performance** via transparent hot swap to direct connection when available
+3. **Reliability** via automatic fallback to relay if direct connection drops
+
+## Connection State Machine
+
+```
+                    ┌─────────────┐
+                    │   Initial   │
+                    └──────┬──────┘
+                           │ connect via relay
+                           v
+                    ┌─────────────┐
+                    │  RelayOnly  │◄──────────────────────┐
+                    └──────┬──────┘                       │
+                           │ probe succeeds               │ direct drops
+                           v                              │
+                    ┌─────────────┐                       │
+                    │    Dual     │───────────────────────┤
+                    └──────┬──────┘                       │
+                           │ relay requests drained       │
+                           v                              │
+                    ┌─────────────┐                       │
+                    │ DirectOnly  │───────────────────────┘
+                    └─────────────┘
+```
+
+### States
+
+- **RelayOnly**: Initial state, all traffic flows through relay tunnel
+- **Dual**: Hot swap in progress; new requests go to direct, in-flight relay requests continue
+- **DirectOnly**: All traffic flows through direct connection; relay tunnel closed
 
 ## Components
 
 ### `connection_result.dart`
 
 Result types for connection operations:
-- `ConnectionResult` - Wraps connection attempt results with type information
+
+- `ConnectionResult` - Wraps connection attempt results
 - `ConnectionType` - Enum for `direct` or `relay` connections
-- `ConnectionPreferences` - Stores last successful connection method for optimization
+- `ConnectionMode` - Enum for state machine states (`relayOnly`, `directOnly`, `dual`)
+- `ConnectionState` - Full state including pending request counts, probe status
 
-### `connection_manager.dart`
+### `relay_first_connection_manager.dart`
 
-The main connection orchestration service that implements:
-- **Direct-first strategy**: Tries all direct URLs in parallel, returning the first successful connection
-- **Parallel attempts**: All URLs are tried simultaneously with individual timeouts (default 5s), improving connection time when some URLs are unreachable
-- **Certificate verification**: (TODO) Validates TLS certificates against stored fingerprints
-- **Relay fallback**: Falls back to WebSocket tunnel if all direct URLs fail
-- **Preference storage**: Remembers last successful connection method for future optimization
-- **State observation**: Emits connection state changes via stream
+The main orchestrator implementing the relay-first strategy:
+
+- **State management**: Tracks current mode and pending requests
+- **Request routing**: Routes requests based on current state
+- **Hot swap**: Coordinates transition from relay to direct
+- **Auto-fallback**: Automatically reconnects via relay if direct drops
+- **Request queuing**: Queues requests during reconnection
+
+### `direct_prober.dart`
+
+Background service for testing direct URL connectivity:
+
+- **Probe sequence**: TCP connection → TLS handshake → Phoenix channel join
+- **Exponential backoff**: 5s, 10s, 30s, 60s, max 5min between retries
+- **App lifecycle awareness**: Re-probes on app foreground
+- **Network change detection**: Immediate re-probe on network change
+
+### `reconnection_service.dart`
+
+Service for reconnecting after app restart:
+
+- Uses relay-first strategy by default
+- Returns session with relay tunnel and direct URLs for probing
+- Supports `forceDirectOnly` flag for local network scenarios
 
 ## Usage Example
 
 ```dart
-import 'package:mydia_player/core/connection/connection_manager.dart';
-import 'package:mydia_player/core/connection/connection_result.dart';
+import 'package:mydia_player/core/connection/relay_first_connection_manager.dart';
+import 'package:mydia_player/core/connection/reconnection_service.dart';
 
-// Create connection manager
-final connectionManager = ConnectionManager(
-  channelService: channelService,
-  relayTunnelService: relayTunnelService,
-  directTimeout: Duration(seconds: 5),
-);
+// After pairing or app restart
+final reconnectionService = ReconnectionService();
+final result = await reconnectionService.reconnect();
 
-// Listen to connection state changes
-connectionManager.stateChanges.listen((state) {
-  print('Connection: $state');
-});
-
-// Attempt connection
-final result = await connectionManager.connect(
-  directUrls: ['https://mydia.example.com', 'https://192.168.1.5:4000'],
-  instanceId: 'instance-uuid',
-  certFingerprint: 'aa:bb:cc:dd:...',
-  relayUrl: 'https://relay.example.com',
-);
-
-// Handle result
 if (result.success) {
-  if (result.isDirect) {
-    print('Connected via direct URL: ${result.connectedUrl}');
-    // The ChannelService is already connected
-    // Now join the appropriate channel
-    final joinResult = await channelService.joinPairingChannel();
-  } else if (result.isRelay) {
-    print('Connected via relay tunnel');
-    final tunnel = result.tunnel!;
-    // Perform handshake over tunnel
-  }
-} else {
-  print('Connection failed: ${result.error}');
+  final session = result.session!;
+
+  // Create connection manager
+  final connectionManager = RelayFirstConnectionManager(
+    directUrls: session.directUrls,
+    instanceId: session.instanceId!,
+    relayUrl: session.relayUrl!,
+    certFingerprint: session.certFingerprint,
+  );
+
+  // Initialize with relay tunnel from reconnection
+  connectionManager.initializeWithRelayTunnel(session.relayTunnel!);
+
+  // Listen for state changes (e.g., to update UI indicator)
+  connectionManager.stateChanges.listen((state) {
+    print('Connection mode: ${state.mode}');
+  });
+
+  // Execute requests through the manager
+  final data = await connectionManager.executeRequest((tunnel, directUrl) async {
+    if (tunnel != null) {
+      // Send request through relay tunnel
+      return await sendViaRelay(tunnel, request);
+    } else {
+      // Send request to direct URL
+      return await sendDirect(directUrl!, request);
+    }
+  });
 }
 ```
+
+## Hot Swap Behavior
+
+When a direct probe succeeds:
+
+1. State transitions to `Dual` mode
+2. New requests are routed to direct connection
+3. In-flight relay requests continue on relay
+4. Once all relay requests complete, relay tunnel is closed
+5. State transitions to `DirectOnly` mode
+
+This ensures zero dropped requests during the transition.
+
+## Auto-Fallback Behavior
+
+When direct connection drops:
+
+1. Request queue is activated (new requests wait)
+2. Reconnection via relay begins with exponential backoff
+3. On success, state returns to `RelayOnly`
+4. Queued requests are processed
+5. Background probing restarts
 
 ## Integration with PairingService
 
-The `ConnectionManager` is designed to replace the direct URL iteration in `PairingService.pairWithClaimCodeOnly()`.
-
-### Current Flow (PairingService)
+The `PairingService` now uses relay-first strategy:
 
 ```dart
-// Step 2: Try each direct URL until one works
-for (final url in claimInfo.directUrls) {
-  final connectResult = await _channelService.connect(url);
-  if (connectResult.success) {
-    connectedUrl = url;
-    break;
-  }
-}
+// PairingService.pairWithClaimCodeOnly()
+Future<PairingResult> pairWithClaimCodeOnly({...}) async {
+  // Step 1: Look up claim code via relay
+  final lookupResult = await _relayService.lookupClaimCode(claimCode);
 
-if (connectedUrl == null) {
-  return PairingResult.error('Could not connect to server...');
+  // Step 2: Always connect via relay tunnel (relay-first strategy)
+  return await _pairViaRelayTunnel(
+    claimCode: claimCode,
+    claimInfo: claimInfo,
+    serverPublicKey: serverPublicKey,
+    deviceName: deviceName,
+    devicePlatform: devicePlatform,
+  );
+
+  // Background probing for direct URLs starts automatically
+  // Hot swap occurs transparently when direct probe succeeds
 }
 ```
 
-### Proposed Flow (with ConnectionManager)
+## Probe Frequency
 
-```dart
-// Step 2: Try direct URLs first, fall back to relay
-final connectionResult = await _connectionManager.connect(
-  directUrls: claimInfo.directUrls,
-  instanceId: claimInfo.instanceId,
-  certFingerprint: claimInfo.certFingerprint,
-  relayUrl: _relayUrl,
-);
+| Event | Probe Timing |
+|-------|--------------|
+| Initial connection | Immediate |
+| Probe failure | Exponential backoff (5s → 10s → 30s → 60s → 5min) |
+| Network change | Immediate |
+| App foreground | Immediate (if on relay) |
+| App background | Paused |
 
-if (!connectionResult.success) {
-  return PairingResult.error(connectionResult.error!);
-}
+## Troubleshooting
 
-String? connectedUrl;
-RelayTunnel? tunnel;
+### Stuck on relay
 
-if (connectionResult.isDirect) {
-  connectedUrl = connectionResult.connectedUrl;
-} else {
-  tunnel = connectionResult.tunnel;
-}
+If the app stays on relay even when direct should work:
 
-// Step 3: Join pairing channel (direct) or perform handshake (relay)
-if (tunnel != null) {
-  // Relay path: Perform Noise handshake over tunnel
-  // (This requires extending PairingService to support tunnel-based handshakes)
-} else {
-  // Direct path: Continue with existing channel-based flow
-  final joinResult = await _channelService.joinPairingChannel();
-  // ... rest of existing code
-}
-```
+1. Check that direct URLs in stored credentials are correct
+2. Verify network allows outbound connections to direct URLs
+3. Check if certificate fingerprint verification is failing
+4. Look for "Probe failed" messages in debug output
 
-## Future Enhancements
+### Request failures during reconnection
 
-1. **Certificate Pinning**: Implement actual TLS certificate verification in `_tryDirectConnection()`
-2. ~~**Parallel Attempts**: Try multiple direct URLs in parallel with timeout race~~ ✅ Implemented
-3. **Connection Quality**: Track connection latency and reliability metrics
-4. **Smart Ordering**: Use historical success rates to reorder direct URLs
-5. **Relay Handshake**: Extend to support performing Noise handshakes over relay tunnels
+If requests fail during direct → relay fallback:
+
+1. Requests are queued during reconnection (up to 5 retries)
+2. If reconnection fails, queued requests are failed with error
+3. UI should handle request failures gracefully
+
+### Connection indicator shows wrong state
+
+The UI indicator reflects the `connectionProvider` state, which should update when:
+
+- Initial connection completes (relay or direct)
+- Hot swap completes (relay → direct)
+- Fallback completes (direct → relay)
 
 ## Dependencies
 
-- `ChannelService` - For establishing Phoenix WebSocket connections
-- `RelayTunnelService` - For establishing relay WebSocket tunnels
-- `CertVerifier` - For certificate fingerprint verification (future)
-- `AuthStorage` - For persisting connection preferences
+- `ChannelService` - Phoenix WebSocket connections
+- `RelayTunnelService` - Relay WebSocket tunnels
+- `CryptoManager` - X25519 key exchange
+- `AuthStorage` - Credential persistence

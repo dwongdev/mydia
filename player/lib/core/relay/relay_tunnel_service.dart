@@ -630,6 +630,9 @@ class RelayTunnel {
 
     final plaintextBytes = utf8.encode(jsonMessage);
     final aad = _buildAad(toServer: true);
+    final aadString = utf8.decode(aad);
+
+    debugPrint('[RelayTunnel] Encrypting message: plaintext_size=${plaintextBytes.length}, session_id=${_info.sessionId}, aad=$aadString');
 
     // Generate 12-byte nonce using secure random
     final random = Random.secure();
@@ -644,6 +647,8 @@ class RelayTunnel {
       nonce: nonce,
       aad: aad,
     );
+
+    debugPrint('[RelayTunnel] Encrypted: nonce_size=${nonce.length}, ciphertext_size=${secretBox.cipherText.length}, mac_size=${secretBox.mac.bytes.length}');
 
     // Wire format: nonce (12 bytes) || ciphertext || mac (16 bytes)
     final payload = Uint8List.fromList([
@@ -666,6 +671,9 @@ class RelayTunnel {
 
     final binary = base64Decode(base64Payload);
     final aad = _buildAad(toServer: false);
+    final aadString = utf8.decode(aad);
+
+    debugPrint('[RelayTunnel] Decrypting message: payload_size=${binary.length}, session_id=${_info.sessionId}, aad=$aadString');
 
     // Minimum size: 12 (nonce) + 0 (empty ciphertext) + 16 (mac) = 28 bytes
     if (binary.length < _nonceSize + _macSize) {
@@ -681,6 +689,8 @@ class RelayTunnel {
     final ciphertext = Uint8List.fromList(ciphertextWithMac.sublist(0, macStart));
     final mac = Uint8List.fromList(ciphertextWithMac.sublist(macStart));
 
+    debugPrint('[RelayTunnel] Extracted components: nonce_size=${nonce.length}, ciphertext_size=${ciphertext.length}, mac_size=${mac.length}');
+
     final secretBox = SecretBox(
       ciphertext,
       nonce: nonce,
@@ -692,6 +702,8 @@ class RelayTunnel {
       secretKey: _sessionKey!,
       aad: aad,
     );
+
+    debugPrint('[RelayTunnel] Successfully decrypted, plaintext_size=${plaintextBytes.length}');
 
     return utf8.decode(plaintextBytes);
   }
@@ -733,6 +745,15 @@ class RelayTunnel {
       } else {
         body = rawBody;
       }
+    }
+
+    debugPrint(
+      '[RelayTunnel] Response body: encoding=$bodyEncoding, type=${rawBody.runtimeType}, size=${rawBody is String ? rawBody.length : (rawBody is List ? rawBody.length : 0)}',
+    );
+    if (rawBody is String && rawBody.length < 200) {
+      debugPrint('[RelayTunnel] Body content: $rawBody');
+    } else if (rawBody is String) {
+      debugPrint('[RelayTunnel] Body preview: ${rawBody.substring(0, 100)}...');
     }
 
     completer.complete(TunnelResponse(

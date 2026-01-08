@@ -243,20 +243,43 @@ class PairingService {
   /// - [onStatusUpdate]: Optional callback for status updates
   ///
   /// Returns a [PairingResult] indicating success or failure.
+  /// Pairs this device using only a claim code with relay-first strategy.
+  ///
+  /// This method always connects via relay tunnel first for guaranteed fast
+  /// connection. Direct URL probing happens in the background after pairing
+  /// completes (handled by ConnectionManager).
+  ///
+  /// ## Relay-First Flow
+  ///
+  /// 1. Looks up the claim code via the relay service
+  /// 2. Connects via relay tunnel (guaranteed to work if relay is reachable)
+  /// 3. Completes pairing handshake via relay
+  /// 4. Returns credentials and active relay tunnel
+  /// 5. Background probing will attempt direct connection upgrade later
+  ///
+  /// ## Parameters
+  ///
+  /// - [claimCode]: The pairing claim code (e.g., 'ABC123')
+  /// - [deviceName]: A friendly name for this device (e.g., 'My iPhone')
+  /// - [platform]: The device platform (defaults to detected platform)
+  /// - [onStatusUpdate]: Optional callback for status updates
+  ///
+  /// Returns a [PairingResult] indicating success or failure.
+  /// On success, the result includes the active relay tunnel for ongoing
+  /// communication until direct connection is established.
   Future<PairingResult> pairWithClaimCodeOnly({
     required String claimCode,
     required String deviceName,
     String? platform,
     void Function(String status)? onStatusUpdate,
   }) async {
-    CryptoManager? cryptoManager;
     try {
       final devicePlatform = platform ?? _detectPlatform();
-      debugPrint('[PairingService] === STEP 1: Looking up claim code via relay ===');
+      debugPrint('[PairingService] === RELAY-FIRST PAIRING ===');
       debugPrint('[PairingService] claimCode=$claimCode, deviceName=$deviceName, platform=$devicePlatform');
 
       // Step 1: Look up claim code via relay
-      onStatusUpdate?.call('Step 1: Looking up claim code...');
+      onStatusUpdate?.call('Looking up claim code...');
       final lookupResult = await _relayService.lookupClaimCode(claimCode);
       debugPrint('[PairingService] Lookup result: success=${lookupResult.success}, error=${lookupResult.error}');
 
@@ -270,177 +293,31 @@ class PairingService {
       debugPrint('[PairingService] ClaimInfo: directUrls=${claimInfo.directUrls}');
       debugPrint('[PairingService] ClaimInfo: publicKey length=${claimInfo.publicKey.length}');
 
-      if (claimInfo.directUrls.isEmpty) {
-        return PairingResult.error(
-            'Server has no direct URLs configured. Please contact your administrator.');
-      }
-
       // Decode the server's public key
-      debugPrint('[PairingService] === STEP 2a: Decoding server public key ===');
       final serverPublicKey = _base64ToBytes(claimInfo.publicKey);
       debugPrint('[PairingService] Server public key: ${serverPublicKey.length} bytes');
 
-      // Step 2: Try each direct URL until one works
-      debugPrint('[PairingService] === STEP 2b: Trying direct URLs ===');
-      onStatusUpdate?.call('Connecting to server...');
-      String? connectedUrl;
-
-      for (final url in claimInfo.directUrls) {
-        debugPrint('[PairingService] Trying direct URL: $url');
-        onStatusUpdate?.call('Step 2: Connecting to $url...');
-        final connectResult = await _channelService.connect(url);
-        debugPrint('[PairingService] Connect result: success=${connectResult.success}, error=${connectResult.error}');
-        if (connectResult.success) {
-          connectedUrl = url;
-          onStatusUpdate?.call('Step 2 done: Connected!');
-          break;
-        }
-      }
-
-      if (connectedUrl == null) {
-        // Step 2b: All direct URLs failed - try relay fallback
-        onStatusUpdate?.call('Direct connection failed, trying relay...');
-        return await _pairViaRelayTunnel(
-          claimCode: claimCode,
-          claimInfo: claimInfo,
-          serverPublicKey: serverPublicKey,
-          deviceName: deviceName,
-          devicePlatform: devicePlatform,
-          onStatusUpdate: onStatusUpdate,
-        );
-      }
-
-      // Step 3: Join pairing channel
-      debugPrint('[PairingService] === STEP 3: Joining pairing channel ===');
-      onStatusUpdate?.call('Joining pairing channel...');
-      final joinResult = await _channelService.joinPairingChannel();
-      debugPrint('[PairingService] Join result: success=${joinResult.success}, error=${joinResult.error}');
-      if (!joinResult.success) {
-        await _channelService.disconnect();
-        return PairingResult.error(
-            joinResult.error ?? 'Failed to join pairing channel');
-      }
-      final channel = joinResult.data!;
-      debugPrint('[PairingService] Channel joined successfully!');
-      onStatusUpdate?.call('Step 3 done: Channel joined');
-
-      // Step 4: Perform X25519 key exchange
-      debugPrint('[PairingService] === STEP 4: Performing X25519 key exchange ===');
-      onStatusUpdate?.call('Step 4: Creating secure session...');
-      debugPrint('[PairingService] Generating client keypair...');
-
-      cryptoManager = CryptoManager();
-      String clientPublicKeyB64;
-      try {
-        clientPublicKeyB64 = await cryptoManager.generateKeyPair();
-        debugPrint('[PairingService] Client public key generated');
-      } catch (e) {
-        debugPrint('[PairingService] ERROR: Failed to generate keypair: $e');
-        onStatusUpdate?.call('Error: Failed to create session');
-        cryptoManager.dispose();
-        rethrow;
-      }
-
-      // Send client public key to server via handshake message
-      onStatusUpdate?.call('Step 4b: Sending key exchange...');
-      debugPrint('[PairingService] Sending client public key to server...');
-      final handshakeMessage = Uint8List.fromList(base64Decode(clientPublicKeyB64));
-      debugPrint('[PairingService] Handshake message: ${handshakeMessage.length} bytes');
-      final handshakeResult = await _channelService.sendPairingHandshake(
-        channel,
-        handshakeMessage,
-      );
-      debugPrint('[PairingService] Handshake result: success=${handshakeResult.success}, error=${handshakeResult.error}');
-
-      if (!handshakeResult.success) {
-        cryptoManager.dispose();
-        await _channelService.disconnect();
-        return PairingResult.error(
-            handshakeResult.error ?? 'Key exchange failed');
-      }
-
-      // Derive session key from server's public key response
-      final serverHandshakePublicKey = base64Encode(handshakeResult.data!);
-      try {
-        await cryptoManager.deriveSessionKey(serverHandshakePublicKey);
-        debugPrint('[PairingService] Session key derived successfully');
-      } catch (e) {
-        debugPrint('[PairingService] ERROR: Failed to derive session key: $e');
-        cryptoManager.dispose();
-        await _channelService.disconnect();
-        return PairingResult.error('Failed to derive session key: $e');
-      }
-      onStatusUpdate?.call('Step 4c: Session established');
-
-      // Dispose session crypto manager - we don't need it for claim submission
-      cryptoManager.dispose();
-      cryptoManager = null;
-
-      // Step 5: Generate static device keypair (client-side key generation)
-      // The private key never leaves the device
-      onStatusUpdate?.call('Generating device keys...');
-      final staticCrypto = CryptoManager();
-      final staticPublicKeyB64 = await staticCrypto.generateStaticKeyPair();
-      final devicePublicKey = await staticCrypto.getStaticPublicKeyBytes();
-      final devicePrivateKey = await staticCrypto.getStaticPrivateKeyBytes();
-
-      // Step 6: Submit claim code with our public key
-      onStatusUpdate?.call('Submitting claim code...');
-      final claimResult = await _channelService.submitClaimCode(
-        channel,
+      // Step 2: Always connect via relay tunnel (relay-first strategy)
+      // Direct URL probing will happen in the background after pairing completes
+      onStatusUpdate?.call('Connecting via relay...');
+      return await _pairViaRelayTunnel(
         claimCode: claimCode,
-        deviceName: deviceName,
-        platform: devicePlatform,
-        staticPublicKey: staticPublicKeyB64,
-      );
-
-      await _channelService.disconnect();
-
-      if (!claimResult.success) {
-        return PairingResult.error(
-            claimResult.error ?? 'Failed to submit claim code');
-      }
-
-      final response = claimResult.data!;
-
-      // Step 7: Store credentials with our locally-generated keypair
-      final credentials = PairingCredentials(
-        serverUrl: connectedUrl,
-        deviceId: response.deviceId,
-        mediaToken: response.mediaToken,
-        devicePublicKey: devicePublicKey,
-        devicePrivateKey: devicePrivateKey,
+        claimInfo: claimInfo,
         serverPublicKey: serverPublicKey,
-        directUrls: claimInfo.directUrls,
-        certFingerprint: null, // TODO: Add cert_fingerprint to relay response
-        instanceName: null, // TODO: Add instance_name to relay response
-        instanceId: claimInfo.instanceId,
+        deviceName: deviceName,
+        devicePlatform: devicePlatform,
+        onStatusUpdate: onStatusUpdate,
       );
-
-      await _storeCredentials(credentials);
-
-      // Step 7: Mark claim as consumed on relay
-      onStatusUpdate?.call('Finalizing...');
-      await _relayService.consumeClaim(claimInfo.claimId, response.deviceId);
-
-      // Step 8: Attempt to switch to direct connection
-      if (_connectionManager != null && credentials.directUrls.isNotEmpty) {
-        onStatusUpdate?.call('Testing direct connection...');
-        await _attemptDirectConnection(credentials);
-      }
-
-      return PairingResult.success(credentials);
     } catch (e, st) {
       debugPrint('[PairingService] === EXCEPTION in pairWithClaimCodeOnly ===');
       debugPrint('[PairingService] Error: $e');
       debugPrint('[PairingService] Stack trace: $st');
-      cryptoManager?.dispose();
       await _channelService.disconnect();
       return PairingResult.error('Pairing error: $e');
     }
   }
 
-  /// Pairs this device using QR code data.
+  /// Pairs this device using QR code data with relay-first strategy.
   ///
   /// This method uses the data scanned from a QR code, which includes:
   /// - The server's instance ID
@@ -448,8 +325,14 @@ class PairingService {
   /// - The relay URL (for self-hosted relays)
   /// - The claim code (rotates every 5 minutes)
   ///
-  /// The flow is similar to [pairWithClaimCodeOnly] but uses the relay URL
-  /// from the QR code, making it work with self-hosted relay services.
+  /// ## Relay-First Flow
+  ///
+  /// 1. Looks up the claim code via the relay service (using QR relay URL)
+  /// 2. Validates the instance ID matches
+  /// 3. Connects via relay tunnel (guaranteed to work if relay is reachable)
+  /// 4. Completes pairing handshake via relay
+  /// 5. Returns credentials and active relay tunnel
+  /// 6. Background probing will attempt direct connection upgrade later
   ///
   /// ## Parameters
   ///
@@ -459,15 +342,17 @@ class PairingService {
   /// - [onStatusUpdate]: Optional callback for status updates
   ///
   /// Returns a [PairingResult] indicating success or failure.
+  /// On success, the result includes the active relay tunnel for ongoing
+  /// communication until direct connection is established.
   Future<PairingResult> pairWithQrData({
     required QrPairingData qrData,
     required String deviceName,
     String? platform,
     void Function(String status)? onStatusUpdate,
   }) async {
-    CryptoManager? cryptoManager;
     try {
       final devicePlatform = platform ?? _detectPlatform();
+      debugPrint('[PairingService] === RELAY-FIRST QR PAIRING ===');
 
       // Step 1: Look up claim code via relay (using relay URL from QR)
       // This validates the claim and gets direct URLs
@@ -491,123 +376,19 @@ class PairingService {
       // Use the public key from the QR code (already validated by matching instance ID)
       final serverPublicKey = qrData.publicKeyBytes;
 
-      if (claimInfo.directUrls.isEmpty) {
-        return PairingResult.error(
-            'Server has no direct URLs configured. Please contact your administrator.');
-      }
-
-      // Step 2: Try each direct URL until one works
-      onStatusUpdate?.call('Connecting to server...');
-      String? connectedUrl;
-
-      for (final url in claimInfo.directUrls) {
-        final connectResult = await _channelService.connect(url);
-        if (connectResult.success) {
-          connectedUrl = url;
-          break;
-        }
-      }
-
-      if (connectedUrl == null) {
-        // All direct URLs failed - try relay fallback
-        onStatusUpdate?.call('Direct connection failed, trying relay...');
-        return await _pairViaRelayTunnel(
-          claimCode: qrData.claimCode,
-          claimInfo: claimInfo,
-          serverPublicKey: serverPublicKey,
-          deviceName: deviceName,
-          devicePlatform: devicePlatform,
-          onStatusUpdate: onStatusUpdate,
-        );
-      }
-
-      // Step 3: Join pairing channel
-      onStatusUpdate?.call('Joining pairing channel...');
-      final joinResult = await _channelService.joinPairingChannel();
-      if (!joinResult.success) {
-        await _channelService.disconnect();
-        return PairingResult.error(
-            joinResult.error ?? 'Failed to join pairing channel');
-      }
-      final channel = joinResult.data!;
-
-      // Step 4: Perform X25519 key exchange
-      onStatusUpdate?.call('Establishing secure connection...');
-      cryptoManager = CryptoManager();
-      final clientPublicKeyB64 = await cryptoManager.generateKeyPair();
-
-      final handshakeMessage = Uint8List.fromList(base64Decode(clientPublicKeyB64));
-      final handshakeResult = await _channelService.sendPairingHandshake(
-        channel,
-        handshakeMessage,
-      );
-
-      if (!handshakeResult.success) {
-        cryptoManager.dispose();
-        await _channelService.disconnect();
-        return PairingResult.error(
-            handshakeResult.error ?? 'Key exchange failed');
-      }
-
-      await cryptoManager.deriveSessionKey(base64Encode(handshakeResult.data!));
-      cryptoManager.dispose();
-      cryptoManager = null;
-
-      // Step 5: Generate static device keypair (client-side key generation)
-      onStatusUpdate?.call('Generating device keys...');
-      final staticCrypto = CryptoManager();
-      final staticPublicKeyB64 = await staticCrypto.generateStaticKeyPair();
-      final devicePublicKey = await staticCrypto.getStaticPublicKeyBytes();
-      final devicePrivateKey = await staticCrypto.getStaticPrivateKeyBytes();
-
-      // Step 6: Submit claim code with our public key
-      onStatusUpdate?.call('Submitting claim code...');
-      final claimResult = await _channelService.submitClaimCode(
-        channel,
+      // Step 2: Always connect via relay tunnel (relay-first strategy)
+      // Direct URL probing will happen in the background after pairing completes
+      onStatusUpdate?.call('Connecting via relay...');
+      return await _pairViaRelayTunnel(
         claimCode: qrData.claimCode,
-        deviceName: deviceName,
-        platform: devicePlatform,
-        staticPublicKey: staticPublicKeyB64,
-      );
-
-      await _channelService.disconnect();
-
-      if (!claimResult.success) {
-        return PairingResult.error(
-            claimResult.error ?? 'Failed to submit claim code');
-      }
-
-      final response = claimResult.data!;
-
-      // Step 7: Store credentials with our locally-generated keypair
-      final credentials = PairingCredentials(
-        serverUrl: connectedUrl,
-        deviceId: response.deviceId,
-        mediaToken: response.mediaToken,
-        devicePublicKey: devicePublicKey,
-        devicePrivateKey: devicePrivateKey,
+        claimInfo: claimInfo,
         serverPublicKey: serverPublicKey,
-        directUrls: claimInfo.directUrls,
-        certFingerprint: null,
-        instanceName: null,
-        instanceId: claimInfo.instanceId,
+        deviceName: deviceName,
+        devicePlatform: devicePlatform,
+        onStatusUpdate: onStatusUpdate,
+        relayUrl: qrData.relayUrl, // Use custom relay URL from QR
       );
-
-      await _storeCredentials(credentials);
-
-      // Step 8: Mark claim as consumed on relay
-      onStatusUpdate?.call('Finalizing...');
-      await relayService.consumeClaim(claimInfo.claimId, response.deviceId);
-
-      // Step 9: Attempt to switch to direct connection
-      if (_connectionManager != null && credentials.directUrls.isNotEmpty) {
-        onStatusUpdate?.call('Testing direct connection...');
-        await _attemptDirectConnection(credentials);
-      }
-
-      return PairingResult.success(credentials);
     } catch (e) {
-      cryptoManager?.dispose();
       await _channelService.disconnect();
       return PairingResult.error('Pairing error: $e');
     }
@@ -814,13 +595,17 @@ class PairingService {
 
   // Private helpers
 
-  /// Pairs the device via relay tunnel when direct connections fail.
+  /// Pairs the device via relay tunnel (relay-first strategy).
   ///
   /// This method:
   /// 1. Connects to relay tunnel using the instance ID
   /// 2. Performs X25519 key exchange over the tunnel
   /// 3. Sends claim code request
-  /// 4. Receives pairing response
+  /// 4. Receives pairing response and returns active tunnel
+  ///
+  /// The returned [PairingResult] includes the active relay tunnel for
+  /// ongoing communication. Background probing (handled by ConnectionManager)
+  /// will attempt to upgrade to direct connection later.
   Future<PairingResult> _pairViaRelayTunnel({
     required String claimCode,
     required ClaimCodeInfo claimInfo,
@@ -828,14 +613,18 @@ class PairingService {
     required String deviceName,
     required String devicePlatform,
     void Function(String status)? onStatusUpdate,
+    String? relayUrl,
   }) async {
     RelayTunnel? tunnel;
     CryptoManager? cryptoManager;
 
+    // Use provided relay URL or default
+    final effectiveRelayUrl = relayUrl ?? _relayUrl;
+
     try {
       // Step 1: Connect to relay tunnel
       onStatusUpdate?.call('Connecting via relay...');
-      final tunnelService = RelayTunnelService(relayUrl: _relayUrl);
+      final tunnelService = RelayTunnelService(relayUrl: effectiveRelayUrl);
       final tunnelResult =
           await tunnelService.connectViaRelay(claimInfo.instanceId);
 
@@ -1018,7 +807,7 @@ class PairingService {
       // Use first direct URL as server URL, or relay URL if no direct URLs
       final serverUrl = claimInfo.directUrls.isNotEmpty
           ? claimInfo.directUrls.first
-          : _relayUrl;
+          : effectiveRelayUrl;
 
       final credentials = PairingCredentials(
         serverUrl: serverUrl,
@@ -1035,47 +824,16 @@ class PairingService {
 
       await _storeCredentials(credentials);
 
-      // Step 6: Mark claim as consumed on relay
+      // Step 7: Mark claim as consumed on relay
       onStatusUpdate?.call('Finalizing...');
       await _relayService.consumeClaim(claimInfo.claimId, deviceId);
 
-      // Step 7: Try direct connection to see if we can use it instead of relay
-      // We already know direct URLs failed before (that's why we're here), but
-      // let's try once more in case network conditions have changed.
-      bool useDirectConnection = false;
-      final connectionManager = _connectionManager;
-      if (connectionManager != null && credentials.directUrls.isNotEmpty) {
-        onStatusUpdate?.call('Testing direct connection...');
-        try {
-          final result = await connectionManager.connect(
-            directUrls: credentials.directUrls,
-            instanceId: credentials.instanceId ?? '',
-            certFingerprint: credentials.certFingerprint,
-            relayUrl: null, // Don't fall back to relay during this test
-          );
-
-          if (result.success && result.isDirect) {
-            useDirectConnection = true;
-            debugPrint('[RelayPairing] Direct connection now works, using it');
-            await _channelService.disconnect();
-            await _authStorage.write('connection_last_type', 'direct');
-            await _authStorage.write('connection_last_url', result.connectedUrl!);
-          }
-        } catch (e) {
-          debugPrint('[RelayPairing] Direct connection test failed: $e');
-        }
-      }
-
-      if (useDirectConnection) {
-        // Direct connection works now, close tunnel and use direct
-        await tunnel.close();
-        return PairingResult.success(credentials);
-      } else {
-        // Direct connection still doesn't work, keep tunnel for ongoing communication
-        debugPrint('[RelayPairing] Keeping tunnel alive for ongoing relay communication');
-        await _authStorage.write('connection_last_type', 'relay');
-        return PairingResult.success(credentials, relayTunnel: tunnel);
-      }
+      // Relay-first strategy: Always return with relay tunnel active.
+      // Background probing (handled by ConnectionManager) will attempt to
+      // upgrade to direct connection later.
+      debugPrint('[RelayPairing] Pairing complete, returning relay tunnel for ongoing communication');
+      await _authStorage.write('connection_last_type', 'relay');
+      return PairingResult.success(credentials, relayTunnel: tunnel);
     } catch (e, stackTrace) {
       debugPrint('[RelayPairing] UNCAUGHT ERROR: $e');
       debugPrint('[RelayPairing] Stack trace: $stackTrace');
@@ -1102,37 +860,6 @@ class PairingService {
         return 'Failed to create device registration';
       default:
         return reason;
-    }
-  }
-
-  /// Attempts to establish a direct connection after pairing.
-  ///
-  /// This validates that the direct URLs work and stores the connection
-  /// preference for future sessions. If direct connection fails, we silently
-  /// fall back to relay on the next connection attempt.
-  Future<void> _attemptDirectConnection(PairingCredentials credentials) async {
-    final connectionManager = _connectionManager;
-    if (connectionManager == null) return;
-
-    try {
-      // Try to connect directly using ConnectionManager
-      final result = await connectionManager.connect(
-        directUrls: credentials.directUrls,
-        instanceId: credentials.instanceId ?? '',
-        certFingerprint: credentials.certFingerprint,
-        relayUrl: null, // Don't fall back to relay during this test
-      );
-
-      if (result.success && result.isDirect) {
-        // Direct connection successful!
-        // ConnectionManager has already stored the preference
-        // Close the ChannelService connection if still open
-        await _channelService.disconnect();
-      }
-      // If failed, silently continue - we'll use relay fallback on next connection
-    } catch (e) {
-      // Ignore errors - this is just a test connection
-      // The user can still connect via relay on next app launch
     }
   }
 

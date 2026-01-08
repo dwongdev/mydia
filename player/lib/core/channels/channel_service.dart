@@ -220,6 +220,61 @@ class ChannelService {
     }
   }
 
+  /// Joins a lightweight probe channel for connectivity testing.
+  ///
+  /// This method is used by [DirectProber] to verify that direct URLs
+  /// are reachable. It joins the `device:probe` channel which requires
+  /// no authentication and simply confirms connectivity.
+  ///
+  /// Returns a [ChannelResult] indicating success or failure.
+  /// The channel is not stored as the active channel since this is
+  /// just for probing.
+  Future<ChannelResult<void>> joinProbeChannel() async {
+    debugPrint('[ChannelService] Joining probe channel...');
+    if (_socket == null || !_socket!.isConnected) {
+      debugPrint('[ChannelService] ERROR: Not connected to server');
+      return ChannelResult.error('Not connected to server');
+    }
+
+    try {
+      // Create and join the probe channel
+      // This is a lightweight channel that just verifies connectivity
+      debugPrint('[ChannelService] Creating channel device:probe...');
+      final channel = _socket!.addChannel(topic: 'device:probe');
+      debugPrint('[ChannelService] Calling channel.join()...');
+      final push = channel.join();
+
+      // Use the Push.future property to properly await the join response
+      final response = await push.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          debugPrint('[ChannelService] TIMEOUT waiting for probe channel join');
+          throw TimeoutException('Probe channel join timed out');
+        },
+      );
+
+      debugPrint('[ChannelService] Got probe join response: ${response.status}');
+
+      // Leave the channel immediately - we just needed to verify connectivity
+      channel.leave();
+
+      if (response.isOk) {
+        debugPrint('[ChannelService] Probe channel joined successfully!');
+        return ChannelResult.success(null);
+      } else {
+        final error = response.response?['reason'] ?? 'Unknown error';
+        debugPrint('[ChannelService] Probe channel join failed: $error');
+        return ChannelResult.error('Failed to join probe channel: $error');
+      }
+    } on TimeoutException {
+      debugPrint('[ChannelService] Probe channel join timed out');
+      return ChannelResult.error('Failed to join probe channel: timeout');
+    } catch (e) {
+      debugPrint('[ChannelService] Exception joining probe channel: $e');
+      return ChannelResult.error('Error joining probe channel: $e');
+    }
+  }
+
   /// Sends a pairing handshake message.
   ///
   /// The [channel] should be a pairing channel obtained from [joinPairingChannel].

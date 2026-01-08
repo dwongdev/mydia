@@ -1,19 +1,21 @@
 /// Service for reconnecting to a paired Mydia instance after app restart.
 ///
 /// This service implements the reconnection flow using X25519 key exchange
-/// for establishing encrypted sessions. It tries direct URLs first, then
-/// falls back to relay.
+/// for establishing encrypted sessions. It uses a **relay-first strategy**:
+/// connect via relay immediately, then probe direct URLs in background.
 ///
-/// ## Reconnection Flow
+/// ## Reconnection Flow (Relay-First)
 ///
-/// 1. Load stored credentials (direct URLs, cert fingerprint, device token)
-/// 2. Try each direct URL in order:
-///    - Verify certificate fingerprint
-///    - Connect to WebSocket
-///    - Join reconnect channel
-///    - Perform X25519 key exchange
-///    - Send encrypted device token for authentication
-/// 3. If all direct URLs fail, fall back to relay tunnel
+/// 1. Load stored credentials (direct URLs, cert fingerprint, device token, instance ID)
+/// 2. Connect via relay tunnel immediately (guaranteed fast connection)
+/// 3. Perform X25519 key exchange through relay
+/// 4. Return session with relay tunnel and direct URLs for background probing
+/// 5. Background probing and hot swap handled by [RelayFirstConnectionManager]
+///
+/// ## Fallback Flow
+///
+/// If relay connection fails (no instance ID or relay unavailable),
+/// falls back to trying direct URLs sequentially.
 ///
 /// ## Usage
 ///
@@ -21,8 +23,17 @@
 /// final service = ReconnectionService();
 /// final result = await service.reconnect();
 /// if (result.success) {
-///   final session = result.data!;
-///   // Use session for GraphQL and media requests
+///   final session = result.session!;
+///
+///   // Initialize RelayFirstConnectionManager with the session
+///   final connectionManager = RelayFirstConnectionManager(
+///     directUrls: session.directUrls,
+///     instanceId: session.instanceId!,
+///     relayUrl: session.relayUrl!,
+///   );
+///   connectionManager.initializeWithRelayTunnel(session.relayTunnel!);
+///
+///   // Background probing starts automatically
 /// } else {
 ///   // Show error, return to pairing flow
 /// }
@@ -86,6 +97,15 @@ class ReconnectionSession {
   /// The relay URL (for relay reconnection).
   final String? relayUrl;
 
+  /// Direct URLs for background probing.
+  ///
+  /// These are used by [RelayFirstConnectionManager] to probe for
+  /// direct connectivity and hot swap from relay to direct.
+  final List<String> directUrls;
+
+  /// Certificate fingerprint for direct URL verification.
+  final String? certFingerprint;
+
   const ReconnectionSession({
     required this.serverUrl,
     required this.deviceId,
@@ -95,6 +115,8 @@ class ReconnectionSession {
     this.relayTunnel,
     this.instanceId,
     this.relayUrl,
+    this.directUrls = const [],
+    this.certFingerprint,
   });
 }
 
@@ -126,15 +148,24 @@ class ReconnectionService {
 
   /// Reconnects to the paired instance using stored credentials.
   ///
-  /// This method tries direct URLs or relay based on [preferRelay]:
-  /// - If [preferRelay] is true: tries relay first, then falls back to direct
-  /// - If [preferRelay] is false (default): tries direct first, then relay
+  /// This method implements the **relay-first strategy**:
+  /// 1. Always try relay connection first (guaranteed fast connection)
+  /// 2. If relay fails, fall back to direct URLs
+  ///
+  /// The returned [ReconnectionSession] contains:
+  /// - The established relay tunnel (or direct connection)
+  /// - Direct URLs for background probing
+  /// - Certificate fingerprint for verification
+  ///
+  /// After reconnection, use [RelayFirstConnectionManager] to:
+  /// - Route requests through the appropriate connection
+  /// - Probe direct URLs in background
+  /// - Hot swap from relay to direct when probe succeeds
   ///
   /// ## Parameters
   ///
-  /// - [preferRelay]: If true, prioritizes relay connection over direct URLs.
-  ///   Use this when the stored connection mode was relay to preserve the
-  ///   user's connection preference.
+  /// - [forceDirectOnly]: If true, skips relay and tries direct URLs only.
+  ///   Use this for local network scenarios where relay is not needed.
   ///
   /// ## Returns
   ///
@@ -145,47 +176,48 @@ class ReconnectionService {
   ///
   /// - 'Device not paired' - No stored credentials found
   /// - 'Certificate verification failed' - Certificate fingerprint mismatch
-  /// - 'All connection attempts failed' - Neither direct nor relay succeeded
-  Future<ReconnectionResult> reconnect({bool preferRelay = false}) async {
+  /// - 'All connection attempts failed' - Neither relay nor direct succeeded
+  Future<ReconnectionResult> reconnect({bool forceDirectOnly = false}) async {
     // Load stored credentials
     final credentials = await _loadCredentials();
     if (credentials == null) {
       return ReconnectionResult.error('Device not paired');
     }
 
-    if (preferRelay) {
-      // Try relay first when the stored mode was relay
-      debugPrint('[ReconnectionService] Preferring relay mode, trying relay first');
-      if (credentials.instanceId != null) {
-        final relayResult = await _tryRelayConnection(credentials);
-        if (relayResult.success) {
-          return relayResult;
-        }
-        debugPrint('[ReconnectionService] Relay failed, falling back to direct URLs');
-      }
-
-      // Fall back to direct URLs
+    if (forceDirectOnly) {
+      // Skip relay, try direct URLs only
+      debugPrint('[ReconnectionService] Force direct mode, skipping relay');
       if (credentials.directUrls.isNotEmpty) {
         final result = await _tryDirectUrlsInParallel(credentials);
         if (result != null && result.success) {
           return result;
         }
       }
+      return ReconnectionResult.error(
+        'Direct connection failed. Please check your network connection.',
+      );
+    }
+
+    // Relay-first strategy: try relay first, then fall back to direct
+    debugPrint('[ReconnectionService] Using relay-first strategy');
+
+    if (credentials.instanceId != null) {
+      final relayResult = await _tryRelayConnection(credentials);
+      if (relayResult.success) {
+        debugPrint('[ReconnectionService] Relay connection successful');
+        return relayResult;
+      }
+      debugPrint('[ReconnectionService] Relay failed, falling back to direct URLs');
     } else {
-      // Try direct URLs first (default behavior)
-      if (credentials.directUrls.isNotEmpty) {
-        final result = await _tryDirectUrlsInParallel(credentials);
-        if (result != null && result.success) {
-          return result;
-        }
-      }
+      debugPrint('[ReconnectionService] No instance ID, skipping relay');
+    }
 
-      // Fall back to relay tunnel
-      if (credentials.instanceId != null) {
-        final relayResult = await _tryRelayConnection(credentials);
-        if (relayResult.success) {
-          return relayResult;
-        }
+    // Fall back to direct URLs
+    if (credentials.directUrls.isNotEmpty) {
+      final result = await _tryDirectUrlsInParallel(credentials);
+      if (result != null && result.success) {
+        debugPrint('[ReconnectionService] Direct connection successful');
+        return result;
       }
     }
 
@@ -351,6 +383,7 @@ class ReconnectionService {
       await cryptoManager.deriveSessionKey(response.serverPublicKey);
 
       // Success! Return established session
+      // Include direct URLs and cert fingerprint for potential relay fallback
       return ReconnectionResult.success(
         ReconnectionSession(
           serverUrl: url,
@@ -358,6 +391,10 @@ class ReconnectionService {
           mediaToken: response.mediaToken,
           cryptoManager: cryptoManager,
           isRelayConnection: false,
+          instanceId: credentials.instanceId,
+          relayUrl: _relayUrl,
+          directUrls: credentials.directUrls,
+          certFingerprint: credentials.certFingerprint,
         ),
       );
     } catch (e) {
@@ -461,6 +498,7 @@ class ReconnectionService {
       }
 
       // Success! Return established session with the tunnel
+      // Include direct URLs for background probing by RelayFirstConnectionManager
       return ReconnectionResult.success(
         ReconnectionSession(
           serverUrl: tunnel.info.directUrls.isNotEmpty
@@ -473,6 +511,8 @@ class ReconnectionService {
           relayTunnel: tunnel,
           instanceId: credentials.instanceId,
           relayUrl: _relayUrl,
+          directUrls: credentials.directUrls,
+          certFingerprint: credentials.certFingerprint,
         ),
       );
     } catch (e) {

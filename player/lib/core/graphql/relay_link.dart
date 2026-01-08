@@ -17,6 +17,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:gql/language.dart' as gql_lang;
 import 'package:graphql_flutter/graphql_flutter.dart';
 
 import '../relay/relay_tunnel_service.dart';
@@ -53,10 +54,11 @@ class RelayLink extends Link {
 
     try {
       // Build the GraphQL request body
+      // Use printNode to properly serialize the GraphQL document to a string
+      final queryString = gql_lang.printNode(request.operation.document);
+
       final body = json.encode({
-        'query': request.operation.document.definitions
-            .map((d) => d.toString())
-            .join('\n'),
+        'query': queryString,
         'operationName': request.operation.operationName,
         'variables': request.variables,
       });

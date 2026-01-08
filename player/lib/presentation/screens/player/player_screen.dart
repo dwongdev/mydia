@@ -23,6 +23,7 @@ import '../../widgets/hls_quality_selector.dart';
 import '../../widgets/gesture_controls.dart';
 import '../../widgets/cast_device_picker.dart';
 import '../../widgets/airplay_button.dart';
+import '../../widgets/video_controls/glassmorphic_video_controls.dart';
 import '../../../domain/models/subtitle_track.dart' as app_models;
 import '../../../domain/models/cast_device.dart';
 import '../../../graphql/fragments/media_file_fragment.graphql.dart';
@@ -786,7 +787,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     Widget videoPlayer = SizedBox.expand(
       child: Video(
         controller: _videoController!,
-        controls: MaterialVideoControls,
+        controls: glassmorphicVideoControlsBuilder,
         fill: Colors.black,
       ),
     );

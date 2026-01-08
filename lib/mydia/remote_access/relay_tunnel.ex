@@ -25,6 +25,7 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
   alias Mydia.Crypto
   alias Mydia.RemoteAccess.Relay
   alias Mydia.RemoteAccess.Pairing
+  alias Mydia.RemoteAccess.ProtocolVersion
 
   # Crypto constants
   @nonce_size 12
@@ -238,9 +239,28 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
     end
   end
 
-  defp handle_tunnel_message("pairing_handshake", %{"message" => client_message_b64}, state) do
+  defp handle_tunnel_message(
+         "pairing_handshake",
+         %{"message" => client_message_b64} = data,
+         state
+       ) do
     Logger.info("Tunnel processing pairing_handshake message")
 
+    # Negotiate protocol versions with client
+    client_versions = Map.get(data, "protocol_versions", %{})
+
+    case ProtocolVersion.negotiate_all(client_versions) do
+      {:ok, _negotiated} ->
+        do_pairing_handshake(client_message_b64, state)
+
+      {:error, :incompatible, failed_layers} ->
+        Logger.warning("Tunnel pairing_handshake: client protocol version mismatch")
+        response = ProtocolVersion.update_required_response(failed_layers)
+        {:ok, Jason.encode!(response), state}
+    end
+  end
+
+  defp do_pairing_handshake(client_message_b64, state) do
     case Base.decode64(client_message_b64) do
       {:ok, client_public_key} ->
         Logger.info(
@@ -261,10 +281,11 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
               "Tunnel pairing_handshake: session key derived successfully, handshake complete"
             )
 
-            # Send back server's public key
+            # Send back server's public key with protocol versions
             response = %{
               type: "pairing_handshake",
-              message: Base.encode64(state.server_public_key)
+              message: Base.encode64(state.server_public_key),
+              protocol_versions: ProtocolVersion.supported_versions()
             }
 
             new_state = %{state | session_key: session_key, handshake_complete: true}
@@ -588,11 +609,26 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
   # Handle key_exchange for reconnection with device_token authentication
   defp handle_tunnel_message(
          "key_exchange",
-         %{"client_public_key" => client_public_key_b64, "device_token" => device_token},
+         %{"client_public_key" => client_public_key_b64, "device_token" => device_token} = data,
          state
        ) do
     Logger.info("Tunnel processing key_exchange (reconnection with device_token)")
 
+    # Negotiate protocol versions with client
+    client_versions = Map.get(data, "protocol_versions", %{})
+
+    case ProtocolVersion.negotiate_all(client_versions) do
+      {:ok, _negotiated} ->
+        do_key_exchange(client_public_key_b64, device_token, state)
+
+      {:error, :incompatible, failed_layers} ->
+        Logger.warning("Tunnel key_exchange: client protocol version mismatch")
+        response = ProtocolVersion.update_required_response(failed_layers)
+        {:ok, Jason.encode!(response), state}
+    end
+  end
+
+  defp do_key_exchange(client_public_key_b64, device_token, state) do
     with {:ok, client_public_key} <- Base.decode64(client_public_key_b64),
          {:ok, device} <- Mydia.RemoteAccess.verify_device_token(device_token),
          false <- Mydia.RemoteAccess.RemoteDevice.revoked?(device) do
@@ -618,7 +654,8 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
         type: "key_exchange_complete",
         server_public_key: Base.encode64(server_public_key),
         token: media_token,
-        device_id: updated_device.id
+        device_id: updated_device.id,
+        protocol_versions: ProtocolVersion.supported_versions()
       }
 
       new_state = %{

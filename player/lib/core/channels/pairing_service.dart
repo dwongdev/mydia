@@ -18,6 +18,7 @@ import 'package:flutter/foundation.dart';
 import 'channel_service.dart';
 import '../crypto/crypto_manager.dart';
 import '../auth/auth_storage.dart';
+import '../protocol/protocol_version.dart';
 import '../relay/relay_service.dart';
 import '../relay/relay_tunnel_service.dart';
 import '../connection/connection_manager.dart';
@@ -705,7 +706,10 @@ class PairingService {
       try {
         final handshakeRequest = jsonEncode({
           'type': 'pairing_handshake',
-          'data': {'message': base64Encode(handshakeMessage)},
+          'data': {
+            'message': base64Encode(handshakeMessage),
+            'protocol_versions': ProtocolVersion.all,
+          },
         });
         debugPrint('[RelayPairing] Sending handshake request...');
         tunnel.sendMessage(Uint8List.fromList(utf8.encode(handshakeRequest)));
@@ -727,9 +731,14 @@ class PairingService {
       final handshakeResponseJson =
           jsonDecode(utf8.decode(handshakeResponseBytes)) as Map<String, dynamic>;
 
+      // Check for update_required error
       if (handshakeResponseJson['type'] == 'error') {
+        final code = handshakeResponseJson['code'] as String?;
         cryptoManager.dispose();
         await tunnel.close();
+        if (code == 'update_required' || code == 'version_incompatible') {
+          throw UpdateRequiredError.fromJson(handshakeResponseJson);
+        }
         return PairingResult.error(
             handshakeResponseJson['message'] as String? ?? 'Handshake failed');
       }

@@ -18,7 +18,7 @@ defmodule Mydia.RemoteAccess.Relay do
 
   The relay service uses JSON messages over WebSocket:
 
-  - Registration: `{"type": "register", "instance_id": "uuid", "public_key": "base64"}`
+  - Registration: `{"type": "register", "instance_id": "uuid", "public_key": "base64", "protocol_versions": {...}}`
   - Heartbeat: `{"type": "ping"}` / `{"type": "pong"}`
   - Incoming connection: `{"type": "connection", "session_id": "uuid", "client_public_key": "base64"}`
   """
@@ -27,6 +27,7 @@ defmodule Mydia.RemoteAccess.Relay do
   require Logger
 
   alias Mydia.RemoteAccess
+  alias Mydia.RemoteAccess.ProtocolVersion
 
   # Heartbeat interval: 30 seconds (matches Phoenix Channel defaults)
   @heartbeat_interval 30_000
@@ -449,7 +450,8 @@ defmodule Mydia.RemoteAccess.Relay do
           type: "register",
           instance_id: state.instance_id,
           public_key: Base.encode64(state.public_key),
-          direct_urls: state.direct_urls
+          direct_urls: state.direct_urls,
+          protocol_versions: ProtocolVersion.supported_versions()
         })
 
       Logger.info("Sending registration message to relay")

@@ -8,6 +8,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/graphql/graphql_provider.dart';
 import '../../core/theme/colors.dart';
+import '../widgets/update_required_dialog.dart';
 import 'login/login_controller.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -189,6 +190,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     final loginState = ref.watch(loginControllerProvider);
     final size = MediaQuery.of(context).size;
     final isCompact = size.height < 700;
+
+    // Listen for update required errors and show dialog
+    ref.listen<LoginState>(
+      loginControllerProvider,
+      (previous, next) {
+        if (next.updateRequiredError != null &&
+            previous?.updateRequiredError == null) {
+          showUpdateRequiredDialog(context, next.updateRequiredError!)
+              .then((_) {
+            if (mounted) {
+              ref.read(loginControllerProvider.notifier).clearUpdateRequiredError();
+            }
+          });
+        }
+      },
+    );
 
     return Scaffold(
       body: Container(

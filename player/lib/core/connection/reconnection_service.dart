@@ -48,6 +48,7 @@ import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import '../auth/auth_storage.dart';
 import '../channels/channel_service.dart';
 import '../crypto/crypto_manager.dart';
+import '../protocol/protocol_version.dart';
 import '../relay/relay_tunnel_service.dart';
 
 /// Result of a reconnection operation.
@@ -457,6 +458,7 @@ class ReconnectionService {
         'data': {
           'client_public_key': clientPublicKey,
           'device_token': credentials.deviceToken,
+          'protocol_versions': ProtocolVersion.all,
         },
       });
       tunnel.sendMessage(Uint8List.fromList(utf8.encode(keyExchangeRequest)));
@@ -471,9 +473,14 @@ class ReconnectionService {
       final responseJson =
           jsonDecode(utf8.decode(responseBytes)) as Map<String, dynamic>;
 
+      // Check for update_required error
       if (responseJson['type'] == 'error') {
+        final code = responseJson['code'] as String?;
         cryptoManager.dispose();
         await tunnel.close();
+        if (code == 'update_required' || code == 'version_incompatible') {
+          throw UpdateRequiredError.fromJson(responseJson);
+        }
         return ReconnectionResult.error(
           responseJson['message'] as String? ?? 'Key exchange failed',
         );

@@ -27,6 +27,7 @@ defmodule MetadataRelayWeb.RelaySocket do
   alias MetadataRelay.Relay
   alias MetadataRelay.Relay.ConnectionRegistry
   alias MetadataRelay.Relay.PendingRequests
+  alias MetadataRelay.Relay.ProtocolVersion
 
   # Heartbeat timeout: 60 seconds (should receive ping every 30 seconds)
   @heartbeat_timeout 60_000
@@ -207,7 +208,26 @@ defmodule MetadataRelayWeb.RelaySocket do
     instance_id = msg["instance_id"]
     public_key_b64 = msg["public_key"]
     direct_urls = msg["direct_urls"] || []
+    protocol_versions = msg["protocol_versions"] || %{}
 
+    # Negotiate relay protocol version
+    relay_versions = protocol_versions["relay_protocol"] || []
+
+    case ProtocolVersion.negotiate(relay_versions) do
+      {:ok, _negotiated_version} ->
+        do_register(instance_id, public_key_b64, direct_urls, protocol_versions, state)
+
+      {:error, :no_compatible_version} ->
+        Logger.warning(
+          "Instance #{instance_id} rejected: no compatible relay protocol (theirs: #{inspect(relay_versions)})"
+        )
+
+        error = Jason.encode!(ProtocolVersion.version_error_response())
+        {:reply, :error, {:text, error}, state}
+    end
+  end
+
+  defp do_register(instance_id, public_key_b64, direct_urls, protocol_versions, state) do
     with {:ok, public_key} <- Base.decode64(public_key_b64),
          true <- byte_size(public_key) == 32,
          {:ok, instance} <-
@@ -220,11 +240,12 @@ defmodule MetadataRelayWeb.RelaySocket do
          {:ok, instance} <- Relay.set_online(instance) do
       Logger.info("Instance registered: #{instance_id}, public_ip: #{state.peer_ip || "unknown"}")
 
-      # Register in ETS for O(1) lookups
+      # Register in ETS for O(1) lookups, including protocol versions for forwarding to clients
       ConnectionRegistry.register(instance_id, self(), %{
         connected_at: DateTime.utc_now(),
         public_ip: state.peer_ip,
-        direct_urls: direct_urls
+        direct_urls: direct_urls,
+        protocol_versions: protocol_versions
       })
 
       # Subscribe to relay messages for this instance
@@ -233,8 +254,12 @@ defmodule MetadataRelayWeb.RelaySocket do
       # Reset heartbeat timer
       state = reset_heartbeat_timer(state)
 
-      # Send registration confirmation
-      response = Jason.encode!(%{type: "registered"})
+      # Send registration confirmation with relay protocol version
+      response =
+        Jason.encode!(%{
+          type: "registered",
+          relay_protocol: ProtocolVersion.preferred_version()
+        })
 
       {:reply, :ok, {:text, response},
        %{state | instance_id: instance_id, instance: instance, registered: true}}

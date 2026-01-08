@@ -4,10 +4,13 @@ import '../../../core/graphql/graphql_provider.dart';
 import '../../../core/channels/pairing_service.dart';
 import '../../../core/auth/device_info_service.dart';
 import '../../../core/connection/connection_provider.dart';
+import '../../../core/protocol/protocol_version.dart';
 import '../../../core/relay/relay_service.dart';
 
 // Re-export QrPairingData so UI can import from one place
 export '../../../core/channels/pairing_service.dart' show QrPairingData;
+// Re-export UpdateRequiredError so UI can import from one place
+export '../../../core/protocol/protocol_version.dart' show UpdateRequiredError;
 
 part 'login_controller.g.dart';
 
@@ -46,6 +49,7 @@ class LoginState {
     this.success = false,
     this.claimCodeStatus = ClaimCodeStatus.idle,
     this.claimCodeMessage,
+    this.updateRequiredError,
   });
 
   final ConnectionMode mode;
@@ -55,6 +59,10 @@ class LoginState {
   final ClaimCodeStatus claimCodeStatus;
   final String? claimCodeMessage;
 
+  /// Set when an update_required error is received from the server.
+  /// The UI should show an UpdateRequiredDialog when this is not null.
+  final UpdateRequiredError? updateRequiredError;
+
   LoginState copyWith({
     ConnectionMode? mode,
     bool? isLoading,
@@ -62,6 +70,8 @@ class LoginState {
     bool? success,
     ClaimCodeStatus? claimCodeStatus,
     String? claimCodeMessage,
+    UpdateRequiredError? updateRequiredError,
+    bool clearUpdateRequiredError = false,
   }) {
     return LoginState(
       mode: mode ?? this.mode,
@@ -70,6 +80,8 @@ class LoginState {
       success: success ?? this.success,
       claimCodeStatus: claimCodeStatus ?? this.claimCodeStatus,
       claimCodeMessage: claimCodeMessage,
+      updateRequiredError:
+          clearUpdateRequiredError ? null : (updateRequiredError ?? this.updateRequiredError),
     );
   }
 
@@ -216,6 +228,15 @@ class LoginController extends _$LoginController {
         success: true,
       );
       debugPrint('[LoginController] Success state set!');
+    } on UpdateRequiredError catch (e) {
+      if (!ref.mounted) return;
+      debugPrint('[LoginController] UpdateRequiredError: ${e.message}');
+      state = state.copyWith(
+        isLoading: false,
+        claimCodeStatus: ClaimCodeStatus.error,
+        error: e.message,
+        updateRequiredError: e,
+      );
     } catch (e) {
       if (!ref.mounted) return;
       state = state.copyWith(
@@ -373,6 +394,15 @@ class LoginController extends _$LoginController {
         claimCodeMessage: 'Paired successfully!',
         success: true,
       );
+    } on UpdateRequiredError catch (e) {
+      if (!ref.mounted) return;
+      debugPrint('[LoginController] UpdateRequiredError (QR): ${e.message}');
+      state = state.copyWith(
+        isLoading: false,
+        claimCodeStatus: ClaimCodeStatus.error,
+        error: e.message,
+        updateRequiredError: e,
+      );
     } catch (e) {
       if (!ref.mounted) return;
       state = state.copyWith(
@@ -386,6 +416,11 @@ class LoginController extends _$LoginController {
   /// Clear error message.
   void clearError() {
     state = state.copyWith(error: null);
+  }
+
+  /// Clear update required error.
+  void clearUpdateRequiredError() {
+    state = state.copyWith(clearUpdateRequiredError: true);
   }
 
   /// Reset state to initial.

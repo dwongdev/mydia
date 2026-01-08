@@ -10,6 +10,8 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:phoenix_socket/phoenix_socket.dart';
 
+import '../protocol/protocol_version.dart';
+
 /// Result type for channel operations.
 class ChannelResult<T> {
   final bool success;
@@ -327,7 +329,10 @@ class ChannelService {
     try {
       final push = channel.push(
         'pairing_handshake',
-        {'message': base64Encode(message)},
+        {
+          'message': base64Encode(message),
+          'protocol_versions': ProtocolVersion.all,
+        },
       );
 
       // Use the Push.future property to properly await the response
@@ -450,6 +455,7 @@ class ChannelService {
         {
           'client_public_key': clientPublicKey,
           'device_token': deviceToken,
+          'protocol_versions': ProtocolVersion.all,
         },
       );
 

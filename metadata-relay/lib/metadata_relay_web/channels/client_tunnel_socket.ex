@@ -19,6 +19,8 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
   require Logger
 
   alias MetadataRelay.Relay
+  alias MetadataRelay.Relay.ConnectionRegistry
+  alias MetadataRelay.Relay.ProtocolVersion
 
   # Session timeout: 5 minutes without activity
   @session_timeout 300_000
@@ -119,13 +121,18 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
             {:relay_connection, state.session_id, <<>>}
           )
 
+          # Get instance protocol versions from ConnectionRegistry
+          instance_versions = get_instance_versions(instance_id)
+
           response =
             Jason.encode!(%{
               type: "connected",
               session_id: state.session_id,
               instance_id: instance_id,
               public_key: info.public_key,
-              direct_urls: info.direct_urls
+              direct_urls: info.direct_urls,
+              relay_protocol: ProtocolVersion.preferred_version(),
+              instance_versions: instance_versions
             })
 
           {:reply, :ok, {:text, response}, %{state | instance_id: instance_id, connected: true}}
@@ -177,6 +184,9 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
 
           Logger.debug("Broadcast sent for session #{state.session_id}")
 
+          # Get instance protocol versions from ConnectionRegistry
+          instance_versions = get_instance_versions(info.instance_id)
+
           response =
             Jason.encode!(%{
               type: "connected",
@@ -185,7 +195,9 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
               instance_id: info.instance_id,
               public_key: info.public_key,
               direct_urls: info.direct_urls,
-              user_id: info.user_id
+              user_id: info.user_id,
+              relay_protocol: ProtocolVersion.preferred_version(),
+              instance_versions: instance_versions
             })
 
           {:reply, :ok, {:text, response},
@@ -272,5 +284,16 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
 
   defp generate_session_id do
     :crypto.strong_rand_bytes(16) |> Base.encode64(padding: false)
+  end
+
+  # Get protocol versions for an instance from ConnectionRegistry
+  defp get_instance_versions(instance_id) do
+    case ConnectionRegistry.lookup(instance_id) do
+      {:ok, _pid, metadata} ->
+        Map.get(metadata, :protocol_versions, %{})
+
+      :not_found ->
+        %{}
+    end
   end
 end

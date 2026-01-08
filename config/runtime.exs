@@ -326,6 +326,13 @@ if config_env() == :prod do
     additional_direct_urls: additional_direct_urls,
     data_dir: data_dir,
     use_http: use_http
+
+  # Player update URL for protocol version mismatch errors
+  # This URL is sent to clients when they have an incompatible protocol version
+  # and need to update their app
+  if player_update_url = System.get_env("PLAYER_UPDATE_URL") do
+    config :mydia, :player_update_url, player_update_url
+  end
 end
 
 # FlareSolverr configuration (all environments)

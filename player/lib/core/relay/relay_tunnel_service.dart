@@ -36,6 +36,8 @@ import 'package:cryptography/dart.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../protocol/protocol_version.dart';
+
 /// Result of a relay tunnel operation.
 class RelayTunnelResult<T> {
   final bool success;
@@ -832,10 +834,11 @@ class RelayTunnelService {
         cancelOnError: false,
       );
 
-      // Send connect message
+      // Send connect message with protocol versions
       final connectMsg = jsonEncode({
         'type': 'connect',
         'instance_id': instanceId,
+        'protocol_versions': ProtocolVersion.all,
       });
       channel.sink.add(connectMsg);
 
@@ -858,8 +861,13 @@ class RelayTunnelService {
       final type = json['type'] as String?;
 
       if (type == 'error') {
+        final code = json['code'] as String?;
         final errorMsg = json['message'] as String? ?? 'Connection failed';
         await channel.sink.close();
+        // Handle update_required error specially
+        if (code == 'update_required' || code == 'version_incompatible') {
+          throw UpdateRequiredError.fromJson(json);
+        }
         return RelayTunnelResult.error(errorMsg);
       }
 
@@ -869,6 +877,25 @@ class RelayTunnelService {
       }
 
       debugPrint('[RelayTunnelService] Received connected response');
+
+      // Check instance protocol versions if provided
+      final instanceVersions = json['instance_versions'] as Map<String, dynamic>?;
+      if (instanceVersions != null) {
+        final mismatch = ProtocolVersion.checkCompatibility(instanceVersions);
+        if (mismatch != null) {
+          await channel.sink.close();
+          throw UpdateRequiredError(
+            message: mismatch.message,
+            incompatibleLayers: mismatch.mismatches
+                .map((m) => {
+                      'layer': m.layer,
+                      'server_version': m.serverVersion,
+                      'client_version': m.clientVersion,
+                    })
+                .toList(),
+          );
+        }
+      }
 
       // Parse connection info
       RelayTunnelInfo info;
@@ -944,10 +971,11 @@ class RelayTunnelService {
         cancelOnError: false,
       );
 
-      // Send connect message with claim code
+      // Send connect message with claim code and protocol versions
       final connectMsg = jsonEncode({
         'type': 'connect',
         'claim_code': claimCode,
+        'protocol_versions': ProtocolVersion.all,
       });
       channel.sink.add(connectMsg);
 
@@ -970,14 +998,38 @@ class RelayTunnelService {
       final type = json['type'] as String?;
 
       if (type == 'error') {
+        final code = json['code'] as String?;
         final errorMsg = json['message'] as String? ?? 'Connection failed';
         await channel.sink.close();
+        // Handle update_required error specially
+        if (code == 'update_required' || code == 'version_incompatible') {
+          throw UpdateRequiredError.fromJson(json);
+        }
         return RelayTunnelResult.error(errorMsg);
       }
 
       if (type != 'connected') {
         await channel.sink.close();
         return RelayTunnelResult.error('Unexpected response type: $type');
+      }
+
+      // Check instance protocol versions if provided
+      final instanceVersions = json['instance_versions'] as Map<String, dynamic>?;
+      if (instanceVersions != null) {
+        final mismatch = ProtocolVersion.checkCompatibility(instanceVersions);
+        if (mismatch != null) {
+          await channel.sink.close();
+          throw UpdateRequiredError(
+            message: mismatch.message,
+            incompatibleLayers: mismatch.mismatches
+                .map((m) => {
+                      'layer': m.layer,
+                      'server_version': m.serverVersion,
+                      'client_version': m.clientVersion,
+                    })
+                .toList(),
+          );
+        }
       }
 
       // Parse connection info

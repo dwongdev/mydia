@@ -227,50 +227,6 @@ defmodule MetadataRelayWeb.RelaySocket do
     end
   end
 
-  defp do_register(instance_id, public_key_b64, direct_urls, protocol_versions, state) do
-    with {:ok, public_key} <- Base.decode64(public_key_b64),
-         true <- byte_size(public_key) == 32,
-         {:ok, instance} <-
-           Relay.register_instance(%{
-             instance_id: instance_id,
-             public_key: public_key,
-             direct_urls: direct_urls,
-             public_ip: state.peer_ip
-           }),
-         {:ok, instance} <- Relay.set_online(instance) do
-      Logger.info("Instance registered: #{instance_id}, public_ip: #{state.peer_ip || "unknown"}")
-
-      # Register in ETS for O(1) lookups, including protocol versions for forwarding to clients
-      ConnectionRegistry.register(instance_id, self(), %{
-        connected_at: DateTime.utc_now(),
-        public_ip: state.peer_ip,
-        direct_urls: direct_urls,
-        protocol_versions: protocol_versions
-      })
-
-      # Subscribe to relay messages for this instance
-      Phoenix.PubSub.subscribe(MetadataRelay.PubSub, "relay:instance:#{instance_id}")
-
-      # Reset heartbeat timer
-      state = reset_heartbeat_timer(state)
-
-      # Send registration confirmation with relay protocol version
-      response =
-        Jason.encode!(%{
-          type: "registered",
-          relay_protocol: ProtocolVersion.preferred_version()
-        })
-
-      {:reply, :ok, {:text, response},
-       %{state | instance_id: instance_id, instance: instance, registered: true}}
-    else
-      _ ->
-        Logger.warning("Failed to register instance: #{instance_id}")
-        error = Jason.encode!(%{type: "error", message: "Registration failed"})
-        {:reply, :error, {:text, error}, state}
-    end
-  end
-
   defp handle_message(%{"type" => "ping"}, state) do
     state = reset_heartbeat_timer(state)
 
@@ -362,6 +318,50 @@ defmodule MetadataRelayWeb.RelaySocket do
   defp handle_message(msg, state) do
     Logger.debug("Unhandled relay message: #{inspect(msg)}")
     {:ok, state}
+  end
+
+  defp do_register(instance_id, public_key_b64, direct_urls, protocol_versions, state) do
+    with {:ok, public_key} <- Base.decode64(public_key_b64),
+         true <- byte_size(public_key) == 32,
+         {:ok, instance} <-
+           Relay.register_instance(%{
+             instance_id: instance_id,
+             public_key: public_key,
+             direct_urls: direct_urls,
+             public_ip: state.peer_ip
+           }),
+         {:ok, instance} <- Relay.set_online(instance) do
+      Logger.info("Instance registered: #{instance_id}, public_ip: #{state.peer_ip || "unknown"}")
+
+      # Register in ETS for O(1) lookups, including protocol versions for forwarding to clients
+      ConnectionRegistry.register(instance_id, self(), %{
+        connected_at: DateTime.utc_now(),
+        public_ip: state.peer_ip,
+        direct_urls: direct_urls,
+        protocol_versions: protocol_versions
+      })
+
+      # Subscribe to relay messages for this instance
+      Phoenix.PubSub.subscribe(MetadataRelay.PubSub, "relay:instance:#{instance_id}")
+
+      # Reset heartbeat timer
+      state = reset_heartbeat_timer(state)
+
+      # Send registration confirmation with relay protocol version
+      response =
+        Jason.encode!(%{
+          type: "registered",
+          relay_protocol: ProtocolVersion.preferred_version()
+        })
+
+      {:reply, :ok, {:text, response},
+       %{state | instance_id: instance_id, instance: instance, registered: true}}
+    else
+      _ ->
+        Logger.warning("Failed to register instance: #{instance_id}")
+        error = Jason.encode!(%{type: "error", message: "Registration failed"})
+        {:reply, :error, {:text, error}, state}
+    end
   end
 
   defp reset_heartbeat_timer(state) do

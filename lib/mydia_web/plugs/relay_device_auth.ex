@@ -31,6 +31,9 @@ defmodule MydiaWeb.Plugs.RelayDeviceAuth do
          true <- from_localhost?(conn),
          :ok <- verify_signature(conn, device_id),
          {:ok, device} <- RemoteAccess.get_active_device(device_id) do
+      # Update last_seen_at asynchronously (throttled to avoid DB writes on every request)
+      RemoteAccess.touch_device_async(device)
+
       conn
       |> assign(:relay_device, device)
       |> assign(:current_user, device.user)

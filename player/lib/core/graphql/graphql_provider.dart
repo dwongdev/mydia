@@ -230,7 +230,10 @@ class AuthStateNotifier extends Notifier<AsyncValue<bool>> {
       final preferRelay = storedMode == 'relay';
       debugPrint('[AuthStateNotifier] Stored connection mode: $storedMode, preferRelay: $preferRelay');
 
-      final result = await reconnectionService.reconnect(preferRelay: preferRelay);
+      // forceDirectOnly: true skips relay. Default (false) uses relay-first strategy.
+      // If stored mode was 'direct', force direct-only. Otherwise use relay-first.
+      final forceDirectOnly = storedMode == 'direct';
+      final result = await reconnectionService.reconnect(forceDirectOnly: forceDirectOnly);
 
       if (result.success && result.session != null) {
         final session = result.session!;

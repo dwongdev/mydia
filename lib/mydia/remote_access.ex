@@ -263,6 +263,34 @@ defmodule Mydia.RemoteAccess do
     |> Repo.update()
   end
 
+  # Throttle interval for touch_device_async (5 minutes)
+  @touch_throttle_seconds 300
+
+  @doc """
+  Asynchronously updates the last seen timestamp for a device if needed.
+
+  This function throttles updates to avoid hitting the database on every request.
+  The timestamp is only updated if:
+  - `last_seen_at` is nil (device never seen)
+  - `last_seen_at` is older than #{@touch_throttle_seconds} seconds
+
+  The update runs asynchronously to avoid blocking the request.
+  """
+  def touch_device_async(device) do
+    if should_touch_device?(device) do
+      Task.start(fn -> touch_device(device) end)
+    end
+
+    :ok
+  end
+
+  defp should_touch_device?(%{last_seen_at: nil}), do: true
+
+  defp should_touch_device?(%{last_seen_at: last_seen_at}) do
+    threshold = DateTime.utc_now() |> DateTime.add(-@touch_throttle_seconds, :second)
+    DateTime.compare(last_seen_at, threshold) == :lt
+  end
+
   @doc """
   Revokes a device, preventing future access.
   """

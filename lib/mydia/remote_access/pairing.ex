@@ -283,6 +283,8 @@ defmodule Mydia.RemoteAccess.Pairing do
              user_id: claim.user_id
            }),
          {:ok, device} <- RemoteAccess.create_device(device_params),
+         # Set initial last_seen_at timestamp
+         {:ok, device} <- RemoteAccess.touch_device(device),
          # Consume the claim code
          {:ok, _consumed_claim} <- RemoteAccess.consume_claim_code(claim_code, device.id) do
       # Generate media access token

@@ -225,7 +225,11 @@ case "$COMMAND" in
                 echo -e "${GREEN}Building player web assets...${NC}"
                 run_in_container sh -c "cd player && flutter build web --base-href /player/"
                 echo -e "${GREEN}Player web assets built successfully!${NC}"
-                echo -e "${YELLOW}Note: FlutterWatcher will automatically copy assets to priv/static/player${NC}"
+                echo -e "${GREEN}Copying build output to priv/static/player...${NC}"
+                run_in_container sh -c "rm -rf priv/static/player && cp -r player/build/web priv/static/player"
+                # Fix ownership to match host user (files created in container are owned by root)
+                run_in_container sh -c "chown -R $(id -u):$(id -g) priv/static/player"
+                echo -e "${GREEN}Build deployed successfully!${NC}"
                 ;;
             setup)
                 echo -e "${GREEN}Setting up player project (pub get + build_runner)...${NC}"

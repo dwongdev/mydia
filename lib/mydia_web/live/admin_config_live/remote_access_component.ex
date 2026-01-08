@@ -50,6 +50,23 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
     {:ok, socket}
   end
 
+  def update(%{claim_consumed: consumed_code} = _assigns, socket) do
+    # A claim code was used - clear the pairing UI if it matches the displayed code
+    current_code = socket.assigns[:claim_code]
+
+    if current_code && normalize_code(current_code) == normalize_code(consumed_code) do
+      {:ok,
+       socket
+       |> assign(:claim_code, nil)
+       |> assign(:claim_expires_at, nil)
+       |> assign(:countdown_seconds, 0)
+       |> load_devices()
+       |> put_flash(:info, "Device paired successfully!")}
+    else
+      {:ok, socket}
+    end
+  end
+
   def update(assigns, socket) do
     socket =
       socket
@@ -1392,6 +1409,15 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
       true -> format_datetime(dt)
     end
   end
+
+  # Normalize claim code by removing whitespace and dashes, converting to uppercase
+  defp normalize_code(code) when is_binary(code) do
+    code
+    |> String.replace(~r/[\s-]/, "")
+    |> String.upcase()
+  end
+
+  defp normalize_code(nil), do: nil
 
   defp generate_qr_code(config, relay_url, claim_code) do
     if config && config.static_public_key && claim_code do

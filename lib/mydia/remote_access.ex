@@ -470,6 +470,8 @@ defmodule Mydia.RemoteAccess do
            claim |> PairingClaim.consume_changeset(device_id) |> Repo.update() do
       # Notify relay server that this claim has been consumed
       Relay.consume_claim(code)
+      # Notify UI that claim has been consumed (for auto-closing pairing modal)
+      publish_claim_consumed(consumed_claim)
       {:ok, consumed_claim}
     end
   end
@@ -751,6 +753,18 @@ defmodule Mydia.RemoteAccess do
       MydiaWeb.Endpoint,
       event_payload,
       device_status_changed: "device_status:#{device.user_id}"
+    )
+  end
+
+  @doc """
+  Publishes a claim consumed event via PubSub.
+  Used to notify the UI that a pairing code has been used and the modal should close.
+  """
+  def publish_claim_consumed(claim) do
+    Phoenix.PubSub.broadcast(
+      Mydia.PubSub,
+      "remote_access:claims",
+      {:claim_consumed, %{code: claim.code, user_id: claim.user_id}}
     )
   end
 

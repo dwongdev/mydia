@@ -35,6 +35,8 @@ defmodule MydiaWeb.AdminConfigLive.Index do
       :timer.send_interval(5000, self(), :refresh_system_data)
       # Subscribe to library scanner topic for job updates
       Phoenix.PubSub.subscribe(Mydia.PubSub, "library_scanner")
+      # Subscribe to remote access claim events (for auto-closing pairing modal)
+      Phoenix.PubSub.subscribe(Mydia.PubSub, "remote_access:claims")
     end
 
     {:ok,
@@ -260,6 +262,20 @@ defmodule MydiaWeb.AdminConfigLive.Index do
       id: component_id,
       port_check_result: result
     )
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:claim_consumed, %{code: code, user_id: user_id}}, socket) do
+    # Forward claim consumed event to the RemoteAccessComponent
+    # Only if the current user matches (to avoid clearing other users' modals)
+    if socket.assigns.current_scope && socket.assigns.current_scope.user.id == user_id do
+      send_update(MydiaWeb.AdminConfigLive.RemoteAccessComponent,
+        id: "remote_access",
+        claim_consumed: code
+      )
+    end
 
     {:noreply, socket}
   end

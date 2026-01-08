@@ -29,6 +29,11 @@ class ProtocolVersion {
   /// Supported API protocol versions.
   static const apiProtocolSupported = ['1.0'];
 
+  /// All supported protocol versions for negotiation.
+  ///
+  /// Use this when sending supported versions to the server.
+  static Map<String, List<String>> get all => supportedVersions;
+
   /// Returns all supported versions for each protocol layer.
   static Map<String, List<String>> get supportedVersions => {
         'relay_protocol': relayProtocolSupported,

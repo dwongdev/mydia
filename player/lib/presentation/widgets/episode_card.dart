@@ -289,7 +289,10 @@ class _EpisodeCardState extends ConsumerState<EpisodeCard>
     final quality = getBestQuality(widget.episode.files);
     final badges = quality.toBadges();
 
-    return Row(
+    return Wrap(
+      spacing: 10,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -306,25 +309,25 @@ class _EpisodeCardState extends ConsumerState<EpisodeCard>
             ),
           ),
         ),
-        if (widget.episode.runtimeDisplay.isNotEmpty) ...[
-          const SizedBox(width: 10),
-          const Icon(
-            Icons.access_time_rounded,
-            size: 14,
-            color: AppColors.textSecondary,
+        if (widget.episode.runtimeDisplay.isNotEmpty)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.access_time_rounded,
+                size: 14,
+                color: AppColors.textSecondary,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                widget.episode.runtimeDisplay,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+              ),
+            ],
           ),
-          const SizedBox(width: 4),
-          Text(
-            widget.episode.runtimeDisplay,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.textSecondary,
-                ),
-          ),
-        ],
-        if (badges.isNotEmpty) ...[
-          const SizedBox(width: 12),
-          QualityBadgeRow(badges: badges, spacing: 4),
-        ],
+        if (badges.isNotEmpty) QualityBadgeRow(badges: badges, spacing: 4),
       ],
     );
   }

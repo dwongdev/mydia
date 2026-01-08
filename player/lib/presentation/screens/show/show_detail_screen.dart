@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'show_detail_controller.dart';
 import 'season_episodes_controller.dart';
+import '../../../domain/models/show_detail.dart';
 import '../../widgets/episode_card.dart';
 import '../../widgets/quality_selector.dart';
 import '../../../core/theme/colors.dart';
@@ -151,7 +152,7 @@ class ShowDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildContent(BuildContext context, WidgetRef ref, show) {
+  Widget _buildContent(BuildContext context, WidgetRef ref, ShowDetail show) {
     return CustomScrollView(
       slivers: [
         _buildHeroSection(context, ref, show),
@@ -208,7 +209,7 @@ class ShowDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildHeroSection(BuildContext context, WidgetRef ref, show) {
+  Widget _buildHeroSection(BuildContext context, WidgetRef ref, ShowDetail show) {
     return SliverAppBar(
       expandedHeight: 380,
       pinned: true,
@@ -430,7 +431,7 @@ class ShowDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildActionButtons(BuildContext context, WidgetRef ref, show) {
+  Widget _buildActionButtons(BuildContext context, WidgetRef ref, ShowDetail show) {
     final hasNextEpisode = show.nextEpisode != null;
 
     return Padding(
@@ -607,7 +608,7 @@ class ShowDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildSeasonSelector(BuildContext context, WidgetRef ref, show) {
+  Widget _buildSeasonSelector(BuildContext context, WidgetRef ref, ShowDetail show) {
     final selectedSeason = ref.watch(selectedSeasonProvider(id));
     // Only show seasons that have files available in Mydia
     final availableSeasons = show.seasons.where((s) => s.hasFiles).toList();

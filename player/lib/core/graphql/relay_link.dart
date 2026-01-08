@@ -44,8 +44,8 @@ class RelayLink extends Link {
       yield Response(
         response: const <String, dynamic>{},
         data: null,
-        errors: [
-          const GraphQLError(message: 'Relay tunnel is not active'),
+        errors: const [
+          GraphQLError(message: 'Relay tunnel is not active'),
         ],
         context: request.context,
       );
@@ -108,8 +108,8 @@ class RelayLink extends Link {
         yield Response(
           response: const <String, dynamic>{},
           data: null,
-          errors: [
-            const GraphQLError(message: 'Empty response from tunnel'),
+          errors: const [
+            GraphQLError(message: 'Empty response from tunnel'),
           ],
           context: request.context,
         );

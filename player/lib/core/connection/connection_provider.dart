@@ -114,7 +114,8 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
   ConnectionState build() {
     // Initialize with direct connection by default
     // The actual mode will be set after checking stored state or pairing
-    _loadStoredState();
+    // Schedule the async load to run after build completes
+    Future.microtask(_loadStoredState);
     return ConnectionState.direct();
   }
 
@@ -123,6 +124,7 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
   /// Loads stored connection state on startup.
   Future<void> _loadStoredState() async {
     // If we already have an active relay tunnel (e.g., just paired), don't overwrite
+    // Now safe to access state since build() has completed
     if (state.isRelayMode && state.isTunnelActive) {
       debugPrint('[ConnectionNotifier] Already in relay mode with active tunnel, skipping stored state load');
       return;

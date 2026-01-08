@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -9,6 +10,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:go_router/go_router.dart';
 import 'package:graphql_flutter/graphql_flutter.dart';
 import 'package:http/http.dart' as http;
+import '../../../core/auth/auth_status.dart';
 import '../../../core/graphql/graphql_provider.dart';
 import '../../../core/player/progress_service.dart';
 import '../../../core/utils/file_utils.dart' as file_utils;
@@ -54,9 +56,14 @@ class PlayerScreen extends ConsumerStatefulWidget {
 }
 
 class _PlayerScreenState extends ConsumerState<PlayerScreen> {
+  /// Minimum position (in seconds) to show the resume dialog.
+  /// If playback position is less than this, start from beginning.
+  static const _minResumeThresholdSeconds = 30;
+
   Player? _player;
   VideoController? _videoController;
   ProgressService? _progressService;
+  StreamSubscription<Duration>? _positionSubscription;
   bool _isLoading = true;
   String? _error;
   String? _loadingMessage;
@@ -67,14 +74,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   // Track selection state
   List<app_models.SubtitleTrack> _subtitleTracks = [];
   app_models.SubtitleTrack? _selectedSubtitleTrack;
-  bool _loadingSubtitles = false;
 
   // HLS quality selection (web only)
   HlsQualityLevel _selectedQuality = HlsQualityLevel.auto;
 
   // Desktop feature state
   final FocusNode _focusNode = FocusNode();
-  int _clickCount = 0;
   DateTime? _lastClickTime;
 
   @override
@@ -90,6 +95,41 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         _error = null;
       });
 
+      // Check if we're in offline mode
+      final authState = ref.read(authStateProvider);
+      final isOfflineMode = authState.maybeWhen(
+        data: (status) => status == AuthStatus.offlineMode,
+        orElse: () => false,
+      );
+
+      // Check for downloaded content first (before any network operations)
+      final downloadManager = ref.read(downloadManagerProvider);
+      final downloadedMedia = downloadManager.getDownloadedMediaById(widget.mediaId);
+
+      // In offline mode, only downloaded content can be played
+      if (isOfflineMode) {
+        if (downloadedMedia == null || kIsWeb) {
+          setState(() {
+            _error = 'This content is not available offline. Download it first to watch without a connection.';
+            _isLoading = false;
+          });
+          return;
+        }
+
+        if (!await file_utils.fileExists(downloadedMedia.filePath)) {
+          setState(() {
+            _error = 'Downloaded file not found. Please re-download the content.';
+            _isLoading = false;
+          });
+          return;
+        }
+
+        // Play downloaded content in offline mode
+        await _initializeOfflinePlayback(downloadedMedia.filePath);
+        return;
+      }
+
+      // Online mode - initialize network services
       // Wait for auth to be ready using async provider
       final graphqlClient = await ref.read(asyncGraphqlClientProvider.future);
 
@@ -98,10 +138,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       final token = await ref.read(authTokenProvider.future);
 
       if (serverUrl == null || token == null) {
-        setState(() {
-          _error = 'Server URL or authentication token not available';
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _error = 'Server URL or authentication token not available';
+            _isLoading = false;
+          });
+        }
         return;
       }
 
@@ -120,10 +162,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       // Create media_kit player
       _player = Player();
       _videoController = VideoController(_player!);
-
-      // Check if media is downloaded for offline playback
-      final downloadManager = ref.read(downloadManagerProvider);
-      final downloadedMedia = downloadManager.getDownloadedMediaById(widget.mediaId);
 
       String mediaSource;
       Map<String, String> httpHeaders = {};
@@ -161,9 +199,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
         // For HLS strategies, follow redirect and wait for playlist to be ready
         if (strategy == StreamingStrategy.hlsCopy || strategy == StreamingStrategy.transcode) {
-          setState(() {
-            _loadingMessage = 'Starting stream...';
-          });
+          if (mounted) {
+            setState(() {
+              _loadingMessage = 'Starting stream...';
+            });
+          }
 
           // Get the HLS playlist URL from the server
           final hlsUrl = await _getHlsPlaylistUrl(
@@ -199,9 +239,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         }
       }
 
-      setState(() {
-        _loadingMessage = null;
-      });
+      if (mounted) {
+        setState(() {
+          _loadingMessage = null;
+        });
+      }
 
       // Open media with media_kit
       await _player!.open(
@@ -216,18 +258,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       // Check if we should show resume dialog
       // Only show if we have valid duration and saved position
       final duration = _player!.state.duration.inSeconds;
+      final savedPosition = _savedPositionSeconds;
       if (mounted &&
-          _savedPositionSeconds != null &&
-          _savedPositionSeconds! > 30 &&
+          savedPosition != null &&
+          savedPosition > _minResumeThresholdSeconds &&
           duration > 0) {
         final shouldResume = await showResumeDialog(
           context,
-          _savedPositionSeconds!,
+          savedPosition,
           duration,
         );
 
         if (shouldResume == true) {
-          await _player!.seek(Duration(seconds: _savedPositionSeconds!));
+          await _player!.seek(Duration(seconds: savedPosition));
         }
       }
 
@@ -242,22 +285,74 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       }
 
       // Listen for playback completion to mark as watched
-      _player!.stream.position.listen((_) {
+      // Cancel any existing subscription before creating a new one
+      await _positionSubscription?.cancel();
+      _positionSubscription = _player!.stream.position.listen((_) {
         _onPlaybackProgress();
       });
 
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
 
       // Subtitle tracks are now extracted from GraphQL in _fetchProgressAndEpisodes
       debugPrint('Loaded ${_subtitleTracks.length} subtitle tracks from GraphQL');
     } catch (e) {
       debugPrint('Error initializing player: $e');
-      setState(() {
-        _error = e.toString();
-        _isLoading = false;
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  /// Initialize player for offline playback (no network services required).
+  Future<void> _initializeOfflinePlayback(String filePath) async {
+    try {
+      debugPrint('Initializing offline playback from: $filePath');
+
+      // Create media_kit player
+      _player = Player();
+      _videoController = VideoController(_player!);
+
+      // Open local file
+      await _player!.open(
+        Media(filePath),
+        play: false,
+      );
+
+      // Wait for player to be ready
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Start playback
+      await _player!.play();
+
+      // Listen for playback progress (but don't sync - we're offline)
+      // Cancel any existing subscription before creating a new one
+      await _positionSubscription?.cancel();
+      _positionSubscription = _player!.stream.position.listen((_) {
+        _onPlaybackProgress();
       });
+
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+
+      debugPrint('Offline playback initialized successfully');
+    } catch (e) {
+      debugPrint('Error initializing offline playback: $e');
+      if (mounted) {
+        setState(() {
+          _error = 'Failed to play downloaded content: $e';
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -343,7 +438,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
       if (result.data != null) {
         final episodes = Query$SeasonEpisodes.fromJson(result.data!).seasonEpisodes;
-        if (episodes != null) {
+        if (episodes != null && mounted) {
           setState(() {
             _seasonEpisodes = episodes.whereType<Query$SeasonEpisodes$seasonEpisodes>().toList();
             _currentEpisodeIndex = _seasonEpisodes?.indexWhere((ep) => ep.id == widget.mediaId);
@@ -356,10 +451,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   void _onPlaybackProgress() {
-    if (_player == null || !mounted) return;
+    final player = _player;
+    if (player == null || !mounted) return;
 
     // Check if video is near completion (90%)
-    if (_progressService?.isWatched(_player!) == true) {
+    if (_progressService?.isWatched(player) == true) {
       // Could trigger mark as watched here if desired
       debugPrint('Content is considered watched (90% complete)');
     }
@@ -548,7 +644,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     // Note: selected can be null if user chose "Off"
     // This is handled by the selector returning null explicitly
-    if (selected != _selectedSubtitleTrack) {
+    if (selected != _selectedSubtitleTrack && mounted) {
       setState(() {
         _selectedSubtitleTrack = selected;
       });
@@ -584,7 +680,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       _selectedQuality,
     );
 
-    if (selected != null && selected != _selectedQuality) {
+    if (selected != null && selected != _selectedQuality && mounted) {
       setState(() {
         _selectedQuality = selected;
       });
@@ -613,7 +709,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       context,
       onSubtitleTap: _showSubtitleSelector,
       selectedSubtitleTrack: _selectedSubtitleTrack,
-      loadingSubtitles: _loadingSubtitles,
       subtitleTrackCount: _subtitleTracks.length,
       onQualityTap: PlatformFeatures.isWeb ? _showQualitySelector : null,
       selectedQuality: _selectedQuality,
@@ -622,7 +717,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   /// Handle keyboard shortcuts (desktop only)
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (_player == null) {
+    final player = _player;
+    if (player == null) {
       return KeyEventResult.ignored;
     }
 
@@ -633,38 +729,38 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     switch (event.logicalKey) {
       case LogicalKeyboardKey.space:
         // Play/Pause
-        _player!.playOrPause();
+        player.playOrPause();
         return KeyEventResult.handled;
 
       case LogicalKeyboardKey.arrowLeft:
         // Seek backward 10 seconds
-        final currentPosition = _player!.state.position;
+        final currentPosition = player.state.position;
         final newPosition = currentPosition - const Duration(seconds: 10);
         final targetPosition = newPosition < Duration.zero ? Duration.zero : newPosition;
-        _player!.seek(targetPosition);
+        player.seek(targetPosition);
         return KeyEventResult.handled;
 
       case LogicalKeyboardKey.arrowRight:
         // Seek forward 10 seconds
-        final currentPosition = _player!.state.position;
-        final duration = _player!.state.duration;
+        final currentPosition = player.state.position;
+        final duration = player.state.duration;
         final newPosition = currentPosition + const Duration(seconds: 10);
         final targetPosition = newPosition > duration ? duration : newPosition;
-        _player!.seek(targetPosition);
+        player.seek(targetPosition);
         return KeyEventResult.handled;
 
       case LogicalKeyboardKey.arrowUp:
         // Volume up
-        final currentVolume = _player!.state.volume;
+        final currentVolume = player.state.volume;
         final newVolume = (currentVolume + 10.0).clamp(0.0, 100.0);
-        _player!.setVolume(newVolume);
+        player.setVolume(newVolume);
         return KeyEventResult.handled;
 
       case LogicalKeyboardKey.arrowDown:
         // Volume down
-        final currentVolume = _player!.state.volume;
+        final currentVolume = player.state.volume;
         final newVolume = (currentVolume - 10.0).clamp(0.0, 100.0);
-        _player!.setVolume(newVolume);
+        player.setVolume(newVolume);
         return KeyEventResult.handled;
 
       case LogicalKeyboardKey.keyF:
@@ -674,10 +770,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
       case LogicalKeyboardKey.keyM:
         // Toggle mute
-        if (_player!.state.volume > 0) {
-          _player!.setVolume(0.0);
+        if (player.state.volume > 0) {
+          player.setVolume(0.0);
         } else {
-          _player!.setVolume(100.0);
+          player.setVolume(100.0);
         }
         return KeyEventResult.handled;
 
@@ -700,19 +796,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         now.difference(_lastClickTime!) < const Duration(milliseconds: 300)) {
       // Double click detected
       // Note: media_kit fullscreen is handled by the Video widget controls
-      _clickCount = 0;
       _lastClickTime = null;
     } else {
       // First click
-      _clickCount = 1;
       _lastClickTime = now;
     }
   }
 
   @override
   void dispose() {
-    // Save progress before disposing
+    // Save progress before disposing (fire and forget - can't await in dispose)
     _saveProgress();
+
+    // Cancel stream subscription to prevent memory leak
+    _positionSubscription?.cancel();
 
     // Stop progress tracking
     _progressService?.stopSync();
@@ -793,9 +890,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
 
     // Wrap with gesture controls for mobile
-    if (PlatformFeatures.supportsGestureControls && _player != null) {
+    final player = _player;
+    if (PlatformFeatures.supportsGestureControls && player != null) {
       videoPlayer = GestureControls(
-        player: _player!,
+        player: player,
         child: videoPlayer,
       );
     }

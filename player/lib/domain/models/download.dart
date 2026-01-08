@@ -9,6 +9,8 @@ enum DownloadStatus {
   cancelled,
   /// Transcoding in progress on server
   transcoding,
+  /// Queued waiting for download slot
+  queued,
 }
 
 enum MediaType {
@@ -115,6 +117,8 @@ class DownloadTask {
         return DownloadStatus.cancelled;
       case 'transcoding':
         return DownloadStatus.transcoding;
+      case 'queued':
+        return DownloadStatus.queued;
       default:
         return DownloadStatus.pending;
     }
@@ -154,6 +158,8 @@ class DownloadTask {
         return 'Cancelled';
       case DownloadStatus.pending:
         return 'Pending';
+      case DownloadStatus.queued:
+        return 'Queued';
     }
   }
 

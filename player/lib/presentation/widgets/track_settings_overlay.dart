@@ -70,7 +70,6 @@ Future<void> showTrackSettingsSheet(
   BuildContext context, {
   required VoidCallback onSubtitleTap,
   required SubtitleTrack? selectedSubtitleTrack,
-  required bool loadingSubtitles,
   required int subtitleTrackCount,
   VoidCallback? onQualityTap,
   HlsQualityLevel? selectedQuality,
@@ -126,16 +125,7 @@ Future<void> showTrackSettingsSheet(
               selectedSubtitleTrack?.displayName ?? 'Off',
               style: const TextStyle(color: Colors.grey),
             ),
-            trailing: loadingSubtitles
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.red,
-                    ),
-                  )
-                : const Icon(Icons.chevron_right, color: Colors.grey),
+            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
             onTap: () {
               Navigator.pop(context);
               onSubtitleTap();

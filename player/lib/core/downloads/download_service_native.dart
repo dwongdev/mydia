@@ -1,6 +1,8 @@
 /// Native implementation of download service.
 ///
 /// This provides the full download functionality on iOS, Android, and desktop.
+/// On mobile platforms (iOS/Android), uses background_downloader for background
+/// download capability. On desktop, uses Dio for foreground downloads.
 library;
 
 import 'dart:async';
@@ -12,7 +14,13 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../domain/models/download.dart';
 import '../../domain/models/download_adapters.dart';
+import '../../domain/models/download_settings.dart';
+import '../../domain/models/storage_settings.dart';
+import 'background_download_service.dart';
 import 'download_service.dart';
+
+/// Whether to use background downloads (true on mobile, false on desktop).
+bool get _useBackgroundDownloader => Platform.isIOS || Platform.isAndroid;
 
 /// Downloads are fully supported on native platforms.
 const bool isDownloadSupported = true;
@@ -40,6 +48,12 @@ class _NativeDownloadDatabase implements DownloadDatabase {
     }
     if (!Hive.isAdapterRegistered(1)) {
       Hive.registerAdapter(DownloadedMediaAdapter());
+    }
+    if (!Hive.isAdapterRegistered(2)) {
+      Hive.registerAdapter(StorageSettingsAdapter());
+    }
+    if (!Hive.isAdapterRegistered(3)) {
+      Hive.registerAdapter(DownloadSettingsAdapter());
     }
 
     _tasksBox = await Hive.openBox<DownloadTask>(_tasksBoxName);
@@ -179,11 +193,116 @@ class _NativeDownloadService implements DownloadService {
   final StreamController<DownloadTask> _progressController =
       StreamController<DownloadTask>.broadcast();
 
+  // Background download service for mobile platforms
+  BackgroundDownloadService? _backgroundService;
+  StreamSubscription<DownloadTask>? _backgroundProgressSubscription;
+  bool _backgroundServiceInitialized = false;
+
+  // Queue management
+  int _maxConcurrentDownloads = 2;
+  bool _autoStartQueued = true;
+
+  /// Set the maximum concurrent downloads limit.
+  void setMaxConcurrentDownloads(int max) {
+    _maxConcurrentDownloads = max;
+  }
+
+  /// Set whether to auto-start queued downloads.
+  void setAutoStartQueued(bool autoStart) {
+    _autoStartQueued = autoStart;
+  }
+
+  /// Get the number of currently active downloads.
+  int getActiveDownloadCount() {
+    if (_database == null) return 0;
+    return _database!.getAllTasks().where((t) =>
+        t.status == 'downloading' || t.status == 'transcoding').length;
+  }
+
+  /// Check if there are available download slots.
+  bool hasAvailableSlots() {
+    return getActiveDownloadCount() < _maxConcurrentDownloads;
+  }
+
+  /// Process the download queue and start next queued downloads if slots available.
+  Future<void> _processQueue() async {
+    if (_database == null || !_autoStartQueued) return;
+
+    while (hasAvailableSlots()) {
+      // Get queued tasks sorted by creation date (FIFO)
+      final queuedTasks = _database!.getAllTasks()
+          .where((t) => t.status == 'queued')
+          .toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+      if (queuedTasks.isEmpty) break;
+
+      // Start the first queued task
+      final task = queuedTasks.first;
+      final pendingTask = task.copyWith(status: 'pending');
+      await _database!.saveTask(pendingTask);
+
+      // Start the download based on type
+      if (task.isProgressive && task.transcodeJobId != null) {
+        // For progressive downloads that were queued, we need to resume
+        // The transcode job ID and other data should still be valid
+        _progressController.add(pendingTask);
+      } else if (task.downloadUrl != null) {
+        // Use background downloads on mobile, Dio on desktop
+        if (_useBackgroundDownloader) {
+          await _initializeBackgroundService();
+          await _backgroundService!.startDownload(pendingTask);
+        } else {
+          _startDownloadTask(pendingTask);
+        }
+      }
+    }
+  }
+
   @override
   Stream<DownloadTask> get progressStream => _progressController.stream;
 
   void setDatabase(_NativeDownloadDatabase database) {
     _database = database;
+  }
+
+  /// Initialize background download service for mobile platforms.
+  Future<void> _initializeBackgroundService() async {
+    if (!_useBackgroundDownloader || _backgroundServiceInitialized) return;
+
+    _backgroundService = BackgroundDownloadService.instance;
+    await _backgroundService!.initialize();
+
+    // Listen to background download progress and forward to our stream
+    _backgroundProgressSubscription =
+        _backgroundService!.progressStream.listen((task) {
+      _onBackgroundProgress(task);
+    });
+
+    _backgroundServiceInitialized = true;
+  }
+
+  /// Handle progress updates from background download service.
+  void _onBackgroundProgress(DownloadTask task) {
+    if (_database == null) return;
+
+    // Update the task in our database
+    _database!.saveTask(task);
+
+    // If completed, save to downloaded media
+    if (task.status == 'completed' && task.filePath != null) {
+      final media = DownloadedMedia.fromTask(task);
+      _database!.saveMedia(media);
+
+      // Process queue to start next download
+      _processQueue();
+    } else if (task.status == 'failed' || task.status == 'cancelled') {
+      // Process queue on failure/cancel too
+      _processQueue();
+    }
+
+    // Forward to our progress stream
+    _progressController.add(task);
   }
 
   Future<String> _getDownloadDirectory() async {
@@ -216,6 +335,10 @@ class _NativeDownloadService implements DownloadService {
     }
 
     final taskId = '${mediaId}_${DateTime.now().millisecondsSinceEpoch}';
+
+    // Check if we should queue this download
+    final shouldQueue = !hasAvailableSlots();
+
     final task = DownloadTask(
       id: taskId,
       mediaId: mediaId,
@@ -226,10 +349,22 @@ class _NativeDownloadService implements DownloadService {
       posterUrl: posterUrl,
       fileSize: fileSize,
       createdAt: DateTime.now(),
+      status: shouldQueue ? 'queued' : 'pending',
     );
 
     await _database!.saveTask(task);
-    _startDownloadTask(task);
+    _progressController.add(task);
+
+    // Only start if not queued
+    if (!shouldQueue) {
+      // Use background downloads on mobile, Dio on desktop
+      if (_useBackgroundDownloader) {
+        await _initializeBackgroundService();
+        await _backgroundService!.startDownload(task);
+      } else {
+        _startDownloadTask(task);
+      }
+    }
 
     return task;
   }
@@ -250,11 +385,34 @@ class _NativeDownloadService implements DownloadService {
       throw StateError('Database not initialized');
     }
 
+    final taskId = '${mediaId}_${DateTime.now().millisecondsSinceEpoch}';
+
+    // Check if we should queue this download
+    final shouldQueue = !hasAvailableSlots();
+
+    if (shouldQueue) {
+      // Queue the download - don't start transcode yet
+      final task = DownloadTask(
+        id: taskId,
+        mediaId: mediaId,
+        title: title,
+        quality: resolution,
+        mediaType: mediaType == MediaType.movie ? 'movie' : 'episode',
+        posterUrl: posterUrl,
+        createdAt: DateTime.now(),
+        isProgressive: true,
+        status: 'queued',
+      );
+
+      await _database!.saveTask(task);
+      _progressController.add(task);
+      return task;
+    }
+
     // Prepare the transcode job on the server
     final prepareResult = await prepareDownload();
     final jobId = prepareResult.jobId;
 
-    final taskId = '${mediaId}_${DateTime.now().millisecondsSinceEpoch}';
     final task = DownloadTask(
       id: taskId,
       mediaId: mediaId,
@@ -306,8 +464,9 @@ class _NativeDownloadService implements DownloadService {
       updatedTask = task.copyWith(filePath: filePath);
       await _database!.saveTask(updatedTask);
 
-      // Phase 1: Wait for transcoding to start producing output
-      // Poll status until we can start downloading
+      // Phase 1: Wait for transcoding
+      // On mobile: wait for full transcode completion before using background download
+      // On desktop: can start downloading once some content is available (progressive)
       bool transcodeComplete = updatedTask.transcodeProgress >= 1.0;
       int? lastKnownFileSize;
 
@@ -335,8 +494,10 @@ class _NativeDownloadService implements DownloadService {
         if (status.status == 'ready') {
           transcodeComplete = true;
           lastKnownFileSize = status.fileSize;
-        } else if (status.status == 'transcoding' && (status.fileSize ?? 0) > 0) {
-          // File is being produced, we can start progressive download
+        } else if (!_useBackgroundDownloader &&
+            status.status == 'transcoding' &&
+            (status.fileSize ?? 0) > 0) {
+          // Desktop only: File is being produced, we can start progressive download
           lastKnownFileSize = status.fileSize;
           break;
         }
@@ -346,14 +507,25 @@ class _NativeDownloadService implements DownloadService {
 
       if (cancelToken.isCancelled) return;
 
-      // Phase 2: Start downloading (possibly while transcode is still running)
+      // Phase 2: Start downloading
       final downloadUrl = await getDownloadUrl(jobId);
       updatedTask = updatedTask.copyWith(
         downloadUrl: downloadUrl,
         status: 'downloading',
+        fileSize: lastKnownFileSize ?? updatedTask.fileSize,
       );
       await _database!.saveTask(updatedTask);
       _progressController.add(updatedTask);
+
+      // On mobile, use background download service for the file download
+      // This allows downloads to continue when app is backgrounded
+      if (_useBackgroundDownloader && transcodeComplete) {
+        await _initializeBackgroundService();
+        await _backgroundService!.startDownload(updatedTask);
+        _cancelTokens.remove(task.id);
+        _pausedTasks.remove(task.id);
+        return; // Background service will handle the rest
+      }
 
       // Progressive download loop - handles the case where file is still growing
       int downloadedBytes = updatedTask.downloadedBytes ?? 0;
@@ -473,6 +645,9 @@ class _NativeDownloadService implements DownloadService {
       _progressController.add(updatedTask);
       _cancelTokens.remove(task.id);
       _pausedTasks.remove(task.id);
+
+      // Process queue to start next download
+      _processQueue();
     } on DioException catch (e) {
       String errorMessage;
       if (e.type == DioExceptionType.cancel) {
@@ -486,6 +661,9 @@ class _NativeDownloadService implements DownloadService {
       _progressController.add(updatedTask);
       _cancelTokens.remove(task.id);
       _pausedTasks.remove(task.id);
+
+      // Process queue on failure/cancel
+      _processQueue();
     } catch (e) {
       final errorTask = updatedTask.copyWith(
         status: 'failed',
@@ -495,6 +673,9 @@ class _NativeDownloadService implements DownloadService {
       _progressController.add(errorTask);
       _cancelTokens.remove(task.id);
       _pausedTasks.remove(task.id);
+
+      // Process queue on error
+      _processQueue();
     }
   }
 
@@ -563,6 +744,9 @@ class _NativeDownloadService implements DownloadService {
 
       _progressController.add(updatedTask);
       _cancelTokens.remove(task.id);
+
+      // Process queue to start next download
+      _processQueue();
     } on DioException catch (e) {
       String errorMessage;
       if (e.type == DioExceptionType.cancel) {
@@ -575,6 +759,9 @@ class _NativeDownloadService implements DownloadService {
       await _database!.saveTask(updatedTask);
       _progressController.add(updatedTask);
       _cancelTokens.remove(task.id);
+
+      // Process queue even on failure/cancel
+      _processQueue();
     } catch (e) {
       final errorTask = task.copyWith(
         status: 'failed',
@@ -583,6 +770,9 @@ class _NativeDownloadService implements DownloadService {
       await _database!.saveTask(errorTask);
       _progressController.add(errorTask);
       _cancelTokens.remove(task.id);
+
+      // Process queue even on error
+      _processQueue();
     }
   }
 
@@ -592,6 +782,13 @@ class _NativeDownloadService implements DownloadService {
 
     final task = _database!.getTask(taskId);
     if (task == null) return;
+
+    // On mobile, try to pause via background service first
+    if (_useBackgroundDownloader && _backgroundServiceInitialized) {
+      await _backgroundService!.pauseDownload(taskId);
+      // Background service will update the task status
+      return;
+    }
 
     // For progressive downloads, use the pause flag instead of cancelling
     if (task.isProgressive) {
@@ -621,6 +818,13 @@ class _NativeDownloadService implements DownloadService {
     final task = _database!.getTask(taskId);
     if (task == null || task.status != 'paused') return;
 
+    // On mobile, try to resume via background service first
+    if (_useBackgroundDownloader && _backgroundServiceInitialized) {
+      await _backgroundService!.resumeDownload(taskId);
+      // Background service will update the task status
+      return;
+    }
+
     // For progressive downloads, just clear the pause flag
     // The download loop will continue automatically
     if (task.isProgressive) {
@@ -641,7 +845,13 @@ class _NativeDownloadService implements DownloadService {
   Future<void> cancelDownload(String taskId) async {
     if (_database == null) return;
 
-    // Cancel the download token
+    // On mobile, try to cancel via background service first
+    if (_useBackgroundDownloader && _backgroundServiceInitialized) {
+      await _backgroundService!.cancelDownload(taskId);
+      // Background service will update the task status
+    }
+
+    // Cancel the download token (for Dio-based downloads)
     final cancelToken = _cancelTokens[taskId];
     if (cancelToken != null) {
       cancelToken.cancel();
@@ -746,6 +956,10 @@ class _NativeDownloadService implements DownloadService {
     }
     _cancelTokens.clear();
     _progressController.close();
+
+    // Clean up background service subscription
+    _backgroundProgressSubscription?.cancel();
+    _backgroundService?.dispose();
   }
 }
 

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:graphql_flutter/graphql_flutter.dart';
 import '../auth/auth_service.dart';
+import '../auth/auth_status.dart';
 import '../auth/auth_storage.dart';
 import '../auth/media_token_service.dart';
 import '../config/web_config.dart';
@@ -87,7 +88,10 @@ final graphqlClientProvider = Provider<GraphQLClient?>((ref) {
         );
       },
       loading: () => null,
-      error: (_, __) => null,
+      error: (error, stackTrace) {
+        debugPrint('[graphqlClientProvider] Auth token error in relay mode: $error\n$stackTrace');
+        return null;
+      },
     );
   }
 
@@ -117,11 +121,17 @@ final graphqlClientProvider = Provider<GraphQLClient?>((ref) {
           );
         },
         loading: () => null,
-        error: (_, __) => null,
+        error: (error, stackTrace) {
+          debugPrint('[graphqlClientProvider] Auth token error in direct mode: $error\n$stackTrace');
+          return null;
+        },
       );
     },
     loading: () => null,
-    error: (_, __) => null,
+    error: (error, stackTrace) {
+      debugPrint('[graphqlClientProvider] Server URL error: $error\n$stackTrace');
+      return null;
+    },
   );
 });
 
@@ -157,11 +167,17 @@ final graphqlClientWithSubscriptionsProvider = Provider<GraphQLClient?>((ref) {
           );
         },
         loading: () => null,
-        error: (_, __) => null,
+        error: (error, stackTrace) {
+          debugPrint('[graphqlClientWithSubscriptionsProvider] Auth token error: $error\n$stackTrace');
+          return null;
+        },
       );
     },
     loading: () => null,
-    error: (_, __) => null,
+    error: (error, stackTrace) {
+      debugPrint('[graphqlClientWithSubscriptionsProvider] Server URL error: $error\n$stackTrace');
+      return null;
+    },
   );
 });
 
@@ -171,12 +187,13 @@ final graphqlClientWithSubscriptionsProvider = Provider<GraphQLClient?>((ref) {
 /// refresh the GraphQL client provider.
 ///
 /// On web platform, automatically reads injected auth config from Phoenix.
-class AuthStateNotifier extends Notifier<AsyncValue<bool>> {
+/// On native platforms, supports offline mode when server is unreachable.
+class AuthStateNotifier extends Notifier<AsyncValue<AuthStatus>> {
   /// Whether web config has been initialized (to avoid re-processing).
   bool _webConfigProcessed = false;
 
   @override
-  AsyncValue<bool> build() {
+  AsyncValue<AuthStatus> build() {
     _initAuth();
     return const AsyncValue.loading();
   }
@@ -190,6 +207,7 @@ class AuthStateNotifier extends Notifier<AsyncValue<bool>> {
   /// - Trying direct URLs first
   /// - Falling back to relay tunnel if direct fails
   /// - Refreshing the auth token on successful reconnection
+  /// - Entering offline mode if reconnection fails (preserves credentials)
   Future<void> _initAuth() async {
     state = const AsyncValue.loading();
     try {
@@ -210,7 +228,7 @@ class AuthStateNotifier extends Notifier<AsyncValue<bool>> {
         return;
       }
 
-      state = AsyncValue.data(isAuth);
+      state = AsyncValue.data(isAuth ? AuthStatus.authenticated : AuthStatus.unauthenticated);
     } catch (e, st) {
       state = AsyncValue.error(e, st);
     }
@@ -218,9 +236,10 @@ class AuthStateNotifier extends Notifier<AsyncValue<bool>> {
 
   /// Attempt to reconnect to the paired instance using ReconnectionService.
   ///
-  /// Returns true if reconnection succeeded and auth was updated,
-  /// false if reconnection failed (caller should show login).
-  Future<bool> _attemptReconnection() async {
+  /// Returns [AuthStatus.authenticated] if reconnection succeeded,
+  /// [AuthStatus.offlineMode] if reconnection failed but credentials exist,
+  /// [AuthStatus.unauthenticated] if no valid credentials.
+  Future<AuthStatus> _attemptReconnection() async {
     final reconnectionService = ref.read(reconnectionServiceProvider);
 
     try {
@@ -260,18 +279,16 @@ class AuthStateNotifier extends Notifier<AsyncValue<bool>> {
           await ref.read(connectionProvider.notifier).setDirectMode();
         }
 
-        return true;
+        return AuthStatus.authenticated;
       } else {
-        debugPrint('[AuthStateNotifier] Reconnection failed: ${result.error}');
-        // Clear invalid session so user is redirected to login
-        await authService.clearSession();
-        return false;
+        debugPrint('[AuthStateNotifier] Reconnection failed: ${result.error}, entering offline mode');
+        // Don't clear session - enter offline mode instead to allow downloads access
+        return AuthStatus.offlineMode;
       }
     } catch (e) {
-      debugPrint('[AuthStateNotifier] Reconnection error: $e');
-      // Clear session on error to show login
-      await authService.clearSession();
-      return false;
+      debugPrint('[AuthStateNotifier] Reconnection error: $e, entering offline mode');
+      // Don't clear session on error - enter offline mode
+      return AuthStatus.offlineMode;
     }
   }
 
@@ -301,8 +318,9 @@ class AuthStateNotifier extends Notifier<AsyncValue<bool>> {
       debugPrint('[AuthStateNotifier] Calling isAuthenticated()...');
       final isAuth = await authService.isAuthenticated();
       debugPrint('[AuthStateNotifier] isAuthenticated() returned: $isAuth');
-      state = AsyncValue.data(isAuth);
-      debugPrint('[AuthStateNotifier] State set to AsyncValue.data($isAuth)');
+      final status = isAuth ? AuthStatus.authenticated : AuthStatus.unauthenticated;
+      state = AsyncValue.data(status);
+      debugPrint('[AuthStateNotifier] State set to AsyncValue.data($status)');
     } catch (e, st) {
       debugPrint('[AuthStateNotifier] _checkAuth() error: $e');
       state = AsyncValue.error(e, st);
@@ -328,7 +346,27 @@ class AuthStateNotifier extends Notifier<AsyncValue<bool>> {
   /// Logout and clear all session data.
   Future<void> logout() async {
     await authService.clearSession();
-    state = const AsyncValue.data(false);
+    state = const AsyncValue.data(AuthStatus.unauthenticated);
+  }
+
+  /// Retry connection to server from offline mode.
+  ///
+  /// Call this when the user taps "Retry Connection" in the offline banner.
+  /// If successful, transitions to authenticated state.
+  /// If failed, stays in offline mode.
+  Future<void> retryConnection() async {
+    debugPrint('[AuthStateNotifier] retryConnection() called');
+    state = const AsyncValue.loading();
+
+    try {
+      final result = await _attemptReconnection();
+      state = AsyncValue.data(result);
+      debugPrint('[AuthStateNotifier] retryConnection() complete, state=$result');
+    } catch (e) {
+      debugPrint('[AuthStateNotifier] retryConnection() error: $e');
+      // Stay in offline mode on error
+      state = const AsyncValue.data(AuthStatus.offlineMode);
+    }
   }
 
   /// Refresh the authentication state.
@@ -341,7 +379,7 @@ class AuthStateNotifier extends Notifier<AsyncValue<bool>> {
 
 /// Provider for the auth state notifier.
 final authStateProvider =
-    NotifierProvider<AuthStateNotifier, AsyncValue<bool>>(AuthStateNotifier.new);
+    NotifierProvider<AuthStateNotifier, AsyncValue<AuthStatus>>(AuthStateNotifier.new);
 
 /// Async provider for the GraphQL client.
 ///

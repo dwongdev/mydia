@@ -2,10 +2,13 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/auth/auth_status.dart';
 import '../../core/config/web_config.dart';
 import '../../core/downloads/download_service.dart' show isDownloadSupported;
+import '../../core/graphql/graphql_provider.dart';
 import '../../core/layout/breakpoints.dart';
 import '../../core/theme/colors.dart';
+import 'offline_banner.dart';
 
 /// Modern app shell with adaptive navigation.
 /// Shows sidebar on desktop (≥900px) and bottom nav on mobile.
@@ -38,7 +41,40 @@ class _AppShellState extends ConsumerState<AppShell> {
     return 0; // Home
   }
 
-  void _onItemTapped(int index) {
+  /// Check if the app is currently in offline mode
+  bool _isOfflineMode() {
+    final authState = ref.watch(authStateProvider);
+    return authState.maybeWhen(
+      data: (status) => status == AuthStatus.offlineMode,
+      orElse: () => false,
+    );
+  }
+
+  /// Show a snackbar when a disabled nav item is tapped in offline mode
+  void _showOfflineSnackbar() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Connect to server to access this'),
+        backgroundColor: AppColors.surfaceVariant,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
+    );
+  }
+
+  void _onItemTapped(int index, {bool isOffline = false}) {
+    // In offline mode, only allow Downloads (index 3 when downloads supported)
+    if (isOffline) {
+      final downloadsIndex = isDownloadSupported ? 3 : -1;
+      if (index != downloadsIndex) {
+        _showOfflineSnackbar();
+        return;
+      }
+    }
+
     switch (index) {
       case 0:
         context.go('/');
@@ -66,6 +102,7 @@ class _AppShellState extends ConsumerState<AppShell> {
   Widget build(BuildContext context) {
     final selectedIndex = _getSelectedIndex();
     final showBackToMydia = isEmbedMode;
+    final isOffline = _isOfflineMode();
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -77,30 +114,46 @@ class _AppShellState extends ConsumerState<AppShell> {
               children: [
                 _DesktopSidebar(
                   selectedIndex: selectedIndex,
-                  onItemTapped: _onItemTapped,
+                  onItemTapped: (index) => _onItemTapped(index, isOffline: isOffline),
                   showBackToMydia: showBackToMydia,
+                  isOffline: isOffline,
                 ),
-                Expanded(child: widget.child),
+                Expanded(
+                  child: Column(
+                    children: [
+                      if (isOffline) const OfflineBanner(),
+                      Expanded(child: widget.child),
+                    ],
+                  ),
+                ),
               ],
             ),
           );
         }
 
         return Scaffold(
-          body: Stack(
+          body: Column(
             children: [
-              widget.child,
-              if (showBackToMydia)
-                Positioned(
-                  top: MediaQuery.of(context).padding.top + 8,
-                  left: 8,
-                  child: const _BackToMydiaButton(compact: true),
+              if (isOffline) const OfflineBanner(),
+              Expanded(
+                child: Stack(
+                  children: [
+                    widget.child,
+                    if (showBackToMydia)
+                      Positioned(
+                        top: MediaQuery.of(context).padding.top + 8,
+                        left: 8,
+                        child: const _BackToMydiaButton(compact: true),
+                      ),
+                  ],
                 ),
+              ),
             ],
           ),
           bottomNavigationBar: _ModernBottomNav(
             selectedIndex: selectedIndex,
-            onItemTapped: _onItemTapped,
+            onItemTapped: (index) => _onItemTapped(index, isOffline: isOffline),
+            isOffline: isOffline,
           ),
         );
       },
@@ -113,11 +166,13 @@ class _DesktopSidebar extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onItemTapped;
   final bool showBackToMydia;
+  final bool isOffline;
 
   const _DesktopSidebar({
     required this.selectedIndex,
     required this.onItemTapped,
     this.showBackToMydia = false,
+    this.isOffline = false,
   });
 
   @override
@@ -192,6 +247,7 @@ class _DesktopSidebar extends StatelessWidget {
                           selectedIcon: Icons.home_rounded,
                           label: 'Home',
                           isSelected: selectedIndex == 0,
+                          isDisabled: isOffline,
                           onTap: () => onItemTapped(0),
                         ),
                         const SizedBox(height: 4),
@@ -200,6 +256,7 @@ class _DesktopSidebar extends StatelessWidget {
                           selectedIcon: Icons.movie_rounded,
                           label: 'Movies',
                           isSelected: selectedIndex == 1,
+                          isDisabled: isOffline,
                           onTap: () => onItemTapped(1),
                         ),
                         const SizedBox(height: 4),
@@ -208,6 +265,7 @@ class _DesktopSidebar extends StatelessWidget {
                           selectedIcon: Icons.tv_rounded,
                           label: 'TV Shows',
                           isSelected: selectedIndex == 2,
+                          isDisabled: isOffline,
                           onTap: () => onItemTapped(2),
                         ),
                         if (isDownloadSupported) ...[
@@ -228,6 +286,7 @@ class _DesktopSidebar extends StatelessWidget {
                           isSelected: isDownloadSupported
                               ? selectedIndex == 4
                               : selectedIndex == 3,
+                          isDisabled: isOffline,
                           onTap: () => onItemTapped(isDownloadSupported ? 4 : 3),
                         ),
                         const SizedBox(height: 16),
@@ -250,6 +309,7 @@ class _SidebarItem extends StatefulWidget {
   final IconData selectedIcon;
   final String label;
   final bool isSelected;
+  final bool isDisabled;
   final VoidCallback onTap;
 
   const _SidebarItem({
@@ -258,6 +318,7 @@ class _SidebarItem extends StatefulWidget {
     required this.label,
     required this.isSelected,
     required this.onTap,
+    this.isDisabled = false,
   });
 
   @override
@@ -269,11 +330,17 @@ class _SidebarItemState extends State<_SidebarItem> {
 
   @override
   Widget build(BuildContext context) {
-    final isActive = widget.isSelected || _isHovered;
+    final isActive = !widget.isDisabled && (widget.isSelected || _isHovered);
+    final effectiveColor = widget.isDisabled
+        ? AppColors.textDisabled
+        : isActive
+            ? AppColors.primary
+            : AppColors.textSecondary;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
+      cursor: widget.isDisabled ? SystemMouseCursors.forbidden : SystemMouseCursors.click,
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
@@ -281,11 +348,13 @@ class _SidebarItemState extends State<_SidebarItem> {
           curve: Curves.easeOutCubic,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: widget.isSelected
-                ? AppColors.primary.withValues(alpha: 0.15)
-                : _isHovered
-                    ? AppColors.surfaceVariant.withValues(alpha: 0.5)
-                    : Colors.transparent,
+            color: widget.isDisabled
+                ? Colors.transparent
+                : widget.isSelected
+                    ? AppColors.primary.withValues(alpha: 0.15)
+                    : _isHovered
+                        ? AppColors.surfaceVariant.withValues(alpha: 0.5)
+                        : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
@@ -297,24 +366,28 @@ class _SidebarItemState extends State<_SidebarItem> {
                 height: 24,
                 margin: const EdgeInsets.only(right: 12),
                 decoration: BoxDecoration(
-                  color: widget.isSelected
+                  color: widget.isSelected && !widget.isDisabled
                       ? AppColors.primary
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
               Icon(
-                widget.isSelected ? widget.selectedIcon : widget.icon,
+                widget.isSelected && !widget.isDisabled ? widget.selectedIcon : widget.icon,
                 size: 22,
-                color: isActive ? AppColors.primary : AppColors.textSecondary,
+                color: effectiveColor,
               ),
               const SizedBox(width: 14),
               Text(
                 widget.label,
                 style: TextStyle(
                   fontSize: 15,
-                  fontWeight: widget.isSelected ? FontWeight.w600 : FontWeight.w500,
-                  color: isActive ? AppColors.textPrimary : AppColors.textSecondary,
+                  fontWeight: widget.isSelected && !widget.isDisabled ? FontWeight.w600 : FontWeight.w500,
+                  color: widget.isDisabled
+                      ? AppColors.textDisabled
+                      : isActive
+                          ? AppColors.textPrimary
+                          : AppColors.textSecondary,
                 ),
               ),
             ],
@@ -329,10 +402,12 @@ class _SidebarItemState extends State<_SidebarItem> {
 class _ModernBottomNav extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onItemTapped;
+  final bool isOffline;
 
   const _ModernBottomNav({
     required this.selectedIndex,
     required this.onItemTapped,
+    this.isOffline = false,
   });
 
   @override
@@ -365,6 +440,7 @@ class _ModernBottomNav extends StatelessWidget {
                 selectedIcon: Icons.home_rounded,
                 label: 'Home',
                 isSelected: selectedIndex == 0,
+                isDisabled: isOffline,
                 onTap: () => onItemTapped(0),
               ),
               _NavItem(
@@ -372,6 +448,7 @@ class _ModernBottomNav extends StatelessWidget {
                 selectedIcon: Icons.movie_rounded,
                 label: 'Movies',
                 isSelected: selectedIndex == 1,
+                isDisabled: isOffline,
                 onTap: () => onItemTapped(1),
               ),
               _NavItem(
@@ -379,6 +456,7 @@ class _ModernBottomNav extends StatelessWidget {
                 selectedIcon: Icons.tv_rounded,
                 label: 'Shows',
                 isSelected: selectedIndex == 2,
+                isDisabled: isOffline,
                 onTap: () => onItemTapped(2),
               ),
               if (isDownloadSupported)
@@ -396,6 +474,7 @@ class _ModernBottomNav extends StatelessWidget {
                 isSelected: isDownloadSupported
                     ? selectedIndex == 4
                     : selectedIndex == 3,
+                isDisabled: isOffline,
                 onTap: () => onItemTapped(isDownloadSupported ? 4 : 3),
               ),
             ],
@@ -411,6 +490,7 @@ class _NavItem extends StatefulWidget {
   final IconData selectedIcon;
   final String label;
   final bool isSelected;
+  final bool isDisabled;
   final VoidCallback onTap;
 
   const _NavItem({
@@ -419,6 +499,7 @@ class _NavItem extends StatefulWidget {
     required this.label,
     required this.isSelected,
     required this.onTap,
+    this.isDisabled = false,
   });
 
   @override
@@ -462,6 +543,12 @@ class _NavItemState extends State<_NavItem> with SingleTickerProviderStateMixin 
 
   @override
   Widget build(BuildContext context) {
+    final effectiveColor = widget.isDisabled
+        ? AppColors.textDisabled
+        : widget.isSelected
+            ? AppColors.primary
+            : AppColors.textSecondary;
+
     return GestureDetector(
       onTapDown: _handleTapDown,
       onTapUp: _handleTapUp,
@@ -473,7 +560,7 @@ class _NavItemState extends State<_NavItem> with SingleTickerProviderStateMixin 
           curve: Curves.easeInOut,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
-            color: widget.isSelected
+            color: widget.isSelected && !widget.isDisabled
                 ? AppColors.primary.withValues(alpha: 0.15)
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
@@ -484,11 +571,9 @@ class _NavItemState extends State<_NavItem> with SingleTickerProviderStateMixin 
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 200),
                 child: Icon(
-                  widget.isSelected ? widget.selectedIcon : widget.icon,
-                  key: ValueKey(widget.isSelected),
-                  color: widget.isSelected
-                      ? AppColors.primary
-                      : AppColors.textSecondary,
+                  widget.isSelected && !widget.isDisabled ? widget.selectedIcon : widget.icon,
+                  key: ValueKey('${widget.isSelected}_${widget.isDisabled}'),
+                  color: effectiveColor,
                   size: 24,
                 ),
               ),
@@ -498,10 +583,8 @@ class _NavItemState extends State<_NavItem> with SingleTickerProviderStateMixin 
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight:
-                      widget.isSelected ? FontWeight.w600 : FontWeight.w500,
-                  color: widget.isSelected
-                      ? AppColors.primary
-                      : AppColors.textSecondary,
+                      widget.isSelected && !widget.isDisabled ? FontWeight.w600 : FontWeight.w500,
+                  color: effectiveColor,
                 ),
                 child: Text(widget.label),
               ),

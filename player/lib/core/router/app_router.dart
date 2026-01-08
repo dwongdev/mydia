@@ -13,6 +13,7 @@ import '../../presentation/screens/settings/devices_screen.dart';
 import '../../presentation/screens/player/player_screen.dart';
 import '../../presentation/screens/downloads/downloads_screen.dart';
 import '../../presentation/widgets/app_shell.dart';
+import '../auth/auth_status.dart';
 import '../graphql/graphql_provider.dart';
 
 part 'app_router.g.dart';
@@ -122,7 +123,7 @@ GoRouter appRouter(Ref ref) {
   final refreshNotifier = _AuthRefreshNotifier();
 
   // Listen to auth state changes and trigger router refresh
-  ref.listen<AsyncValue<bool>>(authStateProvider, (previous, next) {
+  ref.listen<AsyncValue<AuthStatus>>(authStateProvider, (previous, next) {
     debugPrint('[AppRouter] Auth state changed: $previous -> $next');
     refreshNotifier.refresh();
   });
@@ -142,28 +143,38 @@ GoRouter appRouter(Ref ref) {
       // Read auth state directly from the provider each time
       // This ensures we always get the latest state
       final authState = ref.read(authStateProvider);
-      final isAuthenticated = authState.maybeWhen(
-        data: (value) => value,
-        orElse: () => false,
+      final authStatus = authState.maybeWhen(
+        data: (status) => status,
+        orElse: () => AuthStatus.unauthenticated,
       );
       final isLoading = authState.isLoading;
       final isLoginRoute = state.matchedLocation == '/login';
+      final isDownloadsRoute = state.matchedLocation == '/downloads';
+      final isPlayerRoute = state.matchedLocation.startsWith('/player');
 
-      debugPrint('[AppRouter] Redirect check: authState=$authState, isAuthenticated=$isAuthenticated, isLoading=$isLoading, path=${state.matchedLocation}');
+      debugPrint('[AppRouter] Redirect check: authStatus=$authStatus, isLoading=$isLoading, path=${state.matchedLocation}');
 
       // While loading, allow navigation to continue
       if (isLoading) {
         return null;
       }
 
-      // If not authenticated and not on login page, redirect to login
-      if (!isAuthenticated && !isLoginRoute) {
-        debugPrint('[AppRouter] Redirecting to /login (not authenticated)');
+      // Unauthenticated: must go to login
+      if (authStatus == AuthStatus.unauthenticated && !isLoginRoute) {
+        debugPrint('[AppRouter] Redirecting to /login (unauthenticated)');
         return '/login';
       }
 
-      // If authenticated and on login page, redirect to home
-      if (isAuthenticated && isLoginRoute) {
+      // Offline mode: only allow downloads and player routes
+      if (authStatus == AuthStatus.offlineMode) {
+        if (!isDownloadsRoute && !isPlayerRoute) {
+          debugPrint('[AppRouter] Redirecting to /downloads (offline mode)');
+          return '/downloads';
+        }
+      }
+
+      // Authenticated on login: go home
+      if (authStatus == AuthStatus.authenticated && isLoginRoute) {
         debugPrint('[AppRouter] Redirecting to / (authenticated on login page)');
         return '/';
       }

@@ -4,24 +4,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/downloads/download_providers.dart';
+import '../../../core/downloads/download_queue_providers.dart';
+import '../../../core/downloads/storage_quota_providers.dart';
 import '../../../domain/models/download.dart';
+import '../../../domain/models/download_settings.dart';
+import '../../../domain/models/storage_settings.dart';
 import '../../../core/theme/colors.dart';
 
 class DownloadsScreen extends ConsumerWidget {
   const DownloadsScreen({super.key});
 
-  String _formatStorageSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    }
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final storageAsync = ref.watch(storageUsageProvider);
+    final storageQuotaAsync = ref.watch(storageQuotaStatusProvider);
     final downloadedMediaAsync = ref.watch(downloadedMediaProvider);
     final downloadQueueAsync = ref.watch(downloadQueueProvider);
 
@@ -37,8 +32,8 @@ class DownloadsScreen extends ConsumerWidget {
 
           // Storage usage section
           SliverToBoxAdapter(
-            child: storageAsync.when(
-              data: (usage) => _buildStorageHeader(context, usage),
+            child: storageQuotaAsync.when(
+              data: (status) => _buildStorageHeader(context, ref, status),
               loading: () => const SizedBox.shrink(),
               error: (_, __) => const SizedBox.shrink(),
             ),
@@ -233,7 +228,13 @@ class DownloadsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildStorageHeader(BuildContext context, int usage) {
+  Widget _buildStorageHeader(BuildContext context, WidgetRef ref, StorageQuotaStatus status) {
+    // Determine colors based on status
+    final isWarning = status.isWarningExceeded;
+    final isFull = status.isFull;
+    final iconColor = isFull ? AppColors.error : (isWarning ? AppColors.warning : AppColors.primary);
+    final progressColor = isFull ? AppColors.error : (isWarning ? AppColors.warning : AppColors.primary);
+
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       padding: const EdgeInsets.all(20),
@@ -248,43 +249,133 @@ class DownloadsScreen extends ConsumerWidget {
         ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: AppColors.divider.withValues(alpha: 0.3),
+          color: isWarning ? iconColor.withValues(alpha: 0.5) : AppColors.divider.withValues(alpha: 0.3),
         ),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.storage_rounded,
-              color: AppColors.primary,
-              size: 28,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Row(
             children: [
-              Text(
-                'Storage Used',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  isFull ? Icons.storage_rounded : (isWarning ? Icons.warning_amber_rounded : Icons.storage_rounded),
+                  color: iconColor,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Storage Used',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      status.settings.hasLimit
+                          ? '${status.usedDisplay} / ${status.maxDisplay}'
+                          : status.usedDisplay,
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+              // Settings button
+              Material(
+                color: AppColors.surfaceVariant.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(8),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () => _showStorageSettings(context, ref, status),
+                  child: const Padding(
+                    padding: EdgeInsets.all(8),
+                    child: Icon(
+                      Icons.settings_rounded,
+                      size: 20,
                       color: AppColors.textSecondary,
                     ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _formatStorageSize(usage),
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                  ),
+                ),
               ),
             ],
           ),
+          // Progress bar if limit is set
+          if (status.settings.hasLimit) ...[
+            const SizedBox(height: 16),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: status.usagePercentage,
+                minHeight: 8,
+                backgroundColor: AppColors.surfaceVariant,
+                valueColor: AlwaysStoppedAnimation<Color>(progressColor),
+              ),
+            ),
+          ],
+          // Warning message
+          if (isWarning && !isFull) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, size: 16, color: AppColors.warning),
+                const SizedBox(width: 6),
+                Text(
+                  'Storage almost full (${(status.usagePercentage * 100).toStringAsFixed(0)}%)',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.warning,
+                        fontWeight: FontWeight.w500,
+                      ),
+                ),
+              ],
+            ),
+          ],
+          // Full message
+          if (isFull) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Icon(Icons.error_rounded, size: 16, color: AppColors.error),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Storage limit reached. Delete downloads or increase limit.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.error,
+                          fontWeight: FontWeight.w500,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
+      ),
+    );
+  }
+
+  void _showStorageSettings(BuildContext context, WidgetRef ref, StorageQuotaStatus status) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => _StorageSettingsSheet(
+        currentSettings: status.settings,
+        currentUsage: status.usedBytes,
       ),
     );
   }
@@ -342,13 +433,21 @@ class DownloadsScreen extends ConsumerWidget {
         task.downloadStatus == DownloadStatus.downloading &&
         task.transcodeProgress < 1.0;
     final isPaused = task.downloadStatus == DownloadStatus.paused;
+    final isQueued = task.downloadStatus == DownloadStatus.queued;
+
+    // Get queue position for queued tasks
+    final queuePosition = isQueued ? ref.watch(queuePositionProvider(task.id)) : 0;
 
     // Choose status icon and color based on state
     IconData statusIcon;
     Color statusColor;
     String statusText;
 
-    if (isPaused) {
+    if (isQueued) {
+      statusIcon = Icons.queue_rounded;
+      statusColor = AppColors.textSecondary;
+      statusText = queuePosition > 0 ? 'Queued #$queuePosition' : 'Queued';
+    } else if (isPaused) {
       statusIcon = Icons.pause_rounded;
       statusColor = AppColors.warning;
       statusText = 'Paused';
@@ -703,6 +802,408 @@ class DownloadsScreen extends ConsumerWidget {
                   ),
                 ],
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Storage settings bottom sheet.
+class _StorageSettingsSheet extends ConsumerStatefulWidget {
+  final StorageSettings currentSettings;
+  final int currentUsage;
+
+  const _StorageSettingsSheet({
+    required this.currentSettings,
+    required this.currentUsage,
+  });
+
+  @override
+  ConsumerState<_StorageSettingsSheet> createState() => _StorageSettingsSheetState();
+}
+
+class _StorageSettingsSheetState extends ConsumerState<_StorageSettingsSheet> {
+  late int? _selectedLimit;
+  late double _warningThreshold;
+  late bool _autoCleanupEnabled;
+  late CleanupPolicy _cleanupPolicy;
+  late int _maxConcurrentDownloads;
+  late bool _autoStartQueued;
+
+  static const List<int?> _limitOptions = [
+    null, // No limit
+    StorageSettings.gb1,
+    StorageSettings.gb2,
+    StorageSettings.gb5,
+    StorageSettings.gb10,
+    StorageSettings.gb20,
+  ];
+
+  static const List<int> _concurrentOptions = [1, 2, 3, 4, 5];
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedLimit = widget.currentSettings.maxStorageBytes;
+    _warningThreshold = widget.currentSettings.warningThreshold;
+    _autoCleanupEnabled = widget.currentSettings.autoCleanupEnabled;
+    _cleanupPolicy = widget.currentSettings.cleanupPolicy;
+    _maxConcurrentDownloads = 2; // Default, will be loaded async
+    _autoStartQueued = true;
+    _loadDownloadSettings();
+  }
+
+  Future<void> _loadDownloadSettings() async {
+    final downloadSettings = await ref.read(downloadSettingsProvider.future);
+    if (mounted) {
+      setState(() {
+        _maxConcurrentDownloads = downloadSettings.maxConcurrentDownloads;
+        _autoStartQueued = downloadSettings.autoStartQueued;
+      });
+    }
+  }
+
+  String _formatLimit(int? limit) {
+    if (limit == null) return 'No limit';
+    return StorageSettings.formatBytes(limit);
+  }
+
+  Future<void> _saveSettings() async {
+    // Save storage settings
+    final updateStorageSettings = ref.read(updateStorageSettingsProvider);
+    final newStorageSettings = StorageSettings(
+      maxStorageBytes: _selectedLimit,
+      warningThreshold: _warningThreshold,
+      autoCleanupEnabled: _autoCleanupEnabled,
+      cleanupPolicyValue: _cleanupPolicy.name,
+    );
+    await updateStorageSettings(newStorageSettings);
+
+    // Save download settings
+    final updateDownloadSettings = ref.read(updateDownloadSettingsProvider);
+    final newDownloadSettings = DownloadSettings(
+      maxConcurrentDownloads: _maxConcurrentDownloads,
+      autoStartQueued: _autoStartQueued,
+    );
+    await updateDownloadSettings(newDownloadSettings);
+
+    if (mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  Future<void> _cleanupNow() async {
+    final cleanupService = ref.read(storageCleanupServiceProvider);
+    final totalCleanable = cleanupService.getTotalCleanableBytes();
+
+    if (totalCleanable == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No downloads to clean up')),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Clean Up Downloads'),
+        content: Text(
+          'This will delete all downloaded media (${StorageSettings.formatBytes(totalCleanable)}). '
+          'Are you sure?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel', style: TextStyle(color: AppColors.textSecondary)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Delete All'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final freedBytes = await cleanupService.cleanup(
+        targetBytes: totalCleanable,
+        policy: _cleanupPolicy,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Freed ${StorageSettings.formatBytes(freedBytes)}')),
+        );
+        Navigator.of(context).pop();
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.settings_rounded, color: AppColors.primary, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Storage Settings',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          // Storage limit dropdown
+          Text(
+            'Maximum Storage',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceVariant.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<int?>(
+                isExpanded: true,
+                value: _limitOptions.contains(_selectedLimit) ? _selectedLimit : null,
+                items: _limitOptions.map((limit) {
+                  final isCurrentlyUsed = limit != null && widget.currentUsage > limit;
+                  return DropdownMenuItem(
+                    value: limit,
+                    child: Row(
+                      children: [
+                        Text(_formatLimit(limit)),
+                        if (isCurrentlyUsed) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            '(exceeds current usage)',
+                            style: TextStyle(color: AppColors.warning, fontSize: 12),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                }).toList(),
+                onChanged: (value) => setState(() => _selectedLimit = value),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Warning threshold slider
+          Text(
+            'Warning Threshold: ${(_warningThreshold * 100).toStringAsFixed(0)}%',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          Slider(
+            value: _warningThreshold,
+            min: 0.5,
+            max: 1.0,
+            divisions: 10,
+            activeColor: AppColors.primary,
+            onChanged: (value) => setState(() => _warningThreshold = value),
+          ),
+          const SizedBox(height: 12),
+
+          // Auto cleanup toggle
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(
+              'Automatic Cleanup',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            subtitle: Text(
+              'Automatically delete old downloads when storage is full',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+            ),
+            value: _autoCleanupEnabled,
+            onChanged: (value) => setState(() => _autoCleanupEnabled = value),
+          ),
+
+          // Cleanup policy
+          if (_autoCleanupEnabled) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Cleanup Policy',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: _PolicyOption(
+                    title: 'Oldest First',
+                    isSelected: _cleanupPolicy == CleanupPolicy.byDate,
+                    onTap: () => setState(() => _cleanupPolicy = CleanupPolicy.byDate),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _PolicyOption(
+                    title: 'Least Used',
+                    isSelected: _cleanupPolicy == CleanupPolicy.lru,
+                    onTap: () => setState(() => _cleanupPolicy = CleanupPolicy.lru),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 20),
+
+          // Concurrent downloads section
+          const Divider(color: AppColors.divider),
+          const SizedBox(height: 16),
+
+          Text(
+            'Download Queue',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 16),
+
+          // Max concurrent downloads
+          Text(
+            'Max Concurrent Downloads',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceVariant.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<int>(
+                isExpanded: true,
+                value: _concurrentOptions.contains(_maxConcurrentDownloads)
+                    ? _maxConcurrentDownloads
+                    : 2,
+                items: _concurrentOptions.map((count) {
+                  return DropdownMenuItem(
+                    value: count,
+                    child: Text('$count download${count > 1 ? 's' : ''} at a time'),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _maxConcurrentDownloads = value);
+                  }
+                },
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Auto start queued toggle
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(
+              'Auto-start Queued',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            subtitle: Text(
+              'Automatically start queued downloads when slots become available',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+            ),
+            value: _autoStartQueued,
+            onChanged: (value) => setState(() => _autoStartQueued = value),
+          ),
+
+          const SizedBox(height: 24),
+
+          // Actions
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _cleanupNow,
+                  icon: const Icon(Icons.delete_sweep_rounded),
+                  label: const Text('Clean Up Now'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.error,
+                    side: const BorderSide(color: AppColors.error),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton(
+                  onPressed: _saveSettings,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  child: const Text('Save'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PolicyOption extends StatelessWidget {
+  final String title;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _PolicyOption({
+    required this.title,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: isSelected ? AppColors.primary.withValues(alpha: 0.15) : AppColors.surfaceVariant.withValues(alpha: 0.5),
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: isSelected ? AppColors.primary : Colors.transparent,
+            ),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            title,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: isSelected ? AppColors.primary : AppColors.textSecondary,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
             ),
           ),
         ),

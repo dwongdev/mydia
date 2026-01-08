@@ -824,9 +824,8 @@ class PairingService {
 
       await _storeCredentials(credentials);
 
-      // Step 7: Mark claim as consumed on relay
-      onStatusUpdate?.call('Finalizing...');
-      await _relayService.consumeClaim(claimInfo.claimId, deviceId);
+      // Note: Claim consumption on relay is handled server-side by Mydia
+      // after successful pairing (via consume_claim WebSocket message)
 
       // Relay-first strategy: Always return with relay tunnel active.
       // Background probing (handled by ConnectionManager) will attempt to

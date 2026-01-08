@@ -121,6 +121,20 @@ defmodule Mydia.RemoteAccess.Relay do
   end
 
   @doc """
+  Notifies the relay that a claim code has been consumed.
+  This is fire-and-forget - we don't wait for confirmation.
+  Returns :ok or {:error, reason}.
+  """
+  def consume_claim(server \\ __MODULE__, claim_code) when is_binary(claim_code) do
+    try do
+      GenServer.cast(server, {:consume_claim, claim_code})
+    catch
+      :exit, {:noproc, _} ->
+        {:error, :not_running}
+    end
+  end
+
+  @doc """
   Manually triggers reconnection to the relay service.
   Returns :ok or {:error, reason}.
   """
@@ -304,6 +318,23 @@ defmodule Mydia.RemoteAccess.Relay do
     if state.ws_pid do
       msg = Jason.encode!(%{type: "update_urls", direct_urls: direct_urls})
       WebSockex.send_frame(state.ws_pid, {:text, msg})
+    end
+
+    {:noreply, state}
+  end
+
+  @impl GenServer
+  def handle_cast({:consume_claim, claim_code}, state) do
+    if state.registered and state.ws_pid do
+      msg = Jason.encode!(%{type: "consume_claim", claim_code: claim_code})
+
+      case WebSockex.send_frame(state.ws_pid, {:text, msg}) do
+        :ok ->
+          Logger.info("Notified relay of claim consumption: #{claim_code}")
+
+        {:error, reason} ->
+          Logger.warning("Failed to notify relay of claim consumption: #{inspect(reason)}")
+      end
     end
 
     {:noreply, state}

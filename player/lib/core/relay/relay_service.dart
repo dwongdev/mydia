@@ -146,35 +146,6 @@ class RelayService {
     }
   }
 
-  /// Marks a claim as consumed after successful pairing.
-  ///
-  /// This should be called after the device has been successfully paired
-  /// with the instance.
-  Future<RelayResult<void>> consumeClaim(
-      String claimId, String deviceId) async {
-    try {
-      final url = Uri.parse('$_relayUrl/relay/claim/consume');
-
-      final response = await _httpClient.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'claim_id': claimId,
-          'device_id': deviceId,
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        return RelayResult.success(null);
-      } else {
-        return RelayResult.error(
-            'Failed to consume claim (${response.statusCode})');
-      }
-    } catch (e) {
-      return RelayResult.error('Network error: $e');
-    }
-  }
-
   /// Closes the HTTP client.
   void dispose() {
     _httpClient.close();

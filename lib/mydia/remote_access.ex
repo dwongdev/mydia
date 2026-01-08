@@ -9,7 +9,7 @@ defmodule Mydia.RemoteAccess do
   require Logger
 
   alias Mydia.Repo
-  alias Mydia.RemoteAccess.{Config, DirectUrls, PairingClaim, RemoteDevice}
+  alias Mydia.RemoteAccess.{Config, DirectUrls, PairingClaim, Relay, RemoteDevice}
 
   # Config management
 
@@ -436,10 +436,12 @@ defmodule Mydia.RemoteAccess do
   def consume_claim_code(code, device_id) do
     code = normalize_code(code)
 
-    with {:ok, claim} <- validate_claim_code(code) do
-      claim
-      |> PairingClaim.consume_changeset(device_id)
-      |> Repo.update()
+    with {:ok, claim} <- validate_claim_code(code),
+         {:ok, consumed_claim} <-
+           claim |> PairingClaim.consume_changeset(device_id) |> Repo.update() do
+      # Notify relay server that this claim has been consumed
+      Relay.consume_claim(code)
+      {:ok, consumed_claim}
     end
   end
 

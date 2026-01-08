@@ -122,6 +122,12 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
 
   /// Loads stored connection state on startup.
   Future<void> _loadStoredState() async {
+    // If we already have an active relay tunnel (e.g., just paired), don't overwrite
+    if (state.isRelayMode && state.isTunnelActive) {
+      debugPrint('[ConnectionNotifier] Already in relay mode with active tunnel, skipping stored state load');
+      return;
+    }
+
     final modeStr = await _authStorage.read(_ConnectionStorageKeys.connectionMode);
     final instanceId = await _authStorage.read(_ConnectionStorageKeys.instanceId);
     final relayUrl = await _authStorage.read(_ConnectionStorageKeys.relayUrl);

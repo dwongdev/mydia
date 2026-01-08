@@ -173,8 +173,10 @@ defmodule Mydia.RemoteAccess.Pairing do
     end
   end
 
-  # Generates a JWT media access token for the device
-  defp generate_media_token(device) do
+  @doc """
+  Generates a JWT media access token for the device.
+  """
+  def generate_media_token(device) do
     case MediaToken.create_token(device) do
       {:ok, token, _claims} -> token
       {:error, _reason} -> raise "Failed to generate media token"
@@ -267,7 +269,7 @@ defmodule Mydia.RemoteAccess.Pairing do
 
   """
   @spec complete_pairing(String.t(), map(), binary(), binary()) ::
-          {:ok, RemoteDevice.t(), String.t(), binary()}
+          {:ok, RemoteDevice.t(), String.t(), String.t(), binary()}
           | {:error, :not_found | :already_used | :expired | :invalid_key | Ecto.Changeset.t()}
   def complete_pairing(claim_code, device_attrs, client_static_public_key, session_key)
       when byte_size(session_key) == 32 and byte_size(client_static_public_key) == 32 do
@@ -290,8 +292,8 @@ defmodule Mydia.RemoteAccess.Pairing do
       # Generate media access token
       media_token = generate_media_token(device)
 
-      # Return the device and media token (no keypair - client already has it)
-      {:ok, device, media_token, session_key}
+      # Return the device, media token, device token (for reconnection), and session key
+      {:ok, device, media_token, device_token, session_key}
     end
   end
 

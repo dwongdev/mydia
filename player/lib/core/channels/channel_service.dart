@@ -67,7 +67,7 @@ class ChannelService {
       final wsUrl = _buildWebSocketUrl(serverUrl);
       debugPrint('[ChannelService] Connecting to $wsUrl...');
 
-      // Create Phoenix socket
+      // Create Phoenix socket with connection event listeners
       _socket = PhoenixSocket(
         wsUrl,
         socketOptions: PhoenixSocketOptions(
@@ -76,21 +76,59 @@ class ChannelService {
       );
 
       debugPrint('[ChannelService] Socket connecting...');
+
+      // Use a completer to track connection success/failure
+      final completer = Completer<ChannelResult<void>>();
+
+      // Listen for open event
+      _socket!.openStream.listen((_) {
+        if (!completer.isCompleted) {
+          debugPrint('[ChannelService] Socket opened successfully!');
+          completer.complete(ChannelResult.success(null));
+        }
+      });
+
+      // Listen for close/error events
+      _socket!.closeStream.listen((event) {
+        if (!completer.isCompleted) {
+          debugPrint('[ChannelService] Socket closed: code=${event.code}, reason=${event.reason}');
+          completer.complete(ChannelResult.error(
+            'WebSocket closed: ${event.reason ?? "Connection failed"} (code: ${event.code})',
+          ));
+        }
+      });
+
+      _socket!.errorStream.listen((error) {
+        if (!completer.isCompleted) {
+          debugPrint('[ChannelService] Socket error: $error');
+          completer.complete(ChannelResult.error('WebSocket error: $error'));
+        }
+      });
+
       // Connect to the socket
       await _socket!.connect();
 
-      // Wait a bit for connection to establish
-      await Future.delayed(const Duration(milliseconds: 500));
+      // Wait for connection result with timeout
+      final result = await completer.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          debugPrint('[ChannelService] Connection timeout');
+          return ChannelResult.error('Connection timeout');
+        },
+      );
 
-      if (!_socket!.isConnected) {
-        debugPrint('[ChannelService] Socket NOT connected after delay');
-        return ChannelResult.error('Failed to establish WebSocket connection');
+      if (!result.success) {
+        // Clean up on failure
+        _socket?.dispose();
+        _socket = null;
       }
 
-      debugPrint('[ChannelService] Socket connected!');
-      return ChannelResult.success(null);
-    } catch (e) {
+      return result;
+    } catch (e, stackTrace) {
       debugPrint('[ChannelService] Connection error: $e');
+      debugPrint('[ChannelService] Stack trace: $stackTrace');
+      _socket?.dispose();
+      _socket = null;
       return ChannelResult.error('Connection error: $e');
     }
   }
@@ -509,10 +547,15 @@ class ChannelService {
 
         final deviceId = responseData['device_id'] as String?;
         final mediaToken = responseData['media_token'] as String?;
+        final deviceToken = responseData['device_token'] as String?;
 
         if (deviceId == null || mediaToken == null) {
           debugPrint('[ChannelService] Incomplete pairing response');
           return ChannelResult.error('Incomplete pairing response');
+        }
+
+        if (deviceToken == null) {
+          debugPrint('[ChannelService] WARNING: device_token not in response - reconnection may fail');
         }
 
         debugPrint('[ChannelService] Claim code submission successful!');
@@ -520,6 +563,7 @@ class ChannelService {
           PairingResponse(
             deviceId: deviceId,
             mediaToken: mediaToken,
+            deviceToken: deviceToken,
           ),
         );
       } else {
@@ -598,9 +642,16 @@ class PairingResponse {
   /// The media access token for API requests.
   final String mediaToken;
 
+  /// The device token for reconnection authentication.
+  ///
+  /// This token is used during key exchange to prove device identity
+  /// without requiring the claim code again.
+  final String? deviceToken;
+
   const PairingResponse({
     required this.deviceId,
     required this.mediaToken,
+    this.deviceToken,
   });
 }
 

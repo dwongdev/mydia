@@ -407,13 +407,20 @@ class ReconnectionService {
   Future<ReconnectionResult> _tryRelayConnection(
     _StoredCredentials credentials,
   ) async {
+    debugPrint('[ReconnectionService] _tryRelayConnection called');
+    debugPrint('[ReconnectionService] instanceId: ${credentials.instanceId}');
+    debugPrint('[ReconnectionService] deviceToken: ${credentials.deviceToken != null ? "present" : "null"}');
+    debugPrint('[ReconnectionService] relayUrl: $_relayUrl');
+
     if (credentials.instanceId == null) {
+      debugPrint('[ReconnectionService] No instance ID, skipping relay');
       return ReconnectionResult.error(
         'Relay connection not available: no instance ID',
       );
     }
 
     if (credentials.deviceToken == null) {
+      debugPrint('[ReconnectionService] No device token, skipping relay');
       return ReconnectionResult.error(
         'Relay connection not available: no device token',
       );
@@ -421,14 +428,18 @@ class ReconnectionService {
 
     try {
       // Use provided service or create one with default relay URL
+      debugPrint('[ReconnectionService] Creating RelayTunnelService...');
       final tunnelService =
           _relayTunnelService ?? RelayTunnelService(relayUrl: _relayUrl);
 
       // Connect to relay tunnel
+      debugPrint('[ReconnectionService] Calling tunnelService.connectViaRelay...');
       final tunnelResult =
           await tunnelService.connectViaRelay(credentials.instanceId!);
+      debugPrint('[ReconnectionService] Relay tunnel result: success=${tunnelResult.success}, error=${tunnelResult.error}');
 
       if (!tunnelResult.success) {
+        debugPrint('[ReconnectionService] Relay tunnel failed: ${tunnelResult.error}');
         return ReconnectionResult.error(
           tunnelResult.error ?? 'Failed to connect via relay',
         );
@@ -515,7 +526,9 @@ class ReconnectionService {
           certFingerprint: credentials.certFingerprint,
         ),
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('[ReconnectionService] Relay connection exception: $e');
+      debugPrint('[ReconnectionService] Stack trace: $stackTrace');
       return ReconnectionResult.error('Relay connection error: $e');
     }
   }

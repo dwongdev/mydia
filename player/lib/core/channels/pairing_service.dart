@@ -88,6 +88,7 @@ abstract class _StorageKeys {
   static const serverUrl = 'pairing_server_url';
   static const deviceId = 'pairing_device_id';
   static const mediaToken = 'pairing_media_token';
+  static const deviceToken = 'pairing_device_token';
   static const devicePublicKey = 'pairing_device_public_key';
   static const devicePrivateKey = 'pairing_device_private_key';
   static const directUrls = 'pairing_direct_urls';
@@ -137,6 +138,12 @@ class PairingCredentials {
   /// The media access token for API requests.
   final String mediaToken;
 
+  /// The device token for reconnection authentication.
+  ///
+  /// This token is used during key exchange to prove device identity
+  /// without requiring the claim code again.
+  final String? deviceToken;
+
   /// The device's public key (32 bytes).
   final Uint8List devicePublicKey;
 
@@ -162,6 +169,7 @@ class PairingCredentials {
     required this.serverUrl,
     required this.deviceId,
     required this.mediaToken,
+    this.deviceToken,
     required this.devicePublicKey,
     required this.devicePrivateKey,
     required this.serverPublicKey,
@@ -482,6 +490,7 @@ class PairingService {
         serverUrl: serverUrl,
         deviceId: response.deviceId,
         mediaToken: response.mediaToken,
+        deviceToken: response.deviceToken,
         devicePublicKey: devicePublicKey,
         devicePrivateKey: devicePrivateKey,
         serverPublicKey: serverPublicKey,
@@ -508,6 +517,7 @@ class PairingService {
     final serverUrl = await _authStorage.read(_StorageKeys.serverUrl);
     final deviceId = await _authStorage.read(_StorageKeys.deviceId);
     final mediaToken = await _authStorage.read(_StorageKeys.mediaToken);
+    final deviceToken = await _authStorage.read(_StorageKeys.deviceToken);
     final publicKeyB64 = await _authStorage.read(_StorageKeys.devicePublicKey);
     final privateKeyB64 =
         await _authStorage.read(_StorageKeys.devicePrivateKey);
@@ -545,6 +555,7 @@ class PairingService {
       serverUrl: serverUrl,
       deviceId: deviceId,
       mediaToken: mediaToken,
+      deviceToken: deviceToken,
       devicePublicKey: _base64ToBytes(publicKeyB64),
       devicePrivateKey: _base64ToBytes(privateKeyB64),
       serverPublicKey: _base64ToBytes(serverPublicKeyB64),
@@ -562,6 +573,7 @@ class PairingService {
     await _authStorage.delete(_StorageKeys.serverUrl);
     await _authStorage.delete(_StorageKeys.deviceId);
     await _authStorage.delete(_StorageKeys.mediaToken);
+    await _authStorage.delete(_StorageKeys.deviceToken);
     await _authStorage.delete(_StorageKeys.devicePublicKey);
     await _authStorage.delete(_StorageKeys.devicePrivateKey);
     await _authStorage.delete(_StorageKeys.serverPublicKey);
@@ -797,10 +809,17 @@ class PairingService {
       // Parse pairing response (pairing_complete type)
       final deviceId = responseJson['device_id'] as String?;
       final mediaToken = responseJson['media_token'] as String?;
+      final deviceToken = responseJson['device_token'] as String?;
+
+      debugPrint('[RelayPairing] Response: deviceId=$deviceId, mediaToken=${mediaToken != null ? "present" : "null"}, deviceToken=${deviceToken != null ? "present" : "null"}');
 
       if (deviceId == null || mediaToken == null) {
         await tunnel.close();
         return PairingResult.error('Incomplete pairing response from relay');
+      }
+
+      if (deviceToken == null) {
+        debugPrint('[RelayPairing] WARNING: device_token not returned by server - reconnection may fail');
       }
 
       // Step 6: Build credentials with locally-generated keypair
@@ -813,6 +832,7 @@ class PairingService {
         serverUrl: serverUrl,
         deviceId: deviceId,
         mediaToken: mediaToken,
+        deviceToken: deviceToken,
         devicePublicKey: devicePublicKey,
         devicePrivateKey: devicePrivateKey,
         serverPublicKey: serverPublicKey,
@@ -866,6 +886,12 @@ class PairingService {
     await _authStorage.write(_StorageKeys.serverUrl, credentials.serverUrl);
     await _authStorage.write(_StorageKeys.deviceId, credentials.deviceId);
     await _authStorage.write(_StorageKeys.mediaToken, credentials.mediaToken);
+    if (credentials.deviceToken != null) {
+      await _authStorage.write(
+        _StorageKeys.deviceToken,
+        credentials.deviceToken!,
+      );
+    }
     await _authStorage.write(
       _StorageKeys.devicePublicKey,
       _bytesToBase64(credentials.devicePublicKey),

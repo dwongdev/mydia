@@ -324,7 +324,7 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
                  client_static_public_key,
                  state.session_key
                ) do
-            {:ok, device, media_token, _session_key} ->
+            {:ok, device, media_token, device_token, _session_key} ->
               Logger.info(
                 "Tunnel claim_code SUCCESS: device_id=#{device.id}, device_name=#{device_name}"
               )
@@ -332,11 +332,12 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
               # Publish device connected event
               Mydia.RemoteAccess.publish_device_event(device, :connected)
 
-              # Response no longer includes keypair - client already has its keys
+              # Response includes device_token for reconnection authentication
               response = %{
                 type: "pairing_complete",
                 device_id: device.id,
-                media_token: media_token
+                media_token: media_token,
+                device_token: device_token
               }
 
               # Store device_id in state for authenticating subsequent requests
@@ -584,12 +585,85 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
     {:ok, Jason.encode!(response), state}
   end
 
-  defp handle_tunnel_message(type, data, state) do
+  # Handle key_exchange for reconnection with device_token authentication
+  defp handle_tunnel_message(
+         "key_exchange",
+         %{"client_public_key" => client_public_key_b64, "device_token" => device_token},
+         state
+       ) do
+    Logger.info("Tunnel processing key_exchange (reconnection with device_token)")
+
+    with {:ok, client_public_key} <- Base.decode64(client_public_key_b64),
+         {:ok, device} <- Mydia.RemoteAccess.verify_device_token(device_token),
+         false <- Mydia.RemoteAccess.RemoteDevice.revoked?(device) do
+      Logger.info("Tunnel key_exchange: verified device_id=#{device.id}")
+
+      # Generate ephemeral X25519 keypair for this session
+      {server_public_key, server_private_key} = :crypto.generate_key(:ecdh, :x25519)
+
+      # Compute shared secret using X25519 ECDH
+      shared_secret = :crypto.compute_key(:ecdh, client_public_key, server_private_key, :x25519)
+
+      # Derive session key using HKDF
+      session_key = derive_session_key(shared_secret)
+
+      # Update device last_seen and generate new media token
+      {:ok, updated_device} = Mydia.RemoteAccess.touch_device(device)
+      media_token = Pairing.generate_media_token(updated_device)
+
+      # Publish device connected event
+      Mydia.RemoteAccess.publish_device_event(updated_device, :connected)
+
+      response = %{
+        type: "key_exchange_complete",
+        server_public_key: Base.encode64(server_public_key),
+        token: media_token,
+        device_id: updated_device.id
+      }
+
+      new_state = %{
+        state
+        | session_key: session_key,
+          handshake_complete: true,
+          device_id: updated_device.id
+      }
+
+      Logger.info("Tunnel key_exchange SUCCESS: device_id=#{updated_device.id}")
+      {:ok, Jason.encode!(response), new_state}
+    else
+      :error ->
+        Logger.error("Tunnel key_exchange: invalid base64 in client_public_key")
+        {:error, :invalid_base64}
+
+      {:error, :not_found} ->
+        Logger.warning("Tunnel key_exchange: device not found for token")
+        {:error, :device_not_found}
+
+      true ->
+        Logger.warning("Tunnel key_exchange: device has been revoked")
+        {:error, :device_revoked}
+
+      {:error, reason} ->
+        Logger.error("Tunnel key_exchange FAILED: #{inspect(reason)}")
+        {:error, {:key_exchange_failed, reason}}
+    end
+  end
+
+  defp handle_tunnel_message(type, data, state) when is_binary(type) do
     Logger.warning(
       "Tunnel received unknown message type: type=#{type}, keys=#{inspect(Map.keys(data))}, handshake_complete=#{state.handshake_complete}"
     )
 
     {:ok, Jason.encode!(%{type: "error", message: "unknown_message_type"}), state}
+  end
+
+  # Derive a 32-byte session key from shared secret using HKDF-SHA256
+  defp derive_session_key(shared_secret) do
+    # Simple HKDF extract and expand
+    # Extract: PRK = HMAC-SHA256(salt="", IKM=shared_secret)
+    prk = :crypto.mac(:hmac, :sha256, "", shared_secret)
+    # Expand: OKM = HMAC-SHA256(PRK, info || 0x01)
+    :crypto.mac(:hmac, :sha256, prk, "mydia-session-key" <> <<1>>)
   end
 
   # Execute a local HTTP request (used to proxy API calls through the tunnel)
@@ -847,7 +921,8 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
   @doc false
   # Determines if a message type requires encryption/should be sent encrypted.
   # Handshake messages are always plaintext; all others are encrypted after handshake.
-  defp handshake_message_type?(type) when type in ["pairing_handshake", "handshake_complete"] do
+  defp handshake_message_type?(type)
+       when type in ["pairing_handshake", "handshake_complete", "key_exchange_complete"] do
     true
   end
 

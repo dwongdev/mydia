@@ -246,6 +246,35 @@ defmodule Mydia.RemoteAccess do
   end
 
   @doc """
+  Verifies a device token and returns the device if valid.
+
+  This function checks the provided token against all non-revoked devices
+  using Argon2 verification. Returns `{:ok, device}` if found, `{:error, :not_found}` otherwise.
+
+  Note: This iterates through devices which may be slow with many devices.
+  Consider adding a token lookup field for better performance at scale.
+  """
+  def verify_device_token(token) when is_binary(token) do
+    # Get all non-revoked devices
+    query =
+      from d in RemoteDevice,
+        where: is_nil(d.revoked_at),
+        select: d
+
+    devices = Repo.all(query)
+
+    # Find the device whose token_hash matches
+    case Enum.find(devices, fn device ->
+           device.token_hash && Argon2.verify_pass(token, device.token_hash)
+         end) do
+      nil -> {:error, :not_found}
+      device -> {:ok, device}
+    end
+  end
+
+  def verify_device_token(_), do: {:error, :not_found}
+
+  @doc """
   Creates a new device pairing.
   """
   def create_device(attrs) do

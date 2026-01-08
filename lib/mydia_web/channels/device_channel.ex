@@ -146,7 +146,7 @@ defmodule MydiaWeb.DeviceChannel do
                  client_static_public_key,
                  session_key
                ) do
-            {:ok, device, media_token, _session_key} ->
+            {:ok, device, media_token, device_token, _session_key} ->
               # Update socket with device info
               socket =
                 socket
@@ -157,12 +157,13 @@ defmodule MydiaWeb.DeviceChannel do
               # Publish device connected event
               Mydia.RemoteAccess.publish_device_event(device, :connected)
 
-              # No keypair in response - client already has its own keys
+              # Include device_token for reconnection authentication
               {:reply,
                {:ok,
                 %{
                   device_id: device.id,
-                  media_token: media_token
+                  media_token: media_token,
+                  device_token: device_token
                 }}, socket}
 
             {:error, :not_found} ->

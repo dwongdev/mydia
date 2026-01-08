@@ -436,6 +436,7 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
 
     if body do
       Logger.info("Request body size: #{String.length(body)} chars")
+      Logger.info("Request body: #{body}")
     end
 
     # Execute the request using RequestExecutor for proper timeout handling
@@ -468,6 +469,10 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
 
         Logger.info(
           "Tunnel request completed: method=#{method}, path=#{path}, id=#{request_id}, status=#{status}#{body_preview}"
+        )
+
+        Logger.info(
+          "Response body details: encoding=#{encoded.body_encoding}, body_size=#{if encoded.body, do: byte_size(encoded.body), else: 0}, body_preview=#{if encoded.body, do: String.slice(encoded.body, 0, 100), else: "nil"}"
         )
 
         response = %{
@@ -707,12 +712,12 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
     # Log session key for debugging cross-platform crypto
     session_key_hex = Base.encode16(session_key, case: :lower)
 
-    Logger.info(
-      "Tunnel decrypting message: payload_size=#{byte_size(payload)}, session_key_first8=#{String.slice(session_key_hex, 0, 16)}"
-    )
-
     # Build AAD for client→server messages (we're the server receiving)
     aad = build_aad(session_id, :to_server)
+
+    Logger.info(
+      "Tunnel decrypting message: payload_size=#{byte_size(payload)}, session_key_first8=#{String.slice(session_key_hex, 0, 16)}, session_id=#{session_id}, aad=#{aad}"
+    )
 
     case decrypt_payload(payload, session_key, aad) do
       {:ok, decrypted} ->
@@ -744,12 +749,13 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
       # All other responses are encrypted after handshake
       session_key_hex = Base.encode16(session_key, case: :lower)
 
-      Logger.info(
-        "Tunnel encrypting response: type=#{response_type}, session_key_first8=#{String.slice(session_key_hex, 0, 16)}"
-      )
-
       # Build AAD for server→client messages (we're the server sending)
       aad = build_aad(session_id, :to_client)
+
+      Logger.info(
+        "Tunnel encrypting response: type=#{response_type}, session_key_first8=#{String.slice(session_key_hex, 0, 16)}, session_id=#{session_id}, aad=#{aad}"
+      )
+
       encrypt_message(response, session_key, aad)
     end
   end
@@ -775,7 +781,8 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
 
   @doc false
   # Encrypts a JSON response using the session key.
-  # Returns base64-encoded: nonce (12 bytes) || ciphertext || mac (16 bytes)
+  # Returns raw binary: nonce (12 bytes) || ciphertext || mac (16 bytes)
+  # The caller (relay) will base64-encode this binary for transmission.
   # AAD (Additional Authenticated Data) binds the ciphertext to its context,
   # preventing cross-session replay attacks.
   #
@@ -787,9 +794,12 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
     %{ciphertext: ciphertext, nonce: nonce, mac: mac} =
       Crypto.encrypt(json_response, session_key, aad)
 
-    # Wire format: nonce || ciphertext || mac
-    encrypted_payload = nonce <> ciphertext <> mac
-    Base.encode64(encrypted_payload)
+    Logger.info(
+      "encrypt_message: nonce_size=#{byte_size(nonce)}, ciphertext_size=#{byte_size(ciphertext)}, mac_size=#{byte_size(mac)}, plaintext_size=#{byte_size(json_response)}"
+    )
+
+    # Wire format: nonce || ciphertext || mac (return as binary, not base64)
+    nonce <> ciphertext <> mac
   end
 
   @doc false

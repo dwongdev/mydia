@@ -73,7 +73,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: player-macos-app
-          path: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/player.app
+          path: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/Mydia.app
           retention-days: 7
 
   build-linux:

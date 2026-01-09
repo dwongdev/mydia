@@ -163,7 +163,7 @@ defmodule MydiaWeb.Schema.Resolvers.DiscoveryResolver do
 
     %{
       id: episode.id,
-      type: :tv_show,
+      type: :episode,
       title: episode.title || "Episode #{episode.episode_number}",
       artwork: build_episode_artwork(episode, show),
       progress: format_progress(progress),
@@ -205,17 +205,14 @@ defmodule MydiaWeb.Schema.Resolvers.DiscoveryResolver do
 
   defp build_episode_artwork(%{metadata: metadata}, show) when not is_nil(metadata) do
     still_path = get_metadata_field(metadata, :still_path)
+    show_artwork = build_artwork(show)
 
-    # Fall back to show artwork if no episode thumbnail
-    if still_path do
-      %{
-        poster_url: nil,
-        backdrop_url: nil,
-        thumbnail_url: build_image_url(still_path)
-      }
-    else
-      build_artwork(show)
-    end
+    # Always include show's poster/backdrop, plus episode thumbnail if available
+    %{
+      poster_url: show_artwork && show_artwork.poster_url,
+      backdrop_url: show_artwork && show_artwork.backdrop_url,
+      thumbnail_url: build_image_url(still_path)
+    }
   end
 
   defp build_episode_artwork(_episode, show), do: build_artwork(show)

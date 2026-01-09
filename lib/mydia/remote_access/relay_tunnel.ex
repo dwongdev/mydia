@@ -260,48 +260,6 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
     end
   end
 
-  defp do_pairing_handshake(client_message_b64, state) do
-    case Base.decode64(client_message_b64) do
-      {:ok, client_public_key} ->
-        Logger.info(
-          "Tunnel pairing_handshake: client_public_key_length=#{byte_size(client_public_key)}"
-        )
-
-        # Derive session key from client's public key
-        case Pairing.process_pairing_message(state.server_private_key, client_public_key) do
-          {:ok, session_key} ->
-            # Debug: Log session key fingerprint for troubleshooting cross-platform crypto
-            session_key_hex = Base.encode16(session_key, case: :lower)
-
-            Logger.info(
-              "Tunnel pairing_handshake: session key derived, first_8_bytes=#{String.slice(session_key_hex, 0, 16)}"
-            )
-
-            Logger.info(
-              "Tunnel pairing_handshake: session key derived successfully, handshake complete"
-            )
-
-            # Send back server's public key with protocol versions
-            response = %{
-              type: "pairing_handshake",
-              message: Base.encode64(state.server_public_key),
-              protocol_versions: ProtocolVersion.supported_versions()
-            }
-
-            new_state = %{state | session_key: session_key, handshake_complete: true}
-            {:ok, Jason.encode!(response), new_state}
-
-          {:error, reason} ->
-            Logger.error("Tunnel pairing_handshake failed: #{inspect(reason)}")
-            {:error, {:handshake_failed, reason}}
-        end
-
-      :error ->
-        Logger.error("Tunnel pairing_handshake: invalid base64 in client message")
-        {:error, :invalid_base64}
-    end
-  end
-
   defp handle_tunnel_message("claim_code", data, _state)
        when not is_map_key(data, "code") or
               not is_map_key(data, "device_name") or
@@ -628,6 +586,58 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
     end
   end
 
+  defp handle_tunnel_message(type, data, state) when is_binary(type) do
+    Logger.warning(
+      "Tunnel received unknown message type: type=#{type}, keys=#{inspect(Map.keys(data))}, handshake_complete=#{state.handshake_complete}"
+    )
+
+    {:ok, Jason.encode!(%{type: "error", message: "unknown_message_type"}), state}
+  end
+
+  # Helper for pairing_handshake message handling
+  defp do_pairing_handshake(client_message_b64, state) do
+    case Base.decode64(client_message_b64) do
+      {:ok, client_public_key} ->
+        Logger.info(
+          "Tunnel pairing_handshake: client_public_key_length=#{byte_size(client_public_key)}"
+        )
+
+        # Derive session key from client's public key
+        case Pairing.process_pairing_message(state.server_private_key, client_public_key) do
+          {:ok, session_key} ->
+            # Debug: Log session key fingerprint for troubleshooting cross-platform crypto
+            session_key_hex = Base.encode16(session_key, case: :lower)
+
+            Logger.info(
+              "Tunnel pairing_handshake: session key derived, first_8_bytes=#{String.slice(session_key_hex, 0, 16)}"
+            )
+
+            Logger.info(
+              "Tunnel pairing_handshake: session key derived successfully, handshake complete"
+            )
+
+            # Send back server's public key with protocol versions
+            response = %{
+              type: "pairing_handshake",
+              message: Base.encode64(state.server_public_key),
+              protocol_versions: ProtocolVersion.supported_versions()
+            }
+
+            new_state = %{state | session_key: session_key, handshake_complete: true}
+            {:ok, Jason.encode!(response), new_state}
+
+          {:error, reason} ->
+            Logger.error("Tunnel pairing_handshake failed: #{inspect(reason)}")
+            {:error, {:handshake_failed, reason}}
+        end
+
+      :error ->
+        Logger.error("Tunnel pairing_handshake: invalid base64 in client message")
+        {:error, :invalid_base64}
+    end
+  end
+
+  # Helper for key_exchange message handling
   defp do_key_exchange(client_public_key_b64, device_token, state) do
     with {:ok, client_public_key} <- Base.decode64(client_public_key_b64),
          {:ok, device} <- Mydia.RemoteAccess.verify_device_token(device_token),
@@ -684,14 +694,6 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
         Logger.error("Tunnel key_exchange FAILED: #{inspect(reason)}")
         {:error, {:key_exchange_failed, reason}}
     end
-  end
-
-  defp handle_tunnel_message(type, data, state) when is_binary(type) do
-    Logger.warning(
-      "Tunnel received unknown message type: type=#{type}, keys=#{inspect(Map.keys(data))}, handshake_complete=#{state.handshake_complete}"
-    )
-
-    {:ok, Jason.encode!(%{type: "error", message: "unknown_message_type"}), state}
   end
 
   # Derive a 32-byte session key from shared secret using HKDF-SHA256

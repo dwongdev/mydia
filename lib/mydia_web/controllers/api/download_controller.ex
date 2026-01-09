@@ -95,7 +95,7 @@ defmodule MydiaWeb.Api.DownloadController do
       {:error, :invalid_resolution} ->
         conn
         |> put_status(:bad_request)
-        |> json(%{error: "Invalid resolution. Must be one of: 1080p, 720p, 480p"})
+        |> json(%{error: "Invalid resolution. Must be one of: original, 1080p, 720p, 480p"})
 
       {:error, reason} ->
         Logger.error("Failed to prepare download: #{inspect(reason)}")
@@ -227,7 +227,7 @@ defmodule MydiaWeb.Api.DownloadController do
 
   # Get media file for a given content type and ID
   defp get_media_file("movie", media_item_id) do
-    case Media.get_media_item!(media_item_id, preload: [:library_path]) do
+    case Media.get_media_item!(media_item_id) do
       %{type: "movie"} = media_item ->
         # Get the first media file for this movie
         case Library.get_media_files_for_item(media_item.id, preload: [:library_path]) do
@@ -266,20 +266,27 @@ defmodule MydiaWeb.Api.DownloadController do
     # Only offer qualities at or below the source resolution
     source_resolution = parse_resolution_height(media_file.resolution)
 
+    # Always include "original" as the first option (no transcoding)
+    original_option = %{resolution: "original", label: "Original", estimated_size: source_size}
+
     available_resolutions =
       [
-        {"1080p", 1080},
-        {"720p", 720},
-        {"480p", 480}
+        {"1080p", 1080, "1080p (Full HD)"},
+        {"720p", 720, "720p (HD)"},
+        {"480p", 480, "480p (SD)"}
       ]
-      |> Enum.filter(fn {_label, height} -> height <= source_resolution end)
+      |> Enum.filter(fn {_resolution, height, _label} -> height <= source_resolution end)
 
     # Estimate file sizes based on bitrate reduction
-    available_resolutions
-    |> Enum.map(fn {resolution, height} ->
-      estimated_size = estimate_file_size(source_size, source_resolution, height)
-      %{resolution: resolution, estimated_size: estimated_size}
-    end)
+    transcoded_options =
+      available_resolutions
+      |> Enum.map(fn {resolution, height, label} ->
+        estimated_size = estimate_file_size(source_size, source_resolution, height)
+        %{resolution: resolution, label: label, estimated_size: estimated_size}
+      end)
+
+    # Original first, then transcoded options
+    [original_option | transcoded_options]
   end
 
   # Parse resolution string to height in pixels
@@ -316,13 +323,31 @@ defmodule MydiaWeb.Api.DownloadController do
   defp estimate_file_size(source_size, _source_height, _target_height), do: source_size
 
   # Validate resolution parameter
-  defp validate_resolution(resolution) when resolution in ["1080p", "720p", "480p"] do
+  defp validate_resolution(resolution) when resolution in ["original", "1080p", "720p", "480p"] do
     {:ok, resolution}
   end
 
   defp validate_resolution(_), do: {:error, :invalid_resolution}
 
-  # Start transcode if job is pending
+  # Handle "original" resolution - no transcoding, use source file directly
+  defp maybe_start_transcode(%{status: "pending", resolution: "original"} = job, media_file) do
+    # Preload library_path if not already loaded
+    media_file = Mydia.Repo.preload(media_file, :library_path)
+
+    # Get absolute path to source file
+    case Mydia.Library.MediaFile.absolute_path(media_file) do
+      nil ->
+        {:error, :source_file_not_found}
+
+      source_path ->
+        # For original, mark job as ready immediately with source file path
+        file_size = media_file.size || 0
+        Downloads.complete_job(job, source_path, file_size)
+        :ok
+    end
+  end
+
+  # Start transcode if job is pending (for non-original resolutions)
   defp maybe_start_transcode(%{status: "pending"} = job, media_file) do
     # Preload library_path if not already loaded
     media_file = Mydia.Repo.preload(media_file, :library_path)
@@ -383,6 +408,7 @@ defmodule MydiaWeb.Api.DownloadController do
   defp maybe_start_transcode(_job, _media_file), do: :ok
 
   # Convert resolution string to atom for JobManager
+  defp resolution_to_atom("original"), do: :original
   defp resolution_to_atom("1080p"), do: :p1080
   defp resolution_to_atom("720p"), do: :p720
   defp resolution_to_atom("480p"), do: :p480

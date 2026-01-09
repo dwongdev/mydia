@@ -25,7 +25,7 @@ defmodule Mydia.Downloads.TranscodeJob do
   end
 
   @valid_statuses ~w(pending transcoding ready failed)
-  @valid_resolutions ~w(1080p 720p 480p)
+  @valid_resolutions ~w(original 1080p 720p 480p)
 
   @doc """
   Changeset for creating or updating a transcode job.

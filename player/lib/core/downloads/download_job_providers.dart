@@ -55,6 +55,15 @@ Future<DownloadOptionsResponse> downloadOptions(
   String contentType,
   String id,
 ) async {
+  // Wait for server URL and auth token to be available
+  final serverUrl = await ref.watch(serverUrlProvider.future);
+  final authToken = await ref.watch(authTokenProvider.future);
+
+  if (serverUrl == null || authToken == null) {
+    throw Exception('Authentication not available');
+  }
+
+  // Now get the service (should be available since dependencies are ready)
   final service = ref.watch(downloadJobServiceProvider);
   if (service == null) {
     throw Exception('Download service not available');

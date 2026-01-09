@@ -85,9 +85,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   void _handleItemTap(String id, String type) {
     final normalizedType = type.toLowerCase();
     if (normalizedType == 'movie') {
-      context.go('/movie/$id');
+      context.push('/movie/$id');
     } else if (normalizedType == 'tv_show' || normalizedType == 'show') {
-      context.go('/show/$id');
+      context.push('/show/$id');
     }
   }
 
@@ -121,9 +121,22 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
               return _buildEmptyState();
             }
 
+            // Filter items based on search query
+            final searchQuery = _searchController.text.toLowerCase().trim();
+            final filteredItems = searchQuery.isEmpty
+                ? data.items
+                : data.items
+                    .where((item) =>
+                        item.title.toLowerCase().contains(searchQuery))
+                    .toList();
+
+            if (filteredItems.isEmpty && searchQuery.isNotEmpty) {
+              return _buildNoSearchResultsState(searchQuery);
+            }
+
             return _viewMode == ViewMode.grid
-                ? _buildGridView(context, data.items)
-                : _buildListView(context, data.items);
+                ? _buildGridView(context, filteredItems)
+                : _buildListView(context, filteredItems);
           },
         ),
       ),
@@ -241,7 +254,6 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                           ),
                           onChanged: (value) {
                             setState(() {});
-                            // TODO: Implement search
                           },
                         ),
                       ),
@@ -357,6 +369,55 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                     color: AppColors.textSecondary,
                   ),
               textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNoSearchResultsState(String query) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceVariant.withValues(alpha: 0.3),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.search_off_rounded,
+                size: 56,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'No results found',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'No matches for "$query"',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            TextButton(
+              onPressed: () {
+                _searchController.clear();
+                setState(() {});
+              },
+              child: const Text('Clear search'),
             ),
           ],
         ),

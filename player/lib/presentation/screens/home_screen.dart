@@ -15,11 +15,11 @@ class HomeScreen extends ConsumerWidget {
   void _handleItemTap(BuildContext context, String id, String type) {
     final normalizedType = type.toLowerCase();
     if (normalizedType == 'movie') {
-      context.go('/movie/$id');
+      context.push('/movie/$id');
     } else if (normalizedType == 'tv_show' || normalizedType == 'show') {
-      context.go('/show/$id');
+      context.push('/show/$id');
     } else if (normalizedType == 'episode') {
-      context.go('/episode/$id');
+      context.push('/episode/$id');
     }
   }
 
@@ -268,7 +268,7 @@ class _ModernAppBar extends StatelessWidget implements PreferredSizeWidget {
                 child: const Icon(Icons.search_rounded, size: 20),
               ),
               onPressed: () {
-                // TODO: Implement search
+                context.push('/search');
               },
               tooltip: 'Search',
             ),

@@ -12,6 +12,102 @@ import '../../core/layout/breakpoints.dart';
 import '../../core/theme/colors.dart';
 import 'offline_banner.dart';
 
+/// A small glowing dot indicator for relay mode.
+/// Shows an animated orange/yellow glow when the app is connected via relay.
+class _RelayModeIndicator extends ConsumerWidget {
+  const _RelayModeIndicator();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final connectionState = ref.watch(connectionProvider);
+
+    if (!connectionState.isRelayMode) {
+      return const SizedBox.shrink();
+    }
+
+    return Tooltip(
+      message: connectionState.isTunnelActive
+          ? 'Connected via relay'
+          : 'Relay disconnected',
+      child: _GlowingDot(isActive: connectionState.isTunnelActive),
+    );
+  }
+}
+
+/// Animated glowing dot with pulse effect.
+class _GlowingDot extends StatefulWidget {
+  final bool isActive;
+
+  const _GlowingDot({required this.isActive});
+
+  @override
+  State<_GlowingDot> createState() => _GlowingDotState();
+}
+
+class _GlowingDotState extends State<_GlowingDot>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    );
+    _animation = Tween<double>(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+    if (widget.isActive) {
+      _controller.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void didUpdateWidget(_GlowingDot oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive && !_controller.isAnimating) {
+      _controller.repeat(reverse: true);
+    } else if (!widget.isActive && _controller.isAnimating) {
+      _controller.stop();
+      _controller.value = 1.0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.isActive ? Colors.orange : Colors.red;
+
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        return Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: color,
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(alpha: 0.6 * _animation.value),
+                blurRadius: 8 * _animation.value,
+                spreadRadius: 2 * _animation.value,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// Modern app shell with adaptive navigation.
 /// Shows sidebar on desktop (≥900px) and bottom nav on mobile.
 class AppShell extends ConsumerStatefulWidget {
@@ -180,6 +276,12 @@ class _AppShellState extends ConsumerState<AppShell> {
                         left: 8,
                         child: const _BackToMydiaButton(compact: true),
                       ),
+                    // Relay mode indicator for mobile
+                    Positioned(
+                      top: MediaQuery.of(context).padding.top + 12,
+                      right: 12,
+                      child: const _RelayModeIndicator(),
+                    ),
                   ],
                 ),
               ),
@@ -267,6 +369,8 @@ class _DesktopSidebar extends StatelessWidget {
                           letterSpacing: -0.5,
                         ),
                       ),
+                      const SizedBox(width: 8),
+                      const _RelayModeIndicator(),
                     ],
                   ),
                 ),

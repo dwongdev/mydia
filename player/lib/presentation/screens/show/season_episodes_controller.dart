@@ -53,7 +53,7 @@ class SeasonEpisodesController extends _$SeasonEpisodesController {
 
   Future<List<Episode>> _fetchEpisodes(String showId, int seasonNumber) async {
     // Use async provider to wait for client to be ready
-    final client = await ref.watch(asyncGraphqlClientProvider.future);
+    final client = await ref.read(asyncGraphqlClientProvider.future);
 
     final result = await client.query(
       QueryOptions(
@@ -62,7 +62,7 @@ class SeasonEpisodesController extends _$SeasonEpisodesController {
           'showId': showId,
           'seasonNumber': seasonNumber,
         },
-        fetchPolicy: FetchPolicy.networkOnly,
+        fetchPolicy: FetchPolicy.cacheAndNetwork,
       ),
     );
 

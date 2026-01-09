@@ -65,13 +65,13 @@ class ShowDetailController extends _$ShowDetailController {
 
   Future<ShowDetail> _fetchShow(String id) async {
     // Use async provider to wait for client to be ready
-    final client = await ref.watch(asyncGraphqlClientProvider.future);
+    final client = await ref.read(asyncGraphqlClientProvider.future);
 
     final result = await client.query(
       QueryOptions(
         document: gql(tvShowDetailQuery),
         variables: {'id': id},
-        fetchPolicy: FetchPolicy.networkOnly,
+        fetchPolicy: FetchPolicy.cacheAndNetwork,
       ),
     );
 

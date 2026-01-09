@@ -75,7 +75,7 @@ class MovieDetailController extends _$MovieDetailController {
       QueryOptions(
         document: gql(movieDetailQuery),
         variables: {'id': id},
-        fetchPolicy: FetchPolicy.networkOnly,
+        fetchPolicy: FetchPolicy.cacheAndNetwork,
       ),
     );
 

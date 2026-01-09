@@ -74,7 +74,7 @@ class HomeController extends _$HomeController {
 
   Future<HomeData> _fetchHomeData() async {
     // Use async provider to wait for client to be ready
-    final client = await ref.watch(asyncGraphqlClientProvider.future);
+    final client = await ref.read(asyncGraphqlClientProvider.future);
 
     final result = await client.query(
       QueryOptions(
@@ -84,7 +84,7 @@ class HomeController extends _$HomeController {
           'recentlyAddedLimit': 20,
           'upNextLimit': 10,
         },
-        fetchPolicy: FetchPolicy.networkOnly,
+        fetchPolicy: FetchPolicy.cacheAndNetwork,
       ),
     );
 

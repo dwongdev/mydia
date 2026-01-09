@@ -157,7 +157,7 @@ class LibraryController extends _$LibraryController {
     }
 
     // Use async provider to wait for client to be ready
-    final client = await ref.watch(asyncGraphqlClientProvider.future);
+    final client = await ref.read(asyncGraphqlClientProvider.future);
 
     if (libraryType == LibraryType.movies) {
       return _fetchMovies(client);
@@ -174,7 +174,7 @@ class LibraryController extends _$LibraryController {
           'first': 20,
           if (_endCursor != null) 'after': _endCursor,
         },
-        fetchPolicy: FetchPolicy.networkOnly,
+        fetchPolicy: FetchPolicy.cacheAndNetwork,
       ),
     );
 
@@ -228,7 +228,7 @@ class LibraryController extends _$LibraryController {
           'first': 20,
           if (_endCursor != null) 'after': _endCursor,
         },
-        fetchPolicy: FetchPolicy.networkOnly,
+        fetchPolicy: FetchPolicy.cacheAndNetwork,
       ),
     );
 

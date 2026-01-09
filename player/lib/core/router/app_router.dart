@@ -5,13 +5,14 @@ import '../../presentation/screens/home_screen.dart';
 import '../../presentation/screens/login_screen.dart';
 import '../../presentation/screens/movie/movie_detail_screen.dart';
 import '../../presentation/screens/show/show_detail_screen.dart';
-import '../../presentation/screens/episode_detail_screen.dart';
+import '../../presentation/screens/episode/episode_detail_screen.dart';
 import '../../presentation/screens/library/library_screen.dart';
 import '../../presentation/screens/library/library_controller.dart';
 import '../../presentation/screens/settings_screen.dart';
 import '../../presentation/screens/settings/devices_screen.dart';
 import '../../presentation/screens/player/player_screen.dart';
 import '../../presentation/screens/downloads/downloads_screen.dart';
+import '../../presentation/screens/search/search_screen.dart';
 import '../../presentation/widgets/app_shell.dart';
 import '../auth/auth_status.dart';
 import '../graphql/graphql_provider.dart';
@@ -21,90 +22,6 @@ part 'app_router.g.dart';
 /// Global key for the navigator used by the app shell
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
-
-/// Transition duration for page animations
-const _transitionDuration = Duration(milliseconds: 300);
-
-/// Creates a slide-fade transition page (Material 3 style)
-/// Slides in from right while fading in
-CustomTransitionPage<T> _buildSlideTransition<T>({
-  required Widget child,
-  required GoRouterState state,
-}) {
-  return CustomTransitionPage<T>(
-    key: state.pageKey,
-    child: child,
-    transitionDuration: _transitionDuration,
-    reverseTransitionDuration: _transitionDuration,
-    transitionsBuilder: (context, animation, secondaryAnimation, child) {
-      // Slide from right
-      final slideAnimation = Tween<Offset>(
-        begin: const Offset(0.25, 0),
-        end: Offset.zero,
-      ).animate(CurvedAnimation(
-        parent: animation,
-        curve: Curves.easeOutCubic,
-        reverseCurve: Curves.easeInCubic,
-      ));
-
-      // Fade in
-      final fadeAnimation = CurvedAnimation(
-        parent: animation,
-        curve: Curves.easeOut,
-      );
-
-      // Secondary animation for the outgoing page
-      final secondarySlide = Tween<Offset>(
-        begin: Offset.zero,
-        end: const Offset(-0.15, 0),
-      ).animate(CurvedAnimation(
-        parent: secondaryAnimation,
-        curve: Curves.easeOutCubic,
-      ));
-
-      final secondaryFade = Tween<double>(
-        begin: 1.0,
-        end: 0.9,
-      ).animate(secondaryAnimation);
-
-      return SlideTransition(
-        position: secondarySlide,
-        child: FadeTransition(
-          opacity: secondaryFade,
-          child: SlideTransition(
-            position: slideAnimation,
-            child: FadeTransition(
-              opacity: fadeAnimation,
-              child: child,
-            ),
-          ),
-        ),
-      );
-    },
-  );
-}
-
-/// Creates a fade transition page (for modals/overlays)
-CustomTransitionPage<T> _buildFadeTransition<T>({
-  required Widget child,
-  required GoRouterState state,
-}) {
-  return CustomTransitionPage<T>(
-    key: state.pageKey,
-    child: child,
-    transitionDuration: const Duration(milliseconds: 200),
-    reverseTransitionDuration: const Duration(milliseconds: 200),
-    transitionsBuilder: (context, animation, secondaryAnimation, child) {
-      return FadeTransition(
-        opacity: CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOut,
-        ),
-        child: child,
-      );
-    },
-  );
-}
 
 /// Simple ChangeNotifier to trigger GoRouter refreshes.
 /// The actual auth state is read directly from the provider in the redirect callback.
@@ -183,15 +100,12 @@ GoRouter appRouter(Ref ref) {
       return null;
     },
     routes: [
-      // Login route - outside shell (fade transition)
+      // Login route - outside shell
       GoRoute(
         path: '/login',
         name: 'login',
         parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) => _buildFadeTransition(
-          child: const LoginScreen(),
-          state: state,
-        ),
+        builder: (context, state) => const LoginScreen(),
       ),
 
       // Shell route for main app with bottom navigation
@@ -234,60 +148,54 @@ GoRouter appRouter(Ref ref) {
         ],
       ),
 
-      // Detail routes - outside shell (slide-fade transition)
+      // Search route - outside shell
+      GoRoute(
+        path: '/search',
+        name: 'search',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const SearchScreen(),
+      ),
+
+      // Detail routes - outside shell
       GoRoute(
         path: '/settings/devices',
         name: 'devices',
         parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) {
-          return _buildSlideTransition(
-            child: const DevicesScreen(),
-            state: state,
-          );
-        },
+        builder: (context, state) => const DevicesScreen(),
       ),
       GoRoute(
         path: '/movie/:id',
         name: 'movie_detail',
         parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) {
+        builder: (context, state) {
           final id = state.pathParameters['id']!;
-          return _buildSlideTransition(
-            child: MovieDetailScreen(id: id),
-            state: state,
-          );
+          return MovieDetailScreen(id: id);
         },
       ),
       GoRoute(
         path: '/show/:id',
         name: 'show_detail',
         parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) {
+        builder: (context, state) {
           final id = state.pathParameters['id']!;
-          return _buildSlideTransition(
-            child: ShowDetailScreen(id: id),
-            state: state,
-          );
+          return ShowDetailScreen(id: id);
         },
       ),
       GoRoute(
         path: '/episode/:id',
         name: 'episode_detail',
         parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) {
+        builder: (context, state) {
           final id = state.pathParameters['id']!;
-          return _buildSlideTransition(
-            child: EpisodeDetailScreen(id: id),
-            state: state,
-          );
+          return EpisodeDetailScreen(id: id);
         },
       ),
-      // Player route - fade transition (fullscreen experience)
+      // Player route
       GoRoute(
         path: '/player/:type/:id',
         name: 'player',
         parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) {
+        builder: (context, state) {
           final type = state.pathParameters['type']!;
           final id = state.pathParameters['id']!;
           final fileId = state.uri.queryParameters['fileId'];
@@ -295,42 +203,36 @@ GoRouter appRouter(Ref ref) {
 
           if (fileId == null) {
             // If no fileId provided, show error
-            return _buildFadeTransition(
-              child: Scaffold(
-                body: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.error_outline, size: 64, color: Colors.red),
-                      const SizedBox(height: 16),
-                      const Text('No file selected for playback'),
-                      const SizedBox(height: 24),
-                      ElevatedButton(
-                        onPressed: () {
-                          if (context.canPop()) {
-                            context.pop();
-                          } else {
-                            context.go('/');
-                          }
-                        },
-                        child: const Text('Go Back'),
-                      ),
-                    ],
-                  ),
+            return Scaffold(
+              body: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                    const SizedBox(height: 16),
+                    const Text('No file selected for playback'),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      onPressed: () {
+                        if (context.canPop()) {
+                          context.pop();
+                        } else {
+                          context.go('/');
+                        }
+                      },
+                      child: const Text('Go Back'),
+                    ),
+                  ],
                 ),
               ),
-              state: state,
             );
           }
 
-          return _buildFadeTransition(
-            child: PlayerScreen(
-              mediaType: type,
-              mediaId: id,
-              fileId: fileId,
-              title: title,
-            ),
-            state: state,
+          return PlayerScreen(
+            mediaType: type,
+            mediaId: id,
+            fileId: fileId,
+            title: title,
           );
         },
       ),

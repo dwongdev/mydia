@@ -37,10 +37,56 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/widgets.dart' show AppLifecycleListener;
 
+import '../auth/auth_storage.dart';
 import '../channels/channel_service.dart';
+
+/// Storage keys for probe diagnostics.
+abstract class _ProbeStorageKeys {
+  static const lastProbeTime = 'diagnostics_last_direct_attempt';
+  static const urlResults = 'diagnostics_direct_url_errors';
+}
+
+/// Result of a single URL probe attempt.
+class UrlProbeResult {
+  /// The URL that was probed.
+  final String url;
+
+  /// Whether the probe was successful.
+  final bool success;
+
+  /// Error message if the probe failed.
+  final String? error;
+
+  /// When this probe was attempted.
+  final DateTime timestamp;
+
+  const UrlProbeResult({
+    required this.url,
+    required this.success,
+    this.error,
+    required this.timestamp,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'url': url,
+        'success': success,
+        'error': error,
+        'timestamp': timestamp.toIso8601String(),
+      };
+
+  factory UrlProbeResult.fromJson(Map<String, dynamic> json) {
+    return UrlProbeResult(
+      url: json['url'] as String,
+      success: json['success'] as bool,
+      error: json['error'] as String?,
+      timestamp: DateTime.parse(json['timestamp'] as String),
+    );
+  }
+}
 
 /// Result of a direct URL probe attempt.
 class ProbeResult {
@@ -59,23 +105,29 @@ class ProbeResult {
   /// Current failure count (for backoff calculation).
   final int failureCount;
 
+  /// Individual results for each URL probed.
+  final List<UrlProbeResult> urlResults;
+
   const ProbeResult._({
     required this.success,
     this.successfulUrl,
     this.error,
     required this.urlsAttempted,
     required this.failureCount,
+    this.urlResults = const [],
   });
 
   factory ProbeResult.success({
     required String url,
     required int urlsAttempted,
+    List<UrlProbeResult> urlResults = const [],
   }) {
     return ProbeResult._(
       success: true,
       successfulUrl: url,
       urlsAttempted: urlsAttempted,
       failureCount: 0,
+      urlResults: urlResults,
     );
   }
 
@@ -83,12 +135,14 @@ class ProbeResult {
     required String error,
     required int urlsAttempted,
     required int failureCount,
+    List<UrlProbeResult> urlResults = const [],
   }) {
     return ProbeResult._(
       success: false,
       error: error,
       urlsAttempted: urlsAttempted,
       failureCount: failureCount,
+      urlResults: urlResults,
     );
   }
 }
@@ -258,30 +312,72 @@ class DirectProber {
 
   /// Probes all direct URLs and returns the result.
   Future<ProbeResult> _probeDirectUrls() async {
+    final urlResults = <UrlProbeResult>[];
+    final now = DateTime.now();
+
     for (var i = 0; i < _directUrls.length; i++) {
       final url = _directUrls[i];
       debugPrint('[DirectProber] Probing URL ${i + 1}/${_directUrls.length}: $url');
 
-      final success = await _probeUrl(url);
-      if (success) {
+      final probeResult = await _probeUrl(url);
+      urlResults.add(probeResult);
+
+      if (probeResult.success) {
+        // Persist results to storage
+        await _persistProbeResults(urlResults, now);
+
         return ProbeResult.success(
           url: url,
           urlsAttempted: i + 1,
+          urlResults: urlResults,
         );
       }
     }
+
+    // Persist results to storage
+    await _persistProbeResults(urlResults, now);
 
     return ProbeResult.failure(
       error: 'All ${_directUrls.length} direct URLs failed',
       urlsAttempted: _directUrls.length,
       failureCount: _failureCount + 1,
+      urlResults: urlResults,
     );
+  }
+
+  /// Persists probe results to storage for display in settings.
+  Future<void> _persistProbeResults(List<UrlProbeResult> results, DateTime timestamp) async {
+    try {
+      final storage = getAuthStorage();
+
+      // Save last probe time
+      await storage.write(
+        _ProbeStorageKeys.lastProbeTime,
+        timestamp.toIso8601String(),
+      );
+
+      // Save URL results as a map keyed by URL
+      final resultsMap = <String, Map<String, dynamic>>{};
+      for (final result in results) {
+        resultsMap[result.url] = result.toJson();
+      }
+      await storage.write(
+        _ProbeStorageKeys.urlResults,
+        jsonEncode(resultsMap),
+      );
+
+      debugPrint('[DirectProber] Persisted probe results for ${results.length} URLs');
+    } catch (e) {
+      debugPrint('[DirectProber] Failed to persist probe results: $e');
+    }
   }
 
   /// Probes a single URL.
   ///
-  /// Returns true if the probe was successful (connection + channel join).
-  Future<bool> _probeUrl(String url) async {
+  /// Returns a [UrlProbeResult] with success/failure status and error message.
+  Future<UrlProbeResult> _probeUrl(String url) async {
+    final timestamp = DateTime.now();
+
     try {
       // Create a dedicated channel service for probing to avoid
       // interfering with any active connections
@@ -296,8 +392,14 @@ class DirectProber {
         });
 
         if (!connectResult.success) {
-          debugPrint('[DirectProber] Connection failed for $url: ${connectResult.error}');
-          return false;
+          final error = connectResult.error ?? 'Connection failed';
+          debugPrint('[DirectProber] Connection failed for $url: $error');
+          return UrlProbeResult(
+            url: url,
+            success: false,
+            error: error,
+            timestamp: timestamp,
+          );
         }
 
         // TODO: Step 2 - Verify certificate fingerprint
@@ -308,7 +410,7 @@ class DirectProber {
         //   if (!verified) {
         //     debugPrint('[DirectProber] Certificate verification failed for $url');
         //     await probeService.disconnect();
-        //     return false;
+        //     return UrlProbeResult(...);
         //   }
         // }
 
@@ -325,20 +427,40 @@ class DirectProber {
         await probeService.disconnect();
 
         if (!joinResult.success) {
-          debugPrint('[DirectProber] Channel join failed for $url: ${joinResult.error}');
-          return false;
+          final error = joinResult.error ?? 'Channel join failed';
+          debugPrint('[DirectProber] Channel join failed for $url: $error');
+          return UrlProbeResult(
+            url: url,
+            success: false,
+            error: error,
+            timestamp: timestamp,
+          );
         }
 
         debugPrint('[DirectProber] Probe successful for $url');
-        return true;
+        return UrlProbeResult(
+          url: url,
+          success: true,
+          timestamp: timestamp,
+        );
       } catch (e) {
         debugPrint('[DirectProber] Probe error for $url: $e');
         await probeService.disconnect();
-        return false;
+        return UrlProbeResult(
+          url: url,
+          success: false,
+          error: e.toString(),
+          timestamp: timestamp,
+        );
       }
     } catch (e) {
       debugPrint('[DirectProber] Unexpected error probing $url: $e');
-      return false;
+      return UrlProbeResult(
+        url: url,
+        success: false,
+        error: e.toString(),
+        timestamp: timestamp,
+      );
     }
   }
 

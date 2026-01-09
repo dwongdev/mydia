@@ -433,7 +433,8 @@ class EpisodeDetailScreen extends ConsumerWidget {
 
   Widget _buildDownloadButton(
       BuildContext context, WidgetRef ref, EpisodeDetail episode) {
-    final isDownloaded = ref.watch(isMediaDownloadedProvider(episode.id));
+    final isDownloadedAsync = ref.watch(isMediaDownloadedProvider(episode.id));
+    final isDownloaded = isDownloadedAsync.value ?? false;
     final hasFiles = episode.files.isNotEmpty;
 
     return Container(
@@ -463,7 +464,7 @@ class EpisodeDetailScreen extends ConsumerWidget {
 
                   if (selectedResolution != null && context.mounted) {
                     final downloadService = ref.read(downloadJobServiceProvider);
-                    final downloadManager = ref.read(downloadManagerProvider);
+                    final downloadManager = await ref.read(downloadManagerProvider.future);
 
                     if (downloadService != null) {
                       try {
@@ -475,6 +476,15 @@ class EpisodeDetailScreen extends ConsumerWidget {
                           mediaType: MediaType.episode,
                           posterUrl: episode.thumbnailUrl ??
                               episode.show.artwork.posterUrl,
+                          overview: episode.overview,
+                          runtime: episode.runtime,
+                          seasonNumber: episode.seasonNumber,
+                          episodeNumber: episode.episodeNumber,
+                          showId: episode.show.id,
+                          showTitle: episode.show.title,
+                          showPosterUrl: episode.show.artwork.posterUrl,
+                          thumbnailUrl: episode.thumbnailUrl,
+                          airDate: episode.airDate,
                           getDownloadUrl: (jobId) async {
                             return await downloadService.getDownloadUrl(jobId);
                           },
@@ -500,6 +510,9 @@ class EpisodeDetailScreen extends ConsumerWidget {
                               fileSize: status.currentFileSize,
                               error: status.error,
                             );
+                          },
+                          cancelJob: (jobId) async {
+                            await downloadService.cancelJob(jobId);
                           },
                         );
 

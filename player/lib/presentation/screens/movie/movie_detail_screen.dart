@@ -270,7 +270,8 @@ class MovieDetailScreen extends ConsumerWidget {
   }
 
   Widget _buildDownloadButton(BuildContext context, WidgetRef ref, movie) {
-    final isDownloaded = ref.watch(isMediaDownloadedProvider(movie.id));
+    final isDownloadedAsync = ref.watch(isMediaDownloadedProvider(movie.id));
+    final isDownloaded = isDownloadedAsync.value ?? false;
     final hasFiles = movie.files.isNotEmpty;
 
     return IconButton(
@@ -297,7 +298,7 @@ class MovieDetailScreen extends ConsumerWidget {
 
                 if (selectedResolution != null && context.mounted) {
                   final downloadService = ref.read(downloadJobServiceProvider);
-                  final downloadManager = ref.read(downloadManagerProvider);
+                  final downloadManager = await ref.read(downloadManagerProvider.future);
 
                   if (downloadService != null) {
                     try {
@@ -309,6 +310,13 @@ class MovieDetailScreen extends ConsumerWidget {
                         resolution: selectedResolution,
                         mediaType: MediaType.movie,
                         posterUrl: movie.artwork.posterUrl,
+                        overview: movie.overview,
+                        runtime: movie.runtime,
+                        genres: movie.genres,
+                        rating: movie.rating,
+                        backdropUrl: movie.artwork.backdropUrl,
+                        year: movie.year,
+                        contentRating: movie.contentRating,
                         getDownloadUrl: (jobId) async {
                           return await downloadService.getDownloadUrl(jobId);
                         },
@@ -334,6 +342,9 @@ class MovieDetailScreen extends ConsumerWidget {
                             fileSize: status.currentFileSize,
                             error: status.error,
                           );
+                        },
+                        cancelJob: (jobId) async {
+                          await downloadService.cancelJob(jobId);
                         },
                       );
 

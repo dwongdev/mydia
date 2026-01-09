@@ -157,7 +157,7 @@ class _QualityDownloadDialogState extends ConsumerState<QualityDownloadDialog> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    _getQualityLabel(option.resolution),
+                    option.label,
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
@@ -305,18 +305,6 @@ class _QualityDownloadDialogState extends ConsumerState<QualityDownloadDialog> {
     }
   }
 
-  String _getQualityLabel(String resolution) {
-    switch (resolution) {
-      case '1080p':
-        return '1080p (Full HD)';
-      case '720p':
-        return '720p (HD)';
-      case '480p':
-        return '480p (SD)';
-      default:
-        return resolution;
-    }
-  }
 }
 
 /// Shows the quality download dialog and returns the selected resolution.

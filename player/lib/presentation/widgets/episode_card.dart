@@ -66,7 +66,8 @@ class _EpisodeCardState extends ConsumerState<EpisodeCard>
 
   @override
   Widget build(BuildContext context) {
-    final isDownloaded = ref.watch(isMediaDownloadedProvider(widget.episode.id));
+    final isDownloadedAsync = ref.watch(isMediaDownloadedProvider(widget.episode.id));
+    final isDownloaded = isDownloadedAsync.value ?? false;
 
     return MouseRegion(
       onEnter: (_) => _handleHoverEnter(),
@@ -450,7 +451,7 @@ class _EpisodeCardState extends ConsumerState<EpisodeCard>
 
       if (selectedResolution != null && context.mounted) {
         final downloadService = ref.read(downloadJobServiceProvider);
-        final downloadManager = ref.read(downloadManagerProvider);
+        final downloadManager = await ref.read(downloadManagerProvider.future);
 
         if (downloadService != null) {
           try {
@@ -463,6 +464,13 @@ class _EpisodeCardState extends ConsumerState<EpisodeCard>
               resolution: selectedResolution,
               mediaType: MediaType.episode,
               posterUrl: widget.episode.thumbnailUrl,
+              overview: widget.episode.overview,
+              runtime: widget.episode.runtime,
+              seasonNumber: widget.episode.seasonNumber,
+              episodeNumber: widget.episode.episodeNumber,
+              showTitle: widget.showTitle,
+              thumbnailUrl: widget.episode.thumbnailUrl,
+              airDate: widget.episode.airDate,
               getDownloadUrl: (jobId) async {
                 return await downloadService.getDownloadUrl(jobId);
               },
@@ -487,6 +495,9 @@ class _EpisodeCardState extends ConsumerState<EpisodeCard>
                   fileSize: status.currentFileSize,
                   error: status.error,
                 );
+              },
+              cancelJob: (jobId) async {
+                await downloadService.cancelJob(jobId);
               },
             );
 

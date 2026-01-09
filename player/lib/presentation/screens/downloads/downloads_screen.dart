@@ -11,6 +11,7 @@ import '../../../domain/models/download.dart';
 import '../../../domain/models/download_settings.dart';
 import '../../../domain/models/storage_settings.dart';
 import '../../../core/theme/colors.dart';
+import 'downloaded_media_detail_sheet.dart';
 
 class DownloadsScreen extends ConsumerWidget {
   const DownloadsScreen({super.key});
@@ -20,6 +21,7 @@ class DownloadsScreen extends ConsumerWidget {
     final storageQuotaAsync = ref.watch(storageQuotaStatusProvider);
     final downloadedMediaAsync = ref.watch(downloadedMediaProvider);
     final downloadQueueAsync = ref.watch(downloadQueueProvider);
+    final failedDownloadsAsync = ref.watch(failedDownloadsProvider);
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -37,6 +39,89 @@ class DownloadsScreen extends ConsumerWidget {
               data: (status) => _buildStorageHeader(context, ref, status),
               loading: () => const SizedBox.shrink(),
               error: (_, __) => const SizedBox.shrink(),
+            ),
+          ),
+
+          // Failed downloads section
+          SliverToBoxAdapter(
+            child: failedDownloadsAsync.when(
+              data: (failed) {
+                if (failed.isEmpty) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppColors.error.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.error_outline_rounded,
+                          color: AppColors.error,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Failed',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.error,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '${failed.length}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+          ),
+
+          // Failed downloads list
+          failedDownloadsAsync.when(
+            data: (failed) {
+              if (failed.isEmpty) {
+                return const SliverToBoxAdapter(child: SizedBox.shrink());
+              }
+              return SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      final task = failed[index];
+                      return _buildFailedDownloadCard(context, ref, task);
+                    },
+                    childCount: failed.length,
+                  ),
+                ),
+              );
+            },
+            loading: () => const SliverToBoxAdapter(
+              child: SizedBox.shrink(),
+            ),
+            error: (_, __) => const SliverToBoxAdapter(
+              child: SizedBox.shrink(),
             ),
           ),
 
@@ -437,7 +522,8 @@ class DownloadsScreen extends ConsumerWidget {
     final isQueued = task.downloadStatus == DownloadStatus.queued;
 
     // Get queue position for queued tasks
-    final queuePosition = isQueued ? ref.watch(queuePositionProvider(task.id)) : 0;
+    final queuePositionAsync = isQueued ? ref.watch(queuePositionProvider(task.id)) : const AsyncValue.data(0);
+    final queuePosition = queuePositionAsync.value ?? 0;
 
     // Choose status icon and color based on state
     IconData statusIcon;
@@ -515,7 +601,7 @@ class DownloadsScreen extends ConsumerWidget {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(8),
                     onTap: () async {
-                      final manager = ref.read(downloadManagerProvider);
+                      final manager = await ref.read(downloadManagerProvider.future);
                       await manager.pauseDownload(task.id);
                     },
                     child: const Padding(
@@ -535,7 +621,7 @@ class DownloadsScreen extends ConsumerWidget {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(8),
                     onTap: () async {
-                      final manager = ref.read(downloadManagerProvider);
+                      final manager = await ref.read(downloadManagerProvider.future);
                       await manager.resumeDownload(task.id);
                     },
                     child: const Padding(
@@ -556,7 +642,7 @@ class DownloadsScreen extends ConsumerWidget {
                 child: InkWell(
                   borderRadius: BorderRadius.circular(8),
                   onTap: () async {
-                    final manager = ref.read(downloadManagerProvider);
+                    final manager = await ref.read(downloadManagerProvider.future);
                     await manager.cancelDownload(task.id);
                   },
                   child: const Padding(
@@ -643,6 +729,242 @@ class DownloadsScreen extends ConsumerWidget {
     );
   }
 
+  /// Builds a card for a failed download with error details and retry/dismiss actions.
+  Widget _buildFailedDownloadCard(
+    BuildContext context,
+    WidgetRef ref,
+    DownloadTask task,
+  ) {
+    // Parse error message for display
+    final errorMessage = _formatErrorMessage(task.error);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppColors.error.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              // Error icon
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.error.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.error_outline_rounded,
+                  color: AppColors.error,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      task.title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${task.quality} • Failed',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppColors.error,
+                            fontWeight: FontWeight.w500,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Error message box
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: AppColors.error.withValues(alpha: 0.2),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline_rounded,
+                      size: 14,
+                      color: AppColors.error.withValues(alpha: 0.8),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Error Details',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: AppColors.error.withValues(alpha: 0.8),
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  errorMessage,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textSecondary,
+                        height: 1.4,
+                      ),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Action buttons
+          Row(
+            children: [
+              // Retry button
+              Expanded(
+                child: Material(
+                  color: AppColors.primary.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () async {
+                      final manager = await ref.read(downloadManagerProvider.future);
+                      await manager.retryDownload(task.id);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.refresh_rounded,
+                            size: 18,
+                            color: AppColors.primary,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Retry',
+                            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Dismiss button
+              Expanded(
+                child: Material(
+                  color: AppColors.surfaceVariant.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(8),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () async {
+                      final manager = await ref.read(downloadManagerProvider.future);
+                      await manager.cancelDownload(task.id);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.close_rounded,
+                            size: 18,
+                            color: AppColors.textSecondary,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Dismiss',
+                            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                                  color: AppColors.textSecondary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Formats error message for user-friendly display.
+  String _formatErrorMessage(String? error) {
+    if (error == null || error.isEmpty) {
+      return 'An unknown error occurred. Please try again.';
+    }
+
+    // Clean up common error patterns
+    var message = error;
+
+    // Remove Elixir/Erlang stack traces
+    if (message.contains('**')) {
+      final lines = message.split('\n');
+      message = lines.first.replaceAll(RegExp(r'\*\*.*?\*\*'), '').trim();
+    }
+
+    // Remove exception prefixes
+    message = message
+        .replaceAll(RegExp(r'^Exception:\s*', caseSensitive: false), '')
+        .replaceAll(RegExp(r'^Error:\s*', caseSensitive: false), '')
+        .replaceAll(RegExp(r'^Transcode failed:\s*', caseSensitive: false), '');
+
+    // Handle common error types
+    if (message.toLowerCase().contains('connection')) {
+      return 'Connection error. Please check your network and try again.';
+    }
+    if (message.toLowerCase().contains('timeout')) {
+      return 'The request timed out. Please try again.';
+    }
+    if (message.toLowerCase().contains('not found') || message.contains('404')) {
+      return 'The media file could not be found on the server.';
+    }
+    if (message.toLowerCase().contains('disk') || message.toLowerCase().contains('space')) {
+      return 'Not enough storage space. Free up some space and try again.';
+    }
+    if (message.toLowerCase().contains('transcode') || message.toLowerCase().contains('ffmpeg')) {
+      return 'Failed to prepare the video for download. The file may be corrupted or in an unsupported format.';
+    }
+
+    // Truncate long messages
+    if (message.length > 200) {
+      message = '${message.substring(0, 197)}...';
+    }
+
+    return message.isEmpty ? 'An unknown error occurred. Please try again.' : message;
+  }
+
   Widget _buildDownloadedMediaCard(
     BuildContext context,
     WidgetRef ref,
@@ -691,7 +1013,7 @@ class DownloadsScreen extends ConsumerWidget {
         );
       },
       onDismissed: (direction) async {
-        final manager = ref.read(downloadManagerProvider);
+        final manager = await ref.read(downloadManagerProvider.future);
         await manager.deleteDownload(media.mediaId);
       },
       child: Container(
@@ -704,13 +1026,7 @@ class DownloadsScreen extends ConsumerWidget {
           color: Colors.transparent,
           child: InkWell(
             borderRadius: BorderRadius.circular(12),
-            onTap: () {
-              if (media.type == MediaType.movie) {
-                context.push(
-                  '/player/movie/${media.mediaId}?offline=true&title=${Uri.encodeComponent(media.title)}',
-                );
-              }
-            },
+            onTap: () => showDownloadedMediaDetail(context, media),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Row(
@@ -756,42 +1072,89 @@ class DownloadsScreen extends ConsumerWidget {
                               Theme.of(context).textTheme.titleMedium?.copyWith(
                                     fontWeight: FontWeight.w600,
                                   ),
-                          maxLines: 2,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
+                        if (media.seasonNumber != null) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            'S${media.seasonNumber!.toString().padLeft(2, '0')}E${media.episodeNumber!.toString().padLeft(2, '0')}',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: AppColors.textSecondary,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                          ),
+                        ],
                         const SizedBox(height: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.accent.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            media.quality,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.accent,
+                        Row(
+                          children: [
+                            if (media.year != null) ...[
+                              Text(
+                                '${media.year}',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.textSecondary,
+                                    ),
+                              ),
+                              Text(
+                                ' • ',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.textSecondary,
+                                    ),
+                              ),
+                            ],
+                            if (media.runtime != null) ...[
+                              Text(
+                                '${media.runtime}m',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.textSecondary,
+                                    ),
+                              ),
+                              Text(
+                                ' • ',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.textSecondary,
+                                    ),
+                              ),
+                            ],
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.accent.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                media.quality,
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.accent,
+                                ),
+                              ),
                             ),
+                          ],
+                        ),
+                        if (media.overview != null) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            media.overview!,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: AppColors.textSecondary.withOpacity(0.7),
+                                  height: 1.2,
+                                ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          media.fileSizeDisplay,
-                          style:
-                              Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: AppColors.textSecondary,
-                                  ),
-                        ),
+                        ],
                       ],
                     ),
                   ),
+                  const SizedBox(width: 8),
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: 40,
+                    height: 40,
                     decoration: BoxDecoration(
                       color: AppColors.primary.withValues(alpha: 0.15),
                       shape: BoxShape.circle,
@@ -799,7 +1162,7 @@ class DownloadsScreen extends ConsumerWidget {
                     child: const Icon(
                       Icons.play_arrow_rounded,
                       color: AppColors.primary,
-                      size: 28,
+                      size: 24,
                     ),
                   ),
                 ],
@@ -897,7 +1260,7 @@ class _StorageSettingsSheetState extends ConsumerState<_StorageSettingsSheet> {
   }
 
   Future<void> _cleanupNow() async {
-    final cleanupService = ref.read(storageCleanupServiceProvider);
+    final cleanupService = await ref.read(storageCleanupServiceProvider.future);
     final totalCleanable = cleanupService.getTotalCleanableBytes();
 
     if (totalCleanable == 0) {

@@ -103,7 +103,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       );
 
       // Check for downloaded content first (before any network operations)
-      final downloadManager = ref.read(downloadManagerProvider);
+      final downloadManager = await ref.read(downloadManagerProvider.future);
       final downloadedMedia = downloadManager.getDownloadedMediaById(widget.mediaId);
 
       // In offline mode, only downloaded content can be played

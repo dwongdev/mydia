@@ -65,6 +65,10 @@ RUN apk add --no-cache libstdc++ openssl ncurses-libs curl
 RUN addgroup -g 1000 relay && \
     adduser -D -u 1000 -G relay relay
 
+# Create data directory for SQLite database
+RUN mkdir -p /data && \
+    chown -R relay:relay /data
+
 WORKDIR /app
 
 # Copy the release from the builder stage

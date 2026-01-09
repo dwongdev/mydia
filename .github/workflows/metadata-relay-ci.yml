@@ -84,8 +84,8 @@ jobs:
           file: ./metadata-relay/Dockerfile
           push: false
           tags: metadata-relay:ci-test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=metadata-relay
+          cache-to: type=gha,mode=max,scope=metadata-relay
 
   status-check:
     name: All Metadata Relay Checks Passed

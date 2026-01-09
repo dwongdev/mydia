@@ -278,15 +278,31 @@ if config_env() == :prod do
     end
   end
 
-  # External port override (used for sslip.io URL generation for local IPs)
-  # Default to HTTPS port for secure direct URLs in production
-  external_port = parse_integer.(System.get_env("EXTERNAL_PORT"), https_port)
+  # HTTP port for sslip.io URL generation (primary, for reverse proxy setups)
+  # Defaults to the main application port
+  http_port = parse_integer.(System.get_env("HTTP_PORT"), port)
+
+  # HTTPS port for sslip.io URL generation (secondary, for direct secure access)
+  # Defaults to the HTTPS endpoint port; set to empty string to disable
+  https_port_for_urls =
+    case System.get_env("DIRECT_URLS_HTTPS_PORT") do
+      "" -> nil
+      nil -> https_port
+      value -> parse_integer.(value, https_port)
+    end
 
   # Public port override (used for sslip.io URL generation for public IP)
   # Useful when your external port differs from internal port (e.g., NAT port forwarding)
-  # Falls back to external_port if not set
   public_port =
     case System.get_env("PUBLIC_PORT") do
+      nil -> nil
+      "" -> nil
+      value -> parse_integer.(value, nil)
+    end
+
+  # Public HTTPS port override (for public IP HTTPS URLs)
+  public_https_port =
+    case System.get_env("PUBLIC_HTTPS_PORT") do
       nil -> nil
       "" -> nil
       value -> parse_integer.(value, nil)
@@ -315,17 +331,15 @@ if config_env() == :prod do
   # Data directory for certificate storage
   data_dir = System.get_env("MYDIA_DATA_DIR") || "priv/data"
 
-  # Use HTTP instead of HTTPS for sslip.io URLs (for development/testing only)
-  use_http = System.get_env("DIRECT_URLS_USE_HTTP") == "true"
-
   config :mydia, :direct_urls,
-    external_port: external_port,
+    http_port: http_port,
+    https_port: https_port_for_urls,
     public_port: public_port,
+    public_https_port: public_https_port,
     public_ip_enabled: public_ip_enabled,
     external_url: external_url,
     additional_direct_urls: additional_direct_urls,
-    data_dir: data_dir,
-    use_http: use_http
+    data_dir: data_dir
 
   # Player update URL for protocol version mismatch errors
   # This URL is sent to clients when they have an incompatible protocol version
@@ -365,6 +379,77 @@ config :mydia, :flaresolverr,
   url: flaresolverr_url,
   timeout: flaresolverr_timeout,
   max_timeout: flaresolverr_max_timeout
+
+# HTTPS configuration for development
+# Matches production setup for consistent behavior with remote access and direct URLs
+if config_env() == :dev do
+  # Port configuration
+  http_port = String.to_integer(System.get_env("PORT") || "4000")
+  https_port = String.to_integer(System.get_env("HTTPS_PORT") || "4443")
+
+  # Generate or load self-signed certificate
+  {:ok, cert_path, key_path, _fingerprint} = Mydia.RemoteAccess.Certificates.ensure_certificate()
+
+  # Configure HTTPS endpoint (HTTP is already configured in dev.exs)
+  config :mydia, MydiaWeb.Endpoint,
+    https: [
+      ip: {0, 0, 0, 0},
+      port: https_port,
+      cipher_suite: :strong,
+      certfile: cert_path,
+      keyfile: key_path
+    ]
+
+  # Helper function for safe integer parsing
+  parse_integer = fn value, default ->
+    case value do
+      nil ->
+        default
+
+      str when is_binary(str) ->
+        case Integer.parse(str) do
+          {int, _} -> int
+          :error -> default
+        end
+    end
+  end
+
+  # Public port override for NAT port forwarding scenarios
+  public_port =
+    case System.get_env("PUBLIC_PORT") do
+      nil -> nil
+      "" -> nil
+      value -> parse_integer.(value, nil)
+    end
+
+  # Disable public IP detection in dev by default (usually not needed)
+  public_ip_enabled =
+    case System.get_env("PUBLIC_IP_ENABLED") do
+      "true" -> true
+      "1" -> true
+      _ -> false
+    end
+
+  # Manual external URL override
+  external_url = System.get_env("EXTERNAL_URL")
+
+  # Additional direct URLs (comma-separated)
+  additional_direct_urls =
+    case System.get_env("ADDITIONAL_DIRECT_URLS") do
+      nil -> []
+      "" -> []
+      urls -> String.split(urls, ",", trim: true)
+    end
+
+  config :mydia, :direct_urls,
+    http_port: http_port,
+    https_port: https_port,
+    public_port: public_port,
+    public_ip_enabled: public_ip_enabled,
+    external_url: external_url,
+    additional_direct_urls: additional_direct_urls,
+    data_dir: "priv/data"
+end
 
 # Feature flags configuration for dev/test (reads from environment variable)
 if config_env() in [:dev, :test] do

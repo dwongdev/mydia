@@ -5,6 +5,10 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   This module automatically discovers local network IP addresses and generates
   publicly accessible URLs using sslip.io for direct device-to-server connections.
 
+  Supports both HTTP (primary) and HTTPS (secondary) URLs:
+  - HTTP URLs are always generated (for reverse proxy setups)
+  - HTTPS URLs are optionally generated (for direct secure access)
+
   Also supports detecting the instance's public IP address using external services,
   which is useful when running behind NAT/Docker where the relay can't see the
   real public IP.
@@ -30,21 +34,22 @@ defmodule Mydia.RemoteAccess.DirectUrls do
 
   Returns a list of URLs that clients can use to connect directly to this instance.
   This includes:
-  - Auto-detected LAN URLs using sslip.io
+  - Auto-detected LAN URLs using sslip.io (both HTTP and HTTPS if configured)
   - Manual external URL override (if configured)
   - Additional direct URLs (if configured)
 
   ## Configuration
 
   Reads from Application config `:mydia, :direct_urls`:
-  - `:external_port` - Port to use in generated URLs (default: 4000)
+  - `:http_port` - HTTP port for URL generation (default: 4000)
+  - `:https_port` - HTTPS port for URL generation (default: nil, disabled)
   - `:external_url` - Manual external URL override
   - `:additional_direct_urls` - List of additional URLs
 
   ## Examples
 
       iex> DirectUrls.detect_all()
-      ["https://192-168-1-100.sslip.io:4000", "https://example.com:443"]
+      ["http://192-168-1-100.sslip.io:4000", "https://192-168-1-100.sslip.io:4443"]
 
   """
   def detect_all do
@@ -55,16 +60,12 @@ defmodule Mydia.RemoteAccess.DirectUrls do
     external_url = Keyword.get(config, :external_url)
     additional_urls = Keyword.get(config, :additional_direct_urls, [])
 
-    # Get public IP URL (returns nil on failure)
-    public_url =
-      case detect_public_url() do
-        {:ok, url} -> url
-        {:error, _} -> nil
-      end
+    # Get public IP URLs (returns empty list on failure)
+    public_urls = detect_public_urls()
 
     # Combine all URLs, filtering out nils
-    # Order: external_url first (user-configured), then public_url, then additional, then local
-    urls = [external_url, public_url | additional_urls] ++ local_urls
+    # Order: external_url first (user-configured), then public, then additional, then local
+    urls = [external_url | public_urls] ++ additional_urls ++ local_urls
 
     urls
     |> Enum.reject(&is_nil/1)
@@ -77,6 +78,10 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   Scans all network interfaces using `:inet.getifaddrs/0` and builds
   sslip.io URLs for each valid IP address found.
 
+  Generates both HTTP and HTTPS URLs based on configuration:
+  - HTTP URLs on `:http_port` (default: 4000) - always included
+  - HTTPS URLs on `:https_port` (default: nil) - only if configured
+
   Filters out:
   - Loopback addresses (127.x.x.x)
   - Link-local addresses (169.254.x.x)
@@ -86,19 +91,37 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   ## Examples
 
       iex> DirectUrls.detect_local_urls()
-      ["https://192-168-1-100.sslip.io:4000"]
+      ["http://192-168-1-100.sslip.io:4000", "https://192-168-1-100.sslip.io:4443"]
 
   """
   def detect_local_urls do
     config = Application.get_env(:mydia, :direct_urls, [])
-    port = Keyword.get(config, :external_port, 4000)
+
+    # Get port configuration
+    # Support both old (external_port) and new (http_port/https_port) config styles
+    http_port = Keyword.get(config, :http_port) || Keyword.get(config, :external_port, 4000)
+    https_port = Keyword.get(config, :https_port)
 
     case :inet.getifaddrs() do
       {:ok, interfaces} ->
-        interfaces
-        |> extract_ip_addresses()
-        |> Enum.filter(&valid_ip?/1)
-        |> Enum.map(&build_sslip_url(&1, port))
+        ips =
+          interfaces
+          |> extract_ip_addresses()
+          |> Enum.filter(&valid_ip?/1)
+
+        # Build HTTP URLs (primary)
+        http_urls = Enum.map(ips, &build_sslip_url(&1, :http, http_port))
+
+        # Build HTTPS URLs (secondary, if configured)
+        https_urls =
+          if https_port do
+            Enum.map(ips, &build_sslip_url(&1, :https, https_port))
+          else
+            []
+          end
+
+        # HTTP first (primary), then HTTPS (secondary)
+        http_urls ++ https_urls
 
       {:error, _reason} ->
         []
@@ -106,21 +129,31 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   end
 
   @doc """
-  Builds an sslip.io URL from an IP tuple.
+  Builds an sslip.io URL from an IP tuple with explicit scheme.
 
   Converts an IP address tuple (e.g., {192, 168, 1, 100}) into an sslip.io
-  URL format: https://{a}-{b}-{c}-{d}.sslip.io:{port}
+  URL format: {scheme}://{a}-{b}-{c}-{d}.sslip.io:{port}
 
   ## Examples
 
-      iex> DirectUrls.build_sslip_url({192, 168, 1, 100}, 4000)
-      "https://192-168-1-100.sslip.io:4000"
+      iex> DirectUrls.build_sslip_url({192, 168, 1, 100}, :http, 4000)
+      "http://192-168-1-100.sslip.io:4000"
+
+      iex> DirectUrls.build_sslip_url({192, 168, 1, 100}, :https, 4443)
+      "https://192-168-1-100.sslip.io:4443"
 
   """
+  def build_sslip_url({a, b, c, d}, scheme, port)
+      when scheme in [:http, :https] and is_integer(port) do
+    "#{scheme}://#{a}-#{b}-#{c}-#{d}.sslip.io:#{port}"
+  end
+
+  # Legacy 2-arity version for backwards compatibility
+  @doc false
   def build_sslip_url({a, b, c, d}, port) when is_integer(port) do
     config = Application.get_env(:mydia, :direct_urls, [])
-    scheme = if Keyword.get(config, :use_http, false), do: "http", else: "https"
-    "#{scheme}://#{a}-#{b}-#{c}-#{d}.sslip.io:#{port}"
+    scheme = if Keyword.get(config, :use_http, true), do: :http, else: :https
+    build_sslip_url({a, b, c, d}, scheme, port)
   end
 
   @doc """
@@ -157,51 +190,73 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   end
 
   @doc """
-  Detects the public IP and returns an sslip.io URL if successful.
+  Detects the public IP and returns sslip.io URLs if successful.
 
-  Uses the configured `public_port` for the URL. The port is determined by
-  `get_public_port/0` which checks sources in this order:
-  1. Environment variable (PUBLIC_PORT)
-  2. Database setting (remote_access_config.public_port)
-  3. external_port from config
+  Returns a list of URLs for the detected public IP:
+  - HTTP URL on the configured HTTP port (primary)
+  - HTTPS URL on the configured HTTPS port (if configured)
 
-  Returns `{:ok, url}` on success, or `{:error, reason}` on failure.
+  Uses `get_public_http_port/0` and `get_public_https_port/0` for port configuration.
+
+  Returns a list of URLs on success, or an empty list on failure.
 
   ## Examples
 
-      iex> DirectUrls.detect_public_url()
-      {:ok, "https://203-0-113-42.sslip.io:4443"}
+      iex> DirectUrls.detect_public_urls()
+      ["http://203-0-113-42.sslip.io:4000", "https://203-0-113-42.sslip.io:4443"]
 
   """
-  def detect_public_url do
-    port = get_public_port()
-
+  def detect_public_urls do
     case detect_public_ip() do
       {:ok, ip_string} ->
         case parse_ip_string(ip_string) do
           {:ok, ip_tuple} ->
-            {:ok, build_sslip_url(ip_tuple, port)}
+            http_port = get_public_http_port()
+            https_port = get_public_https_port()
 
-          {:error, _} = error ->
-            error
+            # Build HTTP URL (primary)
+            http_url = build_sslip_url(ip_tuple, :http, http_port)
+
+            # Build HTTPS URL (secondary, if configured)
+            https_urls =
+              if https_port do
+                [build_sslip_url(ip_tuple, :https, https_port)]
+              else
+                []
+              end
+
+            [http_url | https_urls]
+
+          {:error, _} ->
+            []
         end
 
-      {:error, _} = error ->
-        error
+      {:error, _} ->
+        []
+    end
+  end
+
+  # Legacy function for backwards compatibility
+  @doc false
+  def detect_public_url do
+    case detect_public_urls() do
+      [url | _] -> {:ok, url}
+      [] -> {:error, :detection_failed}
     end
   end
 
   @doc """
-  Gets the public port configuration.
+  Gets the public HTTP port configuration.
 
   Checks sources in order of precedence:
   1. Environment variable (PUBLIC_PORT) - highest priority
   2. Database setting (remote_access_config.public_port)
-  3. external_port from config - fallback
+  3. http_port from config
+  4. Fallback to 4000
 
   Returns the port as an integer.
   """
-  def get_public_port do
+  def get_public_http_port do
     env_config = Application.get_env(:mydia, :direct_urls, [])
 
     # Environment variable takes precedence
@@ -216,11 +271,27 @@ defmodule Mydia.RemoteAccess.DirectUrls do
             port
 
           _ ->
-            # Fall back to external_port
-            Keyword.get(env_config, :external_port, 4000)
+            # Fall back to http_port or external_port
+            Keyword.get(env_config, :http_port) ||
+              Keyword.get(env_config, :external_port, 4000)
         end
     end
   end
+
+  @doc """
+  Gets the public HTTPS port configuration.
+
+  Returns the HTTPS port if configured, or nil if HTTPS is disabled.
+  Uses `:public_https_port` config if set, otherwise falls back to `:https_port`.
+  """
+  def get_public_https_port do
+    env_config = Application.get_env(:mydia, :direct_urls, [])
+    Keyword.get(env_config, :public_https_port) || Keyword.get(env_config, :https_port)
+  end
+
+  # Legacy function for backwards compatibility
+  @doc false
+  def get_public_port, do: get_public_http_port()
 
   # Gets the public_port from database config
   # Returns nil if not set or database unavailable

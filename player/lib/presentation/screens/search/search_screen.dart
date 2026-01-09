@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../../core/cache/poster_cache_manager.dart';
 import 'search_controller.dart';
 import '../../../domain/models/search_result.dart';
 import '../../../core/theme/colors.dart';
@@ -497,6 +498,7 @@ class _SearchResultCardState extends State<_SearchResultCard> {
                           CachedNetworkImage(
                             imageUrl: widget.result.posterUrl!,
                             fit: BoxFit.cover,
+                            cacheManager: PosterCacheManager(),
                             placeholder: (context, url) => Container(
                               color: AppColors.surface,
                               child: const Center(

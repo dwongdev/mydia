@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/cache/poster_cache_manager.dart';
 import '../../../core/downloads/download_providers.dart';
 import '../../../core/downloads/download_queue_providers.dart';
 import '../../../core/downloads/storage_quota_providers.dart';
@@ -723,6 +724,7 @@ class DownloadsScreen extends ConsumerWidget {
                           ? CachedNetworkImage(
                               imageUrl: media.posterUrl!,
                               fit: BoxFit.cover,
+                              cacheManager: PosterCacheManager(),
                               placeholder: (context, url) => Container(
                                 color: AppColors.surfaceVariant,
                               ),

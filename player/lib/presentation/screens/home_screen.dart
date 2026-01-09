@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../core/cache/poster_cache_manager.dart';
 import '../widgets/content_rail.dart';
 import '../widgets/shimmer_card.dart';
 import '../../core/layout/breakpoints.dart';
@@ -316,6 +317,7 @@ class _HeroSection extends StatelessWidget {
                 ? CachedNetworkImage(
                     imageUrl: _backdropUrl!,
                     fit: BoxFit.cover,
+                    cacheManager: BackdropCacheManager(),
                     placeholder: (context, url) => Container(
                       color: AppColors.surface,
                     ),

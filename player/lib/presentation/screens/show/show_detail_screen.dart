@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../../core/cache/poster_cache_manager.dart';
 import 'show_detail_controller.dart';
 import 'season_episodes_controller.dart';
 import '../../../domain/models/show_detail.dart';
@@ -252,6 +253,7 @@ class ShowDetailScreen extends ConsumerWidget {
               CachedNetworkImage(
                 imageUrl: show.artwork.backdropUrl!,
                 fit: BoxFit.cover,
+                cacheManager: BackdropCacheManager(),
                 placeholder: (context, url) => Container(
                   color: AppColors.surface,
                 ),
@@ -357,6 +359,7 @@ class ShowDetailScreen extends ConsumerWidget {
               ? CachedNetworkImage(
                   imageUrl: show.artwork.posterUrl!,
                   fit: BoxFit.cover,
+                  cacheManager: PosterCacheManager(),
                   placeholder: (context, url) => Container(
                     color: AppColors.surfaceVariant,
                   ),

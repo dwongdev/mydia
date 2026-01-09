@@ -3,6 +3,7 @@ FROM elixir:1.18
 # Install build dependencies and Node.js
 # Includes both SQLite and PostgreSQL development libraries
 # Also includes Chrome and chromedriver for Wallaby browser tests
+# gosu is used for proper user switching in the entrypoint
 RUN apt-get update -qq && \
     apt-get install -y \
       build-essential \
@@ -17,8 +18,9 @@ RUN apt-get update -qq && \
       chromium \
       chromium-driver \
       ca-certificates \
-      xz-utils && \
-    curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
+      xz-utils \
+      gosu && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*

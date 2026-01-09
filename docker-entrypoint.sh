@@ -1,8 +1,55 @@
 #!/bin/bash
 set -e
 
+# ============================================================================
+# User mapping for host filesystem permissions
+# ============================================================================
+# If LOCAL_UID/LOCAL_GID are set, create a user with matching IDs and re-exec
+# this script as that user. This ensures ALL operations (not just the final
+# command) run as the correct user, avoiding permission issues with /tmp files.
+
+if [ "$(id -u)" = "0" ] && [ "${LOCAL_UID:-0}" != "0" ]; then
+    uid="${LOCAL_UID}"
+    gid="${LOCAL_GID:-$uid}"
+
+    # Create group if it doesn't exist
+    if ! getent group "$gid" > /dev/null 2>&1; then
+        groupadd -g "$gid" devgroup
+    fi
+
+    # Create user if it doesn't exist
+    if ! getent passwd "$uid" > /dev/null 2>&1; then
+        useradd -u "$uid" -g "$gid" -m -s /bin/bash devuser
+    fi
+
+    # Get the username for this UID
+    DEV_USER=$(getent passwd "$uid" | cut -d: -f1)
+
+    # Ensure the user owns necessary directories (mounted volumes + Flutter tool caches)
+    for dir in /app/.mix /app/.hex /app/player/.pub-cache /app/_build /app/deps /opt/flutter/packages/flutter_tools/.dart_tool; do
+        if [ -d "$dir" ]; then
+            chown -R "$uid:$gid" "$dir" 2>/dev/null || true
+        fi
+    done
+    # Create Flutter tool cache dir if it doesn't exist
+    mkdir -p /opt/flutter/packages/flutter_tools/.dart_tool
+    chown -R "$uid:$gid" /opt/flutter/packages/flutter_tools/.dart_tool 2>/dev/null || true
+
+    # Create user's cache directory
+    USER_HOME=$(getent passwd "$uid" | cut -d: -f5)
+    mkdir -p "$USER_HOME/.cache"
+    chown -R "$uid:$gid" "$USER_HOME/.cache"
+
+    # Re-exec this script as the dev user
+    # Pass LOCAL_UID=0 to prevent infinite recursion
+    exec gosu "$DEV_USER" env LOCAL_UID=0 LOCAL_GID=0 "$0" "$@"
+fi
+
+# ============================================================================
+# Main entrypoint logic (runs as dev user or root if no LOCAL_UID)
+# ============================================================================
+
 # Determine if we're running an interactive server or a one-off command
-# If no args passed, default to phx.server
 if [ $# -eq 0 ]; then
     COMMAND="mix phx.server"
     FULL_SETUP=true

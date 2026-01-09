@@ -23,6 +23,11 @@ services:
       dockerfile: Dockerfile.dev
     container_name: mydia_dev
     environment:
+      # User mapping for host filesystem permissions
+      # Set via ./dev script to match host user
+      LOCAL_UID: ${LOCAL_UID:-0}
+      LOCAL_GID: ${LOCAL_GID:-0}
+
       # Phoenix configuration
       PHX_HOST: localhost
       PORT: 4000

@@ -9,11 +9,10 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../domain/models/download.dart';
-import '../../domain/models/download_adapters.dart';
 import '../../domain/models/download_settings.dart';
 import '../../domain/models/storage_settings.dart';
 import 'background_download_service.dart';
@@ -183,13 +182,15 @@ class _NativeDownloadDatabase implements DownloadDatabase {
 }
 
 class _NativeDownloadService implements DownloadService {
-  _NativeDownloadDatabase? _database;
+  DownloadDatabase? _database;
   final Dio _dio = Dio(BaseOptions(
     receiveTimeout: const Duration(minutes: 30),
     sendTimeout: const Duration(minutes: 30),
   ));
   final Map<String, CancelToken> _cancelTokens = {};
   final Map<String, bool> _pausedTasks = {};
+  // Track cancellation callbacks for progressive downloads (to cancel server jobs)
+  final Map<String, Future<void> Function(String)> _cancelJobCallbacks = {};
   final StreamController<DownloadTask> _progressController =
       StreamController<DownloadTask>.broadcast();
 
@@ -219,21 +220,59 @@ class _NativeDownloadService implements DownloadService {
         t.status == 'downloading' || t.status == 'transcoding').length;
   }
 
-  /// Check if there are available download slots.
-  bool hasAvailableSlots() {
-    return getActiveDownloadCount() < _maxConcurrentDownloads;
-  }
+   /// Check if there are available download slots.
+   bool hasAvailableSlots() {
+     return getActiveDownloadCount() < _maxConcurrentDownloads;
+   }
+ 
+   /// Reap any tasks whose cancel tokens were already cancelled but DB not updated.
+   Future<void> _reapCancelledTokens() async {
+     if (_database == null) return;
+ 
+     final cancelledIds = _cancelTokens.entries
+         .where((entry) => entry.value.isCancelled)
+         .map((entry) => entry.key)
+         .toList();
+ 
+     for (final id in cancelledIds) {
+       _cancelTokens.remove(id);
+       _pausedTasks.remove(id);
+ 
+       final task = _database!.getTask(id);
+       if (task != null) {
+         final cancelledTask = task.copyWith(
+           status: 'cancelled',
+           error: 'Cancelled by user',
+         );
+         await _database!.saveTask(cancelledTask);
+         _progressController.add(cancelledTask);
+ 
+         if (cancelledTask.filePath != null) {
+           final file = File(cancelledTask.filePath!);
+           if (await file.exists()) {
+             await file.delete();
+           }
+         }
+       }
+     }
+   }
+ 
+   /// Process the download queue and start next queued downloads if slots available.
 
-  /// Process the download queue and start next queued downloads if slots available.
   Future<void> _processQueue() async {
     if (_database == null || !_autoStartQueued) return;
+
+    // Clean up any cancelled tokens before checking slots
+    await _reapCancelledTokens();
 
     while (hasAvailableSlots()) {
       // Get queued tasks sorted by creation date (FIFO)
       final queuedTasks = _database!.getAllTasks()
-          .where((t) => t.status == 'queued')
+          .where((t) => t.status == 'queued' || t.status == 'transcoding')
           .toList()
         ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+
 
       if (queuedTasks.isEmpty) break;
 
@@ -262,8 +301,15 @@ class _NativeDownloadService implements DownloadService {
   @override
   Stream<DownloadTask> get progressStream => _progressController.stream;
 
-  void setDatabase(_NativeDownloadDatabase database) {
+  @override
+  void setDatabase(DownloadDatabase database) {
     _database = database;
+
+    // Run cleanup asynchronously on initialization
+    Future.microtask(() async {
+      await cleanupOrphanedFiles();
+      await cleanupOldTaskRecords();
+    });
   }
 
   /// Initialize background download service for mobile platforms.
@@ -314,6 +360,73 @@ class _NativeDownloadService implements DownloadService {
     return downloadDir.path;
   }
 
+  /// Clean up orphaned partial files from failed or cancelled downloads.
+  ///
+  /// This method scans the downloads directory and removes any files that:
+  /// - Are not associated with a completed download (DownloadedMedia)
+  /// - Are not associated with an active download task
+  ///
+  /// Should be called on service initialization.
+  Future<void> cleanupOrphanedFiles() async {
+    if (_database == null) return;
+
+    try {
+      final downloadDir = Directory(await _getDownloadDirectory());
+      if (!await downloadDir.exists()) return;
+
+      // Get all valid file paths from completed downloads
+      final downloadedMedia = _database!.getAllMedia();
+      final validCompletedPaths = downloadedMedia.map((m) => m.filePath).toSet();
+
+      // Get all file paths from active/pending downloads
+      final activeTasks = _database!.getAllTasks().where((t) =>
+          t.status == 'downloading' ||
+          t.status == 'transcoding' ||
+          t.status == 'pending' ||
+          t.status == 'queued' ||
+          t.status == 'paused');
+      final activeTaskPaths =
+          activeTasks.where((t) => t.filePath != null).map((t) => t.filePath!).toSet();
+
+      // Combine all valid paths
+      final validPaths = {...validCompletedPaths, ...activeTaskPaths};
+
+      // List all files in download directory and delete orphans
+      await for (final entity in downloadDir.list()) {
+        if (entity is File) {
+          if (!validPaths.contains(entity.path)) {
+            try {
+              await entity.delete();
+            } catch (_) {
+              // Ignore deletion errors
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // Ignore errors during cleanup - this is a best-effort operation
+    }
+  }
+
+  /// Clean up cancelled and failed task records older than 24 hours.
+  Future<void> cleanupOldTaskRecords() async {
+    if (_database == null) return;
+
+    try {
+      final cutoff = DateTime.now().subtract(const Duration(hours: 24));
+      final allTasks = _database!.getAllTasks();
+
+      for (final task in allTasks) {
+        if ((task.status == 'cancelled' || task.status == 'failed') &&
+            task.createdAt.isBefore(cutoff)) {
+          await _database!.deleteTask(task.id);
+        }
+      }
+    } catch (_) {
+      // Ignore errors during cleanup
+    }
+  }
+
   String _generateFileName(DownloadTask task) {
     final sanitizedTitle = task.title.replaceAll(RegExp(r'[^\w\s-]'), '');
     final timestamp = DateTime.now().millisecondsSinceEpoch;
@@ -329,10 +442,27 @@ class _NativeDownloadService implements DownloadService {
     required MediaType mediaType,
     String? posterUrl,
     int? fileSize,
+    String? overview,
+    int? runtime,
+    List<String>? genres,
+    double? rating,
+    String? backdropUrl,
+    int? year,
+    String? contentRating,
+    int? seasonNumber,
+    int? episodeNumber,
+    String? showId,
+    String? showTitle,
+    String? showPosterUrl,
+    String? thumbnailUrl,
+    String? airDate,
   }) async {
     if (_database == null) {
       throw StateError('Database not initialized');
     }
+
+    // Clean up any cancelled tokens before checking slots
+    await _reapCancelledTokens();
 
     final taskId = '${mediaId}_${DateTime.now().millisecondsSinceEpoch}';
 
@@ -344,26 +474,34 @@ class _NativeDownloadService implements DownloadService {
       mediaId: mediaId,
       title: title,
       quality: quality,
-      downloadUrl: downloadUrl,
       mediaType: mediaType == MediaType.movie ? 'movie' : 'episode',
       posterUrl: posterUrl,
-      fileSize: fileSize,
       createdAt: DateTime.now(),
-      status: shouldQueue ? 'queued' : 'pending',
+      isProgressive: false,
+      status: shouldQueue ? 'queued' : 'downloading',
+      fileSize: fileSize,
+      downloadUrl: downloadUrl,
+      overview: overview,
+      runtime: runtime,
+      genres: genres,
+      rating: rating,
+      backdropUrl: backdropUrl,
+      year: year,
+      contentRating: contentRating,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
+      showId: showId,
+      showTitle: showTitle,
+      showPosterUrl: showPosterUrl,
+      thumbnailUrl: thumbnailUrl,
+      airDate: airDate,
     );
 
     await _database!.saveTask(task);
     _progressController.add(task);
 
-    // Only start if not queued
     if (!shouldQueue) {
-      // Use background downloads on mobile, Dio on desktop
-      if (_useBackgroundDownloader) {
-        await _initializeBackgroundService();
-        await _backgroundService!.startDownload(task);
-      } else {
-        _startDownloadTask(task);
-      }
+      _startDownloadTask(task);
     }
 
     return task;
@@ -380,10 +518,28 @@ class _NativeDownloadService implements DownloadService {
     required Future<String> Function(String jobId) getDownloadUrl,
     required Future<({String jobId, String status, double progress, int? fileSize})> Function() prepareDownload,
     required Future<({String status, double progress, int? fileSize, String? error})> Function(String jobId) getJobStatus,
+    Future<void> Function(String jobId)? cancelJob,
+    String? overview,
+    int? runtime,
+    List<String>? genres,
+    double? rating,
+    String? backdropUrl,
+    int? year,
+    String? contentRating,
+    int? seasonNumber,
+    int? episodeNumber,
+    String? showId,
+    String? showTitle,
+    String? showPosterUrl,
+    String? thumbnailUrl,
+    String? airDate,
   }) async {
     if (_database == null) {
       throw StateError('Database not initialized');
     }
+
+    // Clean up any cancelled tokens before checking slots
+    await _reapCancelledTokens();
 
     final taskId = '${mediaId}_${DateTime.now().millisecondsSinceEpoch}';
 
@@ -402,12 +558,29 @@ class _NativeDownloadService implements DownloadService {
         createdAt: DateTime.now(),
         isProgressive: true,
         status: 'queued',
+        overview: overview,
+        runtime: runtime,
+        genres: genres,
+        rating: rating,
+        backdropUrl: backdropUrl,
+        year: year,
+        contentRating: contentRating,
+        seasonNumber: seasonNumber,
+        episodeNumber: episodeNumber,
+        showId: showId,
+        showTitle: showTitle,
+        showPosterUrl: showPosterUrl,
+        thumbnailUrl: thumbnailUrl,
+        airDate: airDate,
       );
 
       await _database!.saveTask(task);
       _progressController.add(task);
       return task;
     }
+
+    // Before starting progressive, reap any cancelled tokens to free slots
+    await _reapCancelledTokens();
 
     // Prepare the transcode job on the server
     final prepareResult = await prepareDownload();
@@ -426,10 +599,29 @@ class _NativeDownloadService implements DownloadService {
       transcodeProgress: prepareResult.progress,
       status: prepareResult.status == 'ready' ? 'downloading' : 'transcoding',
       fileSize: prepareResult.fileSize,
+      overview: overview,
+      runtime: runtime,
+      genres: genres,
+      rating: rating,
+      backdropUrl: backdropUrl,
+      year: year,
+      contentRating: contentRating,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
+      showId: showId,
+      showTitle: showTitle,
+      showPosterUrl: showPosterUrl,
+      thumbnailUrl: thumbnailUrl,
+      airDate: airDate,
     );
 
     await _database!.saveTask(task);
     _progressController.add(task);
+
+    // Store the cancel callback for this task
+    if (cancelJob != null) {
+      _cancelJobCallbacks[taskId] = cancelJob;
+    }
 
     // Start the progressive download process
     _startProgressiveDownloadTask(
@@ -505,7 +697,10 @@ class _NativeDownloadService implements DownloadService {
         await Future.delayed(const Duration(seconds: 2));
       }
 
-      if (cancelToken.isCancelled) return;
+      // Check if cancelled - cleanup is handled by cancelDownload
+      if (cancelToken.isCancelled) {
+        return;
+      }
 
       // Phase 2: Start downloading
       final downloadUrl = await getDownloadUrl(jobId);
@@ -538,7 +733,11 @@ class _NativeDownloadService implements DownloadService {
 
       bool downloadComplete = false;
 
-      while (!downloadComplete && !cancelToken.isCancelled) {
+      while (!downloadComplete) {
+        // Check if cancelled - cleanup is handled by cancelDownload
+        if (cancelToken.isCancelled) {
+          return;
+        }
         if (_pausedTasks[task.id] == true) {
           // Save current progress and wait
           updatedTask = updatedTask.copyWith(
@@ -602,29 +801,33 @@ class _NativeDownloadService implements DownloadService {
           final currentFileSize = await file.length();
           downloadedBytes = currentFileSize;
 
-          if (transcodeComplete && lastKnownFileSize != null && currentFileSize >= lastKnownFileSize) {
-            downloadComplete = true;
-          } else if (!transcodeComplete) {
-            // Still transcoding, wait a bit then check for more data
-            await Future.delayed(const Duration(seconds: 2));
-          } else if (response.statusCode == 206) {
-            // Partial content received, continue downloading
-            await Future.delayed(const Duration(milliseconds: 500));
-          }
-        } on DioException catch (e) {
-          if (e.type == DioExceptionType.cancel) {
-            rethrow;
-          }
-          // For other errors during progressive download, retry after delay
-          if (!transcodeComplete) {
-            await Future.delayed(const Duration(seconds: 2));
-            continue;
-          }
-          rethrow;
-        }
+      if (transcodeComplete && lastKnownFileSize != null && currentFileSize >= lastKnownFileSize) {
+        downloadComplete = true;
+      } else if (!transcodeComplete) {
+        // Still transcoding, wait a bit then check for more data
+        await Future.delayed(const Duration(seconds: 2));
+      } else if (response.statusCode == 206) {
+        // Partial content received, continue downloading
+        await Future.delayed(const Duration(milliseconds: 500));
       }
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) {
+        // Cancelled - cleanup is handled by cancelDownload
+        return;
+      }
+      // For other errors during progressive download, retry after delay
+      if (!transcodeComplete) {
+        await Future.delayed(const Duration(seconds: 2));
+        continue;
+      }
+      rethrow;
+    }
+  }
 
-      if (cancelToken.isCancelled) return;
+  // Final cancellation check - cleanup is handled by cancelDownload
+  if (cancelToken.isCancelled) {
+    return;
+  }
 
       // Download complete
       final downloadedFileSize = await file.length();
@@ -645,24 +848,23 @@ class _NativeDownloadService implements DownloadService {
       _progressController.add(updatedTask);
       _cancelTokens.remove(task.id);
       _pausedTasks.remove(task.id);
+      _cancelJobCallbacks.remove(task.id);
 
       // Process queue to start next download
       _processQueue();
     } on DioException catch (e) {
-      String errorMessage;
+      // If cancelled, cleanup is handled by cancelDownload
       if (e.type == DioExceptionType.cancel) {
-        errorMessage = 'Download cancelled';
-        updatedTask = updatedTask.copyWith(status: 'cancelled', error: errorMessage);
-      } else {
-        errorMessage = e.message ?? 'Download failed';
-        updatedTask = updatedTask.copyWith(status: 'failed', error: errorMessage);
+        return;
       }
+      // Handle other Dio errors
+      final errorMessage = e.message ?? 'Download failed';
+      updatedTask = updatedTask.copyWith(status: 'failed', error: errorMessage);
       await _database!.saveTask(updatedTask);
       _progressController.add(updatedTask);
       _cancelTokens.remove(task.id);
       _pausedTasks.remove(task.id);
-
-      // Process queue on failure/cancel
+      _cancelJobCallbacks.remove(task.id);
       _processQueue();
     } catch (e) {
       final errorTask = updatedTask.copyWith(
@@ -673,8 +875,7 @@ class _NativeDownloadService implements DownloadService {
       _progressController.add(errorTask);
       _cancelTokens.remove(task.id);
       _pausedTasks.remove(task.id);
-
-      // Process queue on error
+      _cancelJobCallbacks.remove(task.id);
       _processQueue();
     }
   }
@@ -841,27 +1042,43 @@ class _NativeDownloadService implements DownloadService {
     await _startDownloadTask(task);
   }
 
-  @override
-  Future<void> cancelDownload(String taskId) async {
+  /// Centralized method to cancel a task and clean up all associated resources.
+  ///
+  /// This ensures:
+  /// - Cancel token is triggered immediately (stops network request)
+  /// - Server-side transcode job is cancelled (for progressive downloads)
+  /// - Partial files are deleted
+  /// - Database is updated
+  /// - Queue is processed
+  Future<void> _cancelAndCleanupTask(String taskId, {bool processQueue = true}) async {
     if (_database == null) return;
 
-    // On mobile, try to cancel via background service first
-    if (_useBackgroundDownloader && _backgroundServiceInitialized) {
-      await _backgroundService!.cancelDownload(taskId);
-      // Background service will update the task status
-    }
+    final task = _database!.getTask(taskId);
 
-    // Cancel the download token (for Dio-based downloads)
+    // 1. Cancel the Dio cancel token immediately (stops active download)
     final cancelToken = _cancelTokens[taskId];
-    if (cancelToken != null) {
-      cancelToken.cancel();
-      _cancelTokens.remove(taskId);
+    if (cancelToken != null && !cancelToken.isCancelled) {
+      cancelToken.cancel('Cancelled by user');
     }
+    _cancelTokens.remove(taskId);
 
-    // Remove from paused tracking
+    // 2. Cancel server-side transcode job for progressive downloads
+    if (task != null && task.isProgressive && task.transcodeJobId != null) {
+      final cancelCallback = _cancelJobCallbacks[taskId];
+      if (cancelCallback != null) {
+        try {
+          await cancelCallback(task.transcodeJobId!);
+        } catch (_) {
+          // Ignore errors when cancelling server job - it may have already completed
+        }
+      }
+    }
+    _cancelJobCallbacks.remove(taskId);
+
+    // 3. Remove from paused tracking
     _pausedTasks.remove(taskId);
 
-    final task = _database!.getTask(taskId);
+    // 4. Update database and notify listeners
     if (task != null) {
       final cancelledTask = task.copyWith(
         status: 'cancelled',
@@ -870,14 +1087,36 @@ class _NativeDownloadService implements DownloadService {
       await _database!.saveTask(cancelledTask);
       _progressController.add(cancelledTask);
 
-      // Delete partial file if exists
+      // 5. Delete partial file if exists
       if (task.filePath != null) {
         final file = File(task.filePath!);
         if (await file.exists()) {
-          await file.delete();
+          try {
+            await file.delete();
+          } catch (_) {
+            // Ignore file deletion errors
+          }
         }
       }
     }
+
+    // 6. Process queue to start next download
+    if (processQueue) {
+      _processQueue();
+    }
+  }
+
+  @override
+  Future<void> cancelDownload(String taskId) async {
+    if (_database == null) return;
+
+    // On mobile, try to cancel via background service first
+    if (_useBackgroundDownloader && _backgroundServiceInitialized) {
+      await _backgroundService!.cancelDownload(taskId);
+    }
+
+    // Use centralized cleanup for everything else
+    await _cancelAndCleanupTask(taskId);
   }
 
   @override

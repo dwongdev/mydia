@@ -55,6 +55,10 @@ typedef ProgressiveDownloadCallback = void Function({
 
 /// Abstract interface for the download service/manager.
 abstract class DownloadService {
+  /// Initialize the service with a database.
+  /// Must be called before any other methods.
+  void setDatabase(DownloadDatabase database);
+
   Stream<DownloadTask> get progressStream;
 
   Future<DownloadTask> startDownload({
@@ -65,6 +69,20 @@ abstract class DownloadService {
     required MediaType mediaType,
     String? posterUrl,
     int? fileSize,
+    String? overview,
+    int? runtime,
+    List<String>? genres,
+    double? rating,
+    String? backdropUrl,
+    int? year,
+    String? contentRating,
+    int? seasonNumber,
+    int? episodeNumber,
+    String? showId,
+    String? showTitle,
+    String? showPosterUrl,
+    String? thumbnailUrl,
+    String? airDate,
   });
 
   /// Start a progressive download that transcodes on the server.
@@ -78,6 +96,7 @@ abstract class DownloadService {
   /// [getDownloadUrl] - Async function to get authenticated download URL
   /// [prepareDownload] - Async function to prepare download job on server
   /// [getJobStatus] - Async function to poll job status
+  /// [cancelJob] - Async function to cancel the server-side transcode job
   Future<DownloadTask> startProgressiveDownload({
     required String mediaId,
     required String title,
@@ -88,6 +107,21 @@ abstract class DownloadService {
     required Future<String> Function(String jobId) getDownloadUrl,
     required Future<({String jobId, String status, double progress, int? fileSize})> Function() prepareDownload,
     required Future<({String status, double progress, int? fileSize, String? error})> Function(String jobId) getJobStatus,
+    Future<void> Function(String jobId)? cancelJob,
+    String? overview,
+    int? runtime,
+    List<String>? genres,
+    double? rating,
+    String? backdropUrl,
+    int? year,
+    String? contentRating,
+    int? seasonNumber,
+    int? episodeNumber,
+    String? showId,
+    String? showTitle,
+    String? showPosterUrl,
+    String? thumbnailUrl,
+    String? airDate,
   });
 
   Future<void> pauseDownload(String taskId);

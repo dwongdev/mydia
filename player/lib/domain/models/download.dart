@@ -1,4 +1,7 @@
-import 'package:hive/hive.dart';
+import 'package:hive_ce/hive.dart';
+
+part 'download.g.dart';
+
 
 enum DownloadStatus {
   pending,
@@ -78,6 +81,49 @@ class DownloadTask {
   @HiveField(18)
   final int? downloadedBytes;
 
+  // NEW: Metadata fields
+  @HiveField(19)
+  final String? overview;
+
+  @HiveField(20)
+  final int? runtime;
+
+  @HiveField(21)
+  final List<String>? genres;
+
+  @HiveField(22)
+  final double? rating;
+
+  @HiveField(23)
+  final String? backdropUrl;
+
+  @HiveField(24)
+  final int? year;
+
+  @HiveField(25)
+  final String? contentRating;
+
+  @HiveField(26)
+  final int? seasonNumber;
+
+  @HiveField(27)
+  final int? episodeNumber;
+
+  @HiveField(28)
+  final String? showId;
+
+  @HiveField(29)
+  final String? showTitle;
+
+  @HiveField(30)
+  final String? showPosterUrl;
+
+  @HiveField(31)
+  final String? thumbnailUrl;
+
+  @HiveField(32)
+  final String? airDate;
+
   const DownloadTask({
     required this.id,
     required this.mediaId,
@@ -99,6 +145,21 @@ class DownloadTask {
     this.downloadProgress = 0.0,
     this.isProgressive = false,
     this.downloadedBytes,
+    // Metadata fields
+    this.overview,
+    this.runtime,
+    this.genres,
+    this.rating,
+    this.backdropUrl,
+    this.year,
+    this.contentRating,
+    this.seasonNumber,
+    this.episodeNumber,
+    this.showId,
+    this.showTitle,
+    this.showPosterUrl,
+    this.thumbnailUrl,
+    this.airDate,
   });
 
   DownloadStatus get downloadStatus {
@@ -187,6 +248,20 @@ class DownloadTask {
     double? downloadProgress,
     bool? isProgressive,
     int? downloadedBytes,
+    String? overview,
+    int? runtime,
+    List<String>? genres,
+    double? rating,
+    String? backdropUrl,
+    int? year,
+    String? contentRating,
+    int? seasonNumber,
+    int? episodeNumber,
+    String? showId,
+    String? showTitle,
+    String? showPosterUrl,
+    String? thumbnailUrl,
+    String? airDate,
   }) {
     return DownloadTask(
       id: id ?? this.id,
@@ -208,6 +283,20 @@ class DownloadTask {
       downloadProgress: downloadProgress ?? this.downloadProgress,
       isProgressive: isProgressive ?? this.isProgressive,
       downloadedBytes: downloadedBytes ?? this.downloadedBytes,
+      overview: overview ?? this.overview,
+      runtime: runtime ?? this.runtime,
+      genres: genres ?? this.genres,
+      rating: rating ?? this.rating,
+      backdropUrl: backdropUrl ?? this.backdropUrl,
+      year: year ?? this.year,
+      contentRating: contentRating ?? this.contentRating,
+      seasonNumber: seasonNumber ?? this.seasonNumber,
+      episodeNumber: episodeNumber ?? this.episodeNumber,
+      showId: showId ?? this.showId,
+      showTitle: showTitle ?? this.showTitle,
+      showPosterUrl: showPosterUrl ?? this.showPosterUrl,
+      thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
+      airDate: airDate ?? this.airDate,
     );
   }
 
@@ -256,6 +345,51 @@ class DownloadedMedia {
   @HiveField(8)
   final DateTime downloadedAt;
 
+  // NEW: Common metadata
+  @HiveField(9)
+  final String? overview;
+
+  @HiveField(10)
+  final int? runtime;
+
+  @HiveField(11)
+  final List<String> genres;
+
+  @HiveField(12)
+  final double? rating;
+
+  @HiveField(13)
+  final String? backdropUrl;
+
+  // NEW: Movie-specific
+  @HiveField(14)
+  final int? year;
+
+  @HiveField(15)
+  final String? contentRating;
+
+  // NEW: Episode-specific
+  @HiveField(16)
+  final int? seasonNumber;
+
+  @HiveField(17)
+  final int? episodeNumber;
+
+  @HiveField(18)
+  final String? showId;
+
+  @HiveField(19)
+  final String? showTitle;
+
+  @HiveField(20)
+  final String? showPosterUrl;
+
+  @HiveField(21)
+  final String? thumbnailUrl;
+
+  @HiveField(22)
+  final String? airDate;
+
   const DownloadedMedia({
     required this.id,
     required this.mediaId,
@@ -266,6 +400,20 @@ class DownloadedMedia {
     this.mediaType = 'movie',
     this.posterUrl,
     required this.downloadedAt,
+    this.overview,
+    this.runtime,
+    this.genres = const [],
+    this.rating,
+    this.backdropUrl,
+    this.year,
+    this.contentRating,
+    this.seasonNumber,
+    this.episodeNumber,
+    this.showId,
+    this.showTitle,
+    this.showPosterUrl,
+    this.thumbnailUrl,
+    this.airDate,
   });
 
   MediaType get type {
@@ -293,6 +441,20 @@ class DownloadedMedia {
       mediaType: task.mediaType,
       posterUrl: task.posterUrl,
       downloadedAt: task.completedAt ?? DateTime.now(),
+      overview: task.overview,
+      runtime: task.runtime,
+      genres: task.genres ?? [],
+      rating: task.rating,
+      backdropUrl: task.backdropUrl,
+      year: task.year,
+      contentRating: task.contentRating,
+      seasonNumber: task.seasonNumber,
+      episodeNumber: task.episodeNumber,
+      showId: task.showId,
+      showTitle: task.showTitle,
+      showPosterUrl: task.showPosterUrl,
+      thumbnailUrl: task.thumbnailUrl,
+      airDate: task.airDate,
     );
   }
 }

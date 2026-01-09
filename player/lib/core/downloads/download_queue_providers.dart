@@ -2,7 +2,7 @@
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../domain/models/download.dart';
@@ -94,11 +94,12 @@ Future<DownloadQueueStatus> downloadQueueStatus(Ref ref) async {
       .where((t) => t.status == 'downloading' || t.status == 'transcoding')
       .toList();
 
-  final queuedDownloads = allTasks
-      .where((t) => t.status == 'pending' || t.status == 'queued')
-      .toList()
-    // Sort by creation date (FIFO)
-    ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    final queuedDownloads = allTasks
+        .where((t) => t.status == 'pending' || t.status == 'queued' || t.status == 'transcoding')
+        .toList()
+      // Sort by creation date (FIFO)
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
 
   return DownloadQueueStatus(
     activeCount: activeDownloads.length,
@@ -241,17 +242,17 @@ class DownloadQueueManager {
 
 /// Provider for download queue manager.
 @riverpod
-DownloadQueueManager downloadQueueManager(Ref ref) {
-  final database = ref.watch(downloadDatabaseProvider);
-  final downloadService = ref.watch(downloadManagerProvider);
+Future<DownloadQueueManager> downloadQueueManager(Ref ref) async {
+  final database = await ref.watch(downloadDatabaseProvider.future);
+  final downloadService = await ref.watch(downloadManagerProvider.future);
   return DownloadQueueManager(database, downloadService);
 }
 
 /// Get queue position for a specific task.
 @riverpod
-int queuePosition(Ref ref, String taskId) {
+Future<int> queuePosition(Ref ref, String taskId) async {
   try {
-    final manager = ref.watch(downloadQueueManagerProvider);
+    final manager = await ref.watch(downloadQueueManagerProvider.future);
     return manager.getQueuePosition(taskId);
   } catch (_) {
     return -1; // Not found

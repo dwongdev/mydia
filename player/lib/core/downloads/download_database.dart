@@ -1,6 +1,5 @@
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:hive_ce_flutter/hive_flutter.dart';
 import '../../domain/models/download.dart';
-import '../../domain/models/download_adapters.dart';
 
 class DownloadDatabase {
   static const String _tasksBoxName = 'download_tasks';

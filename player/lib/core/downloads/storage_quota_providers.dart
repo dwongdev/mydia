@@ -2,7 +2,7 @@
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../domain/models/download.dart';
@@ -144,9 +144,9 @@ class StorageCleanupService {
 
 /// Provider for storage cleanup service.
 @riverpod
-StorageCleanupService storageCleanupService(Ref ref) {
-  final database = ref.watch(downloadDatabaseProvider);
-  final downloadService = ref.watch(downloadManagerProvider);
+Future<StorageCleanupService> storageCleanupService(Ref ref) async {
+  final database = await ref.watch(downloadDatabaseProvider.future);
+  final downloadService = await ref.watch(downloadManagerProvider.future);
   return StorageCleanupService(database, downloadService);
 }
 
@@ -163,7 +163,7 @@ Future<int> performAutoCleanup(Ref ref, int requiredBytes) async {
 
   if (bytesToFree <= 0) return 0;
 
-  final cleanupService = ref.read(storageCleanupServiceProvider);
+  final cleanupService = await ref.read(storageCleanupServiceProvider.future);
   return cleanupService.cleanup(
     targetBytes: bytesToFree,
     policy: settings.cleanupPolicy,

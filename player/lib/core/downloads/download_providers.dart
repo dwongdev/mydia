@@ -14,8 +14,9 @@ bool downloadsSupported(Ref ref) {
 }
 
 @Riverpod(keepAlive: true)
-DownloadDatabase downloadDatabase(Ref ref) {
+Future<DownloadDatabase> downloadDatabase(Ref ref) async {
   final database = getDownloadDatabase();
+  await database.initialize();
   ref.onDispose(() {
     database.close();
   });
@@ -23,8 +24,10 @@ DownloadDatabase downloadDatabase(Ref ref) {
 }
 
 @Riverpod(keepAlive: true)
-DownloadService downloadManager(Ref ref) {
+Future<DownloadService> downloadManager(Ref ref) async {
+  final database = await ref.watch(downloadDatabaseProvider.future);
   final service = getDownloadService();
+  service.setDatabase(database);
   ref.onDispose(() {
     service.dispose();
   });
@@ -38,16 +41,23 @@ Stream<List<DownloadTask>> downloadQueue(Ref ref) async* {
     return;
   }
 
-  final database = ref.watch(downloadDatabaseProvider);
-  final manager = ref.watch(downloadManagerProvider);
+  final database = await ref.watch(downloadDatabaseProvider.future);
+  await ref.watch(downloadManagerProvider.future);
 
-  // Emit initial state
-  yield manager.getActiveDownloads();
+  // Emit initial active/queued tasks (exclude failed and completed)
+  yield _getActiveTasks(database);
 
-  // Listen to database changes
+  // Listen to database changes and emit latest tasks
   await for (final _ in database.watchTasks()) {
-    yield manager.getActiveDownloads();
+    yield _getActiveTasks(database);
   }
+}
+
+/// Returns only active tasks (not failed, completed, or cancelled).
+List<DownloadTask> _getActiveTasks(DownloadDatabase database) {
+  return database.getAllTasks()
+      .where((t) => t.status != 'failed' && t.status != 'completed' && t.status != 'cancelled')
+      .toList();
 }
 
 @riverpod
@@ -57,13 +67,13 @@ Stream<List<DownloadedMedia>> downloadedMedia(Ref ref) async* {
     return;
   }
 
-  final database = ref.watch(downloadDatabaseProvider);
-  final manager = ref.watch(downloadManagerProvider);
+  final database = await ref.watch(downloadDatabaseProvider.future);
+  final manager = await ref.watch(downloadManagerProvider.future);
 
-  // Emit initial state
+  // Emit current downloaded media
   yield manager.getDownloadedMedia();
 
-  // Listen to database changes
+  // Listen to database changes and emit downloaded media
   await for (final _ in database.watchMedia()) {
     yield manager.getDownloadedMedia();
   }
@@ -76,8 +86,8 @@ Stream<int> storageUsage(Ref ref) async* {
     return;
   }
 
-  final database = ref.watch(downloadDatabaseProvider);
-  final manager = ref.watch(downloadManagerProvider);
+  final database = await ref.watch(downloadDatabaseProvider.future);
+  final manager = await ref.watch(downloadManagerProvider.future);
 
   // Emit initial state
   yield manager.getTotalStorageUsed();
@@ -89,27 +99,54 @@ Stream<int> storageUsage(Ref ref) async* {
 }
 
 @riverpod
-Stream<DownloadTask> downloadProgress(Ref ref) {
-  final manager = ref.watch(downloadManagerProvider);
-  return manager.progressStream;
+Stream<DownloadTask> downloadProgress(Ref ref) async* {
+  final manager = await ref.watch(downloadManagerProvider.future);
+  yield* manager.progressStream;
+}
+
+/// Provider for failed download tasks.
+/// Returns tasks with 'failed' status, sorted by most recent first.
+@riverpod
+Stream<List<DownloadTask>> failedDownloads(Ref ref) async* {
+  if (!isDownloadSupported) {
+    yield [];
+    return;
+  }
+
+  final database = await ref.watch(downloadDatabaseProvider.future);
+
+  // Emit initial failed tasks
+  yield _getFailedTasks(database);
+
+  // Listen to database changes and emit failed tasks
+  await for (final _ in database.watchTasks()) {
+    yield _getFailedTasks(database);
+  }
+}
+
+List<DownloadTask> _getFailedTasks(DownloadDatabase database) {
+  return database.getAllTasks()
+      .where((t) => t.status == 'failed')
+      .toList()
+    ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 }
 
 @riverpod
-bool isMediaDownloaded(Ref ref, String mediaId) {
+Future<bool> isMediaDownloaded(Ref ref, String mediaId) async {
   if (!isDownloadSupported) {
     return false;
   }
 
-  final manager = ref.watch(downloadManagerProvider);
+  final manager = await ref.watch(downloadManagerProvider.future);
   return manager.isMediaDownloaded(mediaId);
 }
 
 @riverpod
-DownloadedMedia? getDownloadedMediaById(Ref ref, String mediaId) {
+Future<DownloadedMedia?> getDownloadedMediaById(Ref ref, String mediaId) async {
   if (!isDownloadSupported) {
     return null;
   }
 
-  final manager = ref.watch(downloadManagerProvider);
+  final manager = await ref.watch(downloadManagerProvider.future);
   return manager.getDownloadedMediaById(mediaId);
 }

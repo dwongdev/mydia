@@ -7,6 +7,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:graphql_flutter/graphql_flutter.dart';
+import '../auth/auth_status.dart';
 import 'graphql_provider.dart';
 
 // Example 1: Check authentication status
@@ -18,8 +19,8 @@ class AuthStatusWidget extends ConsumerWidget {
     final authStatus = ref.watch(authStateProvider);
 
     return authStatus.when(
-      data: (isAuthenticated) => Text(
-        isAuthenticated ? 'Logged in' : 'Not logged in',
+      data: (status) => Text(
+        status == AuthStatus.authenticated ? 'Logged in' : 'Not logged in',
       ),
       loading: () => const CircularProgressIndicator(),
       error: (error, _) => Text('Error: $error'),

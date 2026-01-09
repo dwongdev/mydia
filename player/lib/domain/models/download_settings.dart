@@ -3,9 +3,9 @@
 /// Allows users to configure max concurrent downloads and queue behavior.
 library;
 
-import 'package:hive/hive.dart';
+import 'package:hive_ce/hive.dart';
 
-part 'download_settings_adapter.dart';
+part 'download_settings.g.dart';
 
 /// Download settings configuration.
 @HiveType(typeId: 3)

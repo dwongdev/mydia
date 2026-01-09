@@ -2,10 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hive/hive.dart';
+import 'package:hive_ce/hive.dart';
 import 'package:path/path.dart' as path;
 import 'package:player/domain/models/download.dart';
-import 'package:player/domain/models/download_adapters.dart';
 import 'package:player/domain/models/download_settings.dart';
 import 'package:player/domain/models/storage_settings.dart';
 
@@ -809,6 +808,20 @@ class TestDownloadService {
     required MediaType mediaType,
     String? posterUrl,
     int? fileSize,
+    String? overview,
+    int? runtime,
+    List<String>? genres,
+    double? rating,
+    String? backdropUrl,
+    int? year,
+    String? contentRating,
+    int? seasonNumber,
+    int? episodeNumber,
+    String? showId,
+    String? showTitle,
+    String? showPosterUrl,
+    String? thumbnailUrl,
+    String? airDate,
   }) async {
     final taskId = '${mediaId}_${DateTime.now().millisecondsSinceEpoch}';
     final shouldQueue = !_hasAvailableSlots();
@@ -824,6 +837,20 @@ class TestDownloadService {
       fileSize: fileSize ?? 1024 * 10, // Default 10KB
       createdAt: DateTime.now(),
       status: shouldQueue ? 'queued' : 'pending',
+      overview: overview,
+      runtime: runtime,
+      genres: genres,
+      rating: rating,
+      backdropUrl: backdropUrl,
+      year: year,
+      contentRating: contentRating,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
+      showId: showId,
+      showTitle: showTitle,
+      showPosterUrl: showPosterUrl,
+      thumbnailUrl: thumbnailUrl,
+      airDate: airDate,
     );
 
     await database.saveTask(task);
@@ -846,6 +873,20 @@ class TestDownloadService {
     required String quality,
     required MediaType mediaType,
     String? posterUrl,
+    String? overview,
+    int? runtime,
+    List<String>? genres,
+    double? rating,
+    String? backdropUrl,
+    int? year,
+    String? contentRating,
+    int? seasonNumber,
+    int? episodeNumber,
+    String? showId,
+    String? showTitle,
+    String? showPosterUrl,
+    String? thumbnailUrl,
+    String? airDate,
   }) async {
     final taskId = '${mediaId}_${DateTime.now().millisecondsSinceEpoch}';
     final shouldQueue = !_hasAvailableSlots();
@@ -861,6 +902,20 @@ class TestDownloadService {
       fileSize: 1024 * 100, // 100KB
       createdAt: DateTime.now(),
       status: shouldQueue ? 'queued' : 'pending',
+      overview: overview,
+      runtime: runtime,
+      genres: genres,
+      rating: rating,
+      backdropUrl: backdropUrl,
+      year: year,
+      contentRating: contentRating,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
+      showId: showId,
+      showTitle: showTitle,
+      showPosterUrl: showPosterUrl,
+      thumbnailUrl: thumbnailUrl,
+      airDate: airDate,
     );
 
     _slowDownloads[taskId] = true;
@@ -1031,6 +1086,9 @@ class TestDownloadService {
       final isFast = _fastSpeed[task.id] ?? false;
       final delay = isFast ? 5 : (slow ? 50 : 10);
       await Future.delayed(Duration(milliseconds: delay));
+
+      // Check again after delay
+      if (_completers[task.id]?.isCompleted ?? true) return;
 
       downloaded += chunkSize;
       if (downloaded > totalSize) downloaded = totalSize;

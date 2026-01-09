@@ -181,6 +181,29 @@ class BackgroundDownloadService {
       await _downloader.cancelTaskWithId(bgTaskId);
       _cleanup(taskId);
     }
+
+    // Emit cancellation regardless of whether a bg task was found
+    final task = _taskIdToDownloadTask[taskId];
+    if (task != null) {
+      final cancelledTask = task.copyWith(
+        status: 'cancelled',
+        error: 'Cancelled by user',
+      );
+      _taskIdToDownloadTask[taskId] = cancelledTask;
+      _progressController.add(cancelledTask);
+
+      // Delete partial file if exists
+      if (task.filePath != null) {
+        final file = File(task.filePath!);
+        if (await file.exists()) {
+          try {
+            await file.delete();
+          } catch (_) {
+            // Ignore file deletion errors
+          }
+        }
+      }
+    }
   }
 
   /// Find the background task ID for a given task ID.
@@ -205,8 +228,10 @@ class BackgroundDownloadService {
     switch (update.status) {
       case bg.TaskStatus.enqueued:
         updatedTask = task.copyWith(status: 'pending');
+        break;
       case bg.TaskStatus.running:
         updatedTask = task.copyWith(status: 'downloading');
+        break;
       case bg.TaskStatus.complete:
         updatedTask = task.copyWith(
           status: 'completed',
@@ -215,14 +240,17 @@ class BackgroundDownloadService {
           completedAt: DateTime.now(),
         );
         _cleanup(taskId);
+        break;
       case bg.TaskStatus.paused:
         updatedTask = task.copyWith(status: 'paused');
+        break;
       case bg.TaskStatus.canceled:
         updatedTask = task.copyWith(
           status: 'cancelled',
           error: 'Cancelled by user',
         );
         _cleanup(taskId);
+        break;
       case bg.TaskStatus.failed:
         final error = update.exception?.description ?? 'Download failed';
         updatedTask = task.copyWith(
@@ -230,14 +258,17 @@ class BackgroundDownloadService {
           error: error,
         );
         _cleanup(taskId);
+        break;
       case bg.TaskStatus.notFound:
         updatedTask = task.copyWith(
           status: 'failed',
           error: 'Download not found',
         );
         _cleanup(taskId);
+        break;
       case bg.TaskStatus.waitingToRetry:
         updatedTask = task.copyWith(status: 'pending');
+        break;
     }
 
     _taskIdToDownloadTask[taskId] = updatedTask;

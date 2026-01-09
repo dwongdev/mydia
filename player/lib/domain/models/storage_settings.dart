@@ -3,9 +3,9 @@
 /// Allows users to configure maximum storage limits and automatic cleanup.
 library;
 
-import 'package:hive/hive.dart';
+import 'package:hive_ce/hive.dart';
 
-part 'storage_settings_adapter.dart';
+part 'storage_settings.g.dart';
 
 /// Cleanup policy for automatic storage management.
 enum CleanupPolicy {

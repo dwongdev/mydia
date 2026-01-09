@@ -1,19 +1,29 @@
 /// Represents a single download quality option with estimated file size.
 class DownloadOption {
-  /// Quality resolution label (e.g., "1080p", "720p", "480p")
+  /// Quality resolution identifier (e.g., "original", "1080p", "720p", "480p")
   final String resolution;
+
+  /// Display label from server (e.g., "Original", "1080p (Full HD)")
+  /// Falls back to resolution if not provided
+  final String? _label;
 
   /// Estimated file size in bytes
   final int estimatedSize;
 
   const DownloadOption({
     required this.resolution,
+    String? label,
     required this.estimatedSize,
-  });
+  }) : _label = label;
+
+  /// Display label - uses server-provided label or falls back to resolution
+  String get label => _label ?? resolution;
 
   factory DownloadOption.fromJson(Map<String, dynamic> json) {
+    final resolution = json['resolution'] as String;
     return DownloadOption(
-      resolution: json['resolution'] as String,
+      resolution: resolution,
+      label: json['label'] as String?,
       estimatedSize: json['estimated_size'] as int,
     );
   }
@@ -21,6 +31,7 @@ class DownloadOption {
   Map<String, dynamic> toJson() {
     return {
       'resolution': resolution,
+      'label': label,
       'estimated_size': estimatedSize,
     };
   }

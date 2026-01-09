@@ -82,6 +82,11 @@ class _StubDownloadService implements DownloadService {
       StreamController<DownloadTask>.broadcast();
 
   @override
+  void setDatabase(DownloadDatabase database) {
+    // No-op in stub
+  }
+
+  @override
   Stream<DownloadTask> get progressStream => _progressController.stream;
 
   @override
@@ -93,6 +98,20 @@ class _StubDownloadService implements DownloadService {
     required MediaType mediaType,
     String? posterUrl,
     int? fileSize,
+    String? overview,
+    int? runtime,
+    List<String>? genres,
+    double? rating,
+    String? backdropUrl,
+    int? year,
+    String? contentRating,
+    int? seasonNumber,
+    int? episodeNumber,
+    String? showId,
+    String? showTitle,
+    String? showPosterUrl,
+    String? thumbnailUrl,
+    String? airDate,
   }) async {
     throw UnsupportedError('Downloads are not supported');
   }
@@ -108,6 +127,21 @@ class _StubDownloadService implements DownloadService {
     required Future<String> Function(String jobId) getDownloadUrl,
     required Future<({String jobId, String status, double progress, int? fileSize})> Function() prepareDownload,
     required Future<({String status, double progress, int? fileSize, String? error})> Function(String jobId) getJobStatus,
+    Future<void> Function(String jobId)? cancelJob,
+    String? overview,
+    int? runtime,
+    List<String>? genres,
+    double? rating,
+    String? backdropUrl,
+    int? year,
+    String? contentRating,
+    int? seasonNumber,
+    int? episodeNumber,
+    String? showId,
+    String? showTitle,
+    String? showPosterUrl,
+    String? thumbnailUrl,
+    String? airDate,
   }) async {
     throw UnsupportedError('Downloads are not supported');
   }

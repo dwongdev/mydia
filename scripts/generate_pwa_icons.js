@@ -46,7 +46,7 @@ const ICONS_DIR = path.join(ROOT, 'priv/static/images/icons');
 
 const SIZES = [192, 512];
 const BG_COLOR = '#1d232a';
-const BRAND_COLOR = '#FD4F00';
+const BRAND_COLOR = '#3b82f6';
 
 async function generateIcons() {
   // Ensure icons directory exists

@@ -26,14 +26,16 @@ if [ "$(id -u)" = "0" ] && [ "${LOCAL_UID:-0}" != "0" ]; then
     DEV_USER=$(getent passwd "$uid" | cut -d: -f1)
 
     # Ensure the user owns necessary directories (mounted volumes + Flutter tool caches)
-    for dir in /app/.mix /app/.hex /app/player/.pub-cache /app/_build /app/deps /opt/flutter/packages/flutter_tools/.dart_tool; do
+    for dir in /app/.mix /app/.hex /app/player/.pub-cache /app/player/.dart_tool /app/player/build /app/_build /app/deps /opt/flutter/packages/flutter_tools/.dart_tool; do
         if [ -d "$dir" ]; then
             chown -R "$uid:$gid" "$dir" 2>/dev/null || true
         fi
     done
-    # Create Flutter tool cache dir if it doesn't exist
+    # Create Flutter directories if they don't exist (for fresh volume mounts)
     mkdir -p /opt/flutter/packages/flutter_tools/.dart_tool
+    mkdir -p /app/player/.dart_tool /app/player/build
     chown -R "$uid:$gid" /opt/flutter/packages/flutter_tools/.dart_tool 2>/dev/null || true
+    chown -R "$uid:$gid" /app/player/.dart_tool /app/player/build 2>/dev/null || true
 
     # Create user's cache directory
     USER_HOME=$(getent passwd "$uid" | cut -d: -f5)

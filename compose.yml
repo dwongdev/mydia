@@ -64,6 +64,10 @@ services:
       - elixir_make_cache:/root/.cache/elixir_make
       # Persist Flutter pub cache
       - player_pub_cache:/app/player/.pub-cache
+      # Isolate Flutter environment-specific directories from host (nix develop)
+      # These contain SDK-specific artifacts that conflict between environments
+      - player_dart_tool:/app/player/.dart_tool
+      - player_build:/app/player/build
     stdin_open: true
     tty: true
     restart: unless-stopped
@@ -76,6 +80,11 @@ services:
 
 volumes:
   player_pub_cache:
+    driver: local
+  # Flutter environment isolation (prevents conflicts with nix develop)
+  player_dart_tool:
+    driver: local
+  player_build:
     driver: local
   # Named volumes for caching
   build_cache:

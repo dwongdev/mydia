@@ -141,12 +141,11 @@ defmodule Mydia.Jobs.MediaImportTest do
           download_client_id: "test123"
         })
 
-      # Note: This test will fail at the "no client info" stage because
-      # the test client isn't actually running. In a real scenario with
-      # mocking, we'd test the library path check.
-      # For now, we verify it handles the missing client gracefully.
+      # Note: The client config exists, but the actual download client isn't running.
+      # The test will fail when trying to connect to the client, returning :client_error.
+      # In a full test with mocking, we'd verify the library path check instead.
 
-      assert {:error, :no_client} =
+      assert {:error, :client_error} =
                perform_job(MediaImport, %{"download_id" => download.id})
     end
 

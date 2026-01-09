@@ -47,8 +47,9 @@ defmodule Mydia.RemoteAccess.DirectUrlRefresherTest do
       assert length(config.direct_urls) > 0
 
       # All URLs should be sslip.io URLs (no external URLs configured)
+      # HTTP is the default scheme for auto-detected URLs
       Enum.each(config.direct_urls, fn url ->
-        assert String.starts_with?(url, "https://")
+        assert String.starts_with?(url, "http://") or String.starts_with?(url, "https://")
         assert String.contains?(url, ".sslip.io:")
       end)
     end

@@ -4,19 +4,24 @@ defmodule Mydia.RemoteAccess.DirectUrlsTest do
 
   alias Mydia.RemoteAccess.DirectUrls
 
-  describe "build_sslip_url/2" do
-    test "builds correct sslip.io URL from IP tuple" do
-      assert DirectUrls.build_sslip_url({192, 168, 1, 100}, 4000) ==
-               "https://192-168-1-100.sslip.io:4000"
+  describe "build_sslip_url/3" do
+    test "builds correct sslip.io HTTP URL from IP tuple" do
+      assert DirectUrls.build_sslip_url({192, 168, 1, 100}, :http, 4000) ==
+               "http://192-168-1-100.sslip.io:4000"
+    end
+
+    test "builds correct sslip.io HTTPS URL from IP tuple" do
+      assert DirectUrls.build_sslip_url({192, 168, 1, 100}, :https, 4443) ==
+               "https://192-168-1-100.sslip.io:4443"
     end
 
     test "handles different IP addresses" do
-      assert DirectUrls.build_sslip_url({10, 0, 0, 1}, 8080) ==
-               "https://10-0-0-1.sslip.io:8080"
+      assert DirectUrls.build_sslip_url({10, 0, 0, 1}, :http, 8080) ==
+               "http://10-0-0-1.sslip.io:8080"
     end
 
     test "handles different ports" do
-      assert DirectUrls.build_sslip_url({192, 168, 1, 1}, 443) ==
+      assert DirectUrls.build_sslip_url({192, 168, 1, 1}, :https, 443) ==
                "https://192-168-1-1.sslip.io:443"
     end
   end
@@ -26,10 +31,10 @@ defmodule Mydia.RemoteAccess.DirectUrlsTest do
       urls = DirectUrls.detect_local_urls()
 
       assert is_list(urls)
-      # URLs should be strings
+      # URLs should be strings - HTTP by default (HTTPS only when https_port configured)
       Enum.each(urls, fn url ->
         assert is_binary(url)
-        assert String.starts_with?(url, "https://")
+        assert String.starts_with?(url, "http://") or String.starts_with?(url, "https://")
         assert String.contains?(url, ".sslip.io:")
       end)
     end
@@ -231,17 +236,18 @@ defmodule Mydia.RemoteAccess.DirectUrlsTest do
     end
 
     test "returns sslip.io URL on success" do
-      Application.put_env(:mydia, :direct_urls, public_ip_enabled: true, external_port: 4443)
+      Application.put_env(:mydia, :direct_urls, public_ip_enabled: true, http_port: 4443)
 
       case DirectUrls.detect_public_url() do
         {:ok, url} ->
           assert is_binary(url)
-          assert String.starts_with?(url, "https://")
+          # HTTP URLs are primary (HTTPS only when https_port configured)
+          assert String.starts_with?(url, "http://")
           assert String.contains?(url, ".sslip.io:")
           assert String.ends_with?(url, ":4443")
 
-        {:error, :all_services_failed} ->
-          # Network unavailable, skip assertion
+        {:error, :detection_failed} ->
+          # Network unavailable or public IP detection failed
           :ok
       end
     end
@@ -258,8 +264,8 @@ defmodule Mydia.RemoteAccess.DirectUrlsTest do
           # Should use public_port (8443) not external_port (4443)
           assert String.ends_with?(url, ":8443")
 
-        {:error, :all_services_failed} ->
-          # Network unavailable, skip assertion
+        {:error, :detection_failed} ->
+          # Network unavailable or public IP detection failed
           :ok
       end
     end
@@ -267,7 +273,10 @@ defmodule Mydia.RemoteAccess.DirectUrlsTest do
     test "returns error when disabled" do
       Application.put_env(:mydia, :direct_urls, public_ip_enabled: false)
 
-      assert {:error, :disabled} = DirectUrls.detect_public_url()
+      # detect_public_url returns :detection_failed when no public URLs are available
+      # The :disabled error is returned by detect_public_ip, but detect_public_url
+      # returns :detection_failed when detect_public_urls returns an empty list
+      assert {:error, :detection_failed} = DirectUrls.detect_public_url()
     end
   end
 

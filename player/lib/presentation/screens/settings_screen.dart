@@ -152,6 +152,33 @@ class _ConnectionDiagnosticsTile extends ConsumerStatefulWidget {
 class _ConnectionDiagnosticsTileState
     extends ConsumerState<_ConnectionDiagnosticsTile> {
   bool _isExpanded = false;
+  bool _isProbing = false;
+
+  Future<void> _testDirectConnection() async {
+    if (_isProbing) return;
+
+    setState(() {
+      _isProbing = true;
+    });
+
+    try {
+      // Trigger the probe
+      final result = await ref.read(connectionProvider.notifier).probeDirectUrls();
+
+      if (result != null) {
+        // Update diagnostics with the results
+        await ref.read(connectionDiagnosticsProvider.notifier).recordBatchAttempts(
+          result.urlResults,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProbing = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -266,6 +293,22 @@ class _ConnectionDiagnosticsTileState
                     attempt: attempt,
                   );
                 }),
+                // Test button
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _isProbing ? null : _testDirectConnection,
+                    icon: _isProbing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh, size: 18),
+                    label: Text(_isProbing ? 'Testing...' : 'Test Direct Connection'),
+                  ),
+                ),
               ],
             ),
           ),

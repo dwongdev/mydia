@@ -580,6 +580,13 @@ const documentNodeQueryHomeScreen = DocumentNode(
                   ),
                 ),
                 FieldNode(
+                  name: NameNode(value: 'showId'),
+                  alias: null,
+                  arguments: [],
+                  directives: [],
+                  selectionSet: null,
+                ),
+                FieldNode(
                   name: NameNode(value: 'showTitle'),
                   alias: null,
                   arguments: [],
@@ -859,6 +866,7 @@ class Query$HomeScreen$continueWatching {
     required this.title,
     this.artwork,
     required this.progress,
+    this.showId,
     this.showTitle,
     this.seasonNumber,
     this.episodeNumber,
@@ -873,6 +881,7 @@ class Query$HomeScreen$continueWatching {
     final l$title = json['title'];
     final l$artwork = json['artwork'];
     final l$progress = json['progress'];
+    final l$showId = json['showId'];
     final l$showTitle = json['showTitle'];
     final l$seasonNumber = json['seasonNumber'];
     final l$episodeNumber = json['episodeNumber'];
@@ -889,6 +898,7 @@ class Query$HomeScreen$continueWatching {
       progress: Fragment$ProgressFragment.fromJson(
         (l$progress as Map<String, dynamic>),
       ),
+      showId: (l$showId as String?),
       showTitle: (l$showTitle as String?),
       seasonNumber: (l$seasonNumber as int?),
       episodeNumber: (l$episodeNumber as int?),
@@ -905,6 +915,8 @@ class Query$HomeScreen$continueWatching {
   final Fragment$ArtworkFragment? artwork;
 
   final Fragment$ProgressFragment progress;
+
+  final String? showId;
 
   final String? showTitle;
 
@@ -926,6 +938,8 @@ class Query$HomeScreen$continueWatching {
     _resultData['artwork'] = l$artwork?.toJson();
     final l$progress = progress;
     _resultData['progress'] = l$progress.toJson();
+    final l$showId = showId;
+    _resultData['showId'] = l$showId;
     final l$showTitle = showTitle;
     _resultData['showTitle'] = l$showTitle;
     final l$seasonNumber = seasonNumber;
@@ -944,6 +958,7 @@ class Query$HomeScreen$continueWatching {
     final l$title = title;
     final l$artwork = artwork;
     final l$progress = progress;
+    final l$showId = showId;
     final l$showTitle = showTitle;
     final l$seasonNumber = seasonNumber;
     final l$episodeNumber = episodeNumber;
@@ -954,6 +969,7 @@ class Query$HomeScreen$continueWatching {
       l$title,
       l$artwork,
       l$progress,
+      l$showId,
       l$showTitle,
       l$seasonNumber,
       l$episodeNumber,
@@ -993,6 +1009,11 @@ class Query$HomeScreen$continueWatching {
     final l$progress = progress;
     final lOther$progress = other.progress;
     if (l$progress != lOther$progress) {
+      return false;
+    }
+    final l$showId = showId;
+    final lOther$showId = other.showId;
+    if (l$showId != lOther$showId) {
       return false;
     }
     final l$showTitle = showTitle;
@@ -1040,6 +1061,7 @@ abstract class CopyWith$Query$HomeScreen$continueWatching<TRes> {
     String? title,
     Fragment$ArtworkFragment? artwork,
     Fragment$ProgressFragment? progress,
+    String? showId,
     String? showTitle,
     int? seasonNumber,
     int? episodeNumber,
@@ -1065,6 +1087,7 @@ class _CopyWithImpl$Query$HomeScreen$continueWatching<TRes>
     Object? title = _undefined,
     Object? artwork = _undefined,
     Object? progress = _undefined,
+    Object? showId = _undefined,
     Object? showTitle = _undefined,
     Object? seasonNumber = _undefined,
     Object? episodeNumber = _undefined,
@@ -1084,6 +1107,7 @@ class _CopyWithImpl$Query$HomeScreen$continueWatching<TRes>
       progress: progress == _undefined || progress == null
           ? _instance.progress
           : (progress as Fragment$ProgressFragment),
+      showId: showId == _undefined ? _instance.showId : (showId as String?),
       showTitle: showTitle == _undefined
           ? _instance.showTitle
           : (showTitle as String?),
@@ -1130,6 +1154,7 @@ class _CopyWithStubImpl$Query$HomeScreen$continueWatching<TRes>
     String? title,
     Fragment$ArtworkFragment? artwork,
     Fragment$ProgressFragment? progress,
+    String? showId,
     String? showTitle,
     int? seasonNumber,
     int? episodeNumber,

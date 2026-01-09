@@ -19,7 +19,8 @@ void main() {
         final credentials = PairingCredentials(
           serverUrl: 'https://example.com',
           deviceId: 'device-123',
-          mediaToken: 'token-456',
+          mediaToken: 'media-token-456',
+          accessToken: 'access-token-789',
           devicePublicKey: Uint8List(32),
           devicePrivateKey: Uint8List(32),
           serverPublicKey: Uint8List(32),
@@ -44,7 +45,8 @@ void main() {
         final credentials = PairingCredentials(
           serverUrl: 'https://mydia.example.com',
           deviceId: 'device-abc',
-          mediaToken: 'token-xyz',
+          mediaToken: 'media-token-xyz',
+          accessToken: 'access-token-abc',
           devicePublicKey: Uint8List(32),
           devicePrivateKey: Uint8List(32),
           serverPublicKey: Uint8List(32),
@@ -56,7 +58,8 @@ void main() {
 
         expect(credentials.serverUrl, equals('https://mydia.example.com'));
         expect(credentials.deviceId, equals('device-abc'));
-        expect(credentials.mediaToken, equals('token-xyz'));
+        expect(credentials.mediaToken, equals('media-token-xyz'));
+        expect(credentials.accessToken, equals('access-token-abc'));
         expect(credentials.devicePublicKey.length, equals(32));
         expect(credentials.devicePrivateKey.length, equals(32));
         expect(credentials.serverPublicKey.length, equals(32));

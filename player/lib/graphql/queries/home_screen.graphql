@@ -12,6 +12,7 @@ query HomeScreen($continueWatchingLimit: Int, $recentlyAddedLimit: Int, $upNextL
     progress {
       ...ProgressFragment
     }
+    showId
     showTitle
     seasonNumber
     episodeNumber

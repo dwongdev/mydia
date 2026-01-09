@@ -43,6 +43,12 @@ defmodule MydiaWeb.DeviceChannel do
   - `key_exchange` - Client sends static public key and device token
   - `key_exchange_complete` - Server confirms and sends token + its public key
   - `key_exchange_error` - Server reports failure
+
+  ## Connectivity Probe (device:probe)
+
+  A lightweight topic used by the player's DirectProber to verify that direct
+  URLs are reachable. No authentication is required - joining successfully
+  confirms WebSocket connectivity to the server.
   """
   use MydiaWeb, :channel
 
@@ -79,6 +85,14 @@ defmodule MydiaWeb.DeviceChannel do
 
         {:ok, socket}
     end
+  end
+
+  @impl true
+  def join("device:probe", _payload, socket) do
+    # Lightweight probe channel for connectivity testing.
+    # Used by DirectProber to verify direct URLs are reachable.
+    # No authentication required - just confirms WebSocket connectivity.
+    {:ok, socket}
   end
 
   @impl true
@@ -146,7 +160,7 @@ defmodule MydiaWeb.DeviceChannel do
                  client_static_public_key,
                  session_key
                ) do
-            {:ok, device, media_token, device_token, _session_key} ->
+            {:ok, device, media_token, access_token, device_token, _session_key} ->
               # Update socket with device info
               socket =
                 socket
@@ -158,11 +172,13 @@ defmodule MydiaWeb.DeviceChannel do
               Mydia.RemoteAccess.publish_device_event(device, :connected)
 
               # Include device_token for reconnection authentication
+              # access_token is for direct GraphQL/API requests
               {:reply,
                {:ok,
                 %{
                   device_id: device.id,
                   media_token: media_token,
+                  access_token: access_token,
                   device_token: device_token
                 }}, socket}
 
@@ -215,7 +231,7 @@ defmodule MydiaWeb.DeviceChannel do
     with {:ok, session_key, device} <-
            Pairing.process_client_message(server_private_key, client_public_key_b64),
          true <- verify_device_token(device, device_token),
-         {:ok, updated_device, token, _session_key} <-
+         {:ok, updated_device, media_token, access_token, _session_key} <-
            Pairing.complete_reconnection(device, session_key) do
       # Update socket with authenticated device info
       socket =
@@ -228,12 +244,15 @@ defmodule MydiaWeb.DeviceChannel do
       # Publish device connected event
       Mydia.RemoteAccess.publish_device_event(updated_device, :connected)
 
-      # Send success response with server's public key and token
+      # Send success response with server's public key and tokens
+      # - media_token: for streaming (typ: media_access)
+      # - access_token: for direct GraphQL/API requests (typ: access)
       {:reply,
        {:ok,
         %{
           server_public_key: Base.encode64(server_public_key),
-          token: token,
+          media_token: media_token,
+          access_token: access_token,
           device_id: updated_device.id
         }}, socket}
     else

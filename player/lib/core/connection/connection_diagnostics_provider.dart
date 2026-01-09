@@ -15,8 +15,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../auth/auth_storage.dart';
 import 'connection_provider.dart';
 
-import 'direct_prober.dart' show UrlProbeResult;
-
 /// Storage keys for diagnostics (same as DirectProber uses).
 abstract class _DiagnosticsKeys {
   static const lastDirectAttempt = 'diagnostics_last_direct_attempt';

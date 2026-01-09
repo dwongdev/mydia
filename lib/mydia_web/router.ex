@@ -49,6 +49,8 @@ defmodule MydiaWeb.Router do
   pipeline :api_auth do
     plug MydiaWeb.Plugs.AuthPipeline
     plug MydiaWeb.Plugs.ApiAuth
+    # Also accept media tokens from remote devices for direct GraphQL requests
+    plug MydiaWeb.Plugs.MediaAuth
   end
 
   # Media API authentication pipeline - supports JWT, API keys, and media tokens

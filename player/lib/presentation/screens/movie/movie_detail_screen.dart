@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../../core/cache/poster_cache_manager.dart';
 import 'movie_detail_controller.dart';
 import '../../widgets/quality_selector.dart';
 import '../../widgets/quality_download_dialog.dart';
@@ -106,6 +107,7 @@ class MovieDetailScreen extends ConsumerWidget {
               CachedNetworkImage(
                 imageUrl: movie.artwork.backdropUrl!,
                 fit: BoxFit.cover,
+                cacheManager: BackdropCacheManager(),
                 placeholder: (context, url) => Container(
                   color: AppColors.background,
                 ),
@@ -200,6 +202,7 @@ class MovieDetailScreen extends ConsumerWidget {
             ? CachedNetworkImage(
                 imageUrl: movie.artwork.posterUrl!,
                 fit: BoxFit.cover,
+                cacheManager: PosterCacheManager(),
                 placeholder: (context, url) => Container(
                   color: AppColors.surface,
                 ),

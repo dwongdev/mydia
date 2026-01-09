@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:player/core/auth/media_token_service.dart';
 import 'package:player/core/player/streaming_strategy.dart';
 
 void main() {

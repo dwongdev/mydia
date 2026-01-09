@@ -243,28 +243,34 @@ class AuthStateNotifier extends Notifier<AsyncValue<AuthStatus>> {
     final reconnectionService = ref.read(reconnectionServiceProvider);
 
     try {
-      // Check if the stored connection mode was relay to prioritize that
+      // Check if relay credentials exist (instanceId) to determine strategy
       final authStorage = getAuthStorage();
-      final storedMode = await authStorage.read('connection_mode');
-      final preferRelay = storedMode == 'relay';
-      debugPrint('[AuthStateNotifier] Stored connection mode: $storedMode, preferRelay: $preferRelay');
+      final instanceId = await authStorage.read('instance_id');
 
-      // forceDirectOnly: true skips relay. Default (false) uses relay-first strategy.
-      // If stored mode was 'direct', force direct-only. Otherwise use relay-first.
-      final forceDirectOnly = storedMode == 'direct';
+      // Use relay-first strategy if we have relay credentials (instanceId).
+      // Only force direct-only when there's no instanceId (user logged in directly).
+      final hasRelayCredentials = instanceId != null && instanceId.isNotEmpty;
+      final forceDirectOnly = !hasRelayCredentials;
+      debugPrint('[AuthStateNotifier] instanceId: ${hasRelayCredentials ? "present" : "null"}, strategy: ${forceDirectOnly ? "direct-only" : "relay-first"}');
       final result = await reconnectionService.reconnect(forceDirectOnly: forceDirectOnly);
 
       if (result.success && result.session != null) {
         final session = result.session!;
         debugPrint('[AuthStateNotifier] Reconnection successful, isRelay=${session.isRelayConnection}');
 
-        // Update auth service with the refreshed token
+        // Update auth service with the access token for GraphQL/API authentication
+        // Media token is stored separately for streaming
         await authService.setSession(
-          token: session.mediaToken,
+          token: session.accessToken,
           serverUrl: session.serverUrl,
           userId: session.deviceId,
           username: 'Device ${session.deviceId.substring(0, 8)}',
         );
+
+        // Also update the pairing tokens storage with refreshed tokens
+        final authStorage = getAuthStorage();
+        await authStorage.write('pairing_media_token', session.mediaToken);
+        await authStorage.write('pairing_access_token', session.accessToken);
 
         // Set the connection provider mode
         if (session.isRelayConnection && session.relayTunnel != null) {

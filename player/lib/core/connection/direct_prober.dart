@@ -159,13 +159,9 @@ class DirectProber {
     ChannelService? channelService,
     Duration probeTimeout = const Duration(seconds: 5),
   })  : _directUrls = List.unmodifiable(directUrls),
-        _certFingerprint = certFingerprint,
-        _channelService = channelService ?? ChannelService(),
         _probeTimeout = probeTimeout;
 
   final List<String> _directUrls;
-  final String? _certFingerprint;
-  final ChannelService _channelService;
   final Duration _probeTimeout;
 
   /// Stream controller for probe results.

@@ -478,10 +478,14 @@ class ChannelService {
         }
 
         final serverPublicKey = responseData['server_public_key'] as String?;
-        final token = responseData['token'] as String?;
+        final mediaToken = responseData['media_token'] as String?;
+        final accessToken = responseData['access_token'] as String?;
         final deviceId = responseData['device_id'] as String?;
 
-        if (serverPublicKey == null || token == null || deviceId == null) {
+        if (serverPublicKey == null ||
+            mediaToken == null ||
+            accessToken == null ||
+            deviceId == null) {
           debugPrint('[ChannelService] Incomplete response data');
           return ChannelResult.error('Incomplete response data');
         }
@@ -490,7 +494,8 @@ class ChannelService {
         return ChannelResult.success(
           KeyExchangeResponse(
             serverPublicKey: serverPublicKey,
-            mediaToken: token,
+            mediaToken: mediaToken,
+            accessToken: accessToken,
             deviceId: deviceId,
           ),
         );
@@ -553,9 +558,10 @@ class ChannelService {
 
         final deviceId = responseData['device_id'] as String?;
         final mediaToken = responseData['media_token'] as String?;
+        final accessToken = responseData['access_token'] as String?;
         final deviceToken = responseData['device_token'] as String?;
 
-        if (deviceId == null || mediaToken == null) {
+        if (deviceId == null || mediaToken == null || accessToken == null) {
           debugPrint('[ChannelService] Incomplete pairing response');
           return ChannelResult.error('Incomplete pairing response');
         }
@@ -569,6 +575,7 @@ class ChannelService {
           PairingResponse(
             deviceId: deviceId,
             mediaToken: mediaToken,
+            accessToken: accessToken,
             deviceToken: deviceToken,
           ),
         );
@@ -640,13 +647,16 @@ class ChannelService {
 /// Response from a successful pairing operation.
 ///
 /// The client generates its own keypair, so the server only returns
-/// the device ID and media token. The client already has its keypair.
+/// the device ID and tokens. The client already has its keypair.
 class PairingResponse {
   /// The device ID assigned by the server.
   final String deviceId;
 
-  /// The media access token for API requests.
+  /// The media access token for streaming (typ: media_access).
   final String mediaToken;
+
+  /// The access token for GraphQL/API requests (typ: access).
+  final String accessToken;
 
   /// The device token for reconnection authentication.
   ///
@@ -657,6 +667,7 @@ class PairingResponse {
   const PairingResponse({
     required this.deviceId,
     required this.mediaToken,
+    required this.accessToken,
     this.deviceToken,
   });
 }
@@ -684,8 +695,11 @@ class KeyExchangeResponse {
   /// The server's public key for ECDH (base64 encoded).
   final String serverPublicKey;
 
-  /// The refreshed media access token.
+  /// The media access token for streaming (typ: media_access).
   final String mediaToken;
+
+  /// The access token for GraphQL/API requests (typ: access).
+  final String accessToken;
 
   /// The device ID.
   final String deviceId;
@@ -693,6 +707,7 @@ class KeyExchangeResponse {
   const KeyExchangeResponse({
     required this.serverPublicKey,
     required this.mediaToken,
+    required this.accessToken,
     required this.deviceId,
   });
 }

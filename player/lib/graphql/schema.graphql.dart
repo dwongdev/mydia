@@ -361,6 +361,7 @@ Enum$DeviceEventType fromJson$Enum$DeviceEventType(String value) {
 enum Enum$MediaType {
   MOVIE,
   TV_SHOW,
+  EPISODE,
   $unknown;
 
   factory Enum$MediaType.fromJson(String value) =>
@@ -375,6 +376,8 @@ String toJson$Enum$MediaType(Enum$MediaType e) {
       return r'MOVIE';
     case Enum$MediaType.TV_SHOW:
       return r'TV_SHOW';
+    case Enum$MediaType.EPISODE:
+      return r'EPISODE';
     case Enum$MediaType.$unknown:
       return r'$unknown';
   }
@@ -386,6 +389,8 @@ Enum$MediaType fromJson$Enum$MediaType(String value) {
       return Enum$MediaType.MOVIE;
     case r'TV_SHOW':
       return Enum$MediaType.TV_SHOW;
+    case r'EPISODE':
+      return Enum$MediaType.EPISODE;
     default:
       return Enum$MediaType.$unknown;
   }

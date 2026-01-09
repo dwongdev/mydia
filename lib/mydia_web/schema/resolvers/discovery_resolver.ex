@@ -167,6 +167,7 @@ defmodule MydiaWeb.Schema.Resolvers.DiscoveryResolver do
       title: episode.title || "Episode #{episode.episode_number}",
       artwork: build_episode_artwork(episode, show),
       progress: format_progress(progress),
+      show_id: show.id,
       show_title: show.title,
       season_number: episode.season_number,
       episode_number: episode.episode_number

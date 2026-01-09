@@ -168,6 +168,7 @@ defmodule MydiaWeb.Schema.QueryTypes do
     field :progress, non_null(:progress)
 
     @desc "For episodes, includes show context"
+    field :show_id, :id
     field :show_title, :string
     field :season_number, :integer
     field :episode_number, :integer

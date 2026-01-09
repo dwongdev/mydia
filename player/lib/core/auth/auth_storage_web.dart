@@ -5,7 +5,6 @@
 /// this is the standard approach.
 library;
 
-import 'dart:js_interop';
 import 'package:web/web.dart' as web;
 
 import 'auth_storage.dart';

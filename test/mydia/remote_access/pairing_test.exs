@@ -183,22 +183,24 @@ defmodule Mydia.RemoteAccess.PairingTest do
       %{device: device, session_key: session_key}
     end
 
-    test "updates last_seen_at and generates token", %{
+    test "updates last_seen_at and generates tokens", %{
       device: device,
       session_key: session_key
     } do
       old_last_seen = device.last_seen_at
 
-      assert {:ok, updated_device, token, returned_key} =
+      assert {:ok, updated_device, media_token, access_token, returned_key} =
                Pairing.complete_reconnection(device, session_key)
 
       # Check that last_seen_at was updated
       refute updated_device.last_seen_at == old_last_seen
       assert DateTime.compare(updated_device.last_seen_at, DateTime.utc_now()) in [:lt, :eq]
 
-      # Check that a token was generated
-      assert is_binary(token)
-      assert byte_size(token) > 0
+      # Check that tokens were generated
+      assert is_binary(media_token)
+      assert byte_size(media_token) > 0
+      assert is_binary(access_token)
+      assert byte_size(access_token) > 0
 
       # Check that session key is returned
       assert returned_key == session_key
@@ -256,11 +258,12 @@ defmodule Mydia.RemoteAccess.PairingTest do
       assert server_session_key == client_session_key
 
       # Step 4: Server completes reconnection
-      assert {:ok, updated_device, token, _session_key} =
+      assert {:ok, updated_device, media_token, access_token, _session_key} =
                Pairing.complete_reconnection(device, server_session_key)
 
       assert updated_device.id == device.id
-      assert is_binary(token)
+      assert is_binary(media_token)
+      assert is_binary(access_token)
 
       # Step 5: Verify encryption works with shared session key
       # Server encrypts a message

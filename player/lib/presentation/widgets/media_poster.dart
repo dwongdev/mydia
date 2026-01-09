@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../core/cache/poster_cache_manager.dart';
 import '../../core/theme/colors.dart';
 import 'progress_overlay.dart';
 
@@ -73,6 +74,7 @@ class _MediaPosterState extends State<MediaPoster> {
                         ? CachedNetworkImage(
                             imageUrl: widget.posterUrl!,
                             fit: BoxFit.cover,
+                            cacheManager: PosterCacheManager(),
                             placeholder: (context, url) => Container(
                               color: AppColors.surfaceVariant,
                               child: const Center(

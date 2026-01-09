@@ -80,8 +80,11 @@ class ReconnectionSession {
   /// The device ID.
   final String deviceId;
 
-  /// The refreshed media access token.
+  /// The refreshed media access token for streaming (typ: media_access).
   final String mediaToken;
+
+  /// The refreshed access token for GraphQL/API (typ: access).
+  final String accessToken;
 
   /// The established crypto manager for transport encryption.
   final CryptoManager cryptoManager;
@@ -111,6 +114,7 @@ class ReconnectionSession {
     required this.serverUrl,
     required this.deviceId,
     required this.mediaToken,
+    required this.accessToken,
     required this.cryptoManager,
     required this.isRelayConnection,
     this.relayTunnel,
@@ -390,6 +394,7 @@ class ReconnectionService {
           serverUrl: url,
           deviceId: response.deviceId,
           mediaToken: response.mediaToken,
+          accessToken: response.accessToken,
           cryptoManager: cryptoManager,
           isRelayConnection: false,
           instanceId: credentials.instanceId,
@@ -503,13 +508,14 @@ class ReconnectionService {
         debugPrint('[ReconnectionService] Encryption enabled on relay tunnel');
       }
 
-      // Extract device ID and media token from response
+      // Extract device ID and tokens from response
       final deviceId =
           responseJson['device_id'] as String? ?? credentials.deviceId;
       final mediaToken =
-          responseJson['token'] as String? ?? credentials.mediaToken;
+          responseJson['media_token'] as String? ?? credentials.mediaToken;
+      final accessToken = responseJson['access_token'] as String?;
 
-      if (deviceId == null || mediaToken == null) {
+      if (deviceId == null || mediaToken == null || accessToken == null) {
         cryptoManager.dispose();
         await tunnel.close();
         return ReconnectionResult.error('Missing credentials in relay response');
@@ -524,6 +530,7 @@ class ReconnectionService {
               : '',
           deviceId: deviceId,
           mediaToken: mediaToken,
+          accessToken: accessToken,
           cryptoManager: cryptoManager,
           isRelayConnection: true,
           relayTunnel: tunnel,

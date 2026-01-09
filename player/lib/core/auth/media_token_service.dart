@@ -14,9 +14,9 @@ class MediaTokenService {
   final AuthStorage _storage;
   final GraphQLClient _graphqlClient;
 
-  // Use the same storage key as AuthService to ensure token is found after reconnection
-  static const _mediaTokenKey = 'auth_token';
-  static const _mediaTokenExpiryKey = 'auth_token_expiry';
+  // Media token key matches the key used by PairingService for storage
+  static const _mediaTokenKey = 'pairing_media_token';
+  static const _mediaTokenExpiryKey = 'pairing_media_token_expiry';
 
   /// Threshold for proactive token refresh (1 hour before expiry).
   static const _refreshThresholdSeconds = 3600;

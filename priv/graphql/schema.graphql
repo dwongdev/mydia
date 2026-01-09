@@ -191,6 +191,8 @@ type ContinueWatchingItem {
   progress: Progress!
 
   "For episodes, includes show context"
+  showId: ID
+
   showTitle: String
 
   seasonNumber: Int
@@ -736,6 +738,9 @@ enum MediaType {
 
   "A TV show"
   TV_SHOW
+
+  "A TV episode"
+  EPISODE
 }
 
 "Library path type"

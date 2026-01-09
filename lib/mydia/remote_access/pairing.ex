@@ -37,6 +37,7 @@ defmodule Mydia.RemoteAccess.Pairing do
   alias Mydia.RemoteAccess
   alias Mydia.RemoteAccess.RemoteDevice
   alias Mydia.RemoteAccess.MediaToken
+  alias Mydia.Auth.Guardian
   alias Mydia.Crypto
 
   @doc """
@@ -146,27 +147,27 @@ defmodule Mydia.RemoteAccess.Pairing do
 
   This function:
   1. Updates the device's `last_seen_at` timestamp
-  2. Generates a fresh media access token
-  3. Returns the device, token, and session key for the client
+  2. Generates a fresh media access token (for streaming)
+  3. Generates a fresh access token (for GraphQL/API requests)
+  4. Returns the device, tokens, and session key for the client
 
   The session key can be used for subsequent encrypted communication
   via `Mydia.Crypto.encrypt/2` and `Mydia.Crypto.decrypt/4`.
 
-  Returns `{:ok, device, token, session_key}` on success.
+  Returns `{:ok, device, media_token, access_token, session_key}` on success.
   """
   @spec complete_reconnection(RemoteDevice.t(), binary()) ::
-          {:ok, RemoteDevice.t(), String.t(), binary()}
+          {:ok, RemoteDevice.t(), String.t(), String.t(), binary()}
           | {:error, Ecto.Changeset.t()}
   def complete_reconnection(device, session_key) when byte_size(session_key) == 32 do
     # Update last_seen_at
     case RemoteAccess.touch_device(device) do
       {:ok, updated_device} ->
-        # Generate a fresh media access token
-        # For now, we'll use a simple token generation
-        # In production, this should integrate with your token system
-        token = generate_media_token(updated_device)
+        # Generate fresh tokens
+        media_token = generate_media_token(updated_device)
+        access_token = generate_access_token(updated_device)
 
-        {:ok, updated_device, token, session_key}
+        {:ok, updated_device, media_token, access_token, session_key}
 
       {:error, changeset} ->
         {:error, changeset}
@@ -180,6 +181,25 @@ defmodule Mydia.RemoteAccess.Pairing do
     case MediaToken.create_token(device) do
       {:ok, token, _claims} -> token
       {:error, _reason} -> raise "Failed to generate media token"
+    end
+  end
+
+  @doc """
+  Generates a JWT access token for the device's user.
+
+  This token has `typ: access` and works with the regular Guardian auth pipeline
+  for GraphQL and API requests when the device connects directly (not via relay).
+  """
+  def generate_access_token(device) do
+    # Preload user if not already loaded
+    device = Mydia.Repo.preload(device, :user)
+
+    case Guardian.encode_and_sign(device.user, %{
+           "device_id" => device.id,
+           "typ" => "access"
+         }) do
+      {:ok, token, _claims} -> token
+      {:error, reason} -> raise "Failed to generate access token: #{inspect(reason)}"
     end
   end
 
@@ -251,13 +271,14 @@ defmodule Mydia.RemoteAccess.Pairing do
   This function:
   1. Validates the claim code
   2. Registers the device with the client-provided public key
-  3. Generates a fresh media access token
-  4. Consumes the claim code
+  3. Generates a fresh media access token (for streaming)
+  4. Generates a fresh access token (for GraphQL/API requests)
+  5. Consumes the claim code
 
   The client generates its own X25519 keypair and sends only the public key.
   The private key never leaves the client device.
 
-  Returns `{:ok, device, token, session_key}` on success.
+  Returns `{:ok, device, media_token, access_token, device_token, session_key}` on success.
   Returns `{:error, reason}` if claim code validation or device creation fails.
 
   ## Parameters
@@ -269,7 +290,7 @@ defmodule Mydia.RemoteAccess.Pairing do
 
   """
   @spec complete_pairing(String.t(), map(), binary(), binary()) ::
-          {:ok, RemoteDevice.t(), String.t(), String.t(), binary()}
+          {:ok, RemoteDevice.t(), String.t(), String.t(), String.t(), binary()}
           | {:error, :not_found | :already_used | :expired | :invalid_key | Ecto.Changeset.t()}
   def complete_pairing(claim_code, device_attrs, client_static_public_key, session_key)
       when byte_size(session_key) == 32 and byte_size(client_static_public_key) == 32 do
@@ -289,11 +310,12 @@ defmodule Mydia.RemoteAccess.Pairing do
          {:ok, device} <- RemoteAccess.touch_device(device),
          # Consume the claim code
          {:ok, _consumed_claim} <- RemoteAccess.consume_claim_code(claim_code, device.id) do
-      # Generate media access token
+      # Generate tokens
       media_token = generate_media_token(device)
+      access_token = generate_access_token(device)
 
-      # Return the device, media token, device token (for reconnection), and session key
-      {:ok, device, media_token, device_token, session_key}
+      # Return the device, tokens, device token (for reconnection), and session key
+      {:ok, device, media_token, access_token, device_token, session_key}
     end
   end
 

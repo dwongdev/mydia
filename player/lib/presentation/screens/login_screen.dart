@@ -131,8 +131,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       return;
     }
 
-    // Valid QR - close scanner and pair
+    // Valid QR - close scanner, show detected code, and pair
     _closeQrScanner();
+
+    // Populate the claim code field to show the detected code
+    _claimCodeController.text = qrData.claimCode;
+
     _pairWithQrData(qrData);
   }
 
@@ -890,28 +894,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
       ),
-      child: Row(
-        children: [
-          const SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: AppColors.primary,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              loginState.claimCodeMessage ?? '',
-              style: const TextStyle(
-                color: AppColors.primary,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        ],
+      child: Text(
+        loginState.claimCodeMessage ?? '',
+        style: const TextStyle(
+          color: AppColors.primary,
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
       ),
     );
   }

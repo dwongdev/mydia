@@ -1,6 +1,6 @@
+import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:player/core/channels/channel_service.dart';
-import 'dart:typed_data';
 
 void main() {
   group('ChannelService', () {
@@ -61,15 +61,15 @@ void main() {
       test('creates response with all fields', () {
         final response = PairingResponse(
           deviceId: 'device-123',
-          mediaToken: 'token-456',
-          devicePublicKey: Uint8List(32),
-          devicePrivateKey: Uint8List(32),
+          mediaToken: 'media-token-456',
+          accessToken: 'access-token-789',
+          deviceToken: 'device-token-abc',
         );
 
         expect(response.deviceId, equals('device-123'));
-        expect(response.mediaToken, equals('token-456'));
-        expect(response.devicePublicKey.length, equals(32));
-        expect(response.devicePrivateKey.length, equals(32));
+        expect(response.mediaToken, equals('media-token-456'));
+        expect(response.accessToken, equals('access-token-789'));
+        expect(response.deviceToken, equals('device-token-abc'));
       });
     });
 

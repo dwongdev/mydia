@@ -21,7 +21,6 @@ import '../auth/auth_storage.dart';
 import '../protocol/protocol_version.dart';
 import '../relay/relay_service.dart';
 import '../relay/relay_tunnel_service.dart';
-import '../connection/connection_manager.dart';
 
 /// Data parsed from a QR code for device pairing.
 ///
@@ -89,6 +88,7 @@ abstract class _StorageKeys {
   static const serverUrl = 'pairing_server_url';
   static const deviceId = 'pairing_device_id';
   static const mediaToken = 'pairing_media_token';
+  static const accessToken = 'pairing_access_token';
   static const deviceToken = 'pairing_device_token';
   static const devicePublicKey = 'pairing_device_public_key';
   static const devicePrivateKey = 'pairing_device_private_key';
@@ -136,8 +136,11 @@ class PairingCredentials {
   /// The device ID assigned by the server.
   final String deviceId;
 
-  /// The media access token for API requests.
+  /// The media access token for streaming (typ: media_access).
   final String mediaToken;
+
+  /// The access token for GraphQL/API requests (typ: access).
+  final String accessToken;
 
   /// The device token for reconnection authentication.
   ///
@@ -170,6 +173,7 @@ class PairingCredentials {
     required this.serverUrl,
     required this.deviceId,
     required this.mediaToken,
+    required this.accessToken,
     this.deviceToken,
     required this.devicePublicKey,
     required this.devicePrivateKey,
@@ -218,12 +222,10 @@ class PairingService {
     ChannelService? channelService,
     AuthStorage? authStorage,
     RelayService? relayService,
-    ConnectionManager? connectionManager,
     String? relayUrl,
   })  : _channelService = channelService ?? ChannelService(),
         _authStorage = authStorage ?? getAuthStorage(),
         _relayService = relayService ?? RelayService(),
-        _connectionManager = connectionManager,
         _relayUrl = relayUrl ?? const String.fromEnvironment(
           'RELAY_URL',
           defaultValue: 'https://relay.mydia.dev',
@@ -232,7 +234,6 @@ class PairingService {
   final ChannelService _channelService;
   final AuthStorage _authStorage;
   final RelayService _relayService;
-  final ConnectionManager? _connectionManager;
   final String _relayUrl;
 
   /// Pairs this device using only a claim code.
@@ -491,6 +492,7 @@ class PairingService {
         serverUrl: serverUrl,
         deviceId: response.deviceId,
         mediaToken: response.mediaToken,
+        accessToken: response.accessToken,
         deviceToken: response.deviceToken,
         devicePublicKey: devicePublicKey,
         devicePrivateKey: devicePrivateKey,
@@ -518,6 +520,7 @@ class PairingService {
     final serverUrl = await _authStorage.read(_StorageKeys.serverUrl);
     final deviceId = await _authStorage.read(_StorageKeys.deviceId);
     final mediaToken = await _authStorage.read(_StorageKeys.mediaToken);
+    final accessToken = await _authStorage.read(_StorageKeys.accessToken);
     final deviceToken = await _authStorage.read(_StorageKeys.deviceToken);
     final publicKeyB64 = await _authStorage.read(_StorageKeys.devicePublicKey);
     final privateKeyB64 =
@@ -533,6 +536,7 @@ class PairingService {
     if (serverUrl == null ||
         deviceId == null ||
         mediaToken == null ||
+        accessToken == null ||
         publicKeyB64 == null ||
         privateKeyB64 == null ||
         serverPublicKeyB64 == null) {
@@ -556,6 +560,7 @@ class PairingService {
       serverUrl: serverUrl,
       deviceId: deviceId,
       mediaToken: mediaToken,
+      accessToken: accessToken,
       deviceToken: deviceToken,
       devicePublicKey: _base64ToBytes(publicKeyB64),
       devicePrivateKey: _base64ToBytes(privateKeyB64),
@@ -574,6 +579,7 @@ class PairingService {
     await _authStorage.delete(_StorageKeys.serverUrl);
     await _authStorage.delete(_StorageKeys.deviceId);
     await _authStorage.delete(_StorageKeys.mediaToken);
+    await _authStorage.delete(_StorageKeys.accessToken);
     await _authStorage.delete(_StorageKeys.deviceToken);
     await _authStorage.delete(_StorageKeys.devicePublicKey);
     await _authStorage.delete(_StorageKeys.devicePrivateKey);
@@ -818,11 +824,12 @@ class PairingService {
       // Parse pairing response (pairing_complete type)
       final deviceId = responseJson['device_id'] as String?;
       final mediaToken = responseJson['media_token'] as String?;
+      final accessToken = responseJson['access_token'] as String?;
       final deviceToken = responseJson['device_token'] as String?;
 
-      debugPrint('[RelayPairing] Response: deviceId=$deviceId, mediaToken=${mediaToken != null ? "present" : "null"}, deviceToken=${deviceToken != null ? "present" : "null"}');
+      debugPrint('[RelayPairing] Response: deviceId=$deviceId, mediaToken=${mediaToken != null ? "present" : "null"}, accessToken=${accessToken != null ? "present" : "null"}, deviceToken=${deviceToken != null ? "present" : "null"}');
 
-      if (deviceId == null || mediaToken == null) {
+      if (deviceId == null || mediaToken == null || accessToken == null) {
         await tunnel.close();
         return PairingResult.error('Incomplete pairing response from relay');
       }
@@ -841,6 +848,7 @@ class PairingService {
         serverUrl: serverUrl,
         deviceId: deviceId,
         mediaToken: mediaToken,
+        accessToken: accessToken,
         deviceToken: deviceToken,
         devicePublicKey: devicePublicKey,
         devicePrivateKey: devicePrivateKey,
@@ -895,6 +903,7 @@ class PairingService {
     await _authStorage.write(_StorageKeys.serverUrl, credentials.serverUrl);
     await _authStorage.write(_StorageKeys.deviceId, credentials.deviceId);
     await _authStorage.write(_StorageKeys.mediaToken, credentials.mediaToken);
+    await _authStorage.write(_StorageKeys.accessToken, credentials.accessToken);
     if (credentials.deviceToken != null) {
       await _authStorage.write(
         _StorageKeys.deviceToken,

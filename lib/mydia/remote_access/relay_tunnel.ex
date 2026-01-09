@@ -303,7 +303,7 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
                  client_static_public_key,
                  state.session_key
                ) do
-            {:ok, device, media_token, device_token, _session_key} ->
+            {:ok, device, media_token, access_token, device_token, _session_key} ->
               Logger.info(
                 "Tunnel claim_code SUCCESS: device_id=#{device.id}, device_name=#{device_name}"
               )
@@ -311,11 +311,15 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
               # Publish device connected event
               Mydia.RemoteAccess.publish_device_event(device, :connected)
 
-              # Response includes device_token for reconnection authentication
+              # Response includes both tokens and device_token for reconnection
+              # - media_token: for streaming (typ: media_access)
+              # - access_token: for direct GraphQL/API requests (typ: access)
+              # - device_token: for reconnection authentication
               response = %{
                 type: "pairing_complete",
                 device_id: device.id,
                 media_token: media_token,
+                access_token: access_token,
                 device_token: device_token
               }
 
@@ -352,7 +356,7 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
             )
 
             case Pairing.complete_reconnection(device, session_key) do
-              {:ok, updated_device, token, _session_key} ->
+              {:ok, updated_device, media_token, access_token, _session_key} ->
                 Logger.info(
                   "Tunnel handshake_init SUCCESS: device_id=#{updated_device.id}, handshake complete"
                 )
@@ -360,11 +364,14 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
                 # Publish device connected event
                 Mydia.RemoteAccess.publish_device_event(updated_device, :connected)
 
-                # Send back server's public key for the client to derive the same session key
+                # Send back server's public key and tokens
+                # - media_token: for streaming (typ: media_access)
+                # - access_token: for direct GraphQL/API requests (typ: access)
                 response = %{
                   type: "handshake_complete",
                   message: Base.encode64(state.server_public_key),
-                  token: token,
+                  media_token: media_token,
+                  access_token: access_token,
                   device_id: updated_device.id
                 }
 
@@ -653,17 +660,21 @@ defmodule Mydia.RemoteAccess.RelayTunnel do
       # Derive session key using HKDF
       session_key = derive_session_key(shared_secret)
 
-      # Update device last_seen and generate new media token
+      # Update device last_seen and generate tokens
       {:ok, updated_device} = Mydia.RemoteAccess.touch_device(device)
       media_token = Pairing.generate_media_token(updated_device)
+      access_token = Pairing.generate_access_token(updated_device)
 
       # Publish device connected event
       Mydia.RemoteAccess.publish_device_event(updated_device, :connected)
 
+      # - media_token: for streaming (typ: media_access)
+      # - access_token: for direct GraphQL/API requests (typ: access)
       response = %{
         type: "key_exchange_complete",
         server_public_key: Base.encode64(server_public_key),
-        token: media_token,
+        media_token: media_token,
+        access_token: access_token,
         device_id: updated_device.id,
         protocol_versions: ProtocolVersion.supported_versions()
       }

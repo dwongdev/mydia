@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../core/cache/poster_cache_manager.dart';
 import '../../domain/models/episode.dart';
 import '../../domain/models/download.dart';
 import '../../core/downloads/download_service.dart' show isDownloadSupported;
@@ -171,6 +172,7 @@ class _EpisodeCardState extends ConsumerState<EpisodeCard>
                 ? CachedNetworkImage(
                     imageUrl: widget.episode.thumbnailUrl!,
                     fit: BoxFit.cover,
+                    cacheManager: EpisodeThumbnailCacheManager(),
                     placeholder: (context, url) => Container(
                       color: AppColors.surfaceVariant,
                     ),

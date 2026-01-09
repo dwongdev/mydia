@@ -7,6 +7,7 @@ class ContinueWatchingItem {
   final String title;
   final Artwork? artwork;
   final Progress? progress;
+  final String? showId;
   final String? showTitle;
   final int? seasonNumber;
   final int? episodeNumber;
@@ -17,6 +18,7 @@ class ContinueWatchingItem {
     required this.title,
     this.artwork,
     this.progress,
+    this.showId,
     this.showTitle,
     this.seasonNumber,
     this.episodeNumber,
@@ -33,6 +35,7 @@ class ContinueWatchingItem {
       progress: json['progress'] != null
           ? Progress.fromJson(json['progress'] as Map<String, dynamic>)
           : null,
+      showId: json['showId'] as String?,
       showTitle: json['showTitle'] as String?,
       seasonNumber: json['seasonNumber'] as int?,
       episodeNumber: json['episodeNumber'] as int?,

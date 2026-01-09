@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../core/cache/poster_cache_manager.dart';
 import '../../core/player/thumbnail_service.dart';
 
 /// Widget that displays a thumbnail preview above the seek bar during scrubbing.
@@ -86,6 +87,7 @@ class SeekPreview extends StatelessWidget {
             offset: Offset(-cue.x.toDouble(), -cue.y.toDouble()),
             child: CachedNetworkImage(
               imageUrl: spriteUrl,
+              cacheManager: SeekSpriteCacheManager(),
               httpHeaders: {
                 'Authorization': 'Bearer $authToken',
               },

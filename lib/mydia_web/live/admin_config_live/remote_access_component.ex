@@ -60,6 +60,7 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
        |> assign(:claim_code, nil)
        |> assign(:claim_expires_at, nil)
        |> assign(:countdown_seconds, 0)
+       |> assign(:show_pairing_modal, false)
        |> load_devices()
        |> put_flash(:info, "Device paired successfully!")}
     else
@@ -425,9 +426,11 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                             <% RemoteAccess.RemoteDevice.revoked?(device) -> %>
                               Access revoked
                             <% is_recent_activity?(device.last_seen_at) -> %>
-                              {format_relative_time(device.last_seen_at)}
+                              Online now
+                            <% is_nil(device.last_seen_at) -> %>
+                              Never connected
                             <% true -> %>
-                              Inactive
+                              {format_relative_time(device.last_seen_at)}
                           <% end %>
                         </div>
                       </div>
@@ -812,9 +815,37 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
               <div class="space-y-5 pt-4">
                 <%!-- QR Code --%>
                 <%= if qr_svg = generate_qr_code(@ra_config, @relay_url, @claim_code) do %>
-                  <div class="flex justify-center">
+                  <div class="flex flex-col items-center gap-2">
                     <div class="p-3 bg-white rounded-xl shadow-md">
                       {Phoenix.HTML.raw(qr_svg)}
+                    </div>
+                    <div class="flex flex-col items-center gap-1">
+                      <span class="text-xs text-base-content/40">QR Contents</span>
+                      <div class="flex flex-wrap justify-center gap-1.5">
+                        <div class="tooltip" data-tip="Instance ID">
+                          <span class="badge badge-sm badge-ghost gap-1 font-mono">
+                            <.icon name="hero-server" class="w-3 h-3 opacity-50" />
+                            {String.slice(@ra_config.instance_id, 0..7)}
+                          </span>
+                        </div>
+                        <div class="tooltip" data-tip="Relay Server">
+                          <span class="badge badge-sm badge-ghost gap-1 font-mono">
+                            <.icon name="hero-globe-alt" class="w-3 h-3 opacity-50" />
+                            {URI.parse(@relay_url).host}
+                          </span>
+                        </div>
+                        <div class="tooltip" data-tip="Public Key">
+                          <span class="badge badge-sm badge-ghost gap-1 font-mono">
+                            <.icon name="hero-key" class="w-3 h-3 opacity-50" />
+                            {String.slice(Base.encode64(@ra_config.static_public_key), 0..7)}
+                          </span>
+                        </div>
+                        <div class="tooltip" data-tip="Claim Code (see below)">
+                          <span class="badge badge-sm badge-ghost gap-1">
+                            <.icon name="hero-ticket" class="w-3 h-3 opacity-50" /> Claim Code
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 <% end %>
@@ -1383,11 +1414,15 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
     Calendar.strftime(dt, "%b %d, %Y at %I:%M %p")
   end
 
+  # Consider a device "active" (online now) if seen within the last 10 minutes.
+  # This matches the touch throttle of 5 minutes, plus buffer for network delays.
+  @active_threshold_seconds 600
+
   defp is_recent_activity?(nil), do: false
 
   defp is_recent_activity?(last_seen) do
-    seven_days_ago = DateTime.utc_now() |> DateTime.add(-7, :day)
-    DateTime.compare(last_seen, seven_days_ago) == :gt
+    threshold = DateTime.utc_now() |> DateTime.add(-@active_threshold_seconds, :second)
+    DateTime.compare(last_seen, threshold) == :gt
   end
 
   defp platform_icon("ios"), do: "hero-device-phone-mobile"
@@ -1404,11 +1439,14 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
     cond do
       diff_seconds < 60 -> "just now"
       diff_seconds < 3600 -> "#{div(diff_seconds, 60)} min ago"
-      diff_seconds < 86400 -> "#{div(diff_seconds, 3600)} hours ago"
-      diff_seconds < 604_800 -> "#{div(diff_seconds, 86400)} days ago"
+      diff_seconds < 86400 -> "#{pluralize(div(diff_seconds, 3600), "hour")} ago"
+      diff_seconds < 604_800 -> "#{pluralize(div(diff_seconds, 86400), "day")} ago"
       true -> format_datetime(dt)
     end
   end
+
+  defp pluralize(1, word), do: "1 #{word}"
+  defp pluralize(n, word), do: "#{n} #{word}s"
 
   # Normalize claim code by removing whitespace and dashes, converting to uppercase
   defp normalize_code(code) when is_binary(code) do

@@ -181,7 +181,8 @@ void main() {
         () => ReconnectionSession(
           serverUrl: 'https://mydia.local',
           deviceId: 'device-123',
-          mediaToken: 'token-456',
+          mediaToken: 'media-token-456',
+          accessToken: 'access-token-789',
           cryptoManager: FakeCryptoManager(),
           isRelayConnection: true,
           directUrls: const ['https://192.168.1.100:4000', 'https://mydia.local'],
@@ -196,7 +197,8 @@ void main() {
       final session = ReconnectionSession(
         serverUrl: 'https://mydia.local',
         deviceId: 'device-123',
-        mediaToken: 'token-456',
+        mediaToken: 'media-token-456',
+        accessToken: 'access-token-789',
         cryptoManager: FakeCryptoManager(),
         isRelayConnection: true,
         instanceId: 'instance-789',

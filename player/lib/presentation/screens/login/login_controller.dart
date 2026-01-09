@@ -178,8 +178,10 @@ class LoginController extends _$LoginController {
       final credentials = result.credentials!;
       final authService = ref.read(authServiceProvider);
 
+      // Store access token for GraphQL/API authentication (typ: access)
+      // Media token is already stored by PairingService for streaming
       await authService.setSession(
-        token: credentials.mediaToken,
+        token: credentials.accessToken,
         serverUrl: credentials.serverUrl,
         userId: credentials.deviceId, // Use device ID as user ID for now
         username: 'Device ${credentials.deviceId.substring(0, 8)}',
@@ -359,8 +361,10 @@ class LoginController extends _$LoginController {
       final credentials = result.credentials!;
       final authService = ref.read(authServiceProvider);
 
+      // Store access token for GraphQL/API authentication (typ: access)
+      // Media token is already stored by PairingService for streaming
       await authService.setSession(
-        token: credentials.mediaToken,
+        token: credentials.accessToken,
         serverUrl: credentials.serverUrl,
         userId: credentials.deviceId,
         username: 'Device ${credentials.deviceId.substring(0, 8)}',

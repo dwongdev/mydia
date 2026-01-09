@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
-import '../../core/auth/auth_service.dart';
 import '../../core/graphql/graphql_provider.dart';
 
 class HomeScreen extends ConsumerWidget {

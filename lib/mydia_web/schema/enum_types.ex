@@ -9,6 +9,7 @@ defmodule MydiaWeb.Schema.EnumTypes do
   enum :media_type do
     value(:movie, description: "A movie")
     value(:tv_show, description: "A TV show")
+    value(:episode, description: "A TV episode")
   end
 
   @desc "Library path type"

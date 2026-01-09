@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../core/cache/poster_cache_manager.dart';
 import '../../core/layout/breakpoints.dart';
 import '../../core/theme/colors.dart';
 import '../../domain/models/media_file.dart';
@@ -173,6 +174,7 @@ class _MediaCardState extends State<MediaCard>
                               ? CachedNetworkImage(
                                   imageUrl: widget.posterUrl!,
                                   fit: BoxFit.cover,
+                                  cacheManager: PosterCacheManager(),
                                   placeholder: (context, url) => _buildPlaceholder(),
                                   errorWidget: (context, url, error) =>
                                       _buildPlaceholder(),

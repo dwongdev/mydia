@@ -94,7 +94,7 @@ defmodule MydiaWeb.Layouts do
           <div class="p-4 border-b border-base-300">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
-                <.icon name="hero-film" class="w-8 h-8 text-primary" />
+                <img src={~p"/images/logo.svg"} alt="Mydia" class="w-8 h-8" />
                 <h1 class="text-2xl font-bold">Mydia</h1>
               </div>
               <a

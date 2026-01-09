@@ -1,4 +1,4 @@
-name: Metadata Relay Release
+name: Relay Release
 
 on:
   push:

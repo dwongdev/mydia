@@ -1,4 +1,4 @@
-name: Metadata Relay CI
+name: Relay CI
 
 on:
   push:
@@ -7,13 +7,13 @@ on:
       - main
     paths:
       - "metadata-relay/**"
-      - ".github/workflows/metadata-relay-ci.yml"
+      - ".github/workflows/relay-ci.yml"
   pull_request:
     branches:
       - "**"
     paths:
       - "metadata-relay/**"
-      - ".github/workflows/metadata-relay-ci.yml"
+      - ".github/workflows/relay-ci.yml"
 
 env:
   MIX_ENV: test
@@ -22,7 +22,7 @@ env:
 
 jobs:
   test:
-    name: Metadata Relay - Test & Quality Checks
+    name: Relay - Test & Quality Checks
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -67,7 +67,7 @@ jobs:
         run: mix test --warnings-as-errors
 
   docker-build:
-    name: Metadata Relay - Verify Docker Build
+    name: Relay - Verify Docker Build
     runs-on: ubuntu-latest
 
     steps:
@@ -88,7 +88,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=metadata-relay
 
   status-check:
-    name: All Metadata Relay Checks Passed
+    name: All Relay Checks Passed
     runs-on: ubuntu-latest
     needs: [test, docker-build]
     if: always()

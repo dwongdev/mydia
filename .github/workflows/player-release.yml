@@ -1,4 +1,4 @@
-name: Flutter Player Release
+name: Player Release
 
 on:
   push:

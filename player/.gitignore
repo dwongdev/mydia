@@ -1,10 +1,5 @@
-# direnv
-.envrc
-.direnv/
-
 # Miscellaneous
 *.class
-*.lock
 *.log
 *.pyc
 *.swp
@@ -23,22 +18,42 @@ migrate_working_dir/
 *.iws
 .idea/
 
-# VS Code related
-.vscode/
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
 
 # Flutter/Dart/Pub related
 **/doc/api/
+**/ios/Flutter/.last_build_id
 .dart_tool/
-.flutter-plugins
 .flutter-plugins-dependencies
-**/generated_plugin_registrant.dart
-.packages
 .pub-cache/
-.pub-preload-cache/
 .pub/
-build/
+/build/
+/coverage/
 
-# Android related
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# === Project-specific additions ===
+
+# direnv
+.direnv/
+
+# Generated code (build_runner)
+*.g.dart
+*.freezed.dart
+
+# Android extras
 **/android/**/gradle-wrapper.jar
 .gradle/
 **/android/captures/
@@ -66,7 +81,6 @@ build/
 **/ios/**/profile
 **/ios/**/xcuserdata
 **/ios/.generated/
-**/ios/Flutter/.last_build_id
 **/ios/Flutter/App.framework
 **/ios/Flutter/Flutter.framework
 **/ios/Flutter/Flutter.podspec
@@ -96,15 +110,6 @@ build/
 **/linux/flutter/generated_plugin_registrant.h
 **/linux/flutter/generated_plugins.cmake
 
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Coverage
-coverage/
-
 # Fastlane
 **/fastlane/report.xml
 **/fastlane/Preview.html
@@ -115,14 +120,8 @@ coverage/
 # Web
 /web/flutter_service_worker.js
 
-# Generated code (build_runner)
-*.g.dart
-*.freezed.dart
-
-# Exceptions to above rules
+# Exceptions
 !**/ios/**/default.mode1v3
 !**/ios/**/default.mode2v3
 !**/ios/**/default.pbxuser
 !**/ios/**/default.perspectivev3
-!/packages/flutter_tools/test/data/dart_dependencies_test/**/.packages
-!**/fastlane/Gemfile.lock

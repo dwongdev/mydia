@@ -42,6 +42,17 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Cache pub dependencies
+        if: steps.check_macos.outputs.enabled == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            ${{ env.PLAYER_PATH }}/.dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
       - name: Install dependencies
         if: steps.check_macos.outputs.enabled == 'true'
         working-directory: ${{ env.PLAYER_PATH }}
@@ -102,6 +113,17 @@ jobs:
         with:
           channel: 'stable'
           cache: true
+
+      - name: Cache pub dependencies
+        if: steps.check_linux.outputs.enabled == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            ${{ env.PLAYER_PATH }}/.dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
 
       - name: Install dependencies
         if: steps.check_linux.outputs.enabled == 'true'

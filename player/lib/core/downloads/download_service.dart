@@ -59,6 +59,10 @@ abstract class DownloadService {
   /// Must be called before any other methods.
   void setDatabase(DownloadDatabase database);
 
+  /// Set the job service for managing progressive downloads.
+  /// This is optional but required for resuming interrupted progressive downloads.
+  void setJobService(dynamic jobService); // Dynamic to avoid circular imports in interface
+
   Stream<DownloadTask> get progressStream;
 
   Future<DownloadTask> startDownload({

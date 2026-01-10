@@ -208,6 +208,9 @@ class DownloadTask {
         if (transcodeProgress < 1.0) {
           return 'Preparing & Downloading';
         }
+        if (downloadProgress <= 0.0) {
+          return 'Starting Download...';
+        }
         return 'Downloading ${(downloadProgress * 100).toStringAsFixed(0)}%';
       case DownloadStatus.completed:
         return 'Completed';

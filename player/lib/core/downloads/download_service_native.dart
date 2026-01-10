@@ -17,6 +17,7 @@ import '../../domain/models/download_settings.dart';
 import '../../domain/models/storage_settings.dart';
 import 'background_download_service.dart';
 import 'download_service.dart';
+import 'download_job_service.dart';
 
 /// Whether to use background downloads (true on mobile, false on desktop).
 bool get _useBackgroundDownloader => Platform.isIOS || Platform.isAndroid;
@@ -198,6 +199,9 @@ class _NativeDownloadService implements DownloadService {
   BackgroundDownloadService? _backgroundService;
   StreamSubscription<DownloadTask>? _backgroundProgressSubscription;
   bool _backgroundServiceInitialized = false;
+  
+  // Job service for resuming progressive downloads
+  DownloadJobService? _jobService;
 
   // Queue management
   int _maxConcurrentDownloads = 2;
@@ -310,6 +314,46 @@ class _NativeDownloadService implements DownloadService {
       await cleanupOrphanedFiles();
       await cleanupOldTaskRecords();
     });
+
+    // Initialize background service early to handle any pending/resuming tasks
+    if (_useBackgroundDownloader) {
+      _initializeBackgroundService();
+    }
+  }
+
+  @override
+  void setJobService(dynamic jobService) {
+    if (jobService is DownloadJobService) {
+      _jobService = jobService;
+      _resumeTranscodingTasks();
+    }
+  }
+
+  /// Resume tasks that were interrupted during transcoding.
+  Future<void> _resumeTranscodingTasks() async {
+    if (_database == null || _jobService == null) return;
+
+    final transcodingTasks = _database!.getAllTasks()
+        .where((t) => t.status == 'transcoding' && t.transcodeJobId != null);
+
+    for (final task in transcodingTasks) {
+      // Check if already being tracked (e.g. paused/resumed manually)
+      if (_cancelTokens.containsKey(task.id)) continue;
+
+      _startProgressiveDownloadTask(
+        task,
+        getDownloadUrl: _jobService!.getDownloadUrl,
+        getJobStatus: (jobId) async {
+          final status = await _jobService!.getJobStatus(jobId);
+          return (
+            status: status.status.name,
+            progress: status.progress,
+            fileSize: status.currentFileSize,
+            error: status.error,
+          );
+        },
+      );
+    }
   }
 
   /// Initialize background download service for mobile platforms.
@@ -429,8 +473,9 @@ class _NativeDownloadService implements DownloadService {
 
   String _generateFileName(DownloadTask task) {
     final sanitizedTitle = task.title.replaceAll(RegExp(r'[^\w\s-]'), '');
+    final sanitizedQuality = task.quality.replaceAll(RegExp(r'[^\w\s-]'), '');
     final timestamp = DateTime.now().millisecondsSinceEpoch;
-    return '${sanitizedTitle}_${task.quality}_$timestamp.mp4';
+    return '${sanitizedTitle}_${sanitizedQuality}_$timestamp.mp4';
   }
 
   @override
@@ -715,11 +760,17 @@ class _NativeDownloadService implements DownloadService {
       // On mobile, use background download service for the file download
       // This allows downloads to continue when app is backgrounded
       if (_useBackgroundDownloader && transcodeComplete) {
-        await _initializeBackgroundService();
-        await _backgroundService!.startDownload(updatedTask);
-        _cancelTokens.remove(task.id);
-        _pausedTasks.remove(task.id);
-        return; // Background service will handle the rest
+        try {
+          await _initializeBackgroundService();
+          await _backgroundService!.startDownload(updatedTask);
+          _cancelTokens.remove(task.id);
+          _pausedTasks.remove(task.id);
+          return; // Background service will handle the rest
+        } catch (e) {
+          // Fallback to foreground download if background service fails
+          print('Background download failed to start: $e');
+          // Continue to foreground download logic below
+        }
       }
 
       // Progressive download loop - handles the case where file is still growing

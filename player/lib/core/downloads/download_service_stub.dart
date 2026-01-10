@@ -87,6 +87,11 @@ class _StubDownloadService implements DownloadService {
   }
 
   @override
+  void setJobService(dynamic jobService) {
+    // No-op in stub
+  }
+
+  @override
   Stream<DownloadTask> get progressStream => _progressController.stream;
 
   @override

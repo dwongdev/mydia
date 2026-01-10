@@ -97,6 +97,11 @@ class _WebDownloadService implements DownloadService {
   }
 
   @override
+  void setJobService(dynamic jobService) {
+    // No-op on web
+  }
+
+  @override
   Stream<DownloadTask> get progressStream => _progressController.stream;
 
   @override

@@ -4,6 +4,8 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../domain/models/download.dart';
 import 'download_service.dart';
 
+import 'download_job_providers.dart';
+
 part 'download_providers.g.dart';
 
 /// Whether downloads are supported on the current platform.
@@ -28,6 +30,13 @@ Future<DownloadService> downloadManager(Ref ref) async {
   final database = await ref.watch(downloadDatabaseProvider.future);
   final service = getDownloadService();
   service.setDatabase(database);
+
+  // Inject job service if available (for resuming progressive downloads)
+  final jobService = ref.watch(downloadJobServiceProvider);
+  if (jobService != null) {
+    service.setJobService(jobService);
+  }
+
   ref.onDispose(() {
     service.dispose();
   });

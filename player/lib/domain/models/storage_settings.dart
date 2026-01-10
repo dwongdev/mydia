@@ -13,7 +13,16 @@ enum CleanupPolicy {
   byDate,
 
   /// Clean up least recently used downloads first
-  lru,
+  lru;
+
+  String get display {
+    switch (this) {
+      case CleanupPolicy.byDate:
+        return 'Oldest First';
+      case CleanupPolicy.lru:
+        return 'Least Recently Used';
+    }
+  }
 }
 
 /// Storage settings configuration.

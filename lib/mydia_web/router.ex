@@ -175,6 +175,7 @@ defmodule MydiaWeb.Router do
       live "/config", AdminConfigLive.Index, :index
       live "/import-lists", AdminImportListsLive.Index, :index
       live "/jobs", JobsLive.Index, :index
+      live "/transcodes", TranscodesLive.Index, :index
       live "/requests", AdminRequestsLive.Index, :index
       live "/users", AdminUsersLive.Index, :index
       live "/devices", AdminDevicesLive.Index, :index

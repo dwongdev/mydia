@@ -1565,12 +1565,18 @@ defmodule Mydia.Downloads do
       {:ok, %TranscodeJob{status: "pending"}}
   """
   def get_or_create_job(media_file_id, resolution) do
-    case Repo.get_by(TranscodeJob, media_file_id: media_file_id, resolution: resolution) do
+    # Explicitly filter for download type jobs
+    case Repo.get_by(TranscodeJob,
+           media_file_id: media_file_id,
+           resolution: resolution,
+           type: "download"
+         ) do
       nil ->
         %TranscodeJob{}
         |> TranscodeJob.changeset(%{
           media_file_id: media_file_id,
           resolution: resolution,
+          type: "download",
           status: "pending",
           progress: 0.0
         })
@@ -1598,6 +1604,7 @@ defmodule Mydia.Downloads do
     TranscodeJob
     |> where([j], j.media_file_id == ^media_file_id)
     |> where([j], j.resolution == ^resolution)
+    |> where([j], j.type == "download")
     |> where([j], j.status == "ready")
     |> Repo.one()
   end
@@ -1625,9 +1632,16 @@ defmodule Mydia.Downloads do
         attrs
       end
 
-    job
-    |> TranscodeJob.changeset(attrs)
-    |> Repo.update()
+    case job
+         |> TranscodeJob.changeset(attrs)
+         |> Repo.update() do
+      {:ok, updated_job} ->
+        broadcast_job_update(updated_job.id)
+        {:ok, updated_job}
+
+      error ->
+        error
+    end
   end
 
   @doc """
@@ -1641,16 +1655,23 @@ defmodule Mydia.Downloads do
       {:ok, %TranscodeJob{status: "ready", completed_at: ~U[...]}}
   """
   def complete_job(%TranscodeJob{} = job, output_path, file_size) do
-    job
-    |> TranscodeJob.changeset(%{
-      status: "ready",
-      progress: 1.0,
-      output_path: output_path,
-      file_size: file_size,
-      completed_at: DateTime.utc_now(),
-      last_accessed_at: DateTime.utc_now()
-    })
-    |> Repo.update()
+    case job
+         |> TranscodeJob.changeset(%{
+           status: "ready",
+           progress: 1.0,
+           output_path: output_path,
+           file_size: file_size,
+           completed_at: DateTime.utc_now(),
+           last_accessed_at: DateTime.utc_now()
+         })
+         |> Repo.update() do
+      {:ok, updated_job} ->
+        broadcast_job_update(updated_job.id)
+        {:ok, updated_job}
+
+      error ->
+        error
+    end
   end
 
   @doc """
@@ -1664,12 +1685,19 @@ defmodule Mydia.Downloads do
       {:ok, %TranscodeJob{status: "failed", error: "FFmpeg error: invalid codec"}}
   """
   def fail_job(%TranscodeJob{} = job, error_message) do
-    job
-    |> TranscodeJob.changeset(%{
-      status: "failed",
-      error: error_message
-    })
-    |> Repo.update()
+    case job
+         |> TranscodeJob.changeset(%{
+           status: "failed",
+           error: error_message
+         })
+         |> Repo.update() do
+      {:ok, updated_job} ->
+        broadcast_job_update(updated_job.id)
+        {:ok, updated_job}
+
+      error ->
+        error
+    end
   end
 
   @doc """
@@ -1689,14 +1717,89 @@ defmodule Mydia.Downloads do
   end
 
   @doc """
-  Deletes a transcode job.
-
-  ## Examples
-
-      iex> delete_job(job)
-      {:ok, %TranscodeJob{}}
+  Broadcasts a transcode job update to all subscribed LiveViews.
   """
-  def delete_job(%TranscodeJob{} = job) do
+  def broadcast_job_update(job_id) do
+    PubSub.broadcast(Mydia.PubSub, "transcodes", {:job_updated, job_id})
+  end
+
+  @doc """
+  Lists transcode jobs.
+  """
+  def list_transcode_jobs(opts \\ []) do
+    TranscodeJob
+    |> maybe_preload(opts[:preload])
+    |> order_by([j], desc: j.updated_at)
+    |> Repo.all()
+  end
+
+  @doc """
+  Cancels a transcode job.
+  """
+  def cancel_transcode_job(%TranscodeJob{} = job) do
+    alias Mydia.Downloads.JobManager
+    alias Mydia.Streaming.HlsSessionSupervisor
+
+    case job.type do
+      "download" ->
+        # Convert schema string resolution to atom for JobManager
+        resolution_atom =
+          case job.resolution do
+            "original" -> :original
+            "1080p" -> :p1080
+            "720p" -> :p720
+            "480p" -> :p480
+            _ -> :p720
+          end
+
+        # Cancel in JobManager
+        JobManager.cancel_job(job.media_file_id, resolution_atom)
+
+      "stream" ->
+        # Stop HLS session if running
+        if job.user_id do
+          HlsSessionSupervisor.stop_session(job.media_file_id, job.user_id)
+        end
+
+      "direct" ->
+        # Stop Direct Play session if running
+        if job.user_id do
+          HlsSessionSupervisor.stop_direct_session(job.media_file_id, job.user_id)
+        end
+
+      _ ->
+        :ok
+    end
+
+    # Delete from DB
     Repo.delete(job)
+
+    # Clean up output file if it exists (only for downloads)
+    if job.output_path && File.exists?(job.output_path) do
+      File.rm(job.output_path)
+    end
+
+    broadcast_job_update(job.id)
+    {:ok, job}
+  end
+
+  @doc """
+  Deletes all completed (ready) transcode jobs and their files.
+  """
+  def delete_all_completed_jobs do
+    jobs =
+      TranscodeJob
+      |> where([j], j.status == "ready")
+      |> Repo.all()
+
+    Enum.each(jobs, &cancel_transcode_job/1)
+  end
+
+  @doc """
+  Deletes all streaming jobs.
+  Should be called on startup to clean up zombie records.
+  """
+  def delete_all_streaming_jobs do
+    Repo.delete_all(from j in TranscodeJob, where: j.type in ["stream", "direct"])
   end
 end

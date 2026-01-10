@@ -344,6 +344,9 @@ defmodule Mydia.Application do
   end
 
   defp cleanup_stale_hls_sessions do
+    # Cleanup DB records for streaming jobs
+    Mydia.Downloads.delete_all_streaming_jobs()
+
     case Mydia.Streaming.HlsCleanup.cleanup_stale_sessions() do
       {:ok, 0} ->
         :ok

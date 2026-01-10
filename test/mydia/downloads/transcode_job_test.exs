@@ -25,7 +25,6 @@ defmodule Mydia.Downloads.TranscodeJobTest do
 
       refute changeset.valid?
       assert :media_file_id in Keyword.keys(changeset.errors)
-      assert :resolution in Keyword.keys(changeset.errors)
       assert :status in Keyword.keys(changeset.errors)
     end
 
@@ -321,7 +320,7 @@ defmodule Mydia.Downloads.TranscodeJobTest do
     end
   end
 
-  describe "Downloads.delete_job/1" do
+  describe "Downloads.cancel_transcode_job/1" do
     setup do
       library = insert(:library_path, type: :movies)
       media_item = insert(:media_item, type: "movie")
@@ -340,7 +339,7 @@ defmodule Mydia.Downloads.TranscodeJobTest do
     end
 
     test "deletes the job from database", %{job: job, media_file: media_file} do
-      {:ok, _deleted_job} = Downloads.delete_job(job)
+      {:ok, _deleted_job} = Downloads.cancel_transcode_job(job)
 
       assert Downloads.get_cached_transcode(media_file.id, "720p") == nil
     end

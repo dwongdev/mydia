@@ -21,6 +21,9 @@ defmodule MydiaWeb.AdminConfigLive.Components do
   attr :library_paths, :list, required: true
   attr :download_clients, :list, required: true
   attr :indexers, :list, required: true
+  attr :active_sessions, :list, required: true
+  attr :transcode_jobs, :list, required: true
+  attr :watch_history, :list, required: true
 
   def status_tab(assigns) do
     ~H"""
@@ -248,6 +251,254 @@ defmodule MydiaWeb.AdminConfigLive.Components do
                   <% end %>
                 </tbody>
               </table>
+            </div>
+          <% end %>
+        </div>
+      </div>
+
+      <div class="divider">Player Activity</div>
+
+      <div class="grid grid-cols-1 xl:grid-cols-3 gap-6 sm:gap-8">
+        <%!-- Active Playback Sessions --%>
+        <div class="bg-base-200 rounded-box p-4 h-full flex flex-col">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-semibold flex items-center gap-2">
+              <.icon name="hero-play-circle" class="w-5 h-5 text-primary" /> Active Sessions
+            </h3>
+            <span class="badge badge-sm badge-ghost">{length(@active_sessions)}</span>
+          </div>
+
+          <%= if @active_sessions == [] do %>
+            <div class="flex-1 flex flex-col items-center justify-center p-8 text-base-content/50">
+              <.icon name="hero-play-circle" class="w-12 h-12 mb-2 opacity-20" />
+              <span class="text-sm">No active sessions</span>
+            </div>
+          <% else %>
+            <div class="space-y-2">
+              <%= for session <- @active_sessions do %>
+                <div class="card bg-base-100 shadow-sm border border-base-300">
+                  <div class="card-body p-3 flex-row items-center gap-3">
+                    <div class="avatar placeholder">
+                      <div class="bg-neutral text-neutral-content rounded-full w-10">
+                        <span class="text-sm uppercase">
+                          {String.slice(session.user.username, 0, 2)}
+                        </span>
+                      </div>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <div class="font-medium text-sm truncate" title={session.media_title}>
+                        {session.media_title}
+                      </div>
+                      <div class="text-xs opacity-60 truncate">
+                        {session.episode_info || "Movie"}
+                      </div>
+                    </div>
+                    <span class={[
+                      "badge badge-xs badge-outline",
+                      if(session.mode == :transcode, do: "badge-warning", else: "badge-success")
+                    ]}>
+                      {if session.mode == :transcode, do: "Transcode", else: "Direct"}
+                    </span>
+                  </div>
+                </div>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+
+        <%!-- Active Jobs (Streaming & Downloads) --%>
+        <div class="bg-base-200 rounded-box p-4 h-full flex flex-col">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-semibold flex items-center gap-2">
+              <.icon name="hero-queue-list" class="w-5 h-5 text-primary" /> Active Jobs
+            </h3>
+            <div class="flex items-center gap-2">
+              <span class="badge badge-sm badge-ghost">{length(@transcode_jobs)}</span>
+              <%= if Enum.any?(@transcode_jobs, & &1.status == "ready") do %>
+                <button
+                  class="btn btn-xs btn-ghost text-error"
+                  phx-click="clear_completed_jobs"
+                  data-confirm="Delete all completed files?"
+                  title="Clear finished"
+                >
+                  <.icon name="hero-trash" class="w-3 h-3" />
+                </button>
+              <% end %>
+            </div>
+          </div>
+
+          <%= if @transcode_jobs == [] do %>
+            <div class="flex-1 flex flex-col items-center justify-center p-8 text-base-content/50">
+              <.icon name="hero-cpu-chip" class="w-12 h-12 mb-2 opacity-20" />
+              <span class="text-sm">No active jobs</span>
+            </div>
+          <% else %>
+            <div class="space-y-3">
+              <%= for job <- @transcode_jobs do %>
+                <div class="card bg-base-100 shadow-sm border border-base-300">
+                  <div class="card-body p-3">
+                    <div class="flex justify-between items-start gap-2 mb-2">
+                      <% title =
+                        cond do
+                          job.media_file.episode && job.media_file.media_item ->
+                            "#{job.media_file.media_item.title} - S#{job.media_file.episode.season_number}E#{job.media_file.episode.episode_number}"
+
+                          job.media_file.media_item ->
+                            job.media_file.media_item.title
+
+                          true ->
+                            Path.basename(job.media_file.path)
+                        end %>
+                      <div class="min-w-0 flex-1">
+                        <div class="font-medium text-sm truncate" title={title}>{title}</div>
+                        <%= if job.user_id && job.user do %>
+                          <div class="text-xs opacity-60 flex items-center gap-1">
+                            <.icon name="hero-user" class="w-3 h-3" />
+                            {job.user.username}
+                          </div>
+                        <% end %>
+                      </div>
+                      <div class="flex items-center gap-1">
+                        <%= cond do %>
+                          <% job.type == "direct" -> %>
+                            <span class="badge badge-xs badge-success" title="Direct Play">
+                              Direct
+                            </span>
+                          <% job.type == "stream" -> %>
+                            <span class="badge badge-xs badge-info" title="Streaming">Stream</span>
+                          <% true -> %>
+                            <span class="badge badge-xs badge-ghost" title="Download">DL</span>
+                        <% end %>
+
+                        <span
+                          class={[
+                            "badge badge-xs",
+                            case job.status do
+                              "ready" -> "badge-success"
+                              "playing" -> "badge-success"
+                              "transcoding" -> "badge-primary"
+                              "failed" -> "badge-error"
+                              _ -> "badge-ghost"
+                            end
+                          ]}
+                          title={job.error}
+                        >
+                          {job.status}
+                        </span>
+                        <button
+                          class="btn btn-ghost btn-xs btn-square text-error -mr-1"
+                          phx-click="delete_transcode_job"
+                          phx-value-id={job.id}
+                          data-confirm={
+                            cond do
+                              job.status == "ready" -> "Delete this file?"
+                              job.type in ["stream", "direct"] -> "Stop this session?"
+                              true -> nil
+                            end
+                          }
+                        >
+                          <.icon name="hero-x-mark" class="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <%= if job.status != "playing" do %>
+                      <progress
+                        class="progress progress-primary w-full h-1"
+                        value={job.progress * 100}
+                        max="100"
+                      >
+                      </progress>
+                    <% end %>
+
+                    <div class="flex justify-between text-xs mt-2 opacity-60 font-mono">
+                      <div class="flex gap-2">
+                        <span>{job.resolution}</span>
+                        <%= if job.file_size do %>
+                          <span>• {format_size(job.file_size)}</span>
+                        <% end %>
+                      </div>
+                      <%= if job.started_at do %>
+                        <span title={Calendar.strftime(job.started_at, "%Y-%m-%d %H:%M:%S")}>
+                          {relative_time(job.started_at)}
+                        </span>
+                      <% end %>
+                    </div>
+                  </div>
+                </div>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+
+        <%!-- Recent Watch History --%>
+        <div class="bg-base-200 rounded-box p-4 h-full flex flex-col">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-semibold flex items-center gap-2">
+              <.icon name="hero-clock" class="w-5 h-5 text-primary" /> History
+            </h3>
+          </div>
+
+          <%= if @watch_history == [] do %>
+            <div class="flex-1 flex flex-col items-center justify-center p-8 text-base-content/50">
+              <.icon name="hero-clock" class="w-12 h-12 mb-2 opacity-20" />
+              <span class="text-sm">No recent history</span>
+            </div>
+          <% else %>
+            <div class="overflow-y-auto max-h-[400px] pr-1 -mr-1">
+              <div class="space-y-0 divide-y divide-base-300 bg-base-100 rounded-box border border-base-300">
+                <%= for progress <- @watch_history do %>
+                  <div class="p-3 flex items-center gap-3 hover:bg-base-200/50 transition-colors">
+                    <% poster_path =
+                      if progress.media_item && progress.media_item.metadata,
+                        do: progress.media_item.metadata.poster_path %>
+                    <%= if poster_path do %>
+                      <div class="avatar">
+                        <div class="w-8 rounded">
+                          <img src={build_image_url(poster_path)} alt="Poster" />
+                        </div>
+                      </div>
+                    <% else %>
+                      <div class="avatar placeholder">
+                        <div class="bg-base-300 text-base-content rounded-full w-8">
+                          <span class="text-xs">
+                            {String.slice(progress.user.username, 0, 1) |> String.upcase()}
+                          </span>
+                        </div>
+                      </div>
+                    <% end %>
+                    <div class="flex-1 min-w-0">
+                      <% title =
+                        cond do
+                          progress.episode && progress.media_item ->
+                            "#{progress.media_item.title} - S#{progress.episode.season_number}E#{progress.episode.episode_number}"
+
+                          progress.media_item ->
+                            progress.media_item.title
+
+                          true ->
+                            "Unknown Media"
+                        end %>
+                      <div class="text-sm font-medium truncate" title={title}>{title}</div>
+                      <div class="text-xs opacity-50 flex justify-between items-center">
+                        <div class="flex items-center gap-1">
+                          <%= if progress.user.avatar_url do %>
+                            <div class="avatar">
+                              <div class="w-4 rounded-full">
+                                <img src={progress.user.avatar_url} alt={progress.user.username} />
+                              </div>
+                            </div>
+                          <% end %>
+                          <span>{progress.user.username}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="text-xs opacity-40 whitespace-nowrap">
+                      {relative_time(progress.last_watched_at)}
+                    </div>
+                  </div>
+                <% end %>
+              </div>
             </div>
           <% end %>
         </div>
@@ -1367,6 +1618,34 @@ defmodule MydiaWeb.AdminConfigLive.Components do
       </div>
     </div>
     """
+  end
+
+  # Helper for image URLs
+  defp build_image_url(nil), do: nil
+  defp build_image_url(path) when is_binary(path), do: "https://image.tmdb.org/t/p/w92#{path}"
+  defp build_image_url(_), do: nil
+
+  # Helper for file size formatting
+  defp format_size(nil), do: "-"
+  defp format_size(bytes) when bytes < 1024, do: "#{bytes} B"
+  defp format_size(bytes) when bytes < 1024 * 1024, do: "#{Float.round(bytes / 1024, 1)} KB"
+
+  defp format_size(bytes) when bytes < 1024 * 1024 * 1024,
+    do: "#{Float.round(bytes / 1024 / 1024, 1)} MB"
+
+  defp format_size(bytes), do: "#{Float.round(bytes / 1024 / 1024 / 1024, 1)} GB"
+
+  # Helper for relative time formatting
+  defp relative_time(datetime) do
+    now = DateTime.utc_now()
+    diff = DateTime.diff(now, datetime, :second)
+
+    cond do
+      diff < 60 -> "Just now"
+      diff < 3600 -> "#{div(diff, 60)}m ago"
+      diff < 86400 -> "#{div(diff, 3600)}h ago"
+      true -> "#{div(diff, 86400)}d ago"
+    end
   end
 
   # ============================================================================

@@ -74,6 +74,9 @@ defmodule MydiaWeb.Api.DownloadController do
          {:ok, resolution} <- validate_resolution(resolution),
          {:ok, job} <- Downloads.get_or_create_job(media_file.id, resolution),
          :ok <- maybe_start_transcode(job, media_file) do
+      # Refetch job to get updated status (e.g. if original quality completed immediately)
+      job = Mydia.Repo.get(Downloads.TranscodeJob, job.id)
+
       conn
       |> put_status(:ok)
       |> json(%{
@@ -162,7 +165,7 @@ defmodule MydiaWeb.Api.DownloadController do
             JobManager.cancel_job(media_file.id, resolution_atom)
 
             # Delete the job record
-            Downloads.delete_job(job)
+            Downloads.cancel_transcode_job(job)
 
             conn
             |> put_status(:ok)
@@ -170,7 +173,7 @@ defmodule MydiaWeb.Api.DownloadController do
 
           _ ->
             # Job has no media_file, just delete it
-            Downloads.delete_job(job)
+            Downloads.cancel_transcode_job(job)
 
             conn
             |> put_status(:ok)

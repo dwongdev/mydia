@@ -9,6 +9,15 @@ defmodule Mydia.Factory do
   alias Mydia.Library.MediaFile
   alias Mydia.Downloads.Download
   alias Mydia.Settings.LibraryPath
+  alias Mydia.Accounts.User
+
+  def user_factory do
+    %User{
+      email: sequence(:email, &"user#{&1}@example.com"),
+      username: sequence(:username, &"user#{&1}"),
+      password_hash: "password"
+    }
+  end
 
   def media_item_factory do
     %MediaItem{

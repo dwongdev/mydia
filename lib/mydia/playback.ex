@@ -264,4 +264,27 @@ defmodule Mydia.Playback do
       end
     end
   end
+
+  @doc """
+  Lists recent watch history for all users.
+  """
+  def list_recent_history(opts \\ []) do
+    limit = Keyword.get(opts, :limit, 20)
+    since = Keyword.get(opts, :since)
+
+    query =
+      from p in Progress,
+        order_by: [desc: p.last_watched_at],
+        limit: ^limit,
+        preload: [:user, :media_item, :episode]
+
+    query =
+      if since do
+        from p in query, where: p.last_watched_at >= ^since
+      else
+        query
+      end
+
+    Repo.all(query)
+  end
 end

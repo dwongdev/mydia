@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import '../crypto/noise_transport.dart';
 import '../relay/relay_tunnel_service.dart';
 
 import 'media_proxy_service.dart';
@@ -16,6 +17,11 @@ class WebRTCConnectionManager {
   RTCDataChannel? _dataChannel;
   RTCDataChannel? _mediaChannel; // Dedicated channel for media
   RelayTunnel? _signalingTunnel;
+  
+  // E2EE support
+  NoiseTransport? _noise;
+  bool _e2eeEnabled = false;
+  Completer<void>? _handshakeCompleter;
   
   // Pending requests map
   final Map<String, Completer<TunnelResponse>> _pendingRequests = {};
@@ -30,6 +36,9 @@ class WebRTCConnectionManager {
   Completer<Map<String, dynamic>>? _pairingCompleter;
 
   WebRTCConnectionManager(this._relayTunnelService);
+  
+  /// Whether E2EE is currently active.
+  bool get isE2EEEnabled => _e2eeEnabled && (_noise?.isHandshakeComplete ?? false);
 
   Future<void> connect(String instanceId) async {
     debugPrint('[WebRTC] Connecting to $instanceId...');
@@ -132,9 +141,7 @@ class WebRTCConnectionManager {
     
     // Set up message handler for API channel
     _dataChannel!.onMessage = (RTCDataChannelMessage message) {
-      if (!message.isBinary) {
-        _handleDataMessage(message.text);
-      }
+      _handleApiChannelMessage(message);
     };
     
     final mediaChannelInit = RTCDataChannelInit();
@@ -212,11 +219,64 @@ class WebRTCConnectionManager {
     debugPrint('[WebRTC] Waiting for Data Channel...');
     try {
       await dataChannelCompleter.future.timeout(const Duration(seconds: 30));
-      debugPrint('[WebRTC] Connected!');
+      debugPrint('[WebRTC] Data channel open');
     } catch (e) {
       debugPrint('[WebRTC] Data Channel timeout: $e');
       throw Exception("WebRTC Data Channel failed to open: $e");
     }
+    
+    // 7. Perform Noise handshake if server supports E2EE
+    await _performNoiseHandshake();
+    
+    debugPrint('[WebRTC] Connected! E2EE: $_e2eeEnabled');
+  }
+  
+  /// Performs the Noise IK handshake over the data channel.
+  /// 
+  /// E2EE is mandatory - throws an exception if:
+  /// - Server public key is not available
+  /// - Server public key is invalid
+  /// - Handshake fails for any reason
+  Future<void> _performNoiseHandshake() async {
+    final publicKeyBase64 = _signalingTunnel?.info.publicKey;
+    if (publicKeyBase64 == null || publicKeyBase64.isEmpty) {
+      throw Exception('E2EE required but server did not provide public key');
+    }
+    
+    final serverPublicKey = base64Decode(publicKeyBase64);
+    if (serverPublicKey.length != 32) {
+      throw Exception('E2EE required but server public key is invalid (length: ${serverPublicKey.length})');
+    }
+    
+    final sessionId = _signalingTunnel!.info.sessionId;
+    final instanceId = _signalingTunnel!.info.instanceId;
+    
+    debugPrint('[WebRTC] Initializing Noise handshake...');
+    
+    _noise = await NoiseTransport.initiator(
+      serverPublicKey: Uint8List.fromList(serverPublicKey),
+      sessionId: sessionId,
+      instanceId: instanceId,
+    );
+    
+    // Set up handshake completer
+    _handshakeCompleter = Completer<void>();
+    
+    // Send handshake message 1
+    final msg1 = await _noise!.writeHandshake();
+    debugPrint('[WebRTC] Sending Noise handshake message 1 (${msg1.length} bytes)');
+    await _dataChannel!.send(RTCDataChannelMessage.fromBinary(msg1));
+    
+    // Wait for handshake response (handled in _handleDataMessage)
+    try {
+      await _handshakeCompleter!.future.timeout(const Duration(seconds: 10));
+    } catch (e) {
+      _noise = null;
+      throw Exception('E2EE handshake failed: $e');
+    }
+    
+    _e2eeEnabled = true;
+    debugPrint('[WebRTC] Noise handshake complete - E2EE active');
   }
   
   // Setup handlers for the media channel
@@ -226,8 +286,36 @@ class WebRTCConnectionManager {
     };
     
     channel.onMessage = (RTCDataChannelMessage message) {
-      _handleMediaMessage(message);
+      _handleMediaChannelMessage(message);
     };
+  }
+  
+  void _handleMediaChannelMessage(RTCDataChannelMessage message) {
+    if (!_e2eeEnabled || _noise == null) {
+      debugPrint('[WebRTC] Ignoring media message: E2EE not active');
+      return;
+    }
+    
+    if (!message.isBinary || !NoiseTransport.isTransportMessage(message.binary)) {
+      debugPrint('[WebRTC] Ignoring non-encrypted media message');
+      return;
+    }
+    
+    try {
+      final (channel, plaintext) = _noise!.decrypt(message.binary);
+      if (channel == NoiseChannel.media) {
+        // Check if it's JSON or binary data
+        if (plaintext.isNotEmpty && plaintext[0] == 0x7B) { // '{' character
+          // JSON message
+          _handleMediaMessage(RTCDataChannelMessage(utf8.decode(plaintext)));
+        } else {
+          // Binary data
+          _handleMediaMessage(RTCDataChannelMessage.fromBinary(plaintext));
+        }
+      }
+    } catch (e) {
+      debugPrint('[WebRTC] E2EE media decryption failed: $e');
+    }
   }
 
   Future<MediaStreamResponse> requestMedia(String fileId, int start, int? end) async {
@@ -251,7 +339,7 @@ class WebRTCConnectionManager {
     };
     
     try {
-      await _mediaChannel!.send(RTCDataChannelMessage(jsonEncode(req)));
+      await _sendMediaMessage(jsonEncode(req));
       
       // Wait for headers
       final headersMsg = await completer.future.timeout(const Duration(seconds: 10));
@@ -327,7 +415,7 @@ class WebRTCConnectionManager {
       'platform': platform,
     };
     
-    await _dataChannel!.send(RTCDataChannelMessage(jsonEncode(req)));
+    await _sendApiMessage(jsonEncode(req));
     
     return _pairingCompleter!.future.timeout(const Duration(seconds: 30));
   }
@@ -350,7 +438,7 @@ class WebRTCConnectionManager {
       'device_token': deviceToken,
     };
 
-    await _dataChannel!.send(RTCDataChannelMessage(jsonEncode(req)));
+    await _sendApiMessage(jsonEncode(req));
     
     return completer.future.timeout(const Duration(seconds: 10));
   }
@@ -386,8 +474,8 @@ class WebRTCConnectionManager {
     
     try {
       final jsonStr = jsonEncode(req);
-      debugPrint('[WebRTC] Sending request: $requestId');
-      await _dataChannel!.send(RTCDataChannelMessage(jsonStr));
+      debugPrint('[WebRTC] Sending request: $requestId (E2EE: $_e2eeEnabled)');
+      await _sendApiMessage(jsonStr);
       debugPrint('[WebRTC] Request sent successfully: $requestId');
     } catch (e) {
       debugPrint('[WebRTC] Error sending request: $e');
@@ -401,6 +489,86 @@ class WebRTCConnectionManager {
       _pendingRequests.remove(requestId);
       throw TimeoutException("Request timed out");
     });
+  }
+  
+  /// Handles incoming messages on the API channel.
+  /// 
+  /// During handshake: processes binary handshake messages.
+  /// After handshake: decrypts and processes JSON messages.
+  /// Sends a message on the API channel with E2EE encryption.
+  /// Throws if E2EE is not active.
+  Future<void> _sendApiMessage(String jsonStr) async {
+    if (!_e2eeEnabled || _noise == null || !_noise!.isHandshakeComplete) {
+      throw Exception('Cannot send message: E2EE not active');
+    }
+    final plaintext = Uint8List.fromList(utf8.encode(jsonStr));
+    final ciphertext = _noise!.encrypt(NoiseChannel.api, plaintext);
+    await _dataChannel!.send(RTCDataChannelMessage.fromBinary(ciphertext));
+  }
+  
+  /// Sends a message on the media channel with E2EE encryption.
+  /// Throws if E2EE is not active.
+  Future<void> _sendMediaMessage(String jsonStr) async {
+    if (!_e2eeEnabled || _noise == null || !_noise!.isHandshakeComplete) {
+      throw Exception('Cannot send message: E2EE not active');
+    }
+    final plaintext = Uint8List.fromList(utf8.encode(jsonStr));
+    final ciphertext = _noise!.encrypt(NoiseChannel.media, plaintext);
+    await _mediaChannel!.send(RTCDataChannelMessage.fromBinary(ciphertext));
+  }
+  
+  /// Handles incoming messages on the API channel.
+  /// 
+  /// During handshake: processes binary handshake messages.
+  /// After handshake: decrypts encrypted messages (E2EE required).
+  void _handleApiChannelMessage(RTCDataChannelMessage message) {
+    // During handshake phase, expect binary handshake response
+    if (_noise != null && !_noise!.isHandshakeComplete && message.isBinary) {
+      _handleHandshakeMessage(message.binary);
+      return;
+    }
+    
+    // After handshake, all messages must be encrypted
+    if (!_e2eeEnabled || _noise == null) {
+      debugPrint('[WebRTC] Ignoring API message: E2EE not active');
+      return;
+    }
+    
+    if (!message.isBinary || !NoiseTransport.isTransportMessage(message.binary)) {
+      debugPrint('[WebRTC] Ignoring non-encrypted API message');
+      return;
+    }
+    
+    try {
+      final (channel, plaintext) = _noise!.decrypt(message.binary);
+      if (channel == NoiseChannel.api) {
+        _handleDataMessage(utf8.decode(plaintext));
+      }
+    } catch (e) {
+      debugPrint('[WebRTC] E2EE decryption failed: $e');
+    }
+  }
+  
+  void _handleHandshakeMessage(Uint8List data) {
+    debugPrint('[WebRTC] Received handshake response (${data.length} bytes)');
+    try {
+      _noise!.readHandshake(data).then((_) {
+        debugPrint('[WebRTC] Handshake message processed');
+        if (_handshakeCompleter != null && !_handshakeCompleter!.isCompleted) {
+          _handshakeCompleter!.complete();
+        }
+      }).catchError((e) {
+        debugPrint('[WebRTC] Handshake read error: $e');
+        if (_handshakeCompleter != null && !_handshakeCompleter!.isCompleted) {
+          _handshakeCompleter!.completeError(e);
+        }
+      });
+    } catch (e) {
+      debugPrint('[WebRTC] Handshake processing error: $e');
+      if (_handshakeCompleter != null && !_handshakeCompleter!.isCompleted) {
+        _handshakeCompleter!.completeError(e);
+      }
+    }
   }
   
   void _handleDataMessage(String data) {

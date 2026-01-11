@@ -41,9 +41,8 @@ defmodule Mydia.RemoteAccess do
 
   """
   def initialize_keypair do
-    # Generate a dummy keypair (random bytes) since we use WebRTC now
-    public_key = :crypto.strong_rand_bytes(32)
-    private_key = :crypto.strong_rand_bytes(32)
+    # Generate X25519 keypair for Noise protocol
+    {public_key, private_key} = generate_x25519_keypair()
 
     # Generate a unique instance ID
     instance_id = Ecto.UUID.generate()
@@ -54,11 +53,21 @@ defmodule Mydia.RemoteAccess do
     |> Config.changeset(%{
       instance_id: instance_id,
       static_public_key: public_key,
-      # Storing raw dummy key
+      # Storing raw key (encryption at rest via DB)
       static_private_key_encrypted: private_key,
       enabled: false
     })
     |> Repo.insert()
+  end
+
+  @doc """
+  Generates an X25519 keypair for the Noise protocol.
+
+  Returns `{public_key, private_key}` as 32-byte binaries.
+  """
+  def generate_x25519_keypair do
+    # Use Erlang crypto to generate a valid X25519 keypair
+    :crypto.generate_key(:ecdh, :x25519)
   end
 
   @doc """
@@ -83,8 +92,10 @@ defmodule Mydia.RemoteAccess do
   end
 
   @doc """
-  Gets the decrypted private key for the instance.
-  Deprecated: Returns dummy key.
+  Gets the private key for the instance.
+
+  Returns `{:ok, private_key}` where private_key is a 32-byte binary,
+  or `{:error, :not_configured}` if not configured.
   """
   def get_private_key do
     case get_config() do
@@ -93,6 +104,23 @@ defmodule Mydia.RemoteAccess do
 
       config ->
         {:ok, config.static_private_key_encrypted}
+    end
+  end
+
+  @doc """
+  Gets the static keypair for the Noise protocol.
+
+  Returns `{:ok, {public_key, private_key}}` where each key is a 32-byte binary,
+  or `{:error, :not_configured}` if not configured.
+  """
+  @spec get_static_keypair() :: {:ok, {binary(), binary()}} | {:error, :not_configured}
+  def get_static_keypair do
+    case get_config() do
+      nil ->
+        {:error, :not_configured}
+
+      config ->
+        {:ok, {config.static_public_key, config.static_private_key_encrypted}}
     end
   end
 

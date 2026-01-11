@@ -115,6 +115,8 @@ defmodule Mydia.MixProject do
       {:ex_webrtc, "~> 0.6.0"},
       # SCTP support for WebRTC DataChannels (requires Rust)
       {:ex_sctp, "~> 0.1.0"},
+      # Noise Protocol Framework for WebRTC E2EE
+      {:decibel, "~> 0.2.4"},
 
       # GraphQL
       {:absinthe, "~> 1.7"},

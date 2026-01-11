@@ -1,16 +1,40 @@
 defmodule Mydia.RemoteAccess.WebRTC.Session do
   @moduledoc """
   Manages a WebRTC PeerConnection for a remote access session.
+
+  E2EE via the Noise protocol is mandatory:
+  1. Client initiates Noise IK handshake on the `mydia-api` DataChannel
+  2. After handshake completion, all messages are encrypted
+  3. Both API and Media channels use the established cipher states
+  4. Plaintext communication is not allowed
   """
   use GenServer
   require Logger
 
   alias ExWebRTC.{PeerConnection, SessionDescription, ICECandidate}
   alias Mydia.RemoteAccess.{Relay, MessageEncoder}
+  alias Mydia.RemoteAccess.WebRTC.NoiseSession
   alias Mydia.Library.MediaFile
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
+  end
+
+  @doc """
+  Sends an encrypted response to the API channel.
+
+  This is called by async tasks to send responses through the GenServer,
+  ensuring proper encryption state management.
+  """
+  def send_api_response(session_pid, response) do
+    GenServer.cast(session_pid, {:send_api_response, response})
+  end
+
+  @doc """
+  Sends an encrypted response to the media channel.
+  """
+  def send_media_response(session_pid, data) do
+    GenServer.cast(session_pid, {:send_media_response, data})
   end
 
   @impl true
@@ -40,18 +64,8 @@ defmodule Mydia.RemoteAccess.WebRTC.Session do
           |> Map.new()
         end)
       else
-        # Default to STUN only
-        default_servers = [%{urls: "stun:stun.l.google.com:19302"}]
-
-        # If we have a local TURN server (e.g. dev environment), add it
-        if Application.get_env(:mydia, :dev_routes) do
-          [
-            %{urls: "turn:localhost:3478", username: "mydia", credential: "mydia"}
-            | default_servers
-          ]
-        else
-          default_servers
-        end
+        # Default to STUN only - TURN credentials are provided by metadata-relay
+        [%{urls: "stun:stun.l.google.com:19302"}]
       end
 
     Logger.info("WebRTC Session using #{length(ice_servers)} ICE servers")
@@ -64,16 +78,41 @@ defmodule Mydia.RemoteAccess.WebRTC.Session do
 
     {:ok, pc} = PeerConnection.start_link(ice_servers: ice_servers)
 
-    state = %{
-      session_id: session_id,
-      relay_pid: relay_pid,
-      pc: pc,
-      data_channel: nil,
-      media_channel: nil,
-      device_id: nil
-    }
+    # Initialize Noise session for E2EE - mandatory
+    case init_noise_session(session_id) do
+      {:ok, noise_session} ->
+        Logger.info("Noise E2EE initialized for session #{session_id}")
 
-    {:ok, state}
+        state = %{
+          session_id: session_id,
+          relay_pid: relay_pid,
+          pc: pc,
+          data_channel: nil,
+          media_channel: nil,
+          device_id: nil,
+          noise_session: noise_session
+        }
+
+        {:ok, state}
+
+      {:error, reason} ->
+        Logger.error("E2EE initialization failed for session #{session_id}: #{inspect(reason)}")
+        {:stop, {:e2ee_required, reason}}
+    end
+  end
+
+  defp init_noise_session(session_id) do
+    with {:ok, keypair} <- Mydia.RemoteAccess.get_static_keypair(),
+         {:ok, config} <- get_remote_access_config() do
+      NoiseSession.new_responder(keypair, session_id, config.instance_id)
+    end
+  end
+
+  defp get_remote_access_config do
+    case Mydia.RemoteAccess.get_config() do
+      nil -> {:error, :not_configured}
+      config -> {:ok, config}
+    end
   end
 
   @impl true
@@ -157,16 +196,33 @@ defmodule Mydia.RemoteAccess.WebRTC.Session do
     {:noreply, state}
   end
 
-  def handle_info({:ex_webrtc, _pc, {:data, channel_ref, data}}, state) do
-    # Determine if this is the media channel (compare by ref, not id)
-    is_media = state.media_channel && state.media_channel.ref == channel_ref
+  def handle_info({:ex_webrtc, _pc, {:data, _channel_ref, data}}, state) do
+    cond do
+      # Handshake not complete - process as handshake message
+      not NoiseSession.handshake_complete?(state.noise_session) ->
+        new_state = handle_noise_handshake(data, state)
+        {:noreply, new_state}
 
-    if is_media do
-      handle_media_message(data, state)
-      {:noreply, state}
-    else
-      new_state = process_data(data, state)
-      {:noreply, new_state}
+      # Handshake complete - all messages must be encrypted
+      true ->
+        case NoiseSession.decrypt(state.noise_session, data) do
+          {:ok, noise_session, channel, plaintext} ->
+            new_state = %{state | noise_session: noise_session}
+
+            case channel do
+              :media ->
+                handle_media_message(plaintext, new_state)
+                {:noreply, new_state}
+
+              :api ->
+                new_state = process_data(plaintext, new_state)
+                {:noreply, new_state}
+            end
+
+          {:error, reason} ->
+            Logger.warning("E2EE decryption failed: #{inspect(reason)}")
+            {:noreply, state}
+        end
     end
   end
 
@@ -192,7 +248,68 @@ defmodule Mydia.RemoteAccess.WebRTC.Session do
     {:noreply, state}
   end
 
-  defp handle_media_message(data, state) do
+  @impl true
+  def handle_cast({:send_api_response, response}, state) do
+    new_state = send_data_to_channel(state, :api, Jason.encode!(response))
+    {:noreply, new_state}
+  end
+
+  def handle_cast({:send_media_response, data}, state) do
+    new_state = send_data_to_channel(state, :media, data)
+    {:noreply, new_state}
+  end
+
+  # Helper to send data with E2EE encryption (mandatory)
+  defp send_data_to_channel(state, channel, data) do
+    channel_struct =
+      case channel do
+        :api -> state.data_channel
+        :media -> state.media_channel
+      end
+
+    cond do
+      channel_struct == nil ->
+        Logger.error("Cannot send to #{channel} - channel is nil!")
+        state
+
+      not NoiseSession.handshake_complete?(state.noise_session) ->
+        Logger.error("Cannot send to #{channel} - E2EE handshake not complete!")
+        state
+
+      true ->
+        case NoiseSession.encrypt(state.noise_session, channel, data) do
+          {:ok, noise_session, ciphertext} ->
+            PeerConnection.send_data(state.pc, channel_struct.ref, ciphertext)
+            %{state | noise_session: noise_session}
+
+          {:error, reason} ->
+            Logger.error("E2EE encryption failed: #{inspect(reason)}")
+            state
+        end
+    end
+  end
+
+  defp handle_noise_handshake(data, state) do
+    case NoiseSession.process_handshake(state.noise_session, data) do
+      {:ok, noise_session, response} ->
+        # Send handshake response if present
+        if response do
+          PeerConnection.send_data(state.pc, state.data_channel.ref, response)
+        end
+
+        Logger.info("Noise handshake progressed for session #{state.session_id}")
+        %{state | noise_session: noise_session}
+
+      {:error, reason} ->
+        # E2EE is mandatory - handshake failure terminates the session
+        Logger.error("Noise handshake failed for session #{state.session_id}: #{inspect(reason)}")
+        # Close the peer connection
+        PeerConnection.close(state.pc)
+        state
+    end
+  end
+
+  defp handle_media_message(data, _state) do
     case Jason.decode(data) do
       {:ok, %{"type" => "stream_request"} = req} ->
         file_id = req["file_id"]
@@ -201,13 +318,11 @@ defmodule Mydia.RemoteAccess.WebRTC.Session do
         # optional
         range_end = req["range_end"]
 
-        # We spawn a task to stream the file to avoid blocking the GenServer
-        # We pass the PC and Channel to the task to send data directly
-        pc = state.pc
-        channel = state.media_channel
+        # Stream chunks back through GenServer for E2EE encryption
+        session_pid = self()
 
         Task.start(fn ->
-          stream_file(file_id, request_id, range_start, range_end, pc, channel)
+          stream_file_e2ee(file_id, request_id, range_start, range_end, session_pid)
         end)
 
       _ ->
@@ -215,10 +330,11 @@ defmodule Mydia.RemoteAccess.WebRTC.Session do
     end
   end
 
-  defp stream_file(file_id, request_id, range_start, range_end, pc, channel) do
+  # File streaming - sends chunks back through GenServer for E2EE encryption
+  defp stream_file_e2ee(file_id, request_id, range_start, range_end, session_pid) do
     case Mydia.Repo.get(MediaFile, file_id) |> Mydia.Repo.preload(:library_path) do
       nil ->
-        send_media_error(pc, channel, request_id, 404, "File not found")
+        send_media_response(session_pid, build_media_error(request_id, 404, "File not found"))
 
       file ->
         abs_path = MediaFile.absolute_path(file)
@@ -244,29 +360,33 @@ defmodule Mydia.RemoteAccess.WebRTC.Session do
             }
           }
 
-          PeerConnection.send_data(pc, channel.ref, Jason.encode!(header))
+          send_media_response(session_pid, Jason.encode!(header))
 
           # Stream data
-          # Chunk size 16KB is safe for SCTP/WebRTC (max message size varies but 16KB is standard safe limit)
-          chunk_size = 16 * 1024
+          # Smaller chunk size for E2EE to account for encryption overhead
+          chunk_size = 14 * 1024
 
           File.open!(abs_path, [:read, :binary], fn io_device ->
             # Seek to start
             :file.position(io_device, range_start)
 
-            stream_loop(io_device, length, chunk_size, pc, channel, request_id)
+            stream_loop_e2ee(io_device, length, chunk_size, request_id, session_pid)
           end)
         else
-          send_media_error(pc, channel, request_id, 404, "File missing on disk")
+          send_media_response(
+            session_pid,
+            build_media_error(request_id, 404, "File missing on disk")
+          )
         end
     end
   end
 
-  defp stream_loop(_io, remaining, _chunk_size, _pc, _channel, _request_id) when remaining <= 0 do
+  defp stream_loop_e2ee(_io, remaining, _chunk_size, _request_id, _session_pid)
+       when remaining <= 0 do
     :ok
   end
 
-  defp stream_loop(io, remaining, chunk_size, pc, channel, request_id) do
+  defp stream_loop_e2ee(io, remaining, chunk_size, request_id, session_pid) do
     bytes_to_read = min(remaining, chunk_size)
 
     case IO.binread(io, bytes_to_read) do
@@ -277,8 +397,8 @@ defmodule Mydia.RemoteAccess.WebRTC.Session do
 
         payload = <<0x01, req_id_len::8, req_id_bytes::binary, data::binary>>
 
-        PeerConnection.send_data(pc, channel.ref, payload)
-        stream_loop(io, remaining - byte_size(data), chunk_size, pc, channel, request_id)
+        send_media_response(session_pid, payload)
+        stream_loop_e2ee(io, remaining - byte_size(data), chunk_size, request_id, session_pid)
 
       :eof ->
         :ok
@@ -288,9 +408,7 @@ defmodule Mydia.RemoteAccess.WebRTC.Session do
     end
   end
 
-  defp send_media_error(pc, channel, request_id, status, message) do
-    Logger.warning("Media error: #{message}")
-
+  defp build_media_error(request_id, status, _message) do
     resp = %{
       type: "response_header",
       request_id: request_id,
@@ -298,7 +416,7 @@ defmodule Mydia.RemoteAccess.WebRTC.Session do
       headers: %{}
     }
 
-    PeerConnection.send_data(pc, channel.ref, Jason.encode!(resp))
+    Jason.encode!(resp)
   end
 
   defp process_data(data, state) do
@@ -318,16 +436,14 @@ defmodule Mydia.RemoteAccess.WebRTC.Session do
           Logger.error("Cannot process request - data_channel is nil!")
           state
         else
-          # Execute request (readonly state access for now)
-          # Note: calling send_data from Task requires pc and channel
-          pc = state.pc
-          channel = state.data_channel
+          # Execute request in a Task, sends back through GenServer for E2EE encryption
           device_id = state.device_id
+          session_pid = self()
 
           Task.start(fn ->
             response = execute_request(req, device_id)
             Logger.info("Sending response for #{req["id"]}: status=#{response[:status]}")
-            PeerConnection.send_data(pc, channel.ref, Jason.encode!(response))
+            send_api_response(session_pid, response)
           end)
 
           state
@@ -338,14 +454,13 @@ defmodule Mydia.RemoteAccess.WebRTC.Session do
           {:ok, device} ->
             Logger.info("Device authenticated via WebRTC: #{device.id}")
             resp = %{type: "auth_response", status: "ok", device_id: device.id}
-            PeerConnection.send_data(state.pc, state.data_channel.ref, Jason.encode!(resp))
-            %{state | device_id: device.id}
+            new_state = %{state | device_id: device.id}
+            send_data_to_channel(new_state, :api, Jason.encode!(resp))
 
           {:error, _reason} ->
             Logger.warning("WebRTC Auth failed")
             resp = %{type: "auth_response", status: "error", message: "Invalid token"}
-            PeerConnection.send_data(state.pc, state.data_channel.ref, Jason.encode!(resp))
-            state
+            send_data_to_channel(state, :api, Jason.encode!(resp))
         end
 
       {:ok,
@@ -369,14 +484,13 @@ defmodule Mydia.RemoteAccess.WebRTC.Session do
               device_token: device_token
             }
 
-            PeerConnection.send_data(state.pc, state.data_channel.ref, Jason.encode!(resp))
-            %{state | device_id: device.id}
+            new_state = %{state | device_id: device.id}
+            send_data_to_channel(new_state, :api, Jason.encode!(resp))
 
           {:error, reason} ->
             Logger.warning("Pairing failed: #{inspect(reason)}")
             resp = %{type: "error", message: "Pairing failed: #{inspect(reason)}"}
-            PeerConnection.send_data(state.pc, state.data_channel.ref, Jason.encode!(resp))
-            state
+            send_data_to_channel(state, :api, Jason.encode!(resp))
         end
 
       {:ok, other} ->

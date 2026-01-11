@@ -490,7 +490,9 @@ defmodule Mydia.RemoteAccess.Relay do
           instance_id: state.instance_id,
           public_key: Base.encode64(state.public_key),
           direct_urls: state.direct_urls,
-          protocol_versions: ProtocolVersion.supported_versions()
+          protocol_versions: ProtocolVersion.supported_versions(),
+          # WebRTC E2EE capability flag
+          webrtc_e2ee: 1
         })
 
       Logger.info("Sending registration message to relay")

@@ -128,7 +128,10 @@ defmodule Mydia.Application do
     # Relay is started dynamically after supervisor starts (see start_relay_if_enabled/0)
     # This avoids querying the database before Repo is started
     # RelayTunnel supervisor is always started to handle incoming tunneled connections
-    [Mydia.RemoteAccess.RelayTunnel]
+    [
+      Mydia.RemoteAccess.WebRTC.Supervisor,
+      Mydia.RemoteAccess.RelayTunnel
+    ]
   end
 
   # Start relay service dynamically after supervisor starts

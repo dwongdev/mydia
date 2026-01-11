@@ -21,6 +21,7 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
   alias MetadataRelay.Relay
   alias MetadataRelay.Relay.ConnectionRegistry
   alias MetadataRelay.Relay.ProtocolVersion
+  alias MetadataRelay.TurnConfig
 
   # Session timeout: 5 minutes without activity
   @session_timeout 300_000
@@ -76,13 +77,33 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
   def handle_info({:relay_response, payload}, state) do
     # Forward response from instance to client
     state = reset_timeout(state)
-
+    
+    # Payload is from Mydia via RelaySocket -> PubSub -> ClientTunnelSocket.
+    # Mydia sends `webrtc_answer` etc. via `send_webrtc_message` which sends `{"type": "webrtc_...", ...}` to RelaySocket.
+    # RelaySocket `handle_message` receives it.
+    
+    # Wait, I need to update `RelaySocket.handle_message` to handle `webrtc_` messages and broadcast them.
+    # Currently it only handles `relay_message`, `ping`, `create_claim`, `register` etc.
+    
     message =
       Jason.encode!(%{
         type: "message",
         payload: Base.encode64(payload)
       })
 
+    {:push, {:text, message}, state}
+  end
+
+  @impl true
+  def handle_info({:webrtc_message, type, payload}, state) do
+    # Forward WebRTC message to client
+    state = reset_timeout(state)
+    
+    message = Jason.encode!(%{
+      type: type,
+      payload: payload
+    })
+    
     {:push, {:text, message}, state}
   end
 
@@ -132,7 +153,8 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
               public_key: info.public_key,
               direct_urls: info.direct_urls,
               relay_protocol: ProtocolVersion.preferred_version(),
-              instance_versions: instance_versions
+              instance_versions: instance_versions,
+              ice_servers: TurnConfig.generate_ice_servers()
             })
 
           {:reply, :ok, {:text, response}, %{state | instance_id: instance_id, connected: true}}
@@ -145,7 +167,6 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
 
           {:reply, :error, {:text, response}, state}
         end
-
       {:error, :not_found} ->
         response =
           Jason.encode!(%{
@@ -155,6 +176,21 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
 
         {:reply, :error, {:text, response}, state}
     end
+  end
+
+  defp handle_message(
+         %{"type" => "webrtc_" <> _ = type, "payload" => payload},
+         state
+       ) when state.connected do
+     Logger.info("Forwarding WebRTC signaling #{type} from client to instance #{state.instance_id}")
+     
+     # Broadcast as a distinct webrtc_signaling event so RelaySocket can forward it properly
+     Phoenix.PubSub.broadcast(
+       MetadataRelay.PubSub,
+       "relay:instance:#{state.instance_id}",
+       {:webrtc_signaling, state.session_id, type, payload}
+     )
+     {:ok, state}
   end
 
   defp handle_message(
@@ -197,7 +233,8 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
               direct_urls: info.direct_urls,
               user_id: info.user_id,
               relay_protocol: ProtocolVersion.preferred_version(),
-              instance_versions: instance_versions
+              instance_versions: instance_versions,
+              ice_servers: TurnConfig.generate_ice_servers()
             })
 
           {:reply, :ok, {:text, response},

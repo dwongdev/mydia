@@ -111,6 +111,11 @@ defmodule Mydia.MixProject do
       # CORS support for cross-origin API requests (standalone player)
       {:corsica, "~> 2.1"},
 
+      # WebRTC
+      {:ex_webrtc, "~> 0.6.0"},
+      # SCTP support for WebRTC DataChannels (requires Rust)
+      {:ex_sctp, "~> 0.1.0"},
+
       # GraphQL
       {:absinthe, "~> 1.7"},
       {:absinthe_plug, "~> 1.5"},

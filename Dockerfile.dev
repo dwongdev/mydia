@@ -25,6 +25,13 @@ RUN apt-get update -qq && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Install Rust (required for ex_sctp - WebRTC DataChannels)
+ENV RUSTUP_HOME=/opt/rustup
+ENV CARGO_HOME=/opt/cargo
+ENV PATH="${CARGO_HOME}/bin:${PATH}"
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable && \
+    chmod -R a+w /opt/rustup /opt/cargo
+
 # Install Flutter SDK for FlutterWatcher builds
 # Using official installation method from https://docs.flutter.dev/install/manual
 ENV FLUTTER_VERSION=3.38.5
@@ -37,7 +44,9 @@ RUN curl -L https://storage.googleapis.com/flutter_infra_release/releases/stable
     git config --global --add safe.directory /opt/flutter && \
     flutter config --no-analytics && \
     flutter precache --web --no-android --no-ios --no-linux --no-windows --no-macos --no-fuchsia && \
-    flutter --version
+    flutter --version && \
+    # Make Flutter SDK writable by any user (needed for LOCAL_UID user mapping)
+    chmod -R a+w /opt/flutter
 
 # Install Hex and Rebar
 RUN mix local.hex --force && \

@@ -122,23 +122,36 @@ defmodule MetadataRelayWeb.RelaySocket do
     {:stop, :heartbeat_timeout, state}
   end
 
-  @impl true
-  def handle_info({:relay_connection, session_id, client_public_key}, state) do
-    # Forward incoming connection request to the instance
-    Logger.info(
-      "Forwarding relay_connection to instance #{state.instance_id}, session: #{session_id}"
-    )
 
+
+  @impl true
+  def handle_info({:webrtc_signaling, session_id, type, payload}, state) do
+    # Forward WebRTC signaling from client (via ClientTunnelSocket) to Mydia instance
+    Logger.info("Forwarding WebRTC signaling #{type} to instance #{state.instance_id}, session: #{session_id}")
+    
+    message =
+      Jason.encode!(%{
+        type: type,
+        session_id: session_id,
+        payload: payload
+      })
+
+    {:push, {:text, message}, state}
+  end
+
+  @impl true
+  def handle_info({:relay_connection, session_id, _client_public_key}, state) do
+    # Forward connection notification to Mydia instance with ICE servers
+    Logger.info("Forwarding connection notification to instance #{state.instance_id}, session: #{session_id}")
+    
+    ice_servers = MetadataRelay.TurnConfig.generate_ice_servers()
+    
     message =
       Jason.encode!(%{
         type: "connection",
         session_id: session_id,
-        client_public_key: Base.encode64(client_public_key)
+        ice_servers: ice_servers
       })
-
-    Logger.debug(
-      "Sending connection message to instance: #{inspect(String.slice(message, 0, 200))}"
-    )
 
     {:push, {:text, message}, state}
   end
@@ -149,7 +162,39 @@ defmodule MetadataRelayWeb.RelaySocket do
     Logger.info(
       "Forwarding relay_message to instance #{state.instance_id}, session: #{session_id}, size: #{byte_size(payload)}"
     )
-
+    
+    # Check if payload is actually JSON inside base64 (hacky check but useful for direct signaling forwarding)
+    # The client might have sent `webrtc_` messages which are JSON.
+    # The ClientTunnelSocket encoded them as base64 in `{:relay_message, ...}`
+    
+    # Actually, `Mydia.RemoteAccess.Relay` expects `relay_message` with base64 payload.
+    # But it also now handles `webrtc_` types. 
+    # If I wrap everything in `relay_message`, the client needs to unwrap.
+    # But `Mydia.RemoteAccess.Relay` (client) handles `relay_message` AND `webrtc_` messages separately.
+    
+    # If the payload is a webrtc message, we should send it as such if possible.
+    # But `ClientTunnelSocket` wraps everything in `{:relay_message ...}`.
+    
+    # Let's try to decode the payload and see if it's a webrtc message.
+    # Or better, update `ClientTunnelSocket` to broadcast distinct events.
+    
+    # But wait, `ClientTunnelSocket` broadcasts `{:relay_message, ...}`.
+    # I can just forward it as `relay_message` and let the client unwrap.
+    # BUT `Mydia.RemoteAccess.Relay` expects `webrtc_` messages to be top-level types?
+    # Let's check `Mydia.RemoteAccess.Relay`.
+    
+    # `handle_relay_message(%{"type" => "relay_message" ...` -> unwraps base64 -> decodes JSON.
+    # If the decoded JSON has `type: "webrtc_..."`, it logs it.
+    
+    # BUT I added `defp handle_relay_message(%{"type" => "webrtc_" <> ...` to `Mydia.RemoteAccess.Relay`.
+    # This expects the top level message to have type `webrtc_...`.
+    
+    # So `RelaySocket` (server) needs to send `{"type": "webrtc_...", ...}` if it's a WebRTC message.
+    
+    # I should change `ClientTunnelSocket` to broadcast `{:webrtc_message, type, payload}` and handle it here.
+    
+    # Reverting this edit and changing approach.
+    
     message =
       Jason.encode!(%{
         type: "relay_message",
@@ -164,7 +209,7 @@ defmodule MetadataRelayWeb.RelaySocket do
   def handle_info(_msg, state) do
     {:ok, state}
   end
-
+  
   @impl true
   def terminate(reason, state) do
     Logger.info(
@@ -281,6 +326,16 @@ defmodule MetadataRelayWeb.RelaySocket do
         Logger.warning("Invalid base64 payload in relay message")
         {:ok, state}
     end
+  end
+
+  defp handle_message(%{"type" => "webrtc_" <> _ = type, "session_id" => session_id, "payload" => payload}, state) do
+     # Forward to client
+     Phoenix.PubSub.broadcast(
+        MetadataRelay.PubSub,
+        "relay:session:#{session_id}",
+        {:webrtc_message, type, payload}
+     )
+     {:ok, state}
   end
 
   defp handle_message(%{"type" => "create_claim"} = msg, state) do

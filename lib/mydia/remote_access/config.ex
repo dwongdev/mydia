@@ -19,8 +19,9 @@ defmodule Mydia.RemoteAccess.Config do
     field :enabled, :boolean, default: false
     field :direct_urls, {:array, :string}, default: []
     field :cert_fingerprint, :string
-    # Port to use for public IP URLs (overrides env var if set)
+    # Port overrides for public IP URLs (overrides env var if set)
     field :public_port, :integer
+    field :public_https_port, :integer
 
     timestamps(type: :utc_datetime)
   end
@@ -37,7 +38,8 @@ defmodule Mydia.RemoteAccess.Config do
       :enabled,
       :direct_urls,
       :cert_fingerprint,
-      :public_port
+      :public_port,
+      :public_https_port
     ])
     |> validate_required([
       :instance_id,
@@ -46,6 +48,7 @@ defmodule Mydia.RemoteAccess.Config do
     ])
     |> validate_length(:instance_id, min: 1, max: 255)
     |> validate_number(:public_port, greater_than: 0, less_than: 65536)
+    |> validate_number(:public_https_port, greater_than: 0, less_than: 65536)
     |> unique_constraint(:instance_id)
   end
 
@@ -70,5 +73,24 @@ defmodule Mydia.RemoteAccess.Config do
     config
     |> change(public_port: public_port)
     |> validate_number(:public_port, greater_than: 0, less_than: 65536)
+  end
+
+  @doc """
+  Changeset for updating public HTTPS port.
+  """
+  def update_public_https_port_changeset(config, public_https_port) do
+    config
+    |> change(public_https_port: public_https_port)
+    |> validate_number(:public_https_port, greater_than: 0, less_than: 65536)
+  end
+
+  @doc """
+  Changeset for updating both public ports.
+  """
+  def update_public_ports_changeset(config, attrs) do
+    config
+    |> cast(attrs, [:public_port, :public_https_port])
+    |> validate_number(:public_port, greater_than: 0, less_than: 65536)
+    |> validate_number(:public_https_port, greater_than: 0, less_than: 65536)
   end
 end

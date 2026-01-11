@@ -9,15 +9,24 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   - HTTP URLs are always generated (for reverse proxy setups)
   - HTTPS URLs are optionally generated (for direct secure access)
 
-  Also supports detecting the instance's public IP address using external services,
-  which is useful when running behind NAT/Docker where the relay can't see the
-  real public IP.
+  Also supports detecting the instance's public IP address using STUN (primary)
+  or HTTP services (fallback), which is useful when running behind NAT/Docker
+  where the relay can't see the real public IP.
+
+  ## Public IP Detection Methods
+
+  1. **STUN (Primary)** - Uses STUN binding requests to Google, Cloudflare, and
+     other public STUN servers. This is faster and more reliable than HTTP.
+  2. **HTTP (Fallback)** - Falls back to ipify.org, ifconfig.me, and icanhazip.com
+     if STUN fails (e.g., UDP blocked by firewall).
   """
 
   require Logger
 
-  # Public IP detection services (tried in order)
-  @public_ip_services [
+  alias Mydia.RemoteAccess.StunClient
+
+  # Fallback HTTP services for public IP detection (used if STUN fails)
+  @http_ip_services [
     "https://api.ipify.org",
     "https://ifconfig.me/ip",
     "https://icanhazip.com"
@@ -26,8 +35,8 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   # Cache TTL for public IP (5 minutes)
   @public_ip_cache_ttl_ms 5 * 60 * 1000
 
-  # Timeout for public IP detection requests (3 seconds)
-  @public_ip_timeout_ms 3_000
+  # Timeout for HTTP fallback requests (3 seconds)
+  @http_timeout_ms 3_000
 
   @doc """
   Detects all available direct URLs for the instance.
@@ -157,10 +166,13 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   end
 
   @doc """
-  Detects the public IP address of this instance using external services.
+  Detects the public IP address of this instance.
 
-  Makes HTTP requests to external "what's my IP" services to determine the
-  public IP address. Results are cached to avoid repeated requests.
+  Uses STUN (Session Traversal Utilities for NAT) as the primary detection method,
+  which is faster and more reliable than HTTP-based services. Falls back to HTTP
+  services (ipify.org, ifconfig.me, icanhazip.com) if STUN fails.
+
+  Results are cached to avoid repeated requests.
 
   Returns `{:ok, ip_string}` on success, or `{:error, reason}` on failure.
 
@@ -175,7 +187,7 @@ defmodule Mydia.RemoteAccess.DirectUrls do
       {:ok, "203.0.113.42"}
 
       iex> DirectUrls.detect_public_ip()
-      {:error, :all_services_failed}
+      {:error, :all_methods_failed}
 
   """
   def detect_public_ip do
@@ -281,12 +293,33 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   @doc """
   Gets the public HTTPS port configuration.
 
-  Returns the HTTPS port if configured, or nil if HTTPS is disabled.
-  Uses `:public_https_port` config if set, otherwise falls back to `:https_port`.
+  Checks sources in order of precedence:
+  1. Environment variable (PUBLIC_HTTPS_PORT) - highest priority
+  2. Database setting (remote_access_config.public_https_port)
+  3. https_port from config
+  4. Returns nil if HTTPS is disabled
+
+  Returns the port as an integer, or nil if HTTPS is not configured.
   """
   def get_public_https_port do
     env_config = Application.get_env(:mydia, :direct_urls, [])
-    Keyword.get(env_config, :public_https_port) || Keyword.get(env_config, :https_port)
+
+    # Environment variable takes precedence
+    case Keyword.get(env_config, :public_https_port) do
+      port when is_integer(port) ->
+        port
+
+      _ ->
+        # Try database config
+        case get_db_public_https_port() do
+          port when is_integer(port) ->
+            port
+
+          _ ->
+            # Fall back to https_port from env config
+            Keyword.get(env_config, :https_port)
+        end
+    end
   end
 
   # Legacy function for backwards compatibility
@@ -298,6 +331,18 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   defp get_db_public_port do
     case Mydia.RemoteAccess.get_config() do
       %{public_port: port} when is_integer(port) -> port
+      _ -> nil
+    end
+  rescue
+    # Database might not be available during startup
+    _ -> nil
+  end
+
+  # Gets the public_https_port from database config
+  # Returns nil if not set or database unavailable
+  defp get_db_public_https_port do
+    case Mydia.RemoteAccess.get_config() do
+      %{public_https_port: port} when is_integer(port) -> port
       _ -> nil
     end
   rescue
@@ -362,21 +407,35 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   end
 
   defp detect_public_ip_from_services do
-    Enum.reduce_while(@public_ip_services, {:error, :all_services_failed}, fn service_url, _acc ->
-      case fetch_public_ip(service_url) do
+    # Try STUN first (faster, more reliable)
+    case StunClient.detect_public_ip() do
+      {:ok, ip} ->
+        Logger.debug("Detected public IP #{ip} via STUN")
+        {:ok, ip}
+
+      {:error, stun_reason} ->
+        Logger.debug("STUN detection failed: #{inspect(stun_reason)}, trying HTTP fallback")
+        # Fall back to HTTP services
+        detect_public_ip_from_http_services()
+    end
+  end
+
+  defp detect_public_ip_from_http_services do
+    Enum.reduce_while(@http_ip_services, {:error, :all_methods_failed}, fn service_url, _acc ->
+      case fetch_public_ip_http(service_url) do
         {:ok, ip} ->
           Logger.debug("Detected public IP #{ip} from #{service_url}")
           {:halt, {:ok, ip}}
 
         {:error, reason} ->
           Logger.debug("Failed to get public IP from #{service_url}: #{inspect(reason)}")
-          {:cont, {:error, :all_services_failed}}
+          {:cont, {:error, :all_methods_failed}}
       end
     end)
   end
 
-  defp fetch_public_ip(service_url) do
-    case Req.get(service_url, receive_timeout: @public_ip_timeout_ms, retry: false) do
+  defp fetch_public_ip_http(service_url) do
+    case Req.get(service_url, receive_timeout: @http_timeout_ms, retry: false) do
       {:ok, %Req.Response{status: 200, body: body}} when is_binary(body) ->
         ip = String.trim(body)
 

@@ -27,5 +27,13 @@ if config_env() != :test do
     config :metadata_relay,
       tmdb_api_key: tmdb_api_key,
       tvdb_api_key: tvdb_api_key
+
+    # TURN Server configuration
+    turn_uri = System.get_env("TURN_URI")
+    turn_secret = System.get_env("TURN_SECRET")
+
+    config :metadata_relay,
+      turn_uri: turn_uri,
+      turn_secret: turn_secret
   end
 end

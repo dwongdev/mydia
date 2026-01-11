@@ -40,15 +40,25 @@ defmodule Mydia.Streaming do
       # Fallback to registry meta if process call fails (race condition)
       user_id = meta[:user_id]
       media_file_id = meta[:media_file_id]
-      started_at = meta[:started_at]
+      # Default start time from registry meta; fall back to session last_activity or now
+      started_at =
+        meta[:started_at] ||
+          (info && info[:last_activity]) ||
+          DateTime.utc_now()
+
       # Default to transcode if missing in meta
       mode = meta[:mode] || :transcode
 
       # If we got info from PID, prefer that (though meta should be static)
       mode = if info, do: info.mode, else: mode
       session_id = if info, do: info.session_id, else: "unknown"
-      # We assume false if we can't check
-      ready = if info, do: info.ready, else: false
+      # Default to false when missing to avoid KeyError
+      ready =
+        if info do
+          Map.get(info, :ready, false)
+        else
+          Map.get(meta, :ready, false)
+        end
 
       # Fetch User
       user = Repo.get(User, user_id)

@@ -168,6 +168,25 @@ defmodule Mydia.RemoteAccess.Relay do
   end
 
   @doc """
+  Sends a WebRTC signaling message to a client through the relay.
+
+  ## Parameters
+  - session_id: The relay session identifier
+  - type: Message type (webrtc_offer, webrtc_answer, webrtc_candidate)
+  - payload: The signaling data (SDP or ICE candidate)
+
+  Returns :ok or {:error, reason}.
+  """
+  def send_webrtc_message(server \\ __MODULE__, session_id, type, payload) do
+    try do
+      GenServer.cast(server, {:send_webrtc_message, session_id, type, payload})
+    catch
+      :exit, {:noproc, _} ->
+        {:error, :not_running}
+    end
+  end
+
+  @doc """
   Requests a claim code from the relay service.
 
   The relay generates the code and returns it. This allows remote clients
@@ -389,6 +408,26 @@ defmodule Mydia.RemoteAccess.Relay do
   end
 
   @impl GenServer
+  def handle_cast({:send_webrtc_message, session_id, type, payload}, state) do
+    Logger.info("Relay sending WebRTC signaling: session=#{session_id}, type=#{type}")
+
+    if state.ws_pid do
+      msg =
+        Jason.encode!(%{
+          type: type,
+          session_id: session_id,
+          payload: payload
+        })
+
+      WebSockex.send_frame(state.ws_pid, {:text, msg})
+    else
+      Logger.warning("Cannot send #{type}: ws_pid is nil, session=#{session_id}")
+    end
+
+    {:noreply, state}
+  end
+
+  @impl GenServer
   def handle_info(:connect, state) do
     Logger.info("Connecting to relay service at #{state.relay_url}")
 
@@ -546,9 +585,10 @@ defmodule Mydia.RemoteAccess.Relay do
          state
        ) do
     has_public_key = msg["client_public_key"] != nil && msg["client_public_key"] != ""
+    ice_servers = msg["ice_servers"] || []
 
     Logger.info(
-      "Relay received connection request: session=#{session_id}, has_client_public_key=#{has_public_key}"
+      "Relay received connection request: session=#{session_id}, has_client_public_key=#{has_public_key}, ice_servers=#{length(ice_servers)}"
     )
 
     # Client public key is optional - it will be established during Noise handshake
@@ -575,7 +615,7 @@ defmodule Mydia.RemoteAccess.Relay do
     Phoenix.PubSub.broadcast(
       Mydia.PubSub,
       "relay:connections",
-      {:relay_connection, session_id, client_public_key, self()}
+      {:relay_connection, session_id, client_public_key, ice_servers, self()}
     )
 
     Logger.info("Relay broadcast sent for session #{session_id}")
@@ -636,6 +676,21 @@ defmodule Mydia.RemoteAccess.Relay do
 
   defp handle_relay_message(%{"type" => "error", "message" => error_msg}, state) do
     Logger.error("Relay service error: #{error_msg}")
+    state
+  end
+
+  defp handle_relay_message(
+         %{"type" => "webrtc_" <> _ = type, "session_id" => session_id} = msg,
+         state
+       ) do
+    Logger.info("Received #{type} for session #{session_id}")
+
+    Phoenix.PubSub.broadcast(
+      Mydia.PubSub,
+      "relay:session:#{session_id}",
+      {:webrtc_signaling, type, msg["payload"]}
+    )
+
     state
   end
 
@@ -771,8 +826,8 @@ defmodule Mydia.RemoteAccess.Relay do
           url
 
         true ->
-          # Default to wss:// if no protocol specified
-          "wss://#{url}"
+          # Default to ws:// for self-hosted/dev instances that often run without TLS
+          "ws://#{url}"
       end
 
     # Append the relay tunnel WebSocket path

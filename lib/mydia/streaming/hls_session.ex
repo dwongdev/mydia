@@ -224,7 +224,11 @@ defmodule Mydia.Streaming.HlsSession do
               type: "stream",
               status: "transcoding",
               # Informational only
-              resolution: (media_file.height && "#{media_file.height}p") || "original",
+              resolution:
+                if(media_file.resolution in ["1080p", "720p", "480p"],
+                  do: media_file.resolution,
+                  else: "original"
+                ),
               progress: 0.0,
               started_at: DateTime.utc_now()
             })

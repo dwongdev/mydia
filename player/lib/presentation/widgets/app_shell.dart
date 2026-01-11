@@ -20,9 +20,9 @@ class _ConnectionStatusBadge extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connectionState = ref.watch(connectionProvider);
-    final isRelay = connectionState.isRelayMode;
+    final isRelay = connectionState.isWebRTCMode;
     final color = isRelay ? Colors.orange : Colors.green;
-    final tooltip = isRelay ? 'Connected via relay' : 'Direct connection';
+    final tooltip = isRelay ? 'Connected via WebRTC Relay' : 'Direct connection';
 
     return Tooltip(
       message: tooltip,
@@ -92,8 +92,8 @@ class _AppShellState extends ConsumerState<AppShell> {
     final connectionState = ref.read(connectionProvider);
 
     // Check if we were in relay mode but tunnel is now dead
-    if (connectionState.isRelayMode && !connectionState.isTunnelActive) {
-      debugPrint('[AppShell] Relay tunnel died while in background, reconnecting...');
+    if (connectionState.isWebRTCMode && connectionState.webrtcManager == null) {
+      debugPrint('[AppShell] WebRTC tunnel died while in background, reconnecting...');
       // Trigger full reconnection (includes key exchange)
       ref.read(authStateProvider.notifier).retryConnection();
     }

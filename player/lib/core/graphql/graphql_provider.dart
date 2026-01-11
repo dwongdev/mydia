@@ -8,19 +8,35 @@ import '../auth/media_token_service.dart';
 import '../config/web_config.dart';
 import '../connection/connection_provider.dart';
 import '../connection/reconnection_service.dart';
+import '../webrtc/media_proxy_service.dart';
 import 'client.dart';
-import 'relay_link.dart';
+import 'webrtc_link.dart';
 
-/// Provider for the auth service instance.
-final authServiceProvider = Provider<AuthService>((ref) {
-  return AuthService();
-});
+// ... (existing providers)
 
-/// Provider for the reconnection service instance.
-///
-/// Used on native platforms to reconnect to a paired instance after app restart.
-final reconnectionServiceProvider = Provider<ReconnectionService>((ref) {
-  return ReconnectionService();
+// Media Proxy Service Provider
+final mediaProxyServiceProvider = FutureProvider<MediaProxyService?>((ref) async {
+  // MediaProxyService uses dart:io HttpServer which is not available on web
+  if (kIsWeb) {
+    debugPrint('[mediaProxyServiceProvider] Skipping on web platform');
+    return null;
+  }
+  
+  final connectionState = ref.watch(connectionProvider);
+  debugPrint('[mediaProxyServiceProvider] isWebRTCMode=${connectionState.isWebRTCMode}, hasManager=${connectionState.webrtcManager != null}');
+  if (connectionState.isWebRTCMode && connectionState.webrtcManager != null) {
+    debugPrint('[mediaProxyServiceProvider] Creating media proxy service');
+    final proxy = MediaProxyService(connectionState.webrtcManager!);
+    await proxy.start();
+    debugPrint('[mediaProxyServiceProvider] Media proxy started');
+    // Ensure we stop it when provider is disposed
+    ref.onDispose(() {
+      proxy.stop();
+    });
+    return proxy;
+  }
+  debugPrint('[mediaProxyServiceProvider] Not in WebRTC mode, returning null');
+  return null;
 });
 
 /// Provider for the server URL.
@@ -29,9 +45,18 @@ final reconnectionServiceProvider = Provider<ReconnectionService>((ref) {
 /// browser-accessible URL (not internal Docker hostnames like 'storage:4000').
 /// On native platforms, uses the stored server URL from secure storage.
 final serverUrlProvider = FutureProvider<String?>((ref) async {
+  // Check WebRTC proxy first
+  final mediaProxy = await ref.watch(mediaProxyServiceProvider.future);
+  if (mediaProxy != null) {
+    final url = await mediaProxy.start(); // Returns http://127.0.0.1:port
+    debugPrint('[serverUrlProvider] Using WebRTC proxy: $url');
+    return url;
+  }
+
   // On web, always use the current origin to avoid CORS issues
   // and ensure we use the browser-accessible URL (not Docker internal names)
   if (kIsWeb) {
+
     final origin = getOriginUrl();
     debugPrint('[serverUrlProvider] kIsWeb=true, origin=$origin');
     if (origin != null) {
@@ -63,33 +88,31 @@ final isAuthenticatedProvider = FutureProvider<bool>((ref) async {
 });
 
 /// Provider for the GraphQL client.
-///
-/// Returns null if either the server URL or auth token is not available.
-/// This provider automatically updates when the server URL or token changes.
-/// Includes 401 error handling with logout on auth failure.
-///
-/// When in relay mode (via [connectionProvider]), uses a [RelayLink] to
-/// route requests through the relay tunnel instead of direct HTTP.
 final graphqlClientProvider = Provider<GraphQLClient?>((ref) {
   final connectionState = ref.watch(connectionProvider);
   final serverUrlAsync = ref.watch(serverUrlProvider);
   final authTokenAsync = ref.watch(authTokenProvider);
   final authService = ref.watch(authServiceProvider);
 
-  // Check if we're in relay mode with an active tunnel
-  if (connectionState.isRelayMode && connectionState.isTunnelActive) {
+  debugPrint('[graphqlClientProvider] Building: isWebRTCMode=${connectionState.isWebRTCMode}, hasManager=${connectionState.webrtcManager != null}');
+
+  // Check if we're in WebRTC mode
+  if (connectionState.isWebRTCMode && connectionState.webrtcManager != null) {
     return authTokenAsync.when(
       data: (authToken) {
-        debugPrint('[graphqlClientProvider] Using relay mode');
-        final link = RelayLink(connectionState.tunnel!, authToken: authToken);
+        debugPrint('[graphqlClientProvider] Using WebRTC mode with authToken=${authToken != null ? "present" : "null"}');
+        final link = WebRTCLink(connectionState.webrtcManager!, authToken: authToken);
         return GraphQLClient(
           link: link,
           cache: GraphQLCache(store: HiveStore()),
         );
       },
-      loading: () => null,
+      loading: () {
+        debugPrint('[graphqlClientProvider] Auth token loading...');
+        return null;
+      },
       error: (error, stackTrace) {
-        debugPrint('[graphqlClientProvider] Auth token error in relay mode: $error\n$stackTrace');
+        debugPrint('[graphqlClientProvider] Auth token error in WebRTC mode: $error\n$stackTrace');
         return null;
       },
     );
@@ -273,10 +296,10 @@ class AuthStateNotifier extends Notifier<AsyncValue<AuthStatus>> {
         await authStorage.write('pairing_access_token', session.accessToken);
 
         // Set the connection provider mode
-        if (session.isRelayConnection && session.relayTunnel != null) {
-          debugPrint('[AuthStateNotifier] Setting relay tunnel in connection provider');
-          await ref.read(connectionProvider.notifier).setRelayTunnel(
-            session.relayTunnel!,
+        if (session.isRelayConnection && session.webrtcManager != null) {
+          debugPrint('[AuthStateNotifier] Setting WebRTC manager in connection provider');
+          await ref.read(connectionProvider.notifier).setWebRTCManager(
+            session.webrtcManager,
             instanceId: session.instanceId,
             relayUrl: session.relayUrl,
           );
@@ -395,14 +418,18 @@ final authStateProvider =
 /// NOTE: Uses ref.watch for graphqlClientProvider to ensure updates when
 /// connection mode changes (e.g., from direct to relay mode after pairing).
 final asyncGraphqlClientProvider = FutureProvider<GraphQLClient>((ref) async {
+  debugPrint('[asyncGraphqlClientProvider] Starting...');
+  
   // Wait for auth check to complete (isAuthenticatedProvider is a FutureProvider)
   final isAuthenticated = await ref.watch(isAuthenticatedProvider.future);
+  debugPrint('[asyncGraphqlClientProvider] isAuthenticated=$isAuthenticated');
   if (!isAuthenticated) {
     throw Exception('Not authenticated');
   }
 
   // Wait for server URL and token to be available
   final serverUrl = await ref.watch(serverUrlProvider.future);
+  debugPrint('[asyncGraphqlClientProvider] serverUrl=$serverUrl');
   await ref.watch(authTokenProvider.future); // Wait for token to be ready
 
   if (serverUrl == null) {
@@ -410,7 +437,9 @@ final asyncGraphqlClientProvider = FutureProvider<GraphQLClient>((ref) async {
   }
 
   // Watch the sync provider to get updates when connection mode changes
+  debugPrint('[asyncGraphqlClientProvider] Getting graphqlClientProvider...');
   final client = ref.watch(graphqlClientProvider);
+  debugPrint('[asyncGraphqlClientProvider] client=${client != null ? "available" : "null"}');
   if (client == null) {
     // This shouldn't happen if auth is ready, but handle it gracefully
     throw Exception('GraphQL client not available');

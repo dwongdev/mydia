@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/graphql/graphql_provider.dart';
+import '../../core/auth/auth_service.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});

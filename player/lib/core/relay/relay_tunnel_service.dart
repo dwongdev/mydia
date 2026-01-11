@@ -25,7 +25,7 @@
 ///   // Use tunnel.sendMessage() and listen to tunnel.messages
 /// }
 /// ```
-library;
+library relay_tunnel_service;
 
 import 'dart:async';
 import 'dart:convert';
@@ -73,11 +73,15 @@ class RelayTunnelInfo {
   /// Direct URLs to the instance (for fallback).
   final List<String> directUrls;
 
+  /// ICE servers configuration for WebRTC.
+  final List<Map<String, dynamic>> iceServers;
+
   const RelayTunnelInfo({
     required this.sessionId,
     required this.instanceId,
     required this.publicKey,
     required this.directUrls,
+    this.iceServers = const [],
   });
 
   factory RelayTunnelInfo.fromJson(Map<String, dynamic> json) {
@@ -87,6 +91,10 @@ class RelayTunnelInfo {
       publicKey: json['public_key'] as String,
       directUrls: (json['direct_urls'] as List<dynamic>?)
               ?.map((e) => e as String)
+              .toList() ??
+          [],
+      iceServers: (json['ice_servers'] as List<dynamic>?)
+              ?.map((e) => Map<String, dynamic>.from(e as Map))
               .toList() ??
           [],
     );
@@ -170,6 +178,7 @@ class RelayTunnel {
     debugPrint('[RelayTunnel] Creating tunnel for session: ${_info.sessionId}');
     _messageController = StreamController<Uint8List>.broadcast();
     _errorController = StreamController<String>.broadcast();
+    _signalingController = StreamController<Map<String, dynamic>>.broadcast();
     _pendingRequests = {};
 
     // Listen to WebSocket messages via the broadcast stream
@@ -206,21 +215,13 @@ class RelayTunnel {
   final RelayTunnelInfo _info;
   late final StreamController<Uint8List> _messageController;
   late final StreamController<String> _errorController;
+  late final StreamController<Map<String, dynamic>> _signalingController;
   late final Map<String, Completer<TunnelResponse>> _pendingRequests;
   int _requestCounter = 0;
 
   Timer? _heartbeatTimer;
   Timer? _heartbeatTimeoutTimer;
   bool _pendingHeartbeat = false;
-
-  /// Session key for end-to-end encryption (null before handshake).
-  SecretKey? _sessionKey;
-
-  /// ChaCha20-Poly1305 cipher for encryption/decryption.
-  final _cipher = DartCryptography.defaultInstance.chacha20Poly1305Aead();
-
-  /// Whether encryption is enabled (handshake complete).
-  bool get isEncryptionEnabled => _sessionKey != null;
 
   /// Information about this tunnel connection.
   RelayTunnelInfo get info => _info;
@@ -231,89 +232,40 @@ class RelayTunnel {
   /// Stream of error messages.
   Stream<String> get errors => _errorController.stream;
 
+  /// Stream of signaling messages.
+  Stream<Map<String, dynamic>> get signalingMessages => _signalingController.stream;
+
   /// Whether the tunnel is still active.
   bool get isActive => !_messageController.isClosed;
 
-  /// Enables end-to-end encryption for all subsequent messages.
-  ///
-  /// This should be called after the handshake is complete. Once enabled,
-  /// all messages sent via [sendMessage], [sendJsonMessage], and [request]
-  /// will be encrypted, and all incoming messages will be decrypted.
-  ///
-  /// ## Parameters
-  ///
-  /// - [sessionKeyBytes] - The 32-byte session key derived from the handshake.
-  ///
-  /// ## Example
-  ///
-  /// ```dart
-  /// // After handshake completes
-  /// final sessionKey = await cryptoManager.getSessionKeyBytes();
-  /// tunnel.enableEncryption(sessionKey!);
-  ///
-  /// // All subsequent messages are now encrypted
-  /// await tunnel.sendJsonMessage('{"type": "claim_code", ...}');
-  /// ```
-  void enableEncryption(Uint8List sessionKeyBytes) {
-    if (sessionKeyBytes.length != 32) {
-      throw ArgumentError(
-        'Session key must be 32 bytes, got ${sessionKeyBytes.length}',
-      );
+  /// Sends a WebRTC signaling message.
+  void sendSignalingMessage(String type, dynamic payload) {
+    if (!isActive) {
+      throw StateError('Tunnel is closed');
     }
-    _sessionKey = SecretKey(sessionKeyBytes);
 
-    // Debug: Log session key fingerprint for cross-platform crypto troubleshooting
-    final sessionKeyHex = sessionKeyBytes
-        .take(8)
-        .map((b) => b.toRadixString(16).padLeft(2, '0'))
-        .join();
-    debugPrint(
-      '[RelayTunnel] Encryption enabled: session=${_info.sessionId}, session_key_first8=$sessionKeyHex',
-    );
+    final message = jsonEncode({
+      'type': type,
+      'payload': jsonEncode(payload),
+    });
+
+    _channel.sink.add(message);
   }
 
   /// Sends a JSON message to the instance through the tunnel.
   ///
-  /// If encryption is enabled, the message will be automatically encrypted
-  /// before sending. This is the preferred method for sending messages after
-  /// the handshake is complete.
+  /// The message is serialized to JSON and sent over the WebSocket.
   ///
   /// ## Parameters
   ///
   /// - [jsonMessage] - The JSON string to send.
-  ///
-  /// ## Example
-  ///
-  /// ```dart
-  /// await tunnel.sendJsonMessage(jsonEncode({
-  ///   'type': 'claim_code',
-  ///   'data': {'code': 'ABC123', 'device_name': 'My Phone', 'platform': 'ios'},
-  /// }));
-  /// ```
   Future<void> sendJsonMessage(String jsonMessage) async {
     if (!isActive) {
       throw StateError('Tunnel is closed');
     }
 
-    String payload;
-    if (_sessionKey != null) {
-      // Encrypt the message
-      final keyBytes = await _sessionKey!.extractBytes();
-      final sessionKeyHex = keyBytes
-          .take(8)
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
-          .join();
-      debugPrint(
-        '[RelayTunnel] sendJsonMessage: encrypting with session_key_first8=$sessionKeyHex',
-      );
-      payload = await _encryptMessage(jsonMessage);
-      debugPrint('[RelayTunnel] Sending encrypted message (${payload.length} chars)');
-    } else {
-      // Send plaintext (only during handshake)
-      payload = base64Encode(utf8.encode(jsonMessage));
-      debugPrint('[RelayTunnel] sendJsonMessage: NO SESSION KEY - sending plaintext!');
-    }
-
+    final payload = base64Encode(utf8.encode(jsonMessage));
+    
     final message = jsonEncode({
       'type': 'message',
       'payload': payload,
@@ -360,112 +312,36 @@ class RelayTunnel {
       // Send close message
       final message = jsonEncode({'type': 'close'});
       _channel.sink.add(message);
-    } catch (e) {
+    } catch (_) {
       // Ignore errors when closing
     }
 
     await _channel.sink.close();
     await _messageController.close();
     await _errorController.close();
+    await _signalingController.close();
+  }
+
+
+  // Handles webrtc_* messages from relay.
+  void _handleSignalingMessage(String type, Map<String, dynamic> messageJson) {
+    final payloadJson = messageJson['payload'];
+
+    dynamic payload;
+    if (payloadJson is String) {
+      try {
+        payload = jsonDecode(payloadJson);
+      } catch (_) {
+        payload = payloadJson;
+      }
+    } else {
+      payload = payloadJson;
+    }
+
+    _signalingController.add({'type': type, 'payload': payload});
   }
 
   /// Sends an HTTP request through the tunnel.
-  ///
-  /// This method proxies HTTP requests through the relay tunnel to the
-  /// Mydia instance, allowing API communication when direct connection
-  /// is not possible.
-  ///
-  /// ## Parameters
-  ///
-  /// - [method] - HTTP method (GET, POST, PUT, DELETE, etc.)
-  /// - [path] - Request path (e.g., '/api/graphql')
-  /// - [headers] - Optional request headers
-  /// - [body] - Optional request body
-  ///
-  /// ## Returns
-  ///
-  /// A [TunnelResponse] containing the response status, headers, and body.
-  ///
-  /// ## Example
-  ///
-  /// ```dart
-  /// final response = await tunnel.request(
-  ///   method: 'POST',
-  ///   path: '/api/graphql',
-  ///   headers: {'Content-Type': 'application/json'},
-  ///   body: '{"query": "{ me { id } }"}',
-  /// );
-  /// if (response.isSuccess) {
-  ///   print('Response: ${response.bodyAsString}');
-  /// }
-  /// ```
-  Future<TunnelResponse> request({
-    required String method,
-    required String path,
-    Map<String, String>? headers,
-    String? body,
-  }) async {
-    if (!isActive) {
-      throw StateError('Tunnel is closed');
-    }
-
-    // Generate unique request ID
-    final requestId = '${_info.sessionId}-${++_requestCounter}';
-
-    // Create completer for the response
-    final completer = Completer<TunnelResponse>();
-    _pendingRequests[requestId] = completer;
-
-    // Build and send request message
-    final requestMessage = jsonEncode({
-      'type': 'request',
-      'id': requestId,
-      'method': method,
-      'path': path,
-      'headers': headers ?? {},
-      'body': body,
-    });
-
-    try {
-      // Encrypt if encryption is enabled
-      String payload;
-      if (_sessionKey != null) {
-        payload = await _encryptMessage(requestMessage);
-        debugPrint('[RelayTunnel] Sending encrypted request: $method $path');
-      } else {
-        payload = base64Encode(utf8.encode(requestMessage));
-      }
-
-      final wrappedMessage = jsonEncode({
-        'type': 'message',
-        'payload': payload,
-      });
-      _channel.sink.add(wrappedMessage);
-    } catch (e) {
-      _pendingRequests.remove(requestId);
-      rethrow;
-    }
-
-    // Wait for response with timeout
-    try {
-      return await completer.future.timeout(
-        _requestTimeout,
-        onTimeout: () {
-          _pendingRequests.remove(requestId);
-          return const TunnelResponse(
-            status: 504,
-            headers: {},
-            body: '{"error": "Request timeout"}',
-          );
-        },
-      );
-    } catch (e) {
-      _pendingRequests.remove(requestId);
-      rethrow;
-    }
-  }
-
-  /// Starts the periodic heartbeat mechanism.
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
     _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) {
@@ -528,6 +404,14 @@ class RelayTunnel {
       final type = json['type'] as String?;
 
       switch (type) {
+        case 'webrtc_offer':
+        case 'webrtc_answer':
+        case 'webrtc_candidate':
+          if (type != null) {
+            _handleSignalingMessage(type, json);
+          }
+          break;
+
         case 'message':
           final payloadB64 = json['payload'] as String?;
           if (payloadB64 == null) {
@@ -535,39 +419,10 @@ class RelayTunnel {
             return;
           }
 
-          // If encryption is enabled, decrypt the payload
           String payloadString;
-          if (_sessionKey != null) {
-            try {
-              // Debug: Log session key for cross-platform crypto troubleshooting
-              final keyBytes = await _sessionKey!.extractBytes();
-              final sessionKeyHex = keyBytes
-                  .take(8)
-                  .map((b) => b.toRadixString(16).padLeft(2, '0'))
-                  .join();
-              debugPrint(
-                '[RelayTunnel] Attempting decryption: payload_size=${payloadB64.length}, session_key_first8=$sessionKeyHex',
-              );
-              payloadString = await _decryptMessage(payloadB64);
-              debugPrint('[RelayTunnel] Decrypted incoming message successfully');
-            } catch (e) {
-              // Log session key on failure for debugging
-              final keyBytes = await _sessionKey!.extractBytes();
-              final sessionKeyHex = keyBytes
-                  .take(8)
-                  .map((b) => b.toRadixString(16).padLeft(2, '0'))
-                  .join();
-              debugPrint(
-                '[RelayTunnel] Decryption FAILED: $e, session_key_first8=$sessionKeyHex',
-              );
-              _errorController.add('Failed to decrypt message: $e');
-              return;
-            }
-          } else {
-            // No encryption - decode as plaintext
-            final payload = Uint8List.fromList(base64Decode(payloadB64));
-            payloadString = utf8.decode(payload);
-          }
+          // No encryption - decode as plaintext
+          final payload = Uint8List.fromList(base64Decode(payloadB64));
+          payloadString = utf8.decode(payload);
 
           // Try to parse as JSON to check if it's a response message
           try {
@@ -601,113 +456,6 @@ class RelayTunnel {
     } catch (e) {
       _errorController.add('Failed to parse message: $e');
     }
-  }
-
-  // ============================================================================
-  // End-to-End Encryption Methods
-  // ============================================================================
-
-  /// Direction for AAD binding.
-  /// - toServer: client→server messages
-  /// - toClient: server→client messages
-
-  /// Builds AAD (Additional Authenticated Data) for encryption/decryption.
-  ///
-  /// Format: "{session_id}:{direction}"
-  /// This binds the ciphertext to a specific session and direction,
-  /// preventing cross-session and reflection attacks.
-  List<int> _buildAad({required bool toServer}) {
-    final direction = toServer ? 'to-server' : 'to-client';
-    return utf8.encode('${_info.sessionId}:$direction');
-  }
-
-  /// Encrypts a JSON message for transmission.
-  ///
-  /// Returns base64(nonce || ciphertext || mac) as expected by the server.
-  /// AAD format: "{session_id}:to-server" for client→server messages.
-  Future<String> _encryptMessage(String jsonMessage) async {
-    if (_sessionKey == null) {
-      throw StateError('Encryption not enabled');
-    }
-
-    final plaintextBytes = utf8.encode(jsonMessage);
-    final aad = _buildAad(toServer: true);
-    final aadString = utf8.decode(aad);
-
-    debugPrint('[RelayTunnel] Encrypting message: plaintext_size=${plaintextBytes.length}, session_id=${_info.sessionId}, aad=$aadString');
-
-    // Generate 12-byte nonce using secure random
-    final random = Random.secure();
-    final nonce = Uint8List(_nonceSize);
-    for (var i = 0; i < _nonceSize; i++) {
-      nonce[i] = random.nextInt(256);
-    }
-
-    final secretBox = await _cipher.encrypt(
-      plaintextBytes,
-      secretKey: _sessionKey!,
-      nonce: nonce,
-      aad: aad,
-    );
-
-    debugPrint('[RelayTunnel] Encrypted: nonce_size=${nonce.length}, ciphertext_size=${secretBox.cipherText.length}, mac_size=${secretBox.mac.bytes.length}');
-
-    // Wire format: nonce (12 bytes) || ciphertext || mac (16 bytes)
-    final payload = Uint8List.fromList([
-      ...nonce,
-      ...secretBox.cipherText,
-      ...secretBox.mac.bytes,
-    ]);
-
-    return base64Encode(payload);
-  }
-
-  /// Decrypts a base64-encoded encrypted message from the server.
-  ///
-  /// Expects base64(nonce || ciphertext || mac) format.
-  /// AAD format: "{session_id}:to-client" for server→client messages.
-  Future<String> _decryptMessage(String base64Payload) async {
-    if (_sessionKey == null) {
-      throw StateError('Encryption not enabled');
-    }
-
-    final binary = base64Decode(base64Payload);
-    final aad = _buildAad(toServer: false);
-    final aadString = utf8.decode(aad);
-
-    debugPrint('[RelayTunnel] Decrypting message: payload_size=${binary.length}, session_id=${_info.sessionId}, aad=$aadString');
-
-    // Minimum size: 12 (nonce) + 0 (empty ciphertext) + 16 (mac) = 28 bytes
-    if (binary.length < _nonceSize + _macSize) {
-      throw ArgumentError(
-        'Payload too short: expected at least ${_nonceSize + _macSize} bytes, got ${binary.length}',
-      );
-    }
-
-    // Extract components: nonce (12 bytes) || ciphertext || mac (16 bytes)
-    final nonce = Uint8List.fromList(binary.sublist(0, _nonceSize));
-    final ciphertextWithMac = binary.sublist(_nonceSize);
-    final macStart = ciphertextWithMac.length - _macSize;
-    final ciphertext = Uint8List.fromList(ciphertextWithMac.sublist(0, macStart));
-    final mac = Uint8List.fromList(ciphertextWithMac.sublist(macStart));
-
-    debugPrint('[RelayTunnel] Extracted components: nonce_size=${nonce.length}, ciphertext_size=${ciphertext.length}, mac_size=${mac.length}');
-
-    final secretBox = SecretBox(
-      ciphertext,
-      nonce: nonce,
-      mac: Mac(mac),
-    );
-
-    final plaintextBytes = await _cipher.decrypt(
-      secretBox,
-      secretKey: _sessionKey!,
-      aad: aad,
-    );
-
-    debugPrint('[RelayTunnel] Successfully decrypted, plaintext_size=${plaintextBytes.length}');
-
-    return utf8.decode(plaintextBytes);
   }
 
   /// Handles a response message from a tunneled request.
@@ -1033,7 +781,10 @@ class RelayTunnelService {
       }
 
       // Parse connection info
+      debugPrint('[RelayTunnelService] Parsing tunnel info from JSON keys: ${json.keys.toList()}');
+      debugPrint('[RelayTunnelService] ice_servers in JSON: ${json['ice_servers']}');
       final info = RelayTunnelInfo.fromJson(json);
+      debugPrint('[RelayTunnelService] Parsed iceServers: ${info.iceServers}');
 
       // Create and return tunnel with broadcast stream
       final tunnel = RelayTunnel._(channel, broadcastStream, info);

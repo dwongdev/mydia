@@ -43,8 +43,8 @@ library;
 import 'dart:async';
 
 import 'connection_result.dart';
-import '../channels/channel_service.dart';
 import '../relay/relay_tunnel_service.dart';
+import '../webrtc/webrtc_connection_manager.dart';
 import '../network/cert_verifier.dart';
 import '../auth/auth_storage.dart';
 
@@ -61,17 +61,14 @@ abstract class _StorageKeys {
 /// connection preference optimization.
 class ConnectionManager {
   ConnectionManager({
-    ChannelService? channelService,
     RelayTunnelService? relayTunnelService,
     CertVerifier? certVerifier,
     AuthStorage? authStorage,
     this.directTimeout = const Duration(seconds: 5),
-  })  : _channelService = channelService ?? ChannelService(),
-        _relayTunnelService = relayTunnelService,
+  })  : _relayTunnelService = relayTunnelService,
         _certVerifier = certVerifier ?? CertVerifier(),
         _authStorage = authStorage ?? getAuthStorage();
 
-  final ChannelService _channelService;
   final RelayTunnelService? _relayTunnelService;
   // ignore: unused_field
   final CertVerifier _certVerifier; // Reserved for future certificate verification
@@ -91,30 +88,18 @@ class ConnectionManager {
   /// - "Falling back to relay"
   Stream<String> get stateChanges => _stateController.stream;
 
-  /// Connects to a Mydia instance using direct-first, relay-fallback strategy.
+  /// Connects to a Mydia instance using relay-first strategy.
   ///
   /// ## Parameters
   ///
-  /// - [directUrls] - List of direct URLs to try
+  /// - [directUrls] - List of direct URLs (ignored in WebRTC-only mode)
   /// - [instanceId] - Instance ID (for relay fallback)
   /// - [certFingerprint] - Expected certificate fingerprint (optional)
   /// - [relayUrl] - Relay service URL (required for relay fallback)
   ///
   /// ## Returns
   ///
-  /// A [ConnectionResult] containing either a Phoenix channel (direct)
-  /// or a relay tunnel (relay), or an error.
-  ///
-  /// ## Example
-  ///
-  /// ```dart
-  /// final result = await manager.connect(
-  ///   directUrls: ['https://mydia.example.com', 'https://192.168.1.5:4000'],
-  ///   instanceId: 'instance-uuid',
-  ///   certFingerprint: 'aa:bb:cc:...',
-  ///   relayUrl: 'https://relay.example.com',
-  /// );
-  /// ```
+  /// A [ConnectionResult] containing a WebRTC connection (webrtc), or an error.
   Future<ConnectionResult> connect({
     required List<String> directUrls,
     required String instanceId,
@@ -122,154 +107,44 @@ class ConnectionManager {
     String? relayUrl,
   }) async {
     // Load connection preferences
-    final prefs = await _loadPreferences();
+    await _loadPreferences();
 
-    // Try direct URLs first (in parallel)
-    if (directUrls.isNotEmpty) {
-      // Reorder URLs to prioritize last successful URL
-      final orderedUrls = _reorderUrls(directUrls, prefs.lastSuccessfulUrl);
+    // In "all-in" WebRTC mode, we skip direct URLs and go straight to Relay/WebRTC.
+    
+    // Connect via Relay (WebRTC)
+    if (relayUrl != null) {
+      _emitState('Connecting via WebRTC Relay');
 
-      _emitState('Trying ${orderedUrls.length} direct URL(s) in parallel');
-
-      final result = await _tryDirectUrlsInParallel(
-        urls: orderedUrls,
-        certFingerprint: certFingerprint,
-      );
-
-      if (result != null) {
-        _emitState('Direct connection successful');
-        await _storePreference(
-          type: ConnectionType.direct,
-          url: result.connectedUrl!,
-        );
-        return result;
-      }
-
-      _emitState('All direct URLs failed');
-    }
-
-    // Fall back to relay
-    if (relayUrl != null && _relayTunnelService != null) {
-      _emitState('Falling back to relay');
-
-      final result = await _tryRelayConnection(
+      final result = await _tryWebRTCConnection(
         instanceId: instanceId,
         relayUrl: relayUrl,
       );
 
       if (result.success) {
-        _emitState('Relay connection successful');
-        await _storePreference(type: ConnectionType.relay);
+        _emitState('WebRTC connection successful');
+        await _storePreference(type: ConnectionType.webrtc);
         return result;
       }
 
-      _emitState('Relay connection failed: ${result.error}');
+      _emitState('WebRTC connection failed: ${result.error}');
       return result;
     }
 
     // No relay service available
     return ConnectionResult.error(
-      'Could not connect to server. All direct URLs failed and no relay service available.',
+      'Could not connect to server. Relay service required.',
     );
   }
 
-  /// Tries all direct URLs in parallel and returns the first successful connection.
-  ///
-  /// This method races all URL attempts simultaneously:
-  /// - All URLs are tried in parallel with individual timeouts
-  /// - Returns immediately when the first connection succeeds
-  /// - Returns null if all connections fail
-  ///
-  /// The [urls] list order determines priority for tie-breaking (first URL
-  /// to succeed wins, but if multiple succeed simultaneously, order is used).
-  Future<ConnectionResult?> _tryDirectUrlsInParallel({
-    required List<String> urls,
-    String? certFingerprint,
-  }) async {
-    if (urls.isEmpty) return null;
-
-    // Create a completer that resolves on first success
-    final completer = Completer<ConnectionResult?>();
-    var pendingCount = urls.length;
-    final errors = <String>[];
-
-    for (final url in urls) {
-      // ignore: unawaited_futures
-      _tryDirectConnection(url: url, certFingerprint: certFingerprint)
-          .then((result) {
-        if (completer.isCompleted) return;
-
-        if (result.success) {
-          completer.complete(result);
-        } else {
-          errors.add(result.error ?? 'Unknown error for $url');
-          pendingCount--;
-          if (pendingCount == 0) {
-            // All attempts failed
-            completer.complete(null);
-          }
-        }
-      }).catchError((Object e) {
-        if (completer.isCompleted) return;
-
-        errors.add('Error for $url: $e');
-        pendingCount--;
-        if (pendingCount == 0) {
-          // All attempts failed
-          completer.complete(null);
-        }
-      });
-    }
-
-    return completer.future;
-  }
-
-  /// Tries to establish a direct connection to a URL.
-  ///
-  /// This method:
-  /// 1. Attempts to connect to the URL with timeout
-  /// 2. Verifies certificate fingerprint if provided
-  /// 3. Returns success with URL (channel joining is handled by caller)
-  ///
-  /// Returns a [ConnectionResult] with the connected URL on success.
-  Future<ConnectionResult> _tryDirectConnection({
-    required String url,
-    String? certFingerprint,
-  }) async {
-    try {
-      // Attempt connection with timeout
-      final connectResult = await _channelService
-          .connect(url)
-          .timeout(directTimeout, onTimeout: () {
-        return ChannelResult.error('Connection timeout');
-      });
-
-      if (!connectResult.success) {
-        return ConnectionResult.error(connectResult.error ?? 'Connection failed');
-      }
-
-      // TODO: Implement certificate fingerprint verification
-      // This requires hooking into the underlying HTTP client's
-      // certificate validation. For now, we skip this check.
-      // See: https://github.com/dart-lang/sdk/issues/35981
-
-      // Connection successful - return with URL
-      // The caller (PairingService) will join the appropriate channel
-      return ConnectionResult.direct(url: url);
-    } catch (e) {
-      return ConnectionResult.error('Connection error: $e');
-    }
-  }
-
-  /// Tries to establish a relay tunnel connection.
+  /// Tries to establish a WebRTC connection via relay.
   ///
   /// This method:
   /// 1. Creates a relay tunnel service if not provided
-  /// 2. Connects to the relay WebSocket
-  /// 3. Establishes tunnel to the instance
+  /// 2. Creates a WebRTCConnectionManager
+  /// 3. Establishes WebRTC connection via relay signaling
   ///
-  /// Returns a [ConnectionResult] with the active tunnel on success.
-  Future<ConnectionResult> _tryRelayConnection({
+  /// Returns a [ConnectionResult] with the active WebRTC manager on success.
+  Future<ConnectionResult> _tryWebRTCConnection({
     required String instanceId,
     required String relayUrl,
   }) async {
@@ -278,69 +153,32 @@ class ConnectionManager {
       final tunnelService = _relayTunnelService ??
           RelayTunnelService(relayUrl: relayUrl);
 
-      // Attempt to connect via relay
-      final result = await tunnelService.connectViaRelay(instanceId);
+      final webrtcManager = WebRTCConnectionManager(tunnelService);
+      
+      // Attempt to connect via WebRTC
+      await webrtcManager.connect(instanceId);
 
-      if (result.success) {
-        return ConnectionResult.relay(tunnel: result.data!);
-      }
-
-      return ConnectionResult.error(result.error ?? 'Relay connection failed');
+      return ConnectionResult.webrtc(manager: webrtcManager);
     } catch (e) {
-      return ConnectionResult.error('Relay error: $e');
+      return ConnectionResult.error('WebRTC error: $e');
     }
-  }
-
-  /// Reorders URLs to prioritize the last successful URL.
-  List<String> _reorderUrls(List<String> urls, String? lastSuccessfulUrl) {
-    if (lastSuccessfulUrl == null || !urls.contains(lastSuccessfulUrl)) {
-      return urls;
-    }
-
-    // Move last successful URL to the front
-    final reordered = [lastSuccessfulUrl];
-    for (final url in urls) {
-      if (url != lastSuccessfulUrl) {
-        reordered.add(url);
-      }
-    }
-
-    return reordered;
   }
 
   /// Loads connection preferences from storage.
-  Future<ConnectionPreferences> _loadPreferences() async {
-    final typeStr = await _authStorage.read(_StorageKeys.lastConnectionType);
-    final url = await _authStorage.read(_StorageKeys.lastConnectionUrl);
-
-    ConnectionType? type;
-    if (typeStr == 'direct') {
-      type = ConnectionType.direct;
-    } else if (typeStr == 'relay') {
-      type = ConnectionType.relay;
-    }
-
-    return ConnectionPreferences(
-      lastSuccessful: type,
-      lastSuccessfulUrl: url,
-    );
+  Future<void> _loadPreferences() async {
+    // Just load to ensure storage is ready, logic mostly unused in forced WebRTC mode
+    await _authStorage.read(_StorageKeys.lastConnectionType);
   }
 
-  /// Stores connection preference for future optimization.
+  /// Stores connection preference.
   Future<void> _storePreference({
     required ConnectionType type,
     String? url,
   }) async {
     await _authStorage.write(
       _StorageKeys.lastConnectionType,
-      type == ConnectionType.direct ? 'direct' : 'relay',
+      'webrtc',
     );
-
-    if (url != null) {
-      await _authStorage.write(_StorageKeys.lastConnectionUrl, url);
-    } else {
-      await _authStorage.delete(_StorageKeys.lastConnectionUrl);
-    }
   }
 
   /// Emits a state change event.

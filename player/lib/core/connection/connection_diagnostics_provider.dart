@@ -15,10 +15,39 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../auth/auth_storage.dart';
 import 'connection_provider.dart';
 
-/// Storage keys for diagnostics (same as DirectProber uses).
+/// Storage keys for diagnostics.
 abstract class _DiagnosticsKeys {
   static const lastDirectAttempt = 'diagnostics_last_direct_attempt';
   static const directUrlErrors = 'diagnostics_direct_url_errors';
+}
+
+/// Simple result type for URL attempts.
+class UrlProbeResult {
+  final String url;
+  final bool success;
+  final String? error;
+  final DateTime timestamp;
+
+  const UrlProbeResult({
+    required this.url,
+    required this.success,
+    this.error,
+    required this.timestamp,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'url': url,
+    'success': success,
+    'error': error,
+    'timestamp': timestamp.toIso8601String(),
+  };
+
+  factory UrlProbeResult.fromJson(Map<String, dynamic> json) => UrlProbeResult(
+    url: json['url'] as String,
+    success: json['success'] as bool,
+    error: json['error'] as String?,
+    timestamp: DateTime.parse(json['timestamp'] as String),
+  );
 }
 
 /// Re-export for convenience in UI.
@@ -35,11 +64,8 @@ class ConnectionDiagnosticsState {
   /// When direct connection was last attempted.
   final DateTime? lastDirectAttempt;
 
-  /// Whether currently connected via relay.
-  final bool isRelayMode;
-
-  /// Whether the relay tunnel is active.
-  final bool isTunnelActive;
+  /// Whether currently connected via WebRTC.
+  final bool isWebRTCMode;
 
   /// Whether diagnostics are still loading.
   final bool isLoading;
@@ -48,8 +74,7 @@ class ConnectionDiagnosticsState {
     this.directUrls = const [],
     this.urlAttempts = const {},
     this.lastDirectAttempt,
-    this.isRelayMode = false,
-    this.isTunnelActive = false,
+    this.isWebRTCMode = false,
     this.isLoading = true,
   });
 
@@ -57,8 +82,7 @@ class ConnectionDiagnosticsState {
     List<String>? directUrls,
     Map<String, DirectUrlAttempt>? urlAttempts,
     DateTime? lastDirectAttempt,
-    bool? isRelayMode,
-    bool? isTunnelActive,
+    bool? isWebRTCMode,
     bool? isLoading,
     bool clearLastDirectAttempt = false,
   }) {
@@ -67,8 +91,7 @@ class ConnectionDiagnosticsState {
       urlAttempts: urlAttempts ?? this.urlAttempts,
       lastDirectAttempt:
           clearLastDirectAttempt ? null : (lastDirectAttempt ?? this.lastDirectAttempt),
-      isRelayMode: isRelayMode ?? this.isRelayMode,
-      isTunnelActive: isTunnelActive ?? this.isTunnelActive,
+      isWebRTCMode: isWebRTCMode ?? this.isWebRTCMode,
       isLoading: isLoading ?? this.isLoading,
     );
   }
@@ -110,8 +133,7 @@ class ConnectionDiagnosticsNotifier extends Notifier<ConnectionDiagnosticsState>
     Future.microtask(_loadDiagnostics);
 
     return ConnectionDiagnosticsState(
-      isRelayMode: connectionState.isRelayMode,
-      isTunnelActive: connectionState.isTunnelActive,
+      isWebRTCMode: connectionState.isWebRTCMode,
       isLoading: true,
     );
   }
@@ -168,8 +190,7 @@ class ConnectionDiagnosticsNotifier extends Notifier<ConnectionDiagnosticsState>
         directUrls: directUrls,
         urlAttempts: urlAttempts,
         lastDirectAttempt: lastDirectAttempt,
-        isRelayMode: connectionState.isRelayMode,
-        isTunnelActive: connectionState.isTunnelActive,
+        isWebRTCMode: connectionState.isWebRTCMode,
         isLoading: false,
       );
     } catch (e) {

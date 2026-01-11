@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/graphql/graphql_provider.dart';
+import '../../core/auth/auth_service.dart';
 import '../../core/theme/colors.dart';
 import '../widgets/update_required_dialog.dart';
 import 'login/login_controller.dart';

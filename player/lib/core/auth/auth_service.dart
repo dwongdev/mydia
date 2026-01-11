@@ -1,5 +1,6 @@
 import 'package:http/http.dart' as http;
 import 'package:graphql/client.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:convert';
 
 import 'auth_storage.dart';
@@ -310,3 +311,8 @@ class AuthService {
     }
   }
 }
+
+/// Provider for the auth service.
+final authServiceProvider = Provider<AuthService>((ref) {
+  return AuthService();
+});

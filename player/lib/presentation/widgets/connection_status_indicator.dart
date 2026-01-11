@@ -16,7 +16,7 @@ class ConnectionStatusBadge extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connectionState = ref.watch(connectionProvider);
-    final isRelay = connectionState.isRelayMode;
+    final isRelay = connectionState.isWebRTCMode;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -41,7 +41,7 @@ class ConnectionStatusBadge extends ConsumerWidget {
           ),
           const SizedBox(width: 4),
           Text(
-            isRelay ? 'Relay' : 'Direct',
+            isRelay ? 'WebRTC' : 'Direct',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w500,
@@ -61,8 +61,8 @@ class ConnectionStatusTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connectionState = ref.watch(connectionProvider);
-    final isRelay = connectionState.isRelayMode;
-    final isTunnelActive = connectionState.isTunnelActive;
+    final isRelay = connectionState.isWebRTCMode;
+    final isTunnelActive = connectionState.webrtcManager != null;
 
     String subtitle;
     IconData icon;
@@ -70,11 +70,11 @@ class ConnectionStatusTile extends ConsumerWidget {
 
     if (isRelay) {
       if (isTunnelActive) {
-        subtitle = 'Connected via relay tunnel';
+        subtitle = 'Connected via WebRTC tunnel';
         icon = Icons.cloud_done_outlined;
         statusColor = Colors.orange;
       } else {
-        subtitle = 'Relay tunnel disconnected';
+        subtitle = 'WebRTC tunnel disconnected';
         icon = Icons.cloud_off_outlined;
         statusColor = Colors.red;
       }

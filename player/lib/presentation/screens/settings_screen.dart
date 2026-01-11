@@ -151,64 +151,34 @@ class _ConnectionDiagnosticsTile extends ConsumerStatefulWidget {
 
 class _ConnectionDiagnosticsTileState
     extends ConsumerState<_ConnectionDiagnosticsTile> {
-  bool _isExpanded = false;
-  bool _isProbing = false;
-
-  Future<void> _testDirectConnection() async {
-    if (_isProbing) return;
-
-    setState(() {
-      _isProbing = true;
-    });
-
-    try {
-      // Trigger the probe
-      final result = await ref.read(connectionProvider.notifier).probeDirectUrls();
-
-      if (result != null) {
-        // Update diagnostics with the results
-        await ref.read(connectionDiagnosticsProvider.notifier).recordBatchAttempts(
-          result.urlResults,
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isProbing = false;
-        });
-      }
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
     // Watch connection provider directly for live status
     final connectionState = ref.watch(connectionProvider);
-    // Watch diagnostics for URL attempt data
-    final diagnostics = ref.watch(connectionDiagnosticsProvider);
     final theme = Theme.of(context);
 
     // Determine status display from live connection state
-    final isRelay = connectionState.isRelayMode;
-    final isTunnelActive = connectionState.isTunnelActive;
-    final hasDirectUrls = diagnostics.directUrls.isNotEmpty;
+    final isWebRTC = connectionState.isWebRTCMode;
+    // We assume tunnel is active if in WebRTC mode (manager exists)
+    final isConnected = connectionState.webrtcManager != null;
 
     IconData icon;
     Color statusColor;
     String statusText;
     String subtitle;
 
-    if (isRelay) {
-      if (isTunnelActive) {
+    if (isWebRTC) {
+      if (isConnected) {
         icon = Icons.cloud_done_outlined;
         statusColor = Colors.orange;
-        statusText = 'Relay';
-        subtitle = 'Connected via relay tunnel';
+        statusText = 'WebRTC Relay';
+        subtitle = 'Connected via secure WebRTC tunnel';
       } else {
         icon = Icons.cloud_off_outlined;
         statusColor = Colors.red;
         statusText = 'Disconnected';
-        subtitle = 'Relay tunnel disconnected';
+        subtitle = 'WebRTC tunnel disconnected';
       }
     } else {
       icon = Icons.wifi;
@@ -246,205 +216,8 @@ class _ConnectionDiagnosticsTileState
             ],
           ),
           subtitle: Text(subtitle),
-          trailing: hasDirectUrls
-              ? Icon(_isExpanded ? Icons.expand_less : Icons.expand_more)
-              : null,
-          onTap: hasDirectUrls
-              ? () {
-                  setState(() {
-                    _isExpanded = !_isExpanded;
-                  });
-                }
-              : null,
         ),
-        if (_isExpanded && hasDirectUrls)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Section header for direct URLs
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    children: [
-                      Text(
-                        'Direct URLs',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const Spacer(),
-                      if (diagnostics.lastDirectAttempt != null)
-                        Text(
-                          'Last tried ${_formatDateTime(diagnostics.lastDirectAttempt!)}',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                // Direct URLs list
-                ...diagnostics.directUrls.map((url) {
-                  final attempt = diagnostics.getAttempt(url);
-                  return _DirectUrlCard(
-                    url: url,
-                    attempt: attempt,
-                  );
-                }),
-                // Test button
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _isProbing ? null : _testDirectConnection,
-                    icon: _isProbing
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.refresh, size: 18),
-                    label: Text(_isProbing ? 'Testing...' : 'Test Direct Connection'),
-                  ),
-                ),
-              ],
-            ),
-          ),
       ],
     );
-  }
-
-  String _formatDateTime(DateTime dt) {
-    final now = DateTime.now();
-    final diff = now.difference(dt);
-
-    if (diff.inMinutes < 1) {
-      return 'just now';
-    } else if (diff.inHours < 1) {
-      return '${diff.inMinutes}m ago';
-    } else if (diff.inHours < 24) {
-      return '${diff.inHours}h ago';
-    } else {
-      return '${diff.inDays}d ago';
-    }
-  }
-}
-
-/// Card showing a single direct URL and its status.
-class _DirectUrlCard extends StatelessWidget {
-  final String url;
-  final DirectUrlAttempt? attempt;
-
-  const _DirectUrlCard({
-    required this.url,
-    this.attempt,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    Color statusColor;
-    IconData statusIcon;
-    String statusText;
-
-    if (attempt == null) {
-      statusColor = Colors.grey;
-      statusIcon = Icons.help_outline;
-      statusText = 'Not tested';
-    } else if (attempt!.success) {
-      statusColor = Colors.green;
-      statusIcon = Icons.check_circle;
-      statusText = 'Connected';
-    } else {
-      statusColor = Colors.red;
-      statusIcon = Icons.error;
-      statusText = 'Failed';
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: statusColor.withValues(alpha: 0.3),
-          width: 1,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(statusIcon, size: 18, color: statusColor),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  _formatUrl(url),
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontFamily: 'monospace',
-                    fontSize: 13,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  statusText,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: statusColor,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if (attempt?.error != null) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.warning_amber_rounded,
-                    size: 14,
-                    color: Colors.red[700],
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      attempt!.error!,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.red[700],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  String _formatUrl(String url) {
-    // Remove protocol for cleaner display
-    return url.replaceFirst(RegExp(r'^https?://'), '');
   }
 }

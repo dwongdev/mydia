@@ -8,15 +8,14 @@
 /// 5. Submit claim code
 /// 6. Receive and store device credentials
 /// 7. Consume claim on relay to mark it as used
-library;
+library pairing_service;
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 
-import 'channel_service.dart';
-import '../crypto/crypto_manager.dart';
+import '../webrtc/webrtc_connection_manager.dart';
 import '../auth/auth_storage.dart';
 import '../protocol/protocol_version.dart';
 import '../relay/relay_service.dart';
@@ -105,19 +104,19 @@ class PairingResult {
   final String? error;
   final PairingCredentials? credentials;
 
-  /// Active relay tunnel (if pairing was via relay and direct connection failed).
-  /// The caller should use this tunnel for ongoing communication.
-  final RelayTunnel? relayTunnel;
+  /// Active WebRTC manager (if pairing was via relay and direct connection failed).
+  /// The caller should use this manager for ongoing communication.
+  final WebRTCConnectionManager? webrtcManager;
 
   const PairingResult._({
     required this.success,
     this.error,
     this.credentials,
-    this.relayTunnel,
+    this.webrtcManager,
   });
 
-  factory PairingResult.success(PairingCredentials credentials, {RelayTunnel? relayTunnel}) {
-    return PairingResult._(success: true, credentials: credentials, relayTunnel: relayTunnel);
+  factory PairingResult.success(PairingCredentials credentials, {WebRTCConnectionManager? webrtcManager}) {
+    return PairingResult._(success: true, credentials: credentials, webrtcManager: webrtcManager);
   }
 
   factory PairingResult.error(String error) {
@@ -125,7 +124,7 @@ class PairingResult {
   }
 
   /// Whether the pairing used relay mode (no direct connection available).
-  bool get isRelayMode => relayTunnel != null;
+  bool get isRelayMode => webrtcManager != null;
 }
 
 /// Credentials obtained from successful pairing.
@@ -148,12 +147,6 @@ class PairingCredentials {
   /// without requiring the claim code again.
   final String? deviceToken;
 
-  /// The device's public key (32 bytes).
-  final Uint8List devicePublicKey;
-
-  /// The device's private key (32 bytes).
-  final Uint8List devicePrivateKey;
-
   /// The server's static public key (32 bytes).
   final Uint8List serverPublicKey;
 
@@ -175,8 +168,6 @@ class PairingCredentials {
     required this.mediaToken,
     required this.accessToken,
     this.deviceToken,
-    required this.devicePublicKey,
-    required this.devicePrivateKey,
     required this.serverPublicKey,
     required this.directUrls,
     this.certFingerprint,
@@ -184,6 +175,7 @@ class PairingCredentials {
     this.instanceId,
   });
 }
+
 
 /// Service for pairing new devices with a Mydia server.
 ///
@@ -219,19 +211,16 @@ class PairingCredentials {
 /// ```
 class PairingService {
   PairingService({
-    ChannelService? channelService,
     AuthStorage? authStorage,
     RelayService? relayService,
     String? relayUrl,
-  })  : _channelService = channelService ?? ChannelService(),
-        _authStorage = authStorage ?? getAuthStorage(),
+  })  : _authStorage = authStorage ?? getAuthStorage(),
         _relayService = relayService ?? RelayService(),
         _relayUrl = relayUrl ?? const String.fromEnvironment(
           'RELAY_URL',
           defaultValue: 'https://relay.mydia.dev',
         );
 
-  final ChannelService _channelService;
   final AuthStorage _authStorage;
   final RelayService _relayService;
   final String _relayUrl;
@@ -322,7 +311,6 @@ class PairingService {
       debugPrint('[PairingService] === EXCEPTION in pairWithClaimCodeOnly ===');
       debugPrint('[PairingService] Error: $e');
       debugPrint('[PairingService] Stack trace: $st');
-      await _channelService.disconnect();
       return PairingResult.error('Pairing error: $e');
     }
   }
@@ -399,119 +387,12 @@ class PairingService {
         relayUrl: qrData.relayUrl, // Use custom relay URL from QR
       );
     } catch (e) {
-      await _channelService.disconnect();
       return PairingResult.error('Pairing error: $e');
     }
   }
 
-  /// Pairs this device with a Mydia server.
-  ///
-  /// ## Parameters
-  ///
-  /// - [serverUrl]: The base URL of the Mydia server (e.g., 'https://mydia.example.com')
-  /// - [serverPublicKey]: The server's static public key (32 bytes) obtained from QR code
-  /// - [claimCode]: The pairing claim code entered by the user
-  /// - [deviceName]: A friendly name for this device (e.g., 'My iPhone')
-  /// - [platform]: The device platform (defaults to detected platform)
-  ///
-  /// Returns a [PairingResult] indicating success or failure.
-  Future<PairingResult> pairDevice({
-    required String serverUrl,
-    required Uint8List serverPublicKey,
-    required String claimCode,
-    required String deviceName,
-    String? platform,
-  }) async {
-    CryptoManager? cryptoManager;
-    try {
-      // Detect platform if not provided
-      final devicePlatform = platform ?? _detectPlatform();
-
-      // Step 1: Connect to server WebSocket
-      final connectResult = await _channelService.connect(serverUrl);
-      if (!connectResult.success) {
-        return PairingResult.error(
-            connectResult.error ?? 'Failed to connect to server');
-      }
-
-      // Step 2: Join pairing channel
-      final joinResult = await _channelService.joinPairingChannel();
-      if (!joinResult.success) {
-        await _channelService.disconnect();
-        return PairingResult.error(
-            joinResult.error ?? 'Failed to join pairing channel');
-      }
-      final channel = joinResult.data!;
-
-      // Step 3: Perform X25519 key exchange
-      cryptoManager = CryptoManager();
-      final clientPublicKeyB64 = await cryptoManager.generateKeyPair();
-
-      // Generate and send handshake message
-      final firstMessage = Uint8List.fromList(base64Decode(clientPublicKeyB64));
-      final handshakeResult =
-          await _channelService.sendPairingHandshake(channel, firstMessage);
-      if (!handshakeResult.success) {
-        cryptoManager.dispose();
-        await _channelService.disconnect();
-        return PairingResult.error(
-            handshakeResult.error ?? 'Key exchange failed');
-      }
-
-      // Derive session key from server's public key response
-      await cryptoManager.deriveSessionKey(base64Encode(handshakeResult.data!));
-      cryptoManager.dispose();
-      cryptoManager = null;
-
-      // Step 4: Generate static device keypair (client-side key generation)
-      final staticCrypto = CryptoManager();
-      final staticPublicKeyB64 = await staticCrypto.generateStaticKeyPair();
-      final devicePublicKey = await staticCrypto.getStaticPublicKeyBytes();
-      final devicePrivateKey = await staticCrypto.getStaticPrivateKeyBytes();
-
-      // Step 5: Submit claim code with our public key
-      final claimResult = await _channelService.submitClaimCode(
-        channel,
-        claimCode: claimCode,
-        deviceName: deviceName,
-        platform: devicePlatform,
-        staticPublicKey: staticPublicKeyB64,
-      );
-
-      await _channelService.disconnect();
-
-      if (!claimResult.success) {
-        return PairingResult.error(
-            claimResult.error ?? 'Failed to submit claim code');
-      }
-
-      final response = claimResult.data!;
-
-      // Step 6: Store credentials with our locally-generated keypair
-      final credentials = PairingCredentials(
-        serverUrl: serverUrl,
-        deviceId: response.deviceId,
-        mediaToken: response.mediaToken,
-        accessToken: response.accessToken,
-        deviceToken: response.deviceToken,
-        devicePublicKey: devicePublicKey,
-        devicePrivateKey: devicePrivateKey,
-        serverPublicKey: serverPublicKey,
-        directUrls: [serverUrl], // Use serverUrl as the only direct URL
-        certFingerprint: null, // Not available in direct pairing
-        instanceName: null, // Not available in direct pairing
-        instanceId: null, // Not available in direct pairing
-      );
-
-      await _storeCredentials(credentials);
-
-      return PairingResult.success(credentials);
-    } catch (e) {
-      cryptoManager?.dispose();
-      await _channelService.disconnect();
-      return PairingResult.error('Pairing error: $e');
-    }
-  }
+  // pairDevice method removed - direct pairing not supported in WebRTC-only mode.
+  // Use pairWithClaimCodeOnly or pairWithQrData.
 
   /// Retrieves stored pairing credentials.
   ///
@@ -522,9 +403,6 @@ class PairingService {
     final mediaToken = await _authStorage.read(_StorageKeys.mediaToken);
     final accessToken = await _authStorage.read(_StorageKeys.accessToken);
     final deviceToken = await _authStorage.read(_StorageKeys.deviceToken);
-    final publicKeyB64 = await _authStorage.read(_StorageKeys.devicePublicKey);
-    final privateKeyB64 =
-        await _authStorage.read(_StorageKeys.devicePrivateKey);
     final serverPublicKeyB64 =
         await _authStorage.read(_StorageKeys.serverPublicKey);
     final directUrlsJson = await _authStorage.read(_StorageKeys.directUrls);
@@ -537,8 +415,6 @@ class PairingService {
         deviceId == null ||
         mediaToken == null ||
         accessToken == null ||
-        publicKeyB64 == null ||
-        privateKeyB64 == null ||
         serverPublicKeyB64 == null) {
       return null;
     }
@@ -562,8 +438,6 @@ class PairingService {
       mediaToken: mediaToken,
       accessToken: accessToken,
       deviceToken: deviceToken,
-      devicePublicKey: _base64ToBytes(publicKeyB64),
-      devicePrivateKey: _base64ToBytes(privateKeyB64),
       serverPublicKey: _base64ToBytes(serverPublicKeyB64),
       directUrls: directUrls,
       certFingerprint: certFingerprint,
@@ -581,8 +455,7 @@ class PairingService {
     await _authStorage.delete(_StorageKeys.mediaToken);
     await _authStorage.delete(_StorageKeys.accessToken);
     await _authStorage.delete(_StorageKeys.deviceToken);
-    await _authStorage.delete(_StorageKeys.devicePublicKey);
-    await _authStorage.delete(_StorageKeys.devicePrivateKey);
+    // Keys removed
     await _authStorage.delete(_StorageKeys.serverPublicKey);
     await _authStorage.delete(_StorageKeys.directUrls);
     await _authStorage.delete(_StorageKeys.certFingerprint);
@@ -618,13 +491,9 @@ class PairingService {
   ///
   /// This method:
   /// 1. Connects to relay tunnel using the instance ID
-  /// 2. Performs X25519 key exchange over the tunnel
+  /// 2. Performs WebRTC handshake over the tunnel
   /// 3. Sends claim code request
-  /// 4. Receives pairing response and returns active tunnel
-  ///
-  /// The returned [PairingResult] includes the active relay tunnel for
-  /// ongoing communication. Background probing (handled by ConnectionManager)
-  /// will attempt to upgrade to direct connection later.
+  /// 4. Receives pairing response and returns active connection
   Future<PairingResult> _pairViaRelayTunnel({
     required String claimCode,
     required ClaimCodeInfo claimInfo,
@@ -634,190 +503,32 @@ class PairingService {
     void Function(String status)? onStatusUpdate,
     String? relayUrl,
   }) async {
-    RelayTunnel? tunnel;
-    CryptoManager? cryptoManager;
+    WebRTCConnectionManager? webrtcManager;
 
     // Use provided relay URL or default
     final effectiveRelayUrl = relayUrl ?? _relayUrl;
 
     try {
       // Step 1: Connect to relay tunnel
-      onStatusUpdate?.call('Connecting via relay...');
+      onStatusUpdate?.call('Connecting via WebRTC...');
       final tunnelService = RelayTunnelService(relayUrl: effectiveRelayUrl);
-      final tunnelResult =
-          await tunnelService.connectViaRelay(claimInfo.instanceId);
-
-      if (!tunnelResult.success) {
-        return PairingResult.error(
-            tunnelResult.error ?? 'Failed to connect via relay');
-      }
-
-      tunnel = tunnelResult.data!;
-      debugPrint('[RelayPairing] Tunnel connected: session=${tunnel.info.sessionId}');
-
-      // Listen for tunnel errors/closure for debugging
-      tunnel.errors.listen(
-        (error) {
-          debugPrint('[RelayPairing] Tunnel error: $error');
-        },
-        onError: (e, stackTrace) {
-          debugPrint('[RelayPairing] Error stream error: $e');
-          debugPrint('[RelayPairing] Error stream stack trace: $stackTrace');
-        },
-      );
-
-      // Check if tunnel is still active
-      debugPrint('[RelayPairing] Tunnel active: ${tunnel.isActive}');
-
-      // Step 2: Perform X25519 key exchange over tunnel
-      onStatusUpdate?.call('Establishing secure connection...');
-
-      // Validate server public key
-      debugPrint('[RelayPairing] Server public key length: ${serverPublicKey.length}');
-      if (serverPublicKey.length != 32) {
-        await tunnel.close();
-        return PairingResult.error(
-            'Invalid server public key: expected 32 bytes, got ${serverPublicKey.length}');
-      }
-
-      debugPrint('[RelayPairing] About to create CryptoManager, tunnel active: ${tunnel.isActive}');
-      try {
-        cryptoManager = CryptoManager();
-        debugPrint('[RelayPairing] CryptoManager created successfully');
-      } catch (e, stackTrace) {
-        debugPrint('[RelayPairing] CryptoManager creation failed: $e');
-        debugPrint('[RelayPairing] Stack trace: $stackTrace');
-        await tunnel.close();
-        return PairingResult.error('Failed to create crypto manager: $e');
-      }
-      debugPrint('[RelayPairing] CryptoManager created, tunnel active: ${tunnel.isActive}');
-      String clientPublicKeyB64;
-      try {
-        debugPrint('[RelayPairing] Starting keypair generation...');
-        clientPublicKeyB64 = await cryptoManager.generateKeyPair();
-        debugPrint('[RelayPairing] Client keypair generated, tunnel active: ${tunnel.isActive}');
-      } catch (e, stackTrace) {
-        debugPrint('[RelayPairing] Failed to generate keypair: $e');
-        debugPrint('[RelayPairing] Stack trace: $stackTrace');
-        cryptoManager.dispose();
-        await tunnel.close();
-        return PairingResult.error('Failed to initialize secure connection: $e');
-      }
-
-      // Generate and send handshake message
-      final handshakeMessage = Uint8List.fromList(base64Decode(clientPublicKeyB64));
-      debugPrint('[RelayPairing] Handshake message generated: ${handshakeMessage.length} bytes');
-
-      // Send handshake message through tunnel (wrapped in JSON for server)
-      try {
-        final handshakeRequest = jsonEncode({
-          'type': 'pairing_handshake',
-          'data': {
-            'message': base64Encode(handshakeMessage),
-            'protocol_versions': ProtocolVersion.all,
-          },
-        });
-        debugPrint('[RelayPairing] Sending handshake request...');
-        tunnel.sendMessage(Uint8List.fromList(utf8.encode(handshakeRequest)));
-        debugPrint('[RelayPairing] Handshake request sent');
-      } catch (e) {
-        debugPrint('[RelayPairing] Failed to send handshake: $e');
-        cryptoManager.dispose();
-        await tunnel.close();
-        return PairingResult.error('Failed to send handshake: $e');
-      }
-
-      // Wait for server's handshake response
-      final handshakeResponseBytes = await tunnel.messages.first.timeout(
-        const Duration(seconds: 10),
-        onTimeout: () => throw Exception('Handshake response timeout'),
-      );
-
-      // Parse handshake response
-      final handshakeResponseJson =
-          jsonDecode(utf8.decode(handshakeResponseBytes)) as Map<String, dynamic>;
-
-      // Check for update_required error
-      if (handshakeResponseJson['type'] == 'error') {
-        final code = handshakeResponseJson['code'] as String?;
-        cryptoManager.dispose();
-        await tunnel.close();
-        if (code == 'update_required' || code == 'version_incompatible') {
-          throw UpdateRequiredError.fromJson(handshakeResponseJson);
-        }
-        return PairingResult.error(
-            handshakeResponseJson['message'] as String? ?? 'Handshake failed');
-      }
-
-      final serverHandshakeB64 = handshakeResponseJson['message'] as String?;
-      if (serverHandshakeB64 == null) {
-        cryptoManager.dispose();
-        await tunnel.close();
-        return PairingResult.error('Invalid handshake response');
-      }
-
-      // Derive session key from server's public key
-      try {
-        await cryptoManager.deriveSessionKey(serverHandshakeB64);
-        debugPrint('[RelayPairing] Session key derived');
-      } catch (e) {
-        debugPrint('[RelayPairing] Failed to derive session key: $e');
-        cryptoManager.dispose();
-        await tunnel.close();
-        return PairingResult.error('Failed to derive session key: $e');
-      }
-
-      // Enable encryption on the tunnel with the derived session key
-      final sessionKeyBytes = await cryptoManager.getSessionKeyBytes();
-      if (sessionKeyBytes == null) {
-        cryptoManager.dispose();
-        await tunnel.close();
-        return PairingResult.error('Failed to get session key');
-      }
-      tunnel.enableEncryption(sessionKeyBytes);
-      debugPrint('[RelayPairing] Encryption enabled on tunnel');
-
-      // Dispose session crypto manager - tunnel now handles encryption
-      cryptoManager.dispose();
-      cryptoManager = null;
-
-      // Step 3: Generate static device keypair (client-side key generation)
-      // The private key never leaves the device
-      onStatusUpdate?.call('Generating device keys...');
-      final staticCrypto = CryptoManager();
-      final staticPublicKeyB64 = await staticCrypto.generateStaticKeyPair();
-      final devicePublicKey = await staticCrypto.getStaticPublicKeyBytes();
-      final devicePrivateKey = await staticCrypto.getStaticPrivateKeyBytes();
-
-      // Step 4: Send claim code request with static public key (encrypted)
+      
+      webrtcManager = WebRTCConnectionManager(tunnelService);
+      
+      // Connect via claim code
+      await webrtcManager.connectViaClaimCode(claimCode);
+      
+      // Step 2: Send claim code request (pairing)
       onStatusUpdate?.call('Submitting claim code...');
-      final claimRequest = jsonEncode({
-        'type': 'claim_code',
-        'data': {
-          'code': claimCode,
-          'device_name': deviceName,
-          'platform': devicePlatform,
-          'static_public_key': staticPublicKeyB64,
-        },
-      });
-      await tunnel.sendJsonMessage(claimRequest);
-
-      // Step 5: Wait for response
-      final responseBytes = await tunnel.messages.first.timeout(
-        const Duration(seconds: 10),
-        onTimeout: () => throw Exception('Claim code response timeout'),
-      );
-
-      // Parse response
-      final responseJson =
-          jsonDecode(utf8.decode(responseBytes)) as Map<String, dynamic>;
+      
+      final responseJson = await webrtcManager.sendPairingRequest(claimCode, deviceName, devicePlatform);
 
       // Check for error (server sends 'message' field for errors)
       if (responseJson['type'] == 'error') {
         final errorMsg = responseJson['message'] as String? ??
             responseJson['reason'] as String? ??
             'Unknown error';
-        await tunnel.close();
+        webrtcManager.dispose();
         return PairingResult.error(_formatTunnelError(errorMsg));
       }
 
@@ -830,7 +541,7 @@ class PairingService {
       debugPrint('[RelayPairing] Response: deviceId=$deviceId, mediaToken=${mediaToken != null ? "present" : "null"}, accessToken=${accessToken != null ? "present" : "null"}, deviceToken=${deviceToken != null ? "present" : "null"}');
 
       if (deviceId == null || mediaToken == null || accessToken == null) {
-        await tunnel.close();
+        webrtcManager.dispose();
         return PairingResult.error('Incomplete pairing response from relay');
       }
 
@@ -838,7 +549,7 @@ class PairingService {
         debugPrint('[RelayPairing] WARNING: device_token not returned by server - reconnection may fail');
       }
 
-      // Step 6: Build credentials with locally-generated keypair
+      // Step 3: Build credentials
       // Use first direct URL as server URL, or relay URL if no direct URLs
       final serverUrl = claimInfo.directUrls.isNotEmpty
           ? claimInfo.directUrls.first
@@ -850,8 +561,6 @@ class PairingService {
         mediaToken: mediaToken,
         accessToken: accessToken,
         deviceToken: deviceToken,
-        devicePublicKey: devicePublicKey,
-        devicePrivateKey: devicePrivateKey,
         serverPublicKey: serverPublicKey,
         directUrls: claimInfo.directUrls,
         certFingerprint: null,
@@ -861,22 +570,14 @@ class PairingService {
 
       await _storeCredentials(credentials);
 
-      // Note: Claim consumption on relay is handled server-side by Mydia
-      // after successful pairing (via consume_claim WebSocket message)
-
-      // Relay-first strategy: Always return with relay tunnel active.
-      // Background probing (handled by ConnectionManager) will attempt to
-      // upgrade to direct connection later.
-      debugPrint('[RelayPairing] Pairing complete, returning relay tunnel for ongoing communication');
-      await _authStorage.write('connection_last_type', 'relay');
-      return PairingResult.success(credentials, relayTunnel: tunnel);
+      // Relay-first strategy: Always return with relay tunnel (WebRTC) active.
+      debugPrint('[RelayPairing] Pairing complete, returning WebRTC connection');
+      await _authStorage.write('connection_last_type', 'webrtc');
+      return PairingResult.success(credentials, webrtcManager: webrtcManager);
     } catch (e, stackTrace) {
       debugPrint('[RelayPairing] UNCAUGHT ERROR: $e');
       debugPrint('[RelayPairing] Stack trace: $stackTrace');
-      cryptoManager?.dispose();
-      if (tunnel != null) {
-        await tunnel.close();
-      }
+      webrtcManager?.dispose();
       return PairingResult.error('Relay pairing error: $e');
     }
   }
@@ -899,6 +600,10 @@ class PairingService {
     }
   }
 
+  String _bytesToBase64(Uint8List bytes) {
+    return base64Encode(bytes);
+  }
+
   Future<void> _storeCredentials(PairingCredentials credentials) async {
     await _authStorage.write(_StorageKeys.serverUrl, credentials.serverUrl);
     await _authStorage.write(_StorageKeys.deviceId, credentials.deviceId);
@@ -910,14 +615,8 @@ class PairingService {
         credentials.deviceToken!,
       );
     }
-    await _authStorage.write(
-      _StorageKeys.devicePublicKey,
-      _bytesToBase64(credentials.devicePublicKey),
-    );
-    await _authStorage.write(
-      _StorageKeys.devicePrivateKey,
-      _bytesToBase64(credentials.devicePrivateKey),
-    );
+    // Removed key storage as WebRTC doesn't need them
+    // Keeping serverPublicKey for identity verification if needed
     await _authStorage.write(
       _StorageKeys.serverPublicKey,
       _bytesToBase64(credentials.serverPublicKey),
@@ -965,9 +664,6 @@ class PairingService {
   }
 
   // Helper functions for base64 encoding/decoding
-  String _bytesToBase64(Uint8List bytes) {
-    return base64Encode(bytes);
-  }
 
   Uint8List _base64ToBytes(String str) {
     return Uint8List.fromList(base64Decode(str));

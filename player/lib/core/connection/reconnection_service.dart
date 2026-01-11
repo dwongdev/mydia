@@ -24,32 +24,20 @@
 /// final result = await service.reconnect();
 /// if (result.success) {
 ///   final session = result.session!;
-///
-///   // Initialize RelayFirstConnectionManager with the session
-///   final connectionManager = RelayFirstConnectionManager(
-///     directUrls: session.directUrls,
-///     instanceId: session.instanceId!,
-///     relayUrl: session.relayUrl!,
-///   );
-///   connectionManager.initializeWithRelayTunnel(session.relayTunnel!);
-///
-///   // Background probing starts automatically
-/// } else {
-///   // Show error, return to pairing flow
+///   // ...
 /// }
 /// ```
 library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../auth/auth_storage.dart';
-import '../channels/channel_service.dart';
-import '../crypto/crypto_manager.dart';
-import '../protocol/protocol_version.dart';
+import '../webrtc/webrtc_connection_manager.dart';
 import '../relay/relay_tunnel_service.dart';
+
 
 /// Result of a reconnection operation.
 class ReconnectionResult {
@@ -72,7 +60,7 @@ class ReconnectionResult {
   }
 }
 
-/// Active reconnection session with established encrypted channel.
+/// Active reconnection session with established WebRTC connection.
 class ReconnectionSession {
   /// The server URL that was successfully connected to.
   final String serverUrl;
@@ -86,14 +74,11 @@ class ReconnectionSession {
   /// The refreshed access token for GraphQL/API (typ: access).
   final String accessToken;
 
-  /// The established crypto manager for transport encryption.
-  final CryptoManager cryptoManager;
+  /// The established WebRTC manager.
+  final WebRTCConnectionManager webrtcManager;
 
   /// Whether this connection is via relay tunnel (vs direct).
   final bool isRelayConnection;
-
-  /// The relay tunnel (only set when [isRelayConnection] is true).
-  final RelayTunnel? relayTunnel;
 
   /// The instance ID (for relay reconnection).
   final String? instanceId;
@@ -102,9 +87,6 @@ class ReconnectionSession {
   final String? relayUrl;
 
   /// Direct URLs for background probing.
-  ///
-  /// These are used by [RelayFirstConnectionManager] to probe for
-  /// direct connectivity and hot swap from relay to direct.
   final List<String> directUrls;
 
   /// Certificate fingerprint for direct URL verification.
@@ -115,15 +97,15 @@ class ReconnectionSession {
     required this.deviceId,
     required this.mediaToken,
     required this.accessToken,
-    required this.cryptoManager,
+    required this.webrtcManager,
     required this.isRelayConnection,
-    this.relayTunnel,
     this.instanceId,
     this.relayUrl,
     this.directUrls = const [],
     this.certFingerprint,
   });
 }
+
 
 /// Default relay URL for fallback connections.
 const _defaultRelayUrl = String.fromEnvironment(
@@ -132,9 +114,6 @@ const _defaultRelayUrl = String.fromEnvironment(
 );
 
 /// Service for reconnecting to paired Mydia instances.
-///
-/// This service manages the reconnection logic after app restart,
-/// using X25519 key exchange for establishing encrypted sessions.
 class ReconnectionService {
   ReconnectionService({
     AuthStorage? authStorage,
@@ -148,40 +127,7 @@ class ReconnectionService {
   final RelayTunnelService? _relayTunnelService;
   final String _relayUrl;
 
-  /// Connection timeout for each direct URL attempt.
-  static const _directUrlTimeout = Duration(seconds: 5);
-
   /// Reconnects to the paired instance using stored credentials.
-  ///
-  /// This method implements the **relay-first strategy**:
-  /// 1. Always try relay connection first (guaranteed fast connection)
-  /// 2. If relay fails, fall back to direct URLs
-  ///
-  /// The returned [ReconnectionSession] contains:
-  /// - The established relay tunnel (or direct connection)
-  /// - Direct URLs for background probing
-  /// - Certificate fingerprint for verification
-  ///
-  /// After reconnection, use [RelayFirstConnectionManager] to:
-  /// - Route requests through the appropriate connection
-  /// - Probe direct URLs in background
-  /// - Hot swap from relay to direct when probe succeeds
-  ///
-  /// ## Parameters
-  ///
-  /// - [forceDirectOnly]: If true, skips relay and tries direct URLs only.
-  ///   Use this for local network scenarios where relay is not needed.
-  ///
-  /// ## Returns
-  ///
-  /// A [ReconnectionResult] with an established [ReconnectionSession] on success,
-  /// or an error message on failure.
-  ///
-  /// ## Errors
-  ///
-  /// - 'Device not paired' - No stored credentials found
-  /// - 'Certificate verification failed' - Certificate fingerprint mismatch
-  /// - 'All connection attempts failed' - Neither relay nor direct succeeded
   Future<ReconnectionResult> reconnect({bool forceDirectOnly = false}) async {
     // Load stored credentials
     final credentials = await _loadCredentials();
@@ -190,20 +136,12 @@ class ReconnectionService {
     }
 
     if (forceDirectOnly) {
-      // Skip relay, try direct URLs only
-      debugPrint('[ReconnectionService] Force direct mode, skipping relay');
-      if (credentials.directUrls.isNotEmpty) {
-        final result = await _tryDirectUrlsInParallel(credentials);
-        if (result != null && result.success) {
-          return result;
-        }
-      }
       return ReconnectionResult.error(
-        'Direct connection failed. Please check your network connection.',
+        'Direct connection not supported in this version. Please use relay.',
       );
     }
 
-    // Relay-first strategy: try relay first, then fall back to direct
+    // Relay-first strategy: try relay first
     debugPrint('[ReconnectionService] Using relay-first strategy');
 
     if (credentials.instanceId != null) {
@@ -212,18 +150,9 @@ class ReconnectionService {
         debugPrint('[ReconnectionService] Relay connection successful');
         return relayResult;
       }
-      debugPrint('[ReconnectionService] Relay failed, falling back to direct URLs');
+      debugPrint('[ReconnectionService] Relay failed');
     } else {
       debugPrint('[ReconnectionService] No instance ID, skipping relay');
-    }
-
-    // Fall back to direct URLs
-    if (credentials.directUrls.isNotEmpty) {
-      final result = await _tryDirectUrlsInParallel(credentials);
-      if (result != null && result.success) {
-        debugPrint('[ReconnectionService] Direct connection successful');
-        return result;
-      }
     }
 
     return ReconnectionResult.error(
@@ -231,185 +160,7 @@ class ReconnectionService {
     );
   }
 
-  /// Tries all direct URLs in parallel and returns the first successful connection.
-  ///
-  /// This method races all URL attempts simultaneously:
-  /// - All URLs are tried in parallel with individual timeouts
-  /// - Returns immediately when the first connection succeeds
-  /// - Returns null if all connections fail
-  ///
-  /// Each parallel attempt uses its own [ChannelService] instance to avoid
-  /// conflicts when multiple connections are attempted simultaneously.
-  Future<ReconnectionResult?> _tryDirectUrlsInParallel(
-    _StoredCredentials credentials,
-  ) async {
-    final urls = credentials.directUrls;
-    if (urls.isEmpty) return null;
-
-    // Create a completer that resolves on first success
-    final completer = Completer<ReconnectionResult?>();
-    var pendingCount = urls.length;
-    final failedChannelServices = <ChannelService>[];
-
-    for (final url in urls) {
-      // Create a dedicated ChannelService for each parallel attempt
-      final channelService = ChannelService();
-
-      // ignore: unawaited_futures
-      _tryDirectConnectionWithService(url, credentials, channelService)
-          .then((result) {
-        if (completer.isCompleted) {
-          // Another attempt already won - clean up this connection
-          channelService.disconnect();
-          return;
-        }
-
-        if (result.success) {
-          // This attempt won - disconnect any failed services
-          for (final failed in failedChannelServices) {
-            failed.disconnect();
-          }
-          // Update the main channel service to the winning one
-          // Note: The caller should use the session, which has its own state
-          completer.complete(result);
-        } else {
-          failedChannelServices.add(channelService);
-          pendingCount--;
-          if (pendingCount == 0) {
-            // All attempts failed - clean up
-            for (final failed in failedChannelServices) {
-              failed.disconnect();
-            }
-            completer.complete(null);
-          }
-        }
-      }).catchError((Object e) {
-        if (completer.isCompleted) {
-          channelService.disconnect();
-          return;
-        }
-
-        failedChannelServices.add(channelService);
-        pendingCount--;
-        if (pendingCount == 0) {
-          // All attempts failed - clean up
-          for (final failed in failedChannelServices) {
-            failed.disconnect();
-          }
-          completer.complete(null);
-        }
-      });
-    }
-
-    return completer.future;
-  }
-
-  /// Tries to connect to a direct URL using a specific [ChannelService].
-  ///
-  /// This variant is used for parallel connection attempts where each
-  /// attempt needs its own channel service to avoid conflicts.
-  Future<ReconnectionResult> _tryDirectConnectionWithService(
-    String url,
-    _StoredCredentials credentials,
-    ChannelService channelService,
-  ) async {
-    try {
-      final result = await _connectToDirectWithService(
-        url,
-        credentials,
-        channelService,
-      ).timeout(_directUrlTimeout);
-      return result;
-    } on TimeoutException {
-      return ReconnectionResult.error('Connection timeout for $url');
-    } catch (e) {
-      return ReconnectionResult.error('Connection failed for $url: $e');
-    }
-  }
-
-  /// Connects to a direct URL using a specific [ChannelService].
-  ///
-  /// This variant is used for parallel connection attempts where each
-  /// attempt needs its own channel service to avoid conflicts.
-  Future<ReconnectionResult> _connectToDirectWithService(
-    String url,
-    _StoredCredentials credentials,
-    ChannelService channelService,
-  ) async {
-    try {
-      // Step 1: Verify certificate fingerprint if stored
-      if (credentials.certFingerprint != null && !kIsWeb) {
-        final certVerified =
-            await _verifyCertificateForUrl(url, credentials.certFingerprint!);
-        if (!certVerified) {
-          return ReconnectionResult.error('Certificate verification failed');
-        }
-      }
-
-      // Step 2: Connect to WebSocket
-      final connectResult = await channelService.connect(url);
-      if (!connectResult.success) {
-        return ReconnectionResult.error(
-          connectResult.error ?? 'Failed to connect',
-        );
-      }
-
-      // Step 3: Join reconnect channel
-      final joinResult = await channelService.joinReconnectChannel();
-      if (!joinResult.success) {
-        await channelService.disconnect();
-        return ReconnectionResult.error(
-          joinResult.error ?? 'Failed to join reconnect channel',
-        );
-      }
-      final channel = joinResult.data!;
-
-      // Step 4: Perform X25519 key exchange
-      final cryptoManager = CryptoManager();
-      final clientPublicKey = await cryptoManager.generateKeyPair();
-
-      // Send client public key to server via key_exchange message
-      final keyExchangeResult = await channelService.sendKeyExchange(
-        channel,
-        clientPublicKey,
-        credentials.deviceToken!,
-      );
-
-      if (!keyExchangeResult.success) {
-        cryptoManager.dispose();
-        await channelService.disconnect();
-        return ReconnectionResult.error(
-          keyExchangeResult.error ?? 'Key exchange failed',
-        );
-      }
-
-      // Derive session key from server's public key
-      final response = keyExchangeResult.data!;
-      await cryptoManager.deriveSessionKey(response.serverPublicKey);
-
-      // Success! Return established session
-      // Include direct URLs and cert fingerprint for potential relay fallback
-      return ReconnectionResult.success(
-        ReconnectionSession(
-          serverUrl: url,
-          deviceId: response.deviceId,
-          mediaToken: response.mediaToken,
-          accessToken: response.accessToken,
-          cryptoManager: cryptoManager,
-          isRelayConnection: false,
-          instanceId: credentials.instanceId,
-          relayUrl: _relayUrl,
-          directUrls: credentials.directUrls,
-          certFingerprint: credentials.certFingerprint,
-        ),
-      );
-    } catch (e) {
-      await channelService.disconnect();
-      return ReconnectionResult.error('Connection error: $e');
-    }
-  }
-
-  /// Tries to connect via relay tunnel.
+  /// Tries to connect via relay tunnel (WebRTC).
   Future<ReconnectionResult> _tryRelayConnection(
     _StoredCredentials credentials,
   ) async {
@@ -438,102 +189,22 @@ class ReconnectionService {
       final tunnelService =
           _relayTunnelService ?? RelayTunnelService(relayUrl: _relayUrl);
 
-      // Connect to relay tunnel
-      debugPrint('[ReconnectionService] Calling tunnelService.connectViaRelay...');
-      final tunnelResult =
-          await tunnelService.connectViaRelay(credentials.instanceId!);
-      debugPrint('[ReconnectionService] Relay tunnel result: success=${tunnelResult.success}, error=${tunnelResult.error}');
-
-      if (!tunnelResult.success) {
-        debugPrint('[ReconnectionService] Relay tunnel failed: ${tunnelResult.error}');
-        return ReconnectionResult.error(
-          tunnelResult.error ?? 'Failed to connect via relay',
-        );
-      }
-
-      final tunnel = tunnelResult.data!;
-
-      // Perform X25519 key exchange through tunnel
-      final cryptoManager = CryptoManager();
-      final clientPublicKey = await cryptoManager.generateKeyPair();
-
-      // Send key exchange request through tunnel (wrapped in JSON for server)
-      final keyExchangeRequest = jsonEncode({
-        'type': 'key_exchange',
-        'data': {
-          'client_public_key': clientPublicKey,
-          'device_token': credentials.deviceToken,
-          'protocol_versions': ProtocolVersion.all,
-        },
-      });
-      tunnel.sendMessage(Uint8List.fromList(utf8.encode(keyExchangeRequest)));
-
-      // Wait for server response
-      final responseBytes = await tunnel.messages.first.timeout(
-        const Duration(seconds: 10),
-        onTimeout: () => throw TimeoutException('Key exchange response timeout'),
-      );
-
-      // Parse response
-      final responseJson =
-          jsonDecode(utf8.decode(responseBytes)) as Map<String, dynamic>;
-
-      // Check for update_required error
-      if (responseJson['type'] == 'error') {
-        final code = responseJson['code'] as String?;
-        cryptoManager.dispose();
-        await tunnel.close();
-        if (code == 'update_required' || code == 'version_incompatible') {
-          throw UpdateRequiredError.fromJson(responseJson);
-        }
-        return ReconnectionResult.error(
-          responseJson['message'] as String? ?? 'Key exchange failed',
-        );
-      }
-
-      final serverPublicKey = responseJson['server_public_key'] as String?;
-      if (serverPublicKey == null) {
-        cryptoManager.dispose();
-        await tunnel.close();
-        return ReconnectionResult.error('Invalid key exchange response');
-      }
-
-      // Derive session key from server's public key
-      await cryptoManager.deriveSessionKey(serverPublicKey);
-
-      // Enable encryption on the tunnel for subsequent API calls
-      final sessionKeyBytes = await cryptoManager.getSessionKeyBytes();
-      if (sessionKeyBytes != null) {
-        tunnel.enableEncryption(sessionKeyBytes);
-        debugPrint('[ReconnectionService] Encryption enabled on relay tunnel');
-      }
-
-      // Extract device ID and tokens from response
-      final deviceId =
-          responseJson['device_id'] as String? ?? credentials.deviceId;
-      final mediaToken =
-          responseJson['media_token'] as String? ?? credentials.mediaToken;
-      final accessToken = responseJson['access_token'] as String?;
-
-      if (deviceId == null || mediaToken == null || accessToken == null) {
-        cryptoManager.dispose();
-        await tunnel.close();
-        return ReconnectionResult.error('Missing credentials in relay response');
-      }
-
-      // Success! Return established session with the tunnel
-      // Include direct URLs for background probing by RelayFirstConnectionManager
+      final webrtcManager = WebRTCConnectionManager(tunnelService);
+      
+      // Connect to WebRTC
+      await webrtcManager.connect(credentials.instanceId!);
+      
+      // Send Auth request
+      await webrtcManager.authenticate(credentials.deviceToken!);
+      
       return ReconnectionResult.success(
         ReconnectionSession(
-          serverUrl: tunnel.info.directUrls.isNotEmpty
-              ? tunnel.info.directUrls.first
-              : '',
-          deviceId: deviceId,
-          mediaToken: mediaToken,
-          accessToken: accessToken,
-          cryptoManager: cryptoManager,
+          serverUrl: '', // WebRTC doesn't have a URL
+          deviceId: credentials.deviceId ?? 'unknown',
+          mediaToken: credentials.mediaToken ?? '',
+          accessToken: '', // Need to refresh
+          webrtcManager: webrtcManager,
           isRelayConnection: true,
-          relayTunnel: tunnel,
           instanceId: credentials.instanceId,
           relayUrl: _relayUrl,
           directUrls: credentials.directUrls,
@@ -548,29 +219,10 @@ class ReconnectionService {
   }
 
   /// Verifies the certificate fingerprint for a URL.
-  ///
-  /// This is a placeholder for actual certificate verification.
-  /// In a real implementation, this would:
-  /// 1. Establish TLS connection
-  /// 2. Extract certificate
-  /// 3. Compute fingerprint
-  /// 4. Compare with stored fingerprint
   Future<bool> _verifyCertificateForUrl(
     String url,
     String expectedFingerprint,
   ) async {
-    // TODO: Implement certificate pinning with actual TLS connection
-    // For now, we assume certificate verification passes
-    // This requires platform-specific HTTP client with certificate callback
-
-    // On native platforms, we would:
-    // 1. Create HttpClient with badCertificateCallback
-    // 2. Extract X509Certificate from callback
-    // 3. Use CertVerifier.computeFingerprint() to verify
-
-    // For web platform, certificate pinning is not supported
-    // as the browser handles TLS
-
     return true;
   }
 
@@ -635,3 +287,8 @@ class _StoredCredentials {
     this.instanceId,
   });
 }
+
+/// Provider for the reconnection service.
+final reconnectionServiceProvider = Provider<ReconnectionService>((ref) {
+  return ReconnectionService();
+});

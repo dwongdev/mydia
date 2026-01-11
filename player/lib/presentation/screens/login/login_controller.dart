@@ -3,6 +3,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../core/graphql/graphql_provider.dart';
 import '../../../core/channels/pairing_service.dart';
 import '../../../core/auth/device_info_service.dart';
+import '../../../core/auth/auth_service.dart';
 import '../../../core/connection/connection_provider.dart';
 import '../../../core/protocol/protocol_version.dart';
 import '../../../core/relay/relay_service.dart';
@@ -189,10 +190,10 @@ class LoginController extends _$LoginController {
       debugPrint('[LoginController] Credentials stored');
 
       // If relay mode, set the tunnel in the connection provider
-      if (result.isRelayMode && result.relayTunnel != null) {
+      if (result.isRelayMode && result.webrtcManager != null) {
         debugPrint('[LoginController] Setting relay tunnel in connection provider');
-        await ref.read(connectionProvider.notifier).setRelayTunnel(
-          result.relayTunnel!,
+        await ref.read(connectionProvider.notifier).setWebRTCManager(
+          result.webrtcManager!,
           instanceId: credentials.instanceId,
           relayUrl: relayUrl,
         );
@@ -371,10 +372,10 @@ class LoginController extends _$LoginController {
       );
 
       // If relay mode, set the tunnel in the connection provider
-      if (result.isRelayMode && result.relayTunnel != null) {
+      if (result.isRelayMode && result.webrtcManager != null) {
         debugPrint('[LoginController] Setting relay tunnel from QR pairing');
-        await ref.read(connectionProvider.notifier).setRelayTunnel(
-          result.relayTunnel!,
+        await ref.read(connectionProvider.notifier).setWebRTCManager(
+          result.webrtcManager!,
           instanceId: credentials.instanceId,
           relayUrl: qrData.relayUrl,
         );

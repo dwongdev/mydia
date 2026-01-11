@@ -986,7 +986,7 @@ def print_summary(config: Config) -> None:
 
     table.add_row("VPS", f"{config.vps_name} ({config.vps_ip})")
     table.add_row("Relay URL", f"https://{config.relay_fqdn}")
-    table.add_row("TURN Server", f"turn:{config.relay_fqdn}:3478 (integrated)")
+    table.add_row("TURN Server", f"turn:{config.vps_ip}:3478 (integrated)")
     table.add_row("ArgoCD URL", f"https://{config.argocd_fqdn}")
     table.add_row("Health Check", f"https://{config.relay_fqdn}/health")
 

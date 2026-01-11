@@ -55,6 +55,7 @@ defmodule MetadataRelay.TurnServer do
     :max_port,
     :listen_ip,
     :public_ip,
+    :max_rate,
     :listener_started
   ]
 
@@ -70,6 +71,7 @@ defmodule MetadataRelay.TurnServer do
   - `:max_port` - Maximum relay allocation port (default: 65535)
   - `:listen_ip` - IP address to listen on (default: {0, 0, 0, 0})
   - `:public_ip` - Public IP for relay addresses (required for TURN)
+  - `:max_rate` - Max bitrate in bytes/second (default: 1,000,000 = ~8 Mbps)
   """
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -162,6 +164,7 @@ defmodule MetadataRelay.TurnServer do
       max_port: state.max_port,
       listen_ip: state.listen_ip,
       public_ip: state.public_ip,
+      max_rate: state.max_rate,
       listener_started: state.listener_started
     }
 
@@ -193,6 +196,7 @@ defmodule MetadataRelay.TurnServer do
     else
       listen_ip = parse_ip(Keyword.get(opts, :listen_ip) || System.get_env("TURN_LISTEN_IP") || "0.0.0.0")
       public_ip = parse_ip(Keyword.get(opts, :public_ip) || System.get_env("TURN_PUBLIC_IP"))
+      max_rate = Keyword.get(opts, :max_rate) || parse_int(System.get_env("TURN_MAX_RATE"), 1_000_000)
 
       state = %__MODULE__{
         port: Keyword.get(opts, :port) || parse_int(System.get_env("TURN_PORT"), @default_port),
@@ -202,6 +206,7 @@ defmodule MetadataRelay.TurnServer do
         max_port: Keyword.get(opts, :max_port) || parse_int(System.get_env("TURN_MAX_PORT"), @default_max_port),
         listen_ip: listen_ip,
         public_ip: public_ip,
+        max_rate: max_rate,
         listener_started: false
       }
 
@@ -222,7 +227,8 @@ defmodule MetadataRelay.TurnServer do
         auth_fun: auth_fun,
         turn_min_port: state.min_port,
         turn_max_port: state.max_port,
-        server_name: "metadata-relay"
+        server_name: "metadata-relay",
+        shaper: {:maxrate, state.max_rate}
       ]
       |> maybe_add_turn_ip(state.public_ip)
 

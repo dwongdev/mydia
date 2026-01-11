@@ -35,6 +35,7 @@ if config_env() != :test do
     turn_secret = System.get_env("TURN_SECRET")
     turn_port = String.to_integer(System.get_env("TURN_PORT") || "3478")
     turn_public_ip = System.get_env("TURN_PUBLIC_IP")
+    turn_max_rate = String.to_integer(System.get_env("TURN_MAX_RATE") || "1000000") # 1 MB/s default (approx 8 Mbps)
 
     # Build TURN URI based on configuration
     turn_uri =
@@ -58,6 +59,7 @@ if config_env() != :test do
       turn_secret: turn_secret,
       turn_port: turn_port,
       turn_public_ip: turn_public_ip,
+      turn_max_rate: turn_max_rate,
       turn_realm: System.get_env("TURN_REALM") || "metadata-relay",
       turn_min_port: String.to_integer(System.get_env("TURN_MIN_PORT") || "49152"),
       turn_max_port: String.to_integer(System.get_env("TURN_MAX_PORT") || "65535")

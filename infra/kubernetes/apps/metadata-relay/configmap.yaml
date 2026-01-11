@@ -25,4 +25,5 @@ data:
   TURN_REALM: "relay.mydia.dev"
   TURN_MIN_PORT: "49152"
   TURN_MAX_PORT: "49252"
+  TURN_MAX_RATE: "1000000" # 1 MB/s (approx 8 Mbps)
   # TURN_PUBLIC_IP is set via env in deployment.yaml using status.hostIP

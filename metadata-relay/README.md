@@ -143,6 +143,7 @@ The service is configured entirely via environment variables for maximum flexibi
 | `TURN_REALM`      | No       | `metadata-relay`   | Authentication realm for TURN                                                                                           |
 | `TURN_MIN_PORT`   | No       | `49152`            | Minimum port for TURN relay allocations                                                                                 |
 | `TURN_MAX_PORT`   | No       | `65535`            | Maximum port for TURN relay allocations                                                                                 |
+| `TURN_MAX_RATE`   | No       | `1000000`          | Max bandwidth per connection in bytes/sec (default ~1MB/s = 8Mbps)                                                      |
 | `TURN_URI`        | No       | -                  | External TURN server URI (only if not using integrated server)                                                          |
 
 ### Cache Configuration

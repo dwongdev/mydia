@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coturn
+  namespace: coturn
+  labels:
+    app: coturn
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: coturn
+  template:
+    metadata:
+      labels:
+        app: coturn
+    spec:
+      # hostNetwork is often recommended for TURN to avoid double NAT issues
+      # and improve performance, but LoadBalancer (NodePort) via k3s also works.
+      # We'll stick to standard networking first, but if connection fails, switch to hostNetwork.
+      # hostNetwork: true 
+      containers:
+        - name: coturn
+          image: coturn/coturn:4.6.2
+          args:
+            - "-c"
+            - "/etc/coturn/turnserver.conf"
+            - "--static-auth-secret=$(TURN_SECRET)"
+            - "--external-ip=$(EXTERNAL_IP)"
+            - "--realm=$(REALM)"
+          env:
+            - name: TURN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: coturn-secrets
+                  key: TURN_SECRET
+            - name: REALM
+              valueFrom:
+                configMapKeyRef:
+                  name: coturn-env-config
+                  key: REALM
+            - name: EXTERNAL_IP
+              valueFrom:
+                configMapKeyRef:
+                  name: coturn-env-config
+                  key: EXTERNAL_IP
+          ports:
+            - containerPort: 3478
+              name: turn-tcp
+              protocol: TCP
+            - containerPort: 3478
+              name: turn-udp
+              protocol: UDP
+            - containerPort: 5349
+              name: turns-tcp
+              protocol: TCP
+            - containerPort: 5349
+              name: turns-udp
+              protocol: UDP
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/coturn/turnserver.conf
+              subPath: turnserver.conf
+            - name: tls-volume
+              mountPath: /etc/coturn/tls
+              readOnly: true
+      volumes:
+        - name: config-volume
+          configMap:
+            name: coturn-config
+        - name: tls-volume
+          secret:
+            secretName: coturn-tls-secret

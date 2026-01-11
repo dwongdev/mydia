@@ -1,0 +1,10 @@
+# ConfigMap for dynamic environment variables injected by deploy script
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coturn-env-config
+  namespace: coturn
+data:
+  # These will be populated by the deploy script
+  REALM: "turn.mydia.dev"
+  EXTERNAL_IP: "127.0.0.1" 

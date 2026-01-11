@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: coturn-tls
+  namespace: coturn
+spec:
+  secretName: coturn-tls-secret
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  commonName: turn.mydia.dev
+  dnsNames:
+  - turn.mydia.dev

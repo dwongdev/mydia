@@ -14,15 +14,17 @@ spec:
     matchLabels:
       app.kubernetes.io/name: metadata-relay
       app.kubernetes.io/component: relay-service
+      app.kubernetes.io/part-of: mydia
   template:
     metadata:
       labels:
         app.kubernetes.io/name: metadata-relay
         app.kubernetes.io/component: relay-service
+        app.kubernetes.io/part-of: mydia
     spec:
       containers:
         - name: metadata-relay
-          image: ghcr.io/getmydia/mydia/metadata-relay:latest
+          image: ghcr.io/getmydia/mydia/metadata-relay:dev
           imagePullPolicy: Always
           ports:
             - name: http

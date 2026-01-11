@@ -114,11 +114,15 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
     local_addr = get_local_address()
     public_addr = get_public_address()
 
+    # Get auto-detected URLs (public + local)
+    detected_urls = get_detected_urls()
+
     assigns =
       assigns
       |> assign(:relay_ready, relay_ready)
       |> assign(:local_addr, local_addr)
       |> assign(:public_addr, public_addr)
+      |> assign(:detected_urls, detected_urls)
 
     ~H"""
     <div class="p-4 sm:p-6 space-y-6">
@@ -499,80 +503,147 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
           <% end %>
         </div>
 
-        <%!-- Settings --%>
+        <%!-- Settings Section --%>
         <div class="space-y-4">
-          <h3 class="text-sm font-medium text-base-content/70 flex items-center gap-2">
-            <.icon name="hero-cog-6-tooth" class="w-4 h-4" /> Settings
-          </h3>
+          <div class="flex items-center gap-2">
+            <.icon name="hero-cog-6-tooth" class="w-4 h-4 text-primary" />
+            <h3 class="text-sm font-semibold">Settings</h3>
+          </div>
 
           <div class="grid gap-4 sm:grid-cols-2">
-            <%!-- Public Port Card --%>
+            <%!-- Public Ports Card --%>
             <div class="card bg-base-200">
-              <div class="card-body p-4">
-                <h4 class="card-title text-sm">
-                  <.icon name="hero-globe-alt" class="w-4 h-4 opacity-60" /> Public Port
-                </h4>
-                <p class="text-xs text-base-content/60">
-                  Override if your external port differs from the internal port (NAT/port forwarding).
-                </p>
+              <div class="card-body p-4 gap-3">
+                <div class="flex items-center justify-between">
+                  <h4 class="card-title text-sm gap-2">
+                    <.icon name="hero-globe-alt" class="w-4 h-4 opacity-60" /> Public Ports
+                  </h4>
+                  <div
+                    class="tooltip tooltip-left"
+                    data-tip="Configure if your external ports differ from internal (e.g., NAT/port forwarding)"
+                  >
+                    <.icon name="hero-question-mark-circle" class="w-4 h-4 opacity-40" />
+                  </div>
+                </div>
+
                 <form
-                  phx-submit="update_public_port"
+                  id="public-ports-form"
+                  phx-submit="update_public_ports"
                   phx-target={@myself}
-                  class="card-actions justify-end items-center mt-2"
+                  class="space-y-3"
                 >
-                  <input
-                    type="number"
-                    name="public_port"
-                    placeholder="Auto"
-                    class="input input-sm input-bordered w-24 text-center font-mono"
-                    value={@ra_config.public_port}
-                    min="1"
-                    max="65535"
-                  />
-                  <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                  <%!-- Port inputs in a clean fieldset-like layout --%>
+                  <div class="grid grid-cols-2 gap-3">
+                    <fieldset class="fieldset">
+                      <legend class="fieldset-legend text-xs font-medium text-base-content/70">
+                        HTTP Port
+                      </legend>
+                      <label class="input input-sm input-bordered flex items-center gap-2 w-full">
+                        <.icon name="hero-globe-alt" class="w-3.5 h-3.5 opacity-40" />
+                        <input
+                          type="number"
+                          name="public_port"
+                          placeholder={to_string(@local_addr.port)}
+                          class="grow font-mono text-center w-full"
+                          value={@ra_config.public_port}
+                          min="1"
+                          max="65535"
+                        />
+                      </label>
+                      <p class="label text-xs text-base-content/50 py-0.5">
+                        Default: {@local_addr.port}
+                      </p>
+                    </fieldset>
+
+                    <fieldset class="fieldset">
+                      <legend class="fieldset-legend text-xs font-medium text-base-content/70">
+                        HTTPS Port
+                      </legend>
+                      <% https_default = Application.get_env(:mydia, :direct_urls, [])[:https_port] %>
+                      <label class="input input-sm input-bordered flex items-center gap-2 w-full">
+                        <.icon name="hero-lock-closed" class="w-3.5 h-3.5 opacity-40" />
+                        <input
+                          type="number"
+                          name="public_https_port"
+                          placeholder={if(https_default, do: to_string(https_default), else: "N/A")}
+                          class="grow font-mono text-center w-full"
+                          value={@ra_config.public_https_port}
+                          min="1"
+                          max="65535"
+                        />
+                      </label>
+                      <p class="label text-xs text-base-content/50 py-0.5">
+                        Default: {https_default || "Not configured"}
+                      </p>
+                    </fieldset>
+                  </div>
+
+                  <div class="flex justify-end">
+                    <button type="submit" class="btn btn-sm btn-primary gap-1">
+                      <.icon name="hero-check" class="w-3.5 h-3.5" /> Save Ports
+                    </button>
+                  </div>
                 </form>
               </div>
             </div>
 
             <%!-- Connection Details Card --%>
             <div class="card bg-base-200">
-              <div class="card-body p-4">
-                <h4 class="card-title text-sm">
+              <div class="card-body p-4 gap-3">
+                <h4 class="card-title text-sm gap-2">
                   <.icon name="hero-information-circle" class="w-4 h-4 opacity-60" />
                   Connection Details
                 </h4>
-                <div class="space-y-2 mt-1">
-                  <div class="flex justify-between items-center text-xs">
-                    <span class="text-base-content/60">Instance ID</span>
-                    <div class="flex items-center gap-1">
-                      <code class="font-mono bg-base-300 px-1.5 py-0.5 rounded">
+
+                <div class="bg-base-300/50 rounded-lg divide-y divide-base-300">
+                  <%!-- Instance ID --%>
+                  <div class="flex justify-between items-center p-2.5">
+                    <span class="text-xs text-base-content/60 font-medium">Instance ID</span>
+                    <div class="flex items-center gap-1.5">
+                      <code class="font-mono text-xs bg-base-100 px-2 py-1 rounded border border-base-300">
                         {String.slice(@ra_config.instance_id, 0..11)}...
                       </code>
                       <button
-                        class="btn btn-xs btn-ghost btn-square"
+                        class="btn btn-xs btn-ghost btn-square hover:bg-base-100"
                         phx-click="copy_instance_id"
                         phx-target={@myself}
                         onclick={"navigator.clipboard.writeText('#{@ra_config.instance_id}')"}
-                        title="Copy"
+                        title="Copy full Instance ID"
                       >
-                        <.icon name="hero-clipboard" class="w-3 h-3" />
+                        <.icon name="hero-clipboard" class="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
-                  <div class="flex justify-between items-center text-xs">
-                    <span class="text-base-content/60">Relay</span>
-                    <code class="font-mono bg-base-300 px-1.5 py-0.5 rounded truncate max-w-[180px]">
-                      {@relay_url}
+
+                  <%!-- Relay URL --%>
+                  <div class="flex justify-between items-center p-2.5 gap-2">
+                    <span class="text-xs text-base-content/60 font-medium shrink-0">Relay</span>
+                    <code
+                      class="font-mono text-xs bg-base-100 px-2 py-1 rounded border border-base-300 truncate max-w-[180px]"
+                      title={@relay_url}
+                    >
+                      {URI.parse(@relay_url).host}
                     </code>
                   </div>
-                  <div class="flex justify-between items-center text-xs">
-                    <span class="text-base-content/60">Status</span>
-                    <span class={[
-                      "badge badge-sm",
+
+                  <%!-- Status --%>
+                  <div class="flex justify-between items-center p-2.5">
+                    <span class="text-xs text-base-content/60 font-medium">Status</span>
+                    <div class={[
+                      "badge badge-sm gap-1",
                       if(@relay_ready, do: "badge-success", else: "badge-warning")
                     ]}>
-                      {if @relay_ready, do: "Registered", else: "Not registered"}
-                    </span>
+                      <%= if @relay_ready do %>
+                        <span class="relative flex h-2 w-2">
+                          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75">
+                          </span>
+                          <span class="relative inline-flex rounded-full h-2 w-2 bg-success"></span>
+                        </span>
+                        Registered
+                      <% else %>
+                        <.icon name="hero-clock" class="w-3 h-3" /> Not registered
+                      <% end %>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -581,48 +652,96 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
 
           <%!-- Direct URLs Card (full width) --%>
           <div class="card bg-base-200">
-            <div class="card-body p-4">
+            <div class="card-body p-4 gap-3">
               <div class="flex items-center justify-between">
-                <h4 class="card-title text-sm">
+                <h4 class="card-title text-sm gap-2">
                   <.icon name="hero-link" class="w-4 h-4 opacity-60" /> Direct URLs
                 </h4>
                 <button
-                  class="btn btn-sm btn-ghost"
+                  class="btn btn-sm btn-ghost gap-1"
                   phx-click="open_add_url_modal"
                   phx-target={@myself}
                 >
                   <.icon name="hero-plus" class="w-4 h-4" /> Add URL
                 </button>
               </div>
-              <p class="text-xs text-base-content/60">
+
+              <p class="text-xs text-base-content/60 -mt-1">
                 Direct URLs allow the app to bypass the relay when on the same network for faster streaming.
               </p>
 
-              <%= if @ra_config.direct_urls && @ra_config.direct_urls != [] do %>
-                <div class="flex flex-wrap gap-2 mt-2">
-                  <%= for url <- @ra_config.direct_urls do %>
-                    <div class="badge badge-lg gap-2 pr-1">
-                      <code class="font-mono text-xs">{url}</code>
-                      <button
-                        class="btn btn-xs btn-ghost btn-circle"
-                        phx-click="remove_direct_url"
-                        phx-target={@myself}
-                        phx-value-url={url}
-                        title="Remove"
-                      >
-                        <.icon name="hero-x-mark" class="w-3 h-3" />
-                      </button>
+              <div class="grid gap-4 sm:grid-cols-2 mt-1">
+                <%!-- Manual URLs Section --%>
+                <div class="space-y-2">
+                  <div class="flex items-center gap-2">
+                    <.icon name="hero-pencil-square" class="w-3.5 h-3.5 opacity-50" />
+                    <span class="text-xs font-medium text-base-content/70">Manual URLs</span>
+                    <%= if @ra_config.direct_urls && @ra_config.direct_urls != [] do %>
+                      <span class="badge badge-ghost badge-xs">{length(@ra_config.direct_urls)}</span>
+                    <% end %>
+                  </div>
+
+                  <%= if @ra_config.direct_urls && @ra_config.direct_urls != [] do %>
+                    <div class="space-y-1.5">
+                      <%= for url <- @ra_config.direct_urls do %>
+                        <div class="flex items-center gap-2 bg-base-300/50 rounded-lg px-3 py-2 group">
+                          <.icon name="hero-link" class="w-3.5 h-3.5 opacity-40 shrink-0" />
+                          <code class="font-mono text-xs truncate flex-1">{url}</code>
+                          <button
+                            class="btn btn-xs btn-ghost btn-square opacity-50 group-hover:opacity-100 hover:btn-error"
+                            phx-click="remove_direct_url"
+                            phx-target={@myself}
+                            phx-value-url={url}
+                            title="Remove URL"
+                          >
+                            <.icon name="hero-x-mark" class="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      <% end %>
+                    </div>
+                  <% else %>
+                    <div class="flex items-center gap-2 text-xs text-base-content/50 italic bg-base-300/30 rounded-lg px-3 py-3">
+                      <.icon name="hero-plus-circle" class="w-4 h-4 opacity-40" />
+                      <span>Click "Add URL" to add custom addresses</span>
                     </div>
                   <% end %>
                 </div>
-              <% else %>
-                <div class="text-xs text-base-content/50 italic">No direct URLs configured</div>
-              <% end %>
 
-              <div class="divider my-2"></div>
+                <%!-- Auto-detected URLs Section --%>
+                <div class="space-y-2">
+                  <div class="flex items-center gap-2">
+                    <.icon name="hero-signal" class="w-3.5 h-3.5 opacity-50" />
+                    <span class="text-xs font-medium text-base-content/70">Auto-detected</span>
+                    <%= if @detected_urls != [] do %>
+                      <span class="badge badge-ghost badge-xs">{length(@detected_urls)}</span>
+                    <% end %>
+                  </div>
 
-              <div class="alert alert-info alert-soft py-2">
-                <.icon name="hero-light-bulb" class="w-5 h-5" />
+                  <%= if @detected_urls != [] do %>
+                    <div class="space-y-1.5">
+                      <%= for url <- @detected_urls do %>
+                        <div class="flex items-center gap-2 bg-base-300/30 rounded-lg px-3 py-2 border border-dashed border-base-300">
+                          <.icon name="hero-signal" class="w-3.5 h-3.5 opacity-40 shrink-0" />
+                          <code class="font-mono text-xs truncate flex-1 text-base-content/70">
+                            {url}
+                          </code>
+                          <span class="badge badge-xs badge-ghost">Auto</span>
+                        </div>
+                      <% end %>
+                    </div>
+                  <% else %>
+                    <div class="flex items-center gap-2 text-xs text-base-content/50 italic bg-base-300/30 rounded-lg px-3 py-3">
+                      <.icon name="hero-exclamation-circle" class="w-4 h-4 opacity-40" />
+                      <span>No URLs detected. Check network config.</span>
+                    </div>
+                  <% end %>
+                </div>
+              </div>
+
+              <div class="divider my-1"></div>
+
+              <div class="alert bg-info/10 border-info/20 py-2.5">
+                <.icon name="hero-light-bulb" class="w-5 h-5 text-info" />
                 <div class="text-xs">
                   <span class="font-semibold">Tip:</span>
                   Use
@@ -630,12 +749,12 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                     href="https://tailscale.com"
                     target="_blank"
                     rel="noopener"
-                    class="link font-medium"
+                    class="link link-info font-medium"
                   >
                     Tailscale
                   </a>
                   for secure access anywhere. Add your Tailscale address, e.g.
-                  <code class="bg-info/20 px-1 py-0.5 rounded font-mono">
+                  <code class="bg-info/20 px-1.5 py-0.5 rounded font-mono text-info">
                     http://mydia.tail1234.ts.net:4000
                   </code>
                 </div>
@@ -1266,6 +1385,44 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
        |> put_flash(:error, "Invalid port number. Must be a valid integer.")}
   end
 
+  def handle_event("update_public_ports", params, socket) do
+    # Parse the port strings, treating empty string as nil (clear the setting)
+    parse_port = fn str ->
+      case String.trim(str || "") do
+        "" -> nil
+        s -> String.to_integer(s)
+      end
+    end
+
+    attrs = %{
+      public_port: parse_port.(params["public_port"]),
+      public_https_port: parse_port.(params["public_https_port"])
+    }
+
+    case RemoteAccess.update_public_ports(attrs) do
+      {:ok, _config} ->
+        {:noreply,
+         socket
+         |> load_config()
+         |> put_flash(:info, "Public ports updated successfully")}
+
+      {:error, :invalid_port} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Invalid port number. Must be between 1 and 65535.")}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Failed to update public ports")}
+    end
+  rescue
+    ArgumentError ->
+      {:noreply,
+       socket
+       |> put_flash(:error, "Invalid port number. Must be a valid integer.")}
+  end
+
   ## Countdown update (called from parent via send_update)
 
   def handle_countdown_tick(socket) do
@@ -1511,6 +1668,16 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
       {:ok, ip} -> %{ip: ip, port: port}
       {:error, _} -> %{ip: nil, port: port}
     end
+  end
+
+  defp get_detected_urls do
+    # Get auto-detected URLs (public IP + local network)
+    public_urls = Mydia.RemoteAccess.DirectUrls.detect_public_urls()
+    local_urls = Mydia.RemoteAccess.DirectUrls.detect_local_urls()
+
+    # Combine and deduplicate
+    (public_urls ++ local_urls)
+    |> Enum.uniq()
   end
 
   defp valid_local_ip?({127, _, _, _}), do: false

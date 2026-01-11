@@ -2,7 +2,7 @@
 FROM elixir:1.18-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache build-base git
+RUN apk add --no-cache build-base git openssl-dev
 
 # Set build environment
 ENV MIX_ENV=prod

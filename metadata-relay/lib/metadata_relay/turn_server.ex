@@ -228,7 +228,7 @@ defmodule MetadataRelay.TurnServer do
         turn_min_port: state.min_port,
         turn_max_port: state.max_port,
         server_name: "metadata-relay",
-        shaper: {:maxrate, state.max_rate}
+        shaper: state.max_rate
       ]
       |> maybe_add_turn_ip(state.public_ip)
 

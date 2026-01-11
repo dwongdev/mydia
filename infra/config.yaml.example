@@ -24,6 +24,10 @@ relay_tvdb_api_key: "your-tvdb-api-key"
 # TMDB API key from: https://www.themoviedb.org/settings/api
 relay_tmdb_api_key: "your-tmdb-api-key"
 
+# Integrated TURN server secret (auto-generated if not set)
+# Generate with: openssl rand -hex 32
+turn_secret: ""
+
 # SSH Configuration
 ssh_public_key_path: "~/.ssh/id_ed25519.pub"
 

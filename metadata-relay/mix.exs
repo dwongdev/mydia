@@ -37,7 +37,9 @@ defmodule MetadataRelay.MixProject do
       {:phoenix_html, "~> 4.0"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
-      {:corsica, "~> 2.0"}
+      {:corsica, "~> 2.0"},
+      # STUN/TURN server (processone implementation)
+      {:stun, "~> 1.2"}
     ]
   end
 

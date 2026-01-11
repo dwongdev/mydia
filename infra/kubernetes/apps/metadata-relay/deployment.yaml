@@ -22,6 +22,10 @@ spec:
         app.kubernetes.io/component: relay-service
         app.kubernetes.io/part-of: mydia
     spec:
+      # Use host network for TURN server to avoid NAT issues with UDP
+      # This allows the TURN server to receive and relay media traffic directly
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: metadata-relay
           image: ghcr.io/getmydia/mydia/metadata-relay:dev
@@ -30,6 +34,19 @@ spec:
             - name: http
               containerPort: 4001
               protocol: TCP
+            # Integrated TURN server ports
+            - name: turn-udp
+              containerPort: 3478
+              protocol: UDP
+            - name: turn-tcp
+              containerPort: 3478
+              protocol: TCP
+          env:
+            # Set TURN_PUBLIC_IP to the node's IP for TURN relay addresses
+            - name: TURN_PUBLIC_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
           envFrom:
             - configMapRef:
                 name: metadata-relay-config

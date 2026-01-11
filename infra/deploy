@@ -71,7 +71,6 @@ class Phase(Enum):
     KUBECONFIG = "kubeconfig"
     KUBERNETES = "kubernetes"
     APP = "app"
-    COTURN = "coturn"
     VERIFY = "verify"
 
 
@@ -92,7 +91,7 @@ class Config:
     relay_secret_key_base: str = ""
     relay_tvdb_api_key: str = ""
     relay_tmdb_api_key: str = ""
-    coturn_secret: str = ""
+    turn_secret: str = ""  # For integrated TURN server
 
     # VPS
     vps_name: str = ""  # Populated after VPS is ordered/found
@@ -106,10 +105,6 @@ class Config:
     @property
     def argocd_fqdn(self) -> str:
         return f"{self.argocd_subdomain}.{self.domain_name}"
-
-    @property
-    def coturn_fqdn(self) -> str:
-        return f"turn.{self.domain_name}"
 
     @property
     def ssh_public_key(self) -> str:
@@ -143,7 +138,7 @@ class Config:
             "relay_secret_key_base": self.relay_secret_key_base,
             "relay_tvdb_api_key": self.relay_tvdb_api_key,
             "relay_tmdb_api_key": self.relay_tmdb_api_key,
-            "coturn_secret": self.coturn_secret,
+            "turn_secret": self.turn_secret,
             "vps_name": self.vps_name,
             "vps_ip": self.vps_ip,
             "ssh_public_key_path": self.ssh_public_key_path,
@@ -808,25 +803,23 @@ def phase_app(config: Config, dry_run: bool = False) -> bool:
             run(["kubectl", "create", "namespace", namespace])
         console.print("  [green]✓[/green] Namespace created")
 
+    # --- Generate TURN secret if not set ---
+    if not config.turn_secret:
+        if dry_run:
+            console.print("  [yellow]Would generate:[/yellow] Random TURN auth secret")
+            config.turn_secret = "dry-run-secret"
+        else:
+            console.print("  [dim]Generating new TURN auth secret...[/dim]")
+            config.turn_secret = secrets.token_hex(32)
+            config.save(CONFIG_FILE)
+
     # --- Secret ---
     if k8s_secret_exists("metadata-relay-secrets", namespace):
         console.print("  [green]✓[/green] Secret 'metadata-relay-secrets' exists")
-        # We might want to update it if config changed, but for now we assume it's static or managed manually if changed
-        # Actually, let's update it if we are not in dry run
+        # Update secret if not in dry run
         if not dry_run:
              console.print("  [dim]Updating secret...[/dim]")
-             run([
-                "kubectl", "create", "secret", "generic", "metadata-relay-secrets",
-                "-n", namespace,
-                "--dry-run=client", "-o", "yaml",
-                f"--from-literal=RELAY_TOKEN_SECRET={config.relay_secret_key_base}",
-                f"--from-literal=TMDB_API_KEY={config.relay_tmdb_api_key}",
-                f"--from-literal=TVDB_API_KEY={config.relay_tvdb_api_key}",
-                f"--from-literal=TURN_URI=turn:{config.coturn_fqdn}:3478",
-                f"--from-literal=TURN_SECRET={config.coturn_secret}",
-            ], capture=True).stdout
-             
-             # The above just generates yaml. We need to pipe it to apply.
+             # Generate yaml and pipe to apply
              proc = subprocess.Popen(
                 ["kubectl", "create", "secret", "generic", "metadata-relay-secrets",
                 "-n", namespace,
@@ -834,15 +827,14 @@ def phase_app(config: Config, dry_run: bool = False) -> bool:
                 f"--from-literal=RELAY_TOKEN_SECRET={config.relay_secret_key_base}",
                 f"--from-literal=TMDB_API_KEY={config.relay_tmdb_api_key}",
                 f"--from-literal=TVDB_API_KEY={config.relay_tvdb_api_key}",
-                f"--from-literal=TURN_URI=turn:{config.coturn_fqdn}:3478",
-                f"--from-literal=TURN_SECRET={config.coturn_secret}"],
+                f"--from-literal=TURN_SECRET={config.turn_secret}"],
                 stdout=subprocess.PIPE
              )
              subprocess.run(["kubectl", "apply", "-f", "-"], stdin=proc.stdout)
              console.print("  [green]✓[/green] Secret updated")
 
     elif dry_run:
-        console.print("  [yellow]Would create:[/yellow] Secret with API keys")
+        console.print("  [yellow]Would create:[/yellow] Secret with API keys and TURN secret")
     else:
         console.print("  [dim]Creating secret...[/dim]")
         run([
@@ -851,8 +843,7 @@ def phase_app(config: Config, dry_run: bool = False) -> bool:
             f"--from-literal=RELAY_TOKEN_SECRET={config.relay_secret_key_base}",
             f"--from-literal=TMDB_API_KEY={config.relay_tmdb_api_key}",
             f"--from-literal=TVDB_API_KEY={config.relay_tvdb_api_key}",
-            f"--from-literal=TURN_URI=turn:{config.coturn_fqdn}:3478",
-            f"--from-literal=TURN_SECRET={config.coturn_secret}",
+            f"--from-literal=TURN_SECRET={config.turn_secret}",
         ])
         console.print("  [green]✓[/green] Secret created")
 
@@ -866,108 +857,6 @@ def phase_app(config: Config, dry_run: bool = False) -> bool:
             if manifest_path.exists():
                 run(["kubectl", "apply", "-f", str(manifest_path)])
         console.print("  [green]✓[/green] Application deployed")
-
-    return True
-
-
-def phase_coturn(config: Config, dry_run: bool = False) -> bool:
-    """Deploy Coturn TURN/STUN server."""
-    console.print("\n[bold blue]Phase: Coturn (TURN/STUN)[/bold blue]")
-
-    namespace = "coturn"
-    coturn_dir = KUBERNETES_DIR / "apps" / "coturn"
-
-    # --- Namespace ---
-    if k8s_namespace_exists(namespace):
-        console.print(f"  [green]✓[/green] Namespace '{namespace}' exists")
-    elif dry_run:
-        console.print(f"  [yellow]Would create:[/yellow] Namespace '{namespace}'")
-    else:
-        console.print("  [dim]Creating namespace...[/dim]")
-        ns_file = coturn_dir / "namespace.yaml"
-        if ns_file.exists():
-            run(["kubectl", "apply", "-f", str(ns_file)])
-        else:
-            run(["kubectl", "create", "namespace", namespace])
-        console.print("  [green]✓[/green] Namespace created")
-
-    # --- Secret ---
-    if not config.coturn_secret:
-        if dry_run:
-            console.print("  [yellow]Would generate:[/yellow] Random Coturn auth secret")
-            config.coturn_secret = "dry-run-secret"
-        else:
-            console.print("  [dim]Generating new Coturn auth secret...[/dim]")
-            config.coturn_secret = secrets.token_hex(32)
-            config.save(CONFIG_FILE)
-
-    if k8s_secret_exists("coturn-secrets", namespace):
-        console.print("  [green]✓[/green] Secret 'coturn-secrets' exists")
-    elif dry_run:
-        console.print("  [yellow]Would create:[/yellow] Secret with auth token")
-    else:
-        console.print("  [dim]Creating secret...[/dim]")
-        run([
-            "kubectl", "create", "secret", "generic", "coturn-secrets",
-            "-n", namespace,
-            f"--from-literal=TURN_SECRET={config.coturn_secret}",
-        ])
-        console.print("  [green]✓[/green] Secret created")
-
-    # --- ConfigMap for Environment Variables ---
-    # We apply this first to update EXTERNAL_IP
-    env_cm_file = coturn_dir / "env-configmap.yaml"
-    if env_cm_file.exists():
-        if dry_run:
-            console.print(f"  [yellow]Would apply:[/yellow] {env_cm_file.name} with EXTERNAL_IP={config.vps_ip}")
-        else:
-            console.print(f"  [dim]Updating {env_cm_file.name}...[/dim]")
-            content = env_cm_file.read_text()
-            # Basic templating for env config
-            # We recreate the config map manifest in memory or simple replace if valid yaml
-            # Since we wrote it as valid yaml, we can load, modify, and apply
-            try:
-                cm_data = yaml.safe_load(content)
-                cm_data["data"]["EXTERNAL_IP"] = config.vps_ip
-                cm_data["data"]["REALM"] = config.coturn_fqdn
-                
-                # Apply directly
-                proc = subprocess.Popen(
-                    ["kubectl", "apply", "-f", "-"],
-                    stdin=subprocess.PIPE,
-                    text=True
-                )
-                proc.communicate(input=yaml.dump(cm_data))
-                if proc.returncode != 0:
-                    raise subprocess.CalledProcessError(proc.returncode, "kubectl apply")
-                console.print(f"  [green]✓[/green] Updated env-configmap with IP {config.vps_ip}")
-            except Exception as e:
-                console.print(f"  [red]✗[/red] Failed to update env configmap: {e}")
-                return False
-
-    # --- Apply manifests ---
-    if dry_run:
-        console.print("  [yellow]Would apply:[/yellow] All Coturn manifests")
-    else:
-        console.print("  [dim]Applying manifests...[/dim]")
-        for manifest in ["configmap.yaml", "certificate.yaml", "deployment.yaml", "service.yaml"]:
-            manifest_path = coturn_dir / manifest
-            if not manifest_path.exists():
-                continue
-                
-            if manifest == "service.yaml":
-                # Special handling for service.yaml to inject IP
-                content = manifest_path.read_text()
-                content = content.replace("EXTERNAL_DNS_TARGET", config.vps_ip)
-                run(
-                    ["kubectl", "apply", "-f", "-"],
-                    input=content,
-                    capture=True 
-                )
-            else:
-                run(["kubectl", "apply", "-f", str(manifest_path)])
-                
-        console.print("  [green]✓[/green] Coturn deployed")
 
     return True
 
@@ -1038,7 +927,6 @@ def deploy(
         Phase.KUBECONFIG: phase_kubeconfig,
         Phase.KUBERNETES: phase_kubernetes,
         Phase.APP: phase_app,
-        Phase.COTURN: phase_coturn,
         Phase.VERIFY: phase_verify,
     }
 
@@ -1098,7 +986,7 @@ def print_summary(config: Config) -> None:
 
     table.add_row("VPS", f"{config.vps_name} ({config.vps_ip})")
     table.add_row("Relay URL", f"https://{config.relay_fqdn}")
-    table.add_row("Coturn URL", f"{config.coturn_fqdn}:3478")
+    table.add_row("TURN Server", f"turn:{config.relay_fqdn}:3478 (integrated)")
     table.add_row("ArgoCD URL", f"https://{config.argocd_fqdn}")
     table.add_row("Health Check", f"https://{config.relay_fqdn}/health")
 

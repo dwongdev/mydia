@@ -7,6 +7,8 @@ metadata:
     app.kubernetes.io/name: metadata-relay
     app.kubernetes.io/component: relay-service
 spec:
+  # Using hostNetwork in deployment, so ClusterIP for HTTP only
+  # TURN traffic goes directly to host ports
   type: ClusterIP
   ports:
     - port: 4001
@@ -16,3 +18,7 @@ spec:
   selector:
     app.kubernetes.io/name: metadata-relay
     app.kubernetes.io/component: relay-service
+
+# NOTE: TURN server uses hostNetwork mode, so TURN ports (3478 UDP/TCP)
+# are exposed directly on the node's IP. No LoadBalancer needed for TURN.
+# The deployment sets TURN_PUBLIC_IP from status.hostIP automatically.

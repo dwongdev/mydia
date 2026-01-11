@@ -31,6 +31,7 @@ defmodule MetadataRelay.Application do
       ] ++
         maybe_tvdb_auth() ++
         maybe_opensubtitles_auth() ++
+        maybe_turn_server() ++
         [
           # Phoenix endpoint (serves both API and ErrorTracker dashboard)
           MetadataRelayWeb.Endpoint
@@ -113,6 +114,23 @@ defmodule MetadataRelay.Application do
       [MetadataRelay.OpenSubtitles.Auth]
     else
       Logger.info("OpenSubtitles credentials not configured, subtitle support disabled")
+      []
+    end
+  end
+
+  defp maybe_turn_server do
+    if MetadataRelay.TurnServer.enabled?() do
+      secret = System.get_env("TURN_SECRET")
+
+      if secret && secret != "" do
+        Logger.info("TURN server enabled, starting integrated STUN/TURN server")
+        [MetadataRelay.TurnServer]
+      else
+        Logger.warning("TURN_ENABLED=true but TURN_SECRET not set, TURN server disabled")
+        []
+      end
+    else
+      Logger.info("Integrated TURN server disabled (set TURN_ENABLED=true to enable)")
       []
     end
   end

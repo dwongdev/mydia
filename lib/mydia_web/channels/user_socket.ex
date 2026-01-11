@@ -2,7 +2,7 @@ defmodule MydiaWeb.UserSocket do
   use Phoenix.Socket
 
   # Define the channel for device connections
-  channel "device:*", MydiaWeb.DeviceChannel
+  # channel "device:*", MydiaWeb.DeviceChannel
 
   @impl true
   def connect(_params, socket, _connect_info) do

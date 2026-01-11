@@ -41,15 +41,9 @@ defmodule Mydia.RemoteAccess do
 
   """
   def initialize_keypair do
-    # Generate a new X25519 keypair
-    {public_key, private_key} = Mydia.Crypto.generate_keypair()
-
-    # Get the application secret for encryption
-    app_secret = get_app_secret()
-
-    # Encrypt the private key (returns a 60-byte binary blob)
-    # Format: <<nonce::binary-12, ciphertext::binary-32, mac::binary-16>>
-    encrypted_blob = Mydia.Crypto.encrypt_private_key(private_key, app_secret)
+    # Generate a dummy keypair (random bytes) since we use WebRTC now
+    public_key = :crypto.strong_rand_bytes(32)
+    private_key = :crypto.strong_rand_bytes(32)
 
     # Generate a unique instance ID
     instance_id = Ecto.UUID.generate()
@@ -60,7 +54,8 @@ defmodule Mydia.RemoteAccess do
     |> Config.changeset(%{
       instance_id: instance_id,
       static_public_key: public_key,
-      static_private_key_encrypted: encrypted_blob,
+      # Storing raw dummy key
+      static_private_key_encrypted: private_key,
       enabled: false
     })
     |> Repo.insert()
@@ -89,21 +84,7 @@ defmodule Mydia.RemoteAccess do
 
   @doc """
   Gets the decrypted private key for the instance.
-
-  This function decrypts the stored private key using the application secret.
-  It should only be used internally for Noise protocol operations.
-
-  **Security Warning**: This returns the raw private key. Never log or expose
-  this value outside of secure cryptographic operations.
-
-  Returns {:ok, private_key} or {:error, reason}.
-
-  ## Examples
-
-      iex> {:ok, private_key} = Mydia.RemoteAccess.get_private_key()
-      iex> byte_size(private_key)
-      32
-
+  Deprecated: Returns dummy key.
   """
   def get_private_key do
     case get_config() do
@@ -111,22 +92,8 @@ defmodule Mydia.RemoteAccess do
         {:error, :not_configured}
 
       config ->
-        # Get the application secret
-        app_secret = get_app_secret()
-
-        # Decrypt the private key (supports both old and new formats)
-        Mydia.Crypto.decrypt_private_key(config.static_private_key_encrypted, app_secret)
+        {:ok, config.static_private_key_encrypted}
     end
-  end
-
-  # Private helper to get the application secret key
-  # Derives a 32-byte key from the secret_key_base
-  defp get_app_secret do
-    secret_key_base = Application.get_env(:mydia, MydiaWeb.Endpoint)[:secret_key_base]
-
-    # Use the first 32 bytes of the secret_key_base
-    # In production, secret_key_base is at least 64 bytes
-    :crypto.hash(:sha256, secret_key_base)
   end
 
   @doc """
@@ -678,6 +645,79 @@ defmodule Mydia.RemoteAccess do
   end
 
   def update_public_port(_), do: {:error, :invalid_port}
+
+  @doc """
+  Updates the public HTTPS port override in the remote access configuration.
+
+  This port is used when generating sslip.io HTTPS URLs from the detected public IP.
+  Useful when your external HTTPS port differs from internal port (e.g., NAT port forwarding).
+
+  Pass `nil` to clear the override and use the default https_port.
+  """
+  def update_public_https_port(nil) do
+    case get_config() do
+      nil ->
+        {:error, :not_configured}
+
+      config ->
+        case config
+             |> Config.update_public_https_port_changeset(nil)
+             |> Repo.update() do
+          {:ok, updated_config} ->
+            DirectUrls.clear_public_ip_cache()
+            {:ok, updated_config}
+
+          {:error, _} = error ->
+            error
+        end
+    end
+  end
+
+  def update_public_https_port(port) when is_integer(port) and port > 0 and port < 65536 do
+    case get_config() do
+      nil ->
+        {:error, :not_configured}
+
+      config ->
+        case config
+             |> Config.update_public_https_port_changeset(port)
+             |> Repo.update() do
+          {:ok, updated_config} ->
+            DirectUrls.clear_public_ip_cache()
+            {:ok, updated_config}
+
+          {:error, _} = error ->
+            error
+        end
+    end
+  end
+
+  def update_public_https_port(_), do: {:error, :invalid_port}
+
+  @doc """
+  Updates both public HTTP and HTTPS port overrides together.
+
+  Accepts a map with `:public_port` and/or `:public_https_port` keys.
+  Pass `nil` for either to clear that override.
+  """
+  def update_public_ports(attrs) when is_map(attrs) do
+    case get_config() do
+      nil ->
+        {:error, :not_configured}
+
+      config ->
+        case config
+             |> Config.update_public_ports_changeset(attrs)
+             |> Repo.update() do
+          {:ok, updated_config} ->
+            DirectUrls.clear_public_ip_cache()
+            {:ok, updated_config}
+
+          {:error, _} = error ->
+            error
+        end
+    end
+  end
 
   @doc """
   Manually triggers a relay reconnection.

@@ -6,6 +6,8 @@ use libp2p::{
     noise,
     tcp,
     yamux,
+    relay,
+    dcutr,
     request_response::{self, ProtocolSupport, OutboundRequestId},
     PeerId,
     SwarmBuilder,
@@ -25,6 +27,9 @@ pub struct MydiaBehaviour {
     mdns: mdns::tokio::Behaviour,
     kad: kad::Behaviour<kad::store::MemoryStore>,
     request_response: request_response::cbor::Behaviour<MydiaRequest, MydiaResponse>,
+    relay_client: relay::client::Behaviour,
+    dcutr: dcutr::Behaviour,
+    relay_server: relay::Behaviour, // Always include but enable/disable via config if needed
 }
 
 // Request/Response Types (using Serde/CBOR)
@@ -85,6 +90,11 @@ pub enum Event {
     // Responses are now handled via oneshot channels, but we can still emit an event if needed
 }
 
+// Configuration for the Host
+pub struct HostConfig {
+    pub enable_relay_server: bool,
+}
+
 // The core Host struct that manages the Libp2p Swarm
 pub struct Host {
     pub cmd_tx: mpsc::Sender<Command>,
@@ -93,7 +103,7 @@ pub struct Host {
 }
 
 impl Host {
-    pub fn new() -> (Self, String) {
+    pub fn new(config: HostConfig) -> (Self, String) {
         let id_keys = identity::Keypair::generate_ed25519();
         let peer_id = PeerId::from(id_keys.public());
         let peer_id_str = peer_id.to_string();
@@ -132,11 +142,26 @@ impl Host {
                             request_response::Config::default(),
                         );
 
+                        // Relay Client
+                        let (relay_transport, relay_client) = relay::client::new(peer_id);
+                        
+                        // DCUtR
+                        let dcutr = dcutr::Behaviour::new(peer_id);
+
+                        // Relay Server
+                        let relay_server = relay::Behaviour::new(
+                            peer_id,
+                            relay::Config::default(),
+                        );
+
                         MydiaBehaviour {
                             ping: ping::Behaviour::new(ping::Config::new().with_interval(Duration::from_secs(1))),
                             mdns,
                             kad,
                             request_response,
+                            relay_client,
+                            dcutr,
+                            relay_server,
                         }
                     })
                     .unwrap()
@@ -198,6 +223,11 @@ impl Host {
                                         }
                                     }
                                     _ => {}
+                                }
+                            }
+                            SwarmEvent::Behaviour(MydiaBehaviourEvent::RelayServer(relay::Event::ReservationReqAccepted { src_peer_id, .. })) => {
+                                if config.enable_relay_server {
+                                    println!("Relay reservation accepted for {:?}", src_peer_id);
                                 }
                             }
                             _ => {}

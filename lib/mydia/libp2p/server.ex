@@ -3,6 +3,7 @@ defmodule Mydia.Libp2p.Server do
   require Logger
 
   alias Mydia.Libp2p
+  alias Mydia.RemoteAccess.Pairing
 
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
@@ -49,12 +50,61 @@ defmodule Mydia.Libp2p.Server do
   # Handle events from Rust
   def handle_info({:ok, "peer_discovered", peer_id}, state) do
     Logger.info("Libp2p Event: Peer Discovered #{peer_id}")
-    # TODO: Broadcast to PubSub
     {:noreply, state}
   end
 
   def handle_info({:ok, "peer_expired", peer_id}, state) do
     Logger.info("Libp2p Event: Peer Expired #{peer_id}")
+    {:noreply, state}
+  end
+
+  def handle_info({:ok, "request_received", "pairing", request_id, req}, state) do
+    Logger.info("Libp2p Request: Pairing from #{req.device_name}")
+
+    device_attrs = %{
+      name: req.device_name,
+      # mapping type to client_name
+      client_name: req.device_type,
+      # TODO: Add version to request
+      client_version: "1.0.0",
+      device_os: req.device_os || "unknown"
+    }
+
+    response =
+      case Pairing.complete_pairing(req.claim_code, device_attrs) do
+        {:ok, _device, media_token, access_token, device_token} ->
+          %Libp2p.PairingResponse{
+            success: true,
+            media_token: media_token,
+            access_token: access_token,
+            device_token: device_token,
+            error: nil
+          }
+
+        {:error, reason} ->
+          Logger.warning("Pairing failed: #{inspect(reason)}")
+
+          %Libp2p.PairingResponse{
+            success: false,
+            error: inspect(reason)
+          }
+      end
+
+    # Wrap in tagged enum tuple as expected by NIF
+    response_enum = {:pairing, response}
+
+    Libp2p.send_response(state.resource, request_id, response_enum)
+    {:noreply, state}
+  end
+
+  def handle_info({:ok, "request_received", "ping", request_id}, state) do
+    # Ping is handled automatically by libp2p ping protocol usually, but if we have application level ping
+    # we can respond here. However, mydia_p2p_core only exposes Ping request for testing manually?
+    # Actually `MydiaRequest::Ping` was defined.
+    # But currently `send_response` NIF only accepts `ElixirResponse` which handles Pairing or Error.
+    # I should update `ElixirResponse` to handle Ping if needed, or just ignore.
+    # For now, let's ignore or log.
+    Logger.debug("Libp2p Ping Request received (manual)")
     {:noreply, state}
   end
 

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:player/native/lib.dart';
@@ -53,6 +54,43 @@ class Libp2pService {
     } catch (e) {
       debugPrint('[Libp2p] Failed to initialize: $e');
       rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> pair({
+    required String claimCode,
+    required String deviceName,
+    required String deviceType,
+  }) async {
+    if (_host == null) throw Exception("Libp2p host not initialized");
+    
+    // Check discovered peers
+    if (_discoveredPeers.isEmpty) {
+        throw Exception("No peers discovered yet");
+    }
+    
+    // Naive selection: try the first one. 
+    // In production we would identify the server peer more robustly.
+    final serverPeerId = _discoveredPeers.first; 
+    debugPrint('[Libp2p] Sending pairing request to $serverPeerId');
+    
+    final req = FlutterPairingRequest(
+        claimCode: claimCode,
+        deviceName: deviceName,
+        deviceType: deviceType,
+        deviceOs: kIsWeb ? 'web' : Platform.operatingSystem,
+    );
+    
+    final res = await _host!.sendPairingRequest(peer: serverPeerId, req: req);
+    
+    if (res.success) {
+        return {
+            'mediaToken': res.mediaToken,
+            'accessToken': res.accessToken,
+            'deviceToken': res.deviceToken,
+        };
+    } else {
+        throw Exception(res.error ?? "Pairing failed");
     }
   }
 

@@ -6,7 +6,7 @@ use libp2p::{
     noise,
     tcp,
     yamux,
-    request_response::{self, ProtocolSupport},
+    request_response::{self, ProtocolSupport, OutboundRequestId},
     PeerId,
     SwarmBuilder,
     Multiaddr,
@@ -14,7 +14,7 @@ use libp2p::{
 };
 use std::time::Duration;
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use libp2p::futures::StreamExt;
 use std::iter;
 
@@ -31,21 +31,45 @@ pub struct MydiaBehaviour {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum MydiaRequest {
     Ping,
+    Pairing(PairingRequest),
     Custom(Vec<u8>),
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PairingRequest {
+    pub claim_code: String,
+    pub device_name: String,
+    pub device_type: String,
+    pub device_os: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum MydiaResponse {
     Pong,
+    Pairing(PairingResponse),
     Custom(Vec<u8>),
     Error(String),
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PairingResponse {
+    pub success: bool,
+    pub media_token: Option<String>,
+    pub access_token: Option<String>,
+    pub device_token: Option<String>,
+    pub error: Option<String>,
 }
 
 // Commands that can be sent to the Host
 pub enum Command {
     Listen(String),
     Dial(String),
-    SendRequest { peer: String, request: MydiaRequest },
+    SendRequest { 
+        peer: String, 
+        request: MydiaRequest, 
+        reply: oneshot::Sender<Result<MydiaResponse, String>> 
+    },
+    SendResponse { request_id: String, response: MydiaResponse }, // For responding to requests
 }
 
 // Events emitted by the Host
@@ -53,8 +77,12 @@ pub enum Command {
 pub enum Event {
     PeerDiscovered(String),
     PeerExpired(String),
-    RequestReceived { peer: String, request: MydiaRequest, response_channel: request_response::ResponseChannel<MydiaResponse> },
-    ResponseReceived { peer: String, response: MydiaResponse, request_id: String },
+    RequestReceived { 
+        peer: String, 
+        request: MydiaRequest, 
+        request_id: String, // UUID to identify the response channel
+    },
+    // Responses are now handled via oneshot channels, but we can still emit an event if needed
 }
 
 // The core Host struct that manages the Libp2p Swarm
@@ -118,6 +146,12 @@ impl Host {
                 // Use Server mode for Kademlia
                 swarm.behaviour_mut().kad.set_mode(Some(kad::Mode::Server));
 
+                // Map to store response channels temporarily
+                let mut response_channels = std::collections::HashMap::new();
+                
+                // Map to store pending outbound requests: RequestId -> oneshot::Sender
+                let mut pending_requests: std::collections::HashMap<OutboundRequestId, oneshot::Sender<Result<MydiaResponse, String>>> = std::collections::HashMap::new();
+
                 loop {
                     tokio::select! {
                         event = swarm.select_next_some() => match event {
@@ -137,22 +171,33 @@ impl Host {
                                     let _ = event_tx.send(Event::PeerExpired(peer_id.to_string())).await;
                                 }
                             }
-                            SwarmEvent::Behaviour(MydiaBehaviourEvent::RequestResponse(request_response::Event::Message { peer, message })) => {
-                                match message {
-                                    request_response::Message::Request { request, channel, .. } => {
-                                        let _ = event_tx.send(Event::RequestReceived {
-                                            peer: peer.to_string(),
-                                            request,
-                                            response_channel: channel,
-                                        }).await;
+                            SwarmEvent::Behaviour(MydiaBehaviourEvent::RequestResponse(event)) => {
+                                match event {
+                                    request_response::Event::Message { peer, message } => {
+                                        match message {
+                                            request_response::Message::Request { request, channel, .. } => {
+                                                let request_id = uuid::Uuid::new_v4().to_string();
+                                                response_channels.insert(request_id.clone(), channel);
+                                                
+                                                let _ = event_tx.send(Event::RequestReceived {
+                                                    peer: peer.to_string(),
+                                                    request,
+                                                    request_id,
+                                                }).await;
+                                            }
+                                            request_response::Message::Response { response, request_id } => {
+                                                if let Some(reply) = pending_requests.remove(&request_id) {
+                                                    let _ = reply.send(Ok(response));
+                                                }
+                                            }
+                                        }
                                     }
-                                    request_response::Message::Response { response, request_id } => {
-                                        let _ = event_tx.send(Event::ResponseReceived {
-                                            peer: peer.to_string(),
-                                            response,
-                                            request_id: request_id.to_string(),
-                                        }).await;
+                                    request_response::Event::OutboundFailure { request_id, error, .. } => {
+                                        if let Some(reply) = pending_requests.remove(&request_id) {
+                                            let _ = reply.send(Err(format!("Outbound failure: {:?}", error)));
+                                        }
                                     }
+                                    _ => {}
                                 }
                             }
                             _ => {}
@@ -168,9 +213,19 @@ impl Host {
                                     let _ = swarm.dial(addr);
                                 }
                             }
-                            Some(Command::SendRequest { peer, request }) => {
+                            Some(Command::SendRequest { peer, request, reply }) => {
                                 if let Ok(peer_id) = peer.parse::<PeerId>() {
-                                    swarm.behaviour_mut().request_response.send_request(&peer_id, request);
+                                    let request_id = swarm.behaviour_mut().request_response.send_request(&peer_id, request);
+                                    pending_requests.insert(request_id, reply);
+                                } else {
+                                    let _ = reply.send(Err("Invalid peer ID".to_string()));
+                                }
+                            }
+                            Some(Command::SendResponse { request_id, response }) => {
+                                if let Some(channel) = response_channels.remove(&request_id) {
+                                    let _ = swarm.behaviour_mut().request_response.send_response(channel, response);
+                                } else {
+                                    println!("Response channel not found for request_id: {}", request_id);
                                 }
                             }
                             None => return, // Channel closed
@@ -192,6 +247,26 @@ impl Host {
 
     pub fn dial(&self, addr: String) -> Result<(), String> {
         match self.cmd_tx.blocking_send(Command::Dial(addr)) {
+            Ok(_) => Ok(()),
+            Err(_) => Err("send_failed".to_string()),
+        }
+    }
+
+    pub async fn send_request(&self, peer: String, request: MydiaRequest) -> Result<MydiaResponse, String> {
+        let (tx, rx) = oneshot::channel();
+        match self.cmd_tx.send(Command::SendRequest { peer, request, reply: tx }).await {
+            Ok(_) => {
+                match rx.await {
+                    Ok(res) => res,
+                    Err(_) => Err("Response channel closed".to_string()),
+                }
+            }
+            Err(_) => Err("send_failed".to_string()),
+        }
+    }
+
+    pub fn send_response(&self, request_id: String, response: MydiaResponse) -> Result<(), String> {
+        match self.cmd_tx.blocking_send(Command::SendResponse { request_id, response }) {
             Ok(_) => Ok(()),
             Err(_) => Err("send_failed".to_string()),
         }

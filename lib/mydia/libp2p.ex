@@ -8,4 +8,18 @@ defmodule Mydia.Libp2p do
   def start_host(), do: :erlang.nif_error(:nif_not_loaded)
 
   def listen(_resource, _addr), do: :erlang.nif_error(:nif_not_loaded)
+
+  def dial(_resource, _addr), do: :erlang.nif_error(:nif_not_loaded)
+
+  def start_listening(_resource, _pid), do: :erlang.nif_error(:nif_not_loaded)
+
+  def send_response(_resource, _request_id, _response), do: :erlang.nif_error(:nif_not_loaded)
+end
+
+defmodule Mydia.Libp2p.PairingRequest do
+  defstruct [:claim_code, :device_name, :device_type, :device_os]
+end
+
+defmodule Mydia.Libp2p.PairingResponse do
+  defstruct [:success, :media_token, :access_token, :device_token, :error]
 end

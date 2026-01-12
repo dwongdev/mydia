@@ -22,3 +22,5 @@ data:
   # Replaces legacy TURN server for NAT traversal and signaling
   LIBP2P_RELAY_ENABLED: "true"
   LIBP2P_PORT: "4001"
+  # External hostname for libp2p (DNS-only record, not proxied by Cloudflare)
+  LIBP2P_EXTERNAL_HOST: "p2p.mydia.dev"

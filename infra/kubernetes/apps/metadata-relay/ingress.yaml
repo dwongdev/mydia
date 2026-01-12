@@ -68,7 +68,7 @@ spec:
           namespace: metadata-relay
       services:
         - name: metadata-relay
-          port: 4001
+          port: 4000
 ---
 # HTTPS IngressRoute
 apiVersion: traefik.io/v1alpha1
@@ -90,7 +90,7 @@ spec:
       match: Host(`relay.mydia.dev`)
       services:
         - name: metadata-relay
-          port: 4001
+          port: 4000
           serversTransport: websocket-transport
   tls:
     secretName: metadata-relay-tls-secret

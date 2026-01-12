@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.4
 FROM elixir:1.18-alpine AS builder
 
-# Install build dependencies
-RUN apk add --no-cache build-base git openssl-dev
+# Install build dependencies including Rust for NIF compilation
+RUN apk add --no-cache build-base git openssl-dev rust cargo
 
 # Set build environment
 ENV MIX_ENV=prod
@@ -17,8 +17,8 @@ RUN --mount=type=cache,target=/root/.hex \
     mix local.hex --force && \
     mix local.rebar --force
 
-# Copy mix files
-COPY mix.exs mix.lock ./
+# Copy mix files (building from repo root)
+COPY metadata-relay/mix.exs metadata-relay/mix.lock ./
 
 # Install dependencies with cache
 RUN --mount=type=cache,target=/root/.hex \
@@ -40,14 +40,22 @@ RUN --mount=type=cache,target=/root/.hex \
 # Restore _build from cache copy
 RUN rm -rf _build && mv _build_copy _build
 
-# Copy application files
-COPY config ./config
-COPY lib ./lib
-COPY priv ./priv
+# Copy application files (building from repo root)
+COPY metadata-relay/config ./config
+COPY metadata-relay/lib ./lib
+COPY metadata-relay/priv ./priv
 
-# Compile the application
+# Copy native Rust crates for NIF compilation
+# metadata_relay_p2p depends on mydia_p2p_core from parent project
+# When building, use: docker build -f metadata-relay/Dockerfile .
+COPY metadata-relay/native ./native
+COPY native/mydia_p2p_core /native/mydia_p2p_core
+
+# Compile the application (Rustler will compile the NIF automatically)
 RUN --mount=type=cache,target=/root/.hex \
     --mount=type=cache,target=/root/.mix \
+    --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
     mix compile
 
 # Build release
@@ -75,7 +83,7 @@ WORKDIR /app
 COPY --from=builder --chown=relay:relay /app/_build/prod/rel/metadata_relay ./
 
 # Copy entrypoint script
-COPY --chown=relay:relay docker-entrypoint.sh /app/docker-entrypoint.sh
+COPY --chown=relay:relay metadata-relay/docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
 # Set environment

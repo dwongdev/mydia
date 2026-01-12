@@ -71,6 +71,7 @@ ${YELLOW}Development Commands:${NC}
   ecto.migrate         Run database migrations
   ecto.reset           Reset database
   phx.server           Start Phoenix server
+  mix precommit        Run precommit checks in isolated container
 
 ${YELLOW}User Management:${NC}
   user list [--role=R] List all users (optionally filter by role)
@@ -139,6 +140,32 @@ run_in_container() {
     fi
 }
 
+# Run command in an isolated container (separate volumes from dev)
+# Usage: run_isolated <command>
+# Example: run_isolated "mix test"
+run_isolated() {
+    local cmd="$1"
+    # Use dedicated isolated volumes (separate from dev, but cached between runs)
+    docker run --rm \
+        -e MIX_ENV=test \
+        -e DATABASE_PATH=/tmp/mydia_test.db \
+        -e LOCAL_UID="$LOCAL_UID" \
+        -e LOCAL_GID="$LOCAL_GID" \
+        -e SECRET_KEY_BASE="test_secret_key_base_at_least_64_bytes_long_for_isolated_container" \
+        -e MIX_HOME=/app/.mix \
+        -e HEX_HOME=/app/.hex \
+        -v "$(pwd):/app:ro" \
+        -v "$(pwd)/priv:/app/priv" \
+        -v mydia_isolated_build:/app/_build \
+        -v mydia_isolated_deps:/app/deps \
+        -v mydia_isolated_mix:/app/.mix \
+        -v mydia_isolated_hex:/app/.hex \
+        -w /app \
+        --entrypoint "" \
+        "$(docker compose config --images | head -1)" \
+        sh -c "mix deps.get && $cmd"
+}
+
 # Parse command
 COMMAND=$1
 shift
@@ -168,9 +195,13 @@ case "$COMMAND" in
 
     # Mix command shortcuts
     mix)
-        # Set MIX_ENV=test for commands that run tests
-        if [[ "$1" == "precommit" ]] || [[ "$1" == "test" ]]; then
-            docker compose run --rm -e MIX_ENV=test -e LOCAL_UID="$LOCAL_UID" -e LOCAL_GID="$LOCAL_GID" "$SERVICE_NAME" mix "$@"
+        # Run precommit/test in a fully isolated container (no shared volumes)
+        if [[ "$1" == "precommit" ]]; then
+            echo -e "${GREEN}Running precommit in isolated container...${NC}"
+            run_isolated "mix precommit"
+        elif [[ "$1" == "test" ]]; then
+            echo -e "${GREEN}Running tests in isolated container...${NC}"
+            run_isolated "mix ecto.create --quiet && mix ecto.migrate --quiet && mix test ${*:2}"
         else
             run_in_container mix "$@"
         fi
@@ -178,8 +209,8 @@ case "$COMMAND" in
 
     # Common development shortcuts
     test)
-        echo -e "${GREEN}Running tests...${NC}"
-        docker compose run --rm -e MIX_ENV=test -e LOCAL_UID="$LOCAL_UID" -e LOCAL_GID="$LOCAL_GID" "$SERVICE_NAME" sh -c 'mix ecto.create --quiet && mix ecto.migrate --quiet && mix test '"$*"
+        echo -e "${GREEN}Running tests in isolated container...${NC}"
+        run_isolated "mix ecto.create --quiet && mix ecto.migrate --quiet && mix test $*"
         ;;
 
     feature-test)
@@ -240,6 +271,8 @@ case "$COMMAND" in
                 echo -e "${GREEN}Player web assets built successfully!${NC}"
                 echo -e "${GREEN}Copying build output to priv/static/player...${NC}"
                 run_in_container sh -c "rm -rf priv/static/player && cp -r player/build/web priv/static/player"
+                # Copy manifest.json if it exists (Flutter doesn't auto-copy it)
+                run_in_container sh -c "[ -f player/web/manifest.json ] && cp player/web/manifest.json priv/static/player/"
                 echo -e "${GREEN}Build deployed successfully!${NC}"
                 ;;
             setup)

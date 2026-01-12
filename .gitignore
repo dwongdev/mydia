@@ -94,6 +94,9 @@ compose.override.yml
 .venv/
 docs/.venv/
 
+# Rust build artifacts
+**/target/
+
 # Terraform
 *.tfstate
 *.tfstate.*

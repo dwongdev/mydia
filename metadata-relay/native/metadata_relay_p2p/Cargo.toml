@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
+name = "metadata_relay_p2p"
 crate-type = ["cdylib"]
 
 [dependencies]

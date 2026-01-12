@@ -14,7 +14,7 @@ The application is designed to be deployed on personal servers or home lab envir
 
 ## Remote Access Architecture (Libp2p)
 
-Mydia uses a decentralized **libp2p** architecture for remote access, replacing the legacy WebRTC/Relay system.
+Mydia uses a decentralized **libp2p** architecture for remote access.
 
 ### Key Components
 

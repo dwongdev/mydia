@@ -7,6 +7,8 @@ import 'package:media_kit/media_kit.dart';
 import 'app.dart';
 import 'core/downloads/download_service.dart';
 
+import 'package:player/native/frb_generated.dart';
+
 void main() async {
   // Add error logging for debugging
   FlutterError.onError = (details) {
@@ -18,6 +20,13 @@ void main() async {
   runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
+
+      // Initialize Rust Bridge
+      try {
+        await RustLib.init();
+      } catch (e) {
+        debugPrint('Failed to initialize Rust bridge: $e');
+      }
 
       // Initialize media_kit for video playback
       MediaKit.ensureInitialized();

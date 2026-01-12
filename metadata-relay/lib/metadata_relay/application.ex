@@ -31,7 +31,7 @@ defmodule MetadataRelay.Application do
       ] ++
         maybe_tvdb_auth() ++
         maybe_opensubtitles_auth() ++
-        maybe_turn_server() ++
+        maybe_p2p_relay() ++
         [
           # Phoenix endpoint (serves both API and ErrorTracker dashboard)
           MetadataRelayWeb.Endpoint
@@ -118,19 +118,12 @@ defmodule MetadataRelay.Application do
     end
   end
 
-  defp maybe_turn_server do
-    if MetadataRelay.TurnServer.enabled?() do
-      secret = System.get_env("TURN_SECRET")
-
-      if secret && secret != "" do
-        Logger.info("TURN server enabled, starting integrated STUN/TURN server")
-        [MetadataRelay.TurnServer]
-      else
-        Logger.warning("TURN_ENABLED=true but TURN_SECRET not set, TURN server disabled")
-        []
-      end
+  defp maybe_p2p_relay do
+    if System.get_env("LIBP2P_RELAY_ENABLED") == "true" do
+      Logger.info("Libp2p Relay enabled, starting P2P host")
+      [MetadataRelay.P2p.Server]
     else
-      Logger.info("Integrated TURN server disabled (set TURN_ENABLED=true to enable)")
+      Logger.info("Libp2p Relay disabled")
       []
     end
   end

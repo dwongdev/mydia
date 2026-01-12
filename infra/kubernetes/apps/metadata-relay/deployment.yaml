@@ -32,21 +32,15 @@ spec:
           imagePullPolicy: Always
           ports:
             - name: http
+              containerPort: 4000
+              protocol: TCP
+            # Libp2p Relay ports
+            - name: p2p-tcp
               containerPort: 4001
               protocol: TCP
-            # Integrated TURN server ports
-            - name: turn-udp
-              containerPort: 3478
+            - name: p2p-udp
+              containerPort: 4001
               protocol: UDP
-            - name: turn-tcp
-              containerPort: 3478
-              protocol: TCP
-          env:
-            # Set TURN_PUBLIC_IP to the node's IP for TURN relay addresses
-            - name: TURN_PUBLIC_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.hostIP
           envFrom:
             - configMapRef:
                 name: metadata-relay-config

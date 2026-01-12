@@ -38,8 +38,8 @@ defmodule MetadataRelay.MixProject do
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:corsica, "~> 2.0"},
-      # STUN/TURN server (processone implementation)
-      {:stun, "~> 1.2"}
+      # Rustler for Libp2p Relay
+      {:rustler, "~> 0.34.0", runtime: false}
     ]
   end
 

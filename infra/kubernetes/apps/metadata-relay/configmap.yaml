@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/component: relay-service
 data:
   # Application configuration
-  PORT: "4001"
+  PORT: "4000"
   PHX_HOST: "relay.mydia.dev"
   MIX_ENV: "prod"
 
@@ -18,12 +18,7 @@ data:
   # Redis cache for distributed/persistent caching
   REDIS_URL: "redis://redis:6379"
 
-  # Integrated TURN Server Configuration
-  # The integrated TURN server provides STUN/TURN for WebRTC NAT traversal
-  TURN_ENABLED: "true"
-  TURN_PORT: "3478"
-  TURN_REALM: "relay.mydia.dev"
-  TURN_MIN_PORT: "49152"
-  TURN_MAX_PORT: "49252"
-  TURN_MAX_RATE: "1000000" # 1 MB/s (approx 8 Mbps)
-  # TURN_PUBLIC_IP is set via env in deployment.yaml using status.hostIP
+  # Libp2p Relay Server Configuration
+  # Replaces legacy TURN server for NAT traversal and signaling
+  LIBP2P_RELAY_ENABLED: "true"
+  LIBP2P_PORT: "4001"

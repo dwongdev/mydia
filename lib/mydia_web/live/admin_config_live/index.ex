@@ -252,37 +252,10 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   end
 
   @impl true
-  def handle_info({:remote_access_refresh_relay, component_id}, socket) do
-    # Give the relay a moment to reconnect, then update the component
-    Process.send_after(self(), {:remote_access_do_refresh_relay, component_id}, 1000)
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_info({:remote_access_do_refresh_relay, component_id}, socket) do
+  def handle_info({:remote_access_refresh_libp2p, component_id}, socket) do
     send_update(MydiaWeb.AdminConfigLive.RemoteAccessComponent,
       id: component_id,
-      refresh_relay: true
-    )
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_info({:check_port_status, component_id}, socket) do
-    send_update(MydiaWeb.AdminConfigLive.RemoteAccessComponent,
-      id: component_id,
-      start_port_check: true
-    )
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_info({:port_check_complete, component_id, result}, socket) do
-    send_update(MydiaWeb.AdminConfigLive.RemoteAccessComponent,
-      id: component_id,
-      port_check_result: result
+      refresh_libp2p: true
     )
 
     {:noreply, socket}

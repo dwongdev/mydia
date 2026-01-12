@@ -9,7 +9,7 @@ defmodule Mydia.RemoteAccess.StunClient do
   - It works over UDP, which is faster and has lower overhead
   - STUN servers are specifically designed for this purpose
   - Many reliable public STUN servers are available (Google, Twilio, etc.)
-  - It's the same mechanism used by WebRTC for ICE candidate gathering
+  - It's the same mechanism used for NAT traversal in P2P protocols
 
   ## Usage
 

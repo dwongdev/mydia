@@ -42,7 +42,6 @@ defmodule Mydia.Application do
         Mydia.Hooks.Manager,
         {Registry, keys: :unique, name: Mydia.Streaming.HlsSessionRegistry},
         Mydia.Streaming.HlsSessionSupervisor,
-        Mydia.Streaming.WebRTCSessionSupervisor,
         {Registry, keys: :unique, name: Mydia.Downloads.TranscodeRegistry},
         Mydia.Downloads.JobManager,
         Mydia.CrashReporter.Queue,
@@ -129,43 +128,14 @@ defmodule Mydia.Application do
   defp relay_children do
     # Relay is started dynamically after supervisor starts (see start_relay_if_enabled/0)
     # This avoids querying the database before Repo is started
-    [
-      Mydia.RemoteAccess.WebRTC.Supervisor
-    ]
+    []
   end
 
-  # Start relay service dynamically after supervisor starts
+  # Legacy relay service startup - no longer needed with libp2p architecture.
+  # The Mydia.Libp2p.Server is now started in the supervision tree and handles
+  # all p2p connectivity for remote access.
   defp start_relay_if_enabled do
-    # Only start relay service if remote access is enabled
-    # Skip in test environment to avoid connection attempts during tests
-    if Application.get_env(:mydia, :start_health_monitors, true) do
-      case Mydia.RemoteAccess.get_config() do
-        nil ->
-          :ok
-
-        config ->
-          if config.enabled do
-            # Check if relay is already running (prevents duplicate starts)
-            if Process.whereis(Mydia.RemoteAccess.Relay) do
-              :ok
-            else
-              # Start relay under the main supervisor
-              case DynamicSupervisor.start_child(
-                     {:via, Registry, {Mydia.DynamicSupervisorRegistry, :relay}},
-                     Mydia.RemoteAccess.Relay
-                   ) do
-                {:ok, _pid} -> :ok
-                {:error, {:already_started, _pid}} -> :ok
-                {:error, reason} -> {:error, reason}
-              end
-            end
-          else
-            :ok
-          end
-      end
-    else
-      :ok
-    end
+    :ok
   end
 
   defp oban_children do

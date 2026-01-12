@@ -1,8 +1,14 @@
 use rustler::{Env, LocalPid, ResourceArc, Term, OwnedEnv, Encoder, NifStruct, NifTaggedEnum};
-use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingRequest, PairingResponse, ReadMediaRequest, HostConfig};
+use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingResponse, HostConfig};
 use std::thread;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+
+mod atoms {
+    rustler::atoms! {
+        ok,
+    }
+}
 
 // Resource to hold the Host state
 struct HostResource {
@@ -16,7 +22,10 @@ fn load(env: Env, _info: Term) -> bool {
 
 #[rustler::nif]
 fn start_host() -> Result<(ResourceArc<HostResource>, String), rustler::Error> {
-    let config = HostConfig { enable_relay_server: false };
+    let config = HostConfig {
+        enable_relay_server: false,
+        bootstrap_peers: vec![],  // Can be extended to accept custom bootstrap peers
+    };
     let (host, peer_id_str) = Host::new(config);
     let resource = HostResource { host };
     Ok((ResourceArc::new(resource), peer_id_str))
@@ -38,7 +47,40 @@ fn dial(resource: ResourceArc<HostResource>, addr: String) -> Result<String, rus
     }
 }
 
+#[rustler::nif]
+fn bootstrap(resource: ResourceArc<HostResource>, addr: String) -> Result<String, rustler::Error> {
+    match resource.host.bootstrap(addr) {
+        Ok(_) => Ok("ok".to_string()),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
+    }
+}
+
+#[rustler::nif(schedule = "DirtyCpu")]
+fn provide_claim_code(resource: ResourceArc<HostResource>, claim_code: String) -> Result<String, rustler::Error> {
+    match resource.host.provide_claim_code(claim_code) {
+        Ok(_) => Ok("ok".to_string()),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
+    }
+}
+
+#[rustler::nif]
+fn get_dht_stats(resource: ResourceArc<HostResource>) -> ElixirDhtStats {
+    let stats = resource.host.get_dht_stats();
+    ElixirDhtStats {
+        routing_table_size: stats.routing_table_size,
+        provided_keys_count: stats.provided_keys_count,
+        bootstrap_complete: stats.bootstrap_complete,
+    }
+}
+
 // Mirror structs for Elixir interop
+#[derive(NifStruct)]
+#[module = "Mydia.Libp2p.DhtStats"]
+struct ElixirDhtStats {
+    pub routing_table_size: usize,
+    pub provided_keys_count: usize,
+    pub bootstrap_complete: bool,
+}
 #[derive(NifStruct)]
 #[module = "Mydia.Libp2p.PairingRequest"]
 struct ElixirPairingRequest {
@@ -102,7 +144,6 @@ fn respond_with_file_chunk(resource: ResourceArc<HostResource>, request_id: Stri
     // But for simplicity in Rustler, small reads are OK? No, disk I/O should be threaded.
     // Since we are inside a NIF, let's spawn a thread.
     
-    let host = resource.host.peer_id.clone(); // Just to clone something? No we need the host instance.
     // We can't move 'resource' into thread easily without Arc (it is Arc).
     let resource_clone = resource.clone();
     
@@ -146,10 +187,10 @@ fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid)
                     msg_env.send_and_clear(&pid, |env| {
                         match event {
                             Event::PeerDiscovered(peer_id) => {
-                                (rustler::atoms::ok(), "peer_discovered", peer_id).encode(env)
+                                (atoms::ok(), "peer_discovered", peer_id).encode(env)
                             }
                             Event::PeerExpired(peer_id) => {
-                                (rustler::atoms::ok(), "peer_expired", peer_id).encode(env)
+                                (atoms::ok(), "peer_expired", peer_id).encode(env)
                             }
                             Event::RequestReceived { peer, request, request_id } => {
                                 match request {
@@ -160,7 +201,7 @@ fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid)
                                             device_type: req.device_type,
                                             device_os: req.device_os,
                                         };
-                                        (rustler::atoms::ok(), "request_received", "pairing", request_id, elixir_req).encode(env)
+                                        (atoms::ok(), "request_received", "pairing", request_id, elixir_req).encode(env)
                                     },
                                     MydiaRequest::ReadMedia(req) => {
                                         let elixir_req = ElixirReadMediaRequest {
@@ -168,15 +209,17 @@ fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid)
                                             offset: req.offset,
                                             length: req.length,
                                         };
-                                        (rustler::atoms::ok(), "request_received", "read_media", request_id, elixir_req).encode(env)
+                                        (atoms::ok(), "request_received", "read_media", request_id, elixir_req).encode(env)
                                     },
                                     MydiaRequest::Ping => {
-                                        (rustler::atoms::ok(), "request_received", "ping", request_id).encode(env)
+                                        (atoms::ok(), "request_received", "ping", request_id).encode(env)
                                     }
-                                    _ => (rustler::atoms::ok(), "unknown_request").encode(env)
+                                    _ => (atoms::ok(), "unknown_request").encode(env)
                                 }
                             }
-                            _ => (rustler::atoms::ok(), "unknown_event").encode(env)
+                            Event::BootstrapCompleted => {
+                                (atoms::ok(), "bootstrap_completed").encode(env)
+                            }
                         }
                     });
                 } else {
@@ -189,4 +232,4 @@ fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid)
     Ok("ok".to_string())
 }
 
-rustler::init!("Elixir.Mydia.Libp2p", [start_host, listen, dial, start_listening, send_response, respond_with_file_chunk], load = load);
+rustler::init!("Elixir.Mydia.Libp2p", load = load);

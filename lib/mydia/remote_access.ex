@@ -406,6 +406,7 @@ defmodule Mydia.RemoteAccess do
   This function:
   1. Generates a random code locally
   2. Creates a local claim record
+  3. Provides the code on the DHT for discovery
 
   Returns {:ok, claim} if successful, {:error, reason} otherwise.
   """
@@ -416,13 +417,30 @@ defmodule Mydia.RemoteAccess do
 
     expires_at = DateTime.utc_now() |> DateTime.add(300, :second)
 
-    %PairingClaim{}
-    |> PairingClaim.changeset_with_code(%{
-      user_id: user_id,
-      code: code,
-      expires_at: expires_at
-    })
-    |> Repo.insert()
+    with {:ok, claim} <-
+           %PairingClaim{}
+           |> PairingClaim.changeset_with_code(%{
+             user_id: user_id,
+             code: code,
+             expires_at: expires_at
+           })
+           |> Repo.insert() do
+      # Provide the claim code on the DHT for discovery
+      # This runs async - failures don't affect claim creation
+      Task.start(fn ->
+        case Mydia.Libp2p.Server.provide_claim_code(code) do
+          {:ok, _} ->
+            require Logger
+            Logger.debug("Claim code #{code} provided on DHT")
+
+          {:error, reason} ->
+            require Logger
+            Logger.warning("Failed to provide claim code on DHT: #{inspect(reason)}")
+        end
+      end)
+
+      {:ok, claim}
+    end
   end
 
   @doc """
@@ -549,21 +567,123 @@ defmodule Mydia.RemoteAccess do
     |> String.upcase()
   end
 
-  # Relay service management
+  # Libp2p service management
 
   @doc """
-  Gets the status of the relay connection.
+  Gets the status of the libp2p host.
+
+  Returns {:ok, status} with a map containing:
+  - peer_id: The libp2p peer ID
+  - running: Whether the host is running
+  - dht_bootstrapped: Whether DHT bootstrap completed
+  - connected_peers: Number of connected peers
+  - discovered_peers: Number of discovered peers via mDNS
   """
-  def relay_status do
-    # TODO: Fetch status from Libp2p Server
-    {:ok, %{connected: true, registered: true, instance_id: "p2p"}}
+  def libp2p_status do
+    try do
+      status = Mydia.Libp2p.Server.status()
+      {:ok, status}
+    rescue
+      _ ->
+        {:ok,
+         %Mydia.Libp2p.Server.Status{
+           peer_id: nil,
+           running: false,
+           dht_bootstrapped: false,
+           connected_peers: 0,
+           discovered_peers: 0
+         }}
+    catch
+      :exit, _ ->
+        {:ok,
+         %Mydia.Libp2p.Server.Status{
+           peer_id: nil,
+           running: false,
+           dht_bootstrapped: false,
+           connected_peers: 0,
+           discovered_peers: 0
+         }}
+    end
   end
 
   @doc """
+  Checks if the libp2p service is available and running.
+  """
+  def libp2p_available? do
+    case libp2p_status() do
+      {:ok, %{running: true}} -> true
+      _ -> false
+    end
+  end
+
+  @doc """
+  Gets DHT statistics from the libp2p host.
+
+  Returns {:ok, stats} with:
+  - routing_table_size: Number of peers in the Kademlia routing table
+  - provided_keys_count: Number of claim codes currently being provided on DHT
+  - bootstrap_complete: Whether DHT bootstrap has completed
+  """
+  def dht_stats do
+    try do
+      stats = Mydia.Libp2p.Server.dht_stats()
+      {:ok, stats}
+    rescue
+      _ ->
+        {:ok,
+         %Mydia.Libp2p.DhtStats{
+           routing_table_size: 0,
+           provided_keys_count: 0,
+           bootstrap_complete: false
+         }}
+    catch
+      :exit, _ ->
+        {:ok,
+         %Mydia.Libp2p.DhtStats{
+           routing_table_size: 0,
+           provided_keys_count: 0,
+           bootstrap_complete: false
+         }}
+    end
+  end
+
+  @doc """
+  Gets the DHT registration status of a claim code.
+  Returns :not_found, :pending, :registered, or {:error, reason}.
+  """
+  def claim_code_dht_status(claim_code) do
+    try do
+      Mydia.Libp2p.Server.claim_code_status(claim_code)
+    rescue
+      _ -> :not_found
+    catch
+      :exit, _ -> :not_found
+    end
+  end
+
+  @doc """
+  DEPRECATED: Use libp2p_status/0 instead.
+  Gets the status of the relay connection (legacy compatibility).
+  """
+  def relay_status do
+    case libp2p_status() do
+      {:ok, status} ->
+        # Map libp2p status to legacy relay status format for compatibility
+        {:ok,
+         %{
+           connected: status.running,
+           registered: status.running,
+           instance_id: status.peer_id
+         }}
+    end
+  end
+
+  @doc """
+  DEPRECATED: Use libp2p_available?/0 instead.
   Checks if the relay service is available and connected.
   """
   def relay_available? do
-    true
+    libp2p_available?()
   end
 
   @doc """
@@ -606,22 +726,10 @@ defmodule Mydia.RemoteAccess do
 
   @doc """
   Updates the instance's direct URLs with the relay service.
-  DEPRECATED.
+  DEPRECATED - This is a stub that just returns the URLs without relay integration.
   """
   def update_relay_urls(direct_urls) when is_list(direct_urls) do
     {:ok, direct_urls}
-  end
-
-  @doc """
-  Updates the public port used for public IP URLs.
-  """
-  def update_relay_urls(direct_urls) when is_list(direct_urls) do
-    # Update the config
-    with {:ok, _config} <- upsert_config(%{direct_urls: direct_urls}),
-         # Notify the relay connection
-         :ok <- Mydia.RemoteAccess.Relay.update_direct_urls(direct_urls) do
-      {:ok, direct_urls}
-    end
   end
 
   @doc """

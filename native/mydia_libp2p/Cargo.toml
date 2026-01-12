@@ -12,3 +12,4 @@ crate-type = ["cdylib"]
 [dependencies]
 rustler = "0.34.0"
 mydia_p2p_core = { path = "../mydia_p2p_core" }
+tokio = { version = "1.43", features = ["rt-multi-thread"] }

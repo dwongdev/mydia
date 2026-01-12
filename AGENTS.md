@@ -12,6 +12,22 @@ Mydia is a self-hosted media management application for organizing and tracking 
 
 The application is designed to be deployed on personal servers or home lab environments, giving users complete control over their media collection data.
 
+## Remote Access Architecture (Libp2p)
+
+Mydia uses a decentralized **libp2p** architecture for remote access, replacing the legacy WebRTC/Relay system.
+
+### Key Components
+
+- **Core (Rust)**: The shared networking logic (Host, Swarm, DHT, mDNS) is implemented in a pure Rust crate (`native/mydia_p2p_core`). This ensures protocol parity between client and server.
+- **Backend (Elixir)**: The Phoenix app wraps the core crate using a Rustler NIF (`Mydia.Libp2p`). It acts as a permanent node in the mesh.
+- **Frontend (Flutter)**: The player app wraps the same core crate using `flutter_rust_bridge`. It connects to the backend via the p2p mesh for discovery and control.
+
+### Connectivity
+
+- **Discovery**: Nodes find each other via mDNS (local network) and Kademlia DHT (internet).
+- **Transport**: Connections are established over TCP or QUIC, secured with Noise encryption.
+- **Media**: Media streams (HLS) are served over the libp2p connection (via a local proxy in the client).
+
 ## Metadata Relay Service
 
 Mydia uses a companion service called **metadata-relay**, which is a developer-owned service that:
@@ -34,6 +50,10 @@ Mydia uses a companion service called **metadata-relay**, which is a developer-o
 - **Never** embed TVDB or TMDB API keys directly in the mydia application
 - Configure the metadata-relay base URL via application configuration
 - Handle metadata-relay service failures gracefully with appropriate error messages
+
+## Player (Flutter)
+
+The Flutter player has additional workflow guidance in `player/CLAUDE.md`.
 
 ## Project guidelines
 
@@ -582,4 +602,3 @@ And **never** do this:
 <!-- phoenix:liveview-end -->
 
 <!-- usage-rules-end -->
-

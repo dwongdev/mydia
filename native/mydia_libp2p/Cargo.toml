@@ -11,7 +11,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 rustler = "0.34.0"
-tokio = { version = "1.43", features = ["full"] }
-libp2p = { version = "0.54", features = ["tokio", "gossipsub", "mdns", "noise", "macros", "tcp", "yamux", "quic", "dns", "kad", "ping", "identify"] }
-env_logger = "0.11"
-log = "0.4"
+mydia_p2p_core = { path = "../mydia_p2p_core" }

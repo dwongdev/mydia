@@ -1879,10 +1879,19 @@ dependencies = [
 name = "mydia_libp2p"
 version = "0.1.0"
 dependencies = [
+ "mydia_p2p_core",
+ "rustler",
+]
+
+[[package]]
+name = "mydia_p2p_core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
  "env_logger",
+ "futures",
  "libp2p",
  "log",
- "rustler",
  "tokio",
 ]
 

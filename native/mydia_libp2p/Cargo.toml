@@ -1,0 +1,17 @@
+[package]
+name = "mydia_libp2p"
+version = "0.1.0"
+authors = []
+edition = "2021"
+
+[lib]
+name = "mydia_libp2p"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.34.0"
+tokio = { version = "1.43", features = ["full"] }
+libp2p = { version = "0.54", features = ["tokio", "gossipsub", "mdns", "noise", "macros", "tcp", "yamux", "quic", "dns", "kad", "ping", "identify"] }
+env_logger = "0.11"
+log = "0.4"

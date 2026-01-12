@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:player/native/frb_generated.dart';
+import 'package:player/native/lib.dart';
 
 /// Provider for the Libp2pService
 final libp2pServiceProvider = Provider<Libp2pService>((ref) {
@@ -12,7 +12,7 @@ final libp2pServiceProvider = Provider<Libp2pService>((ref) {
 
 /// Service to handle Libp2p networking and discovery via Rust Native Core
 class Libp2pService {
-  P2pHost? _host;
+  P2PHost? _host;
   bool _isInitialized = false;
   
   // Stream of discovered peers
@@ -28,8 +28,8 @@ class Libp2pService {
       debugPrint('[Libp2p] Initializing Rust Core Host...');
       
       // Initialize Host via FRB
-      // Assuming new() returns (P2pHost, String)
-      final (host, peerId) = await P2pHost.new_();
+      // Returns a Record (P2PHost, String)
+      final (host, peerId) = P2PHost.init();
       _host = host;
       
       debugPrint('[Libp2p] Host started with PeerID: $peerId');
@@ -57,7 +57,7 @@ class Libp2pService {
   }
 
   Future<void> dispose() async {
-    // Rust host is dropped when P2pHost is garbage collected or via dispose logic if added
+    // Rust host is dropped when P2PHost is garbage collected or via dispose logic if added
     await _peerController.close();
     _isInitialized = false;
   }

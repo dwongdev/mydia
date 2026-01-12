@@ -5,8 +5,9 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1.43", features = ["full"] }
-libp2p = { version = "0.54", features = ["tokio", "gossipsub", "mdns", "noise", "macros", "tcp", "yamux", "quic", "dns", "kad", "ping", "identify"] }
+libp2p = { version = "0.54", features = ["tokio", "gossipsub", "mdns", "noise", "macros", "tcp", "yamux", "quic", "dns", "kad", "ping", "identify", "request-response", "cbor"] }
 env_logger = "0.11"
 log = "0.4"
 anyhow = "1.0"
 futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }

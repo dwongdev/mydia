@@ -1,6 +1,7 @@
+mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be accurate, and you can change it according to your needs. */
 use mydia_p2p_core::{Host, Event};
 use flutter_rust_bridge::frb;
-use flutter_rust_bridge::StreamSink;
+use crate::frb_generated::StreamSink;
 
 #[frb(init)]
 pub fn init_app() {
@@ -14,7 +15,7 @@ pub struct P2pHost {
 
 impl P2pHost {
     #[frb(sync)]
-    pub fn new() -> (Self, String) {
+    pub fn init() -> (Self, String) {
         let (host, peer_id) = Host::new();
         (P2pHost { inner: host }, peer_id)
     }

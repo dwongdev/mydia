@@ -15,4 +15,78 @@ abstract class P2PHost implements RustOpaqueInterface {
   static (P2PHost, String) init() => RustLib.instance.api.crateP2PHostInit();
 
   Future<void> listen({required String addr});
+
+  Future<Uint8List> readStreamChunk(
+      {required String streamId, required int size});
+
+  Future<String> requestMedia({required String peer, required String filePath});
+
+  Future<FlutterPairingResponse> sendPairingRequest(
+      {required String peer, required FlutterPairingRequest req});
+}
+
+class FlutterPairingRequest {
+  final String claimCode;
+  final String deviceName;
+  final String deviceType;
+  final String? deviceOs;
+
+  const FlutterPairingRequest({
+    required this.claimCode,
+    required this.deviceName,
+    required this.deviceType,
+    this.deviceOs,
+  });
+
+  @override
+  int get hashCode =>
+      claimCode.hashCode ^
+      deviceName.hashCode ^
+      deviceType.hashCode ^
+      deviceOs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterPairingRequest &&
+          runtimeType == other.runtimeType &&
+          claimCode == other.claimCode &&
+          deviceName == other.deviceName &&
+          deviceType == other.deviceType &&
+          deviceOs == other.deviceOs;
+}
+
+class FlutterPairingResponse {
+  final bool success;
+  final String? mediaToken;
+  final String? accessToken;
+  final String? deviceToken;
+  final String? error;
+
+  const FlutterPairingResponse({
+    required this.success,
+    this.mediaToken,
+    this.accessToken,
+    this.deviceToken,
+    this.error,
+  });
+
+  @override
+  int get hashCode =>
+      success.hashCode ^
+      mediaToken.hashCode ^
+      accessToken.hashCode ^
+      deviceToken.hashCode ^
+      error.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterPairingResponse &&
+          runtimeType == other.runtimeType &&
+          success == other.success &&
+          mediaToken == other.mediaToken &&
+          accessToken == other.accessToken &&
+          deviceToken == other.deviceToken &&
+          error == other.error;
 }

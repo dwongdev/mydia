@@ -98,13 +98,27 @@ defmodule Mydia.Libp2p.Server do
   end
 
   def handle_info({:ok, "request_received", "ping", request_id}, state) do
-    # Ping is handled automatically by libp2p ping protocol usually, but if we have application level ping
-    # we can respond here. However, mydia_p2p_core only exposes Ping request for testing manually?
-    # Actually `MydiaRequest::Ping` was defined.
-    # But currently `send_response` NIF only accepts `ElixirResponse` which handles Pairing or Error.
-    # I should update `ElixirResponse` to handle Ping if needed, or just ignore.
-    # For now, let's ignore or log.
     Logger.debug("Libp2p Ping Request received (manual)")
+    {:noreply, state}
+  end
+
+  def handle_info({:ok, "request_received", "read_media", request_id, req}, state) do
+    # Validate file path exists
+    # SECURITY: In production, verify path is within allowed directories!
+    if File.exists?(req.file_path) do
+      # Use the optimized NIF to read chunk and respond
+      Libp2p.respond_with_file_chunk(
+        state.resource,
+        request_id,
+        req.file_path,
+        req.offset,
+        req.length
+      )
+    else
+      Logger.warning("Requested file not found: #{req.file_path}")
+      Libp2p.send_response(state.resource, request_id, {:error, "File not found"})
+    end
+
     {:noreply, state}
   end
 

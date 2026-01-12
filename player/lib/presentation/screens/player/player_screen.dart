@@ -7,15 +7,18 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:graphql_flutter/graphql_flutter.dart';
 import 'package:http/http.dart' as http;
 import '../../../core/auth/auth_status.dart';
+import '../../../core/connection/connection_provider.dart';
 import '../../../core/graphql/graphql_provider.dart';
 import '../../../core/player/progress_service.dart';
 import '../../../core/utils/file_utils.dart' as file_utils;
 import '../../../core/player/platform_features.dart';
 import '../../../core/player/streaming_strategy.dart';
+import '../../../core/webrtc/webrtc_connection_manager.dart';
 import '../../../core/cast/cast_providers.dart';
 import '../../../core/downloads/download_providers.dart';
 import '../../widgets/resume_dialog.dart';
@@ -78,6 +81,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   // HLS quality selection (web only)
   HlsQualityLevel _selectedQuality = HlsQualityLevel.auto;
 
+  // WebRTC state
+  final RTCVideoRenderer _rtcRenderer = RTCVideoRenderer();
+  bool _isWebRTCStreaming = false;
+  WebRTCConnectionManager? _webrtcManager;
+
   // Desktop feature state
   final FocusNode _focusNode = FocusNode();
   DateTime? _lastClickTime;
@@ -85,6 +93,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   @override
   void initState() {
     super.initState();
+    _rtcRenderer.initialize();
     _initializePlayer();
   }
 
@@ -183,10 +192,30 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         }
       } else {
         // Determine optimal streaming strategy based on platform
-        final strategy = StreamingStrategyService.getOptimalStrategy();
+        var strategy = StreamingStrategyService.getOptimalStrategy();
+
+        // Check for WebRTC mode
+        final connectionState = ref.read(connectionProvider);
+        if (connectionState.isWebRTCMode && connectionState.webrtcManager != null) {
+          debugPrint('WebRTC mode detected, using WebRTC streaming strategy');
+          strategy = StreamingStrategy.webRTC;
+          _webrtcManager = connectionState.webrtcManager;
+        }
 
         // Get media token for URL (if available)
         final mediaToken = await mediaTokenService.getToken();
+
+        // Handle WebRTC streaming
+        if (strategy == StreamingStrategy.webRTC && _webrtcManager != null) {
+          await _initializeWebRTCPlayback();
+          
+          if (mounted) {
+            setState(() {
+              _isLoading = false;
+            });
+          }
+          return;
+        }
 
         final streamUrl = StreamingStrategyService.buildStreamUrl(
           serverUrl: serverUrl,
@@ -304,6 +333,42 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       if (mounted) {
         setState(() {
           _error = e.toString();
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  /// Initialize WebRTC playback
+  Future<void> _initializeWebRTCPlayback() async {
+    try {
+      debugPrint('Initializing WebRTC playback');
+      setState(() {
+        _isWebRTCStreaming = true;
+        _loadingMessage = 'Starting WebRTC stream...';
+      });
+
+      // Listen for incoming streams
+      _webrtcManager!.onMediaStream.listen((stream) {
+        debugPrint('Received WebRTC media stream');
+        setState(() {
+          _rtcRenderer.srcObject = stream;
+          _loadingMessage = null;
+        });
+      });
+
+      // Start the stream
+      // Default to medium profile for now
+      await _webrtcManager!.startStream(widget.fileId, _savedPositionSeconds ?? 0, 'relay-medium');
+
+      // Start progress tracking (manual timer for WebRTC)
+      // TODO: Implement progress tracking for WebRTC based on seek/elapsed time
+      
+    } catch (e) {
+      debugPrint('Error initializing WebRTC playback: $e');
+      if (mounted) {
+        setState(() {
+          _error = 'Failed to start WebRTC stream: $e';
           _isLoading = false;
         });
       }
@@ -817,6 +882,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     // Dispose player (VideoController is automatically disposed when player is disposed)
     _player?.dispose();
+    _rtcRenderer.dispose();
+    if (_isWebRTCStreaming) {
+      _webrtcManager?.stopStream();
+    }
     _focusNode.dispose();
     super.dispose();
   }
@@ -841,6 +910,66 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       body: SafeArea(
         child: body,
       ),
+    );
+  }
+
+  Widget _buildWebRTCPlayer() {
+    return Stack(
+      children: [
+        SizedBox.expand(
+          child: RTCVideoView(
+            _rtcRenderer,
+            objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+          ),
+        ),
+        // Overlay standard controls (custom implementation for WebRTC needed)
+        // For now, minimal controls
+        Positioned(
+          bottom: 40,
+          left: 20,
+          right: 20,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.replay_10),
+                onPressed: () {
+                  // TODO: Implement seek
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.pause),
+                onPressed: () {
+                  // TODO: Implement pause
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.forward_10),
+                onPressed: () {
+                  // TODO: Implement seek
+                },
+              ),
+            ],
+          ),
+        ),
+        Positioned(
+          top: 8,
+          left: 8,
+          child: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/');
+              }
+            },
+            style: IconButton.styleFrom(
+              backgroundColor: Colors.black.withValues(alpha: 0.5),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -869,6 +998,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     if (_error != null) {
       return _buildError();
+    }
+
+    if (_isWebRTCStreaming) {
+      return _buildWebRTCPlayer();
     }
 
     if (_videoController == null) {

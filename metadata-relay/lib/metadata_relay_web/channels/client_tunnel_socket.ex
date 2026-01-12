@@ -32,17 +32,54 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
   end
 
   @impl true
-  def connect(_state) do
+  def connect(state) do
     session_id = generate_session_id()
-    Logger.info("Client tunnel socket connect: session_id=#{session_id}")
+    client_ip = extract_peer_ip(state)
+
+    Logger.info(
+      "Client tunnel socket connect: session_id=#{session_id}, client_ip=#{client_ip || "unknown"}"
+    )
 
     {:ok,
      %{
        session_id: session_id,
        instance_id: nil,
        connected: false,
-       timeout_timer: nil
+       timeout_timer: nil,
+       client_ip: client_ip
      }}
+  end
+
+  # Extract peer IP from connect_info, handling proxies via X-Forwarded-For
+  defp extract_peer_ip(state) do
+    connect_info = Map.get(state, :connect_info, %{})
+
+    # First check X-Forwarded-For header (for reverse proxy scenarios)
+    x_headers = Map.get(connect_info, :x_headers, [])
+
+    forwarded_ip =
+      x_headers
+      |> Enum.find_value(fn
+        {"x-forwarded-for", value} ->
+          # Take the first IP (original client)
+          value |> String.split(",") |> List.first() |> String.trim()
+
+        _ ->
+          nil
+      end)
+
+    if forwarded_ip do
+      forwarded_ip
+    else
+      # Fall back to direct peer connection
+      case Map.get(connect_info, :peer_data) do
+        %{address: address} ->
+          address |> :inet.ntoa() |> to_string()
+
+        _ ->
+          nil
+      end
+    end
   end
 
   @impl true
@@ -77,14 +114,14 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
   def handle_info({:relay_response, payload}, state) do
     # Forward response from instance to client
     state = reset_timeout(state)
-    
+
     # Payload is from Mydia via RelaySocket -> PubSub -> ClientTunnelSocket.
     # Mydia sends `webrtc_answer` etc. via `send_webrtc_message` which sends `{"type": "webrtc_...", ...}` to RelaySocket.
     # RelaySocket `handle_message` receives it.
-    
+
     # Wait, I need to update `RelaySocket.handle_message` to handle `webrtc_` messages and broadcast them.
     # Currently it only handles `relay_message`, `ping`, `create_claim`, `register` etc.
-    
+
     message =
       Jason.encode!(%{
         type: "message",
@@ -97,13 +134,18 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
   @impl true
   def handle_info({:webrtc_message, type, payload}, state) do
     # Forward WebRTC message to client
+    Logger.info(
+      "Relay->client WebRTC: session=#{state.session_id}, type=#{type}, payload_size=#{byte_size(payload)}"
+    )
+
     state = reset_timeout(state)
-    
-    message = Jason.encode!(%{
-      type: type,
-      payload: payload
-    })
-    
+
+    message =
+      Jason.encode!(%{
+        type: type,
+        payload: payload
+      })
+
     {:push, {:text, message}, state}
   end
 
@@ -134,12 +176,12 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
           state = reset_timeout(state)
 
           # Notify the instance about the incoming connection
-          # Instance needs to know: session_id and client public key (if available)
-          # For now, we send a connection notification - handshake will happen via messages
+          # Instance needs to know: session_id, client public key (if available), and client IP
+          # The client IP is needed for TURN permission creation
           Phoenix.PubSub.broadcast(
             MetadataRelay.PubSub,
             "relay:instance:#{instance_id}",
-            {:relay_connection, state.session_id, <<>>}
+            {:relay_connection, state.session_id, <<>>, state.client_ip}
           )
 
           # Get instance protocol versions from ConnectionRegistry
@@ -167,6 +209,7 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
 
           {:reply, :error, {:text, response}, state}
         end
+
       {:error, :not_found} ->
         response =
           Jason.encode!(%{
@@ -181,16 +224,19 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
   defp handle_message(
          %{"type" => "webrtc_" <> _ = type, "payload" => payload},
          state
-       ) when state.connected do
-     Logger.info("Forwarding WebRTC signaling #{type} from client to instance #{state.instance_id}")
-     
-     # Broadcast as a distinct webrtc_signaling event so RelaySocket can forward it properly
-     Phoenix.PubSub.broadcast(
-       MetadataRelay.PubSub,
-       "relay:instance:#{state.instance_id}",
-       {:webrtc_signaling, state.session_id, type, payload}
-     )
-     {:ok, state}
+       )
+       when state.connected do
+    Logger.info(
+      "Client->relay WebRTC: session=#{state.session_id}, instance=#{state.instance_id}, type=#{type}, payload_size=#{byte_size(payload)}"
+    )
+
+    Phoenix.PubSub.broadcast(
+      MetadataRelay.PubSub,
+      "relay:instance:#{state.instance_id}",
+      {:webrtc_signaling, state.session_id, type, payload}
+    )
+
+    {:ok, state}
   end
 
   defp handle_message(
@@ -210,12 +256,15 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
           state = reset_timeout(state)
 
           # Notify the instance about the incoming connection
-          Logger.debug("Broadcasting relay_connection to relay:instance:#{info.instance_id}")
+          # Include client IP for TURN permission creation
+          Logger.debug(
+            "Broadcasting relay_connection to relay:instance:#{info.instance_id}, client_ip=#{state.client_ip || "unknown"}"
+          )
 
           Phoenix.PubSub.broadcast(
             MetadataRelay.PubSub,
             "relay:instance:#{info.instance_id}",
-            {:relay_connection, state.session_id, <<>>}
+            {:relay_connection, state.session_id, <<>>, state.client_ip}
           )
 
           Logger.debug("Broadcast sent for session #{state.session_id}")

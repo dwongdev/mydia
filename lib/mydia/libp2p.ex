@@ -14,6 +14,8 @@ defmodule Mydia.Libp2p do
   def start_listening(_resource, _pid), do: :erlang.nif_error(:nif_not_loaded)
 
   def send_response(_resource, _request_id, _response), do: :erlang.nif_error(:nif_not_loaded)
+
+  def stream_file(_resource, _stream_id, _file_path), do: :erlang.nif_error(:nif_not_loaded)
 end
 
 defmodule Mydia.Libp2p.PairingRequest do

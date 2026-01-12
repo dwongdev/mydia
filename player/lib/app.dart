@@ -5,12 +5,33 @@ import 'core/theme/app_theme.dart';
 import 'core/providers/providers.dart';
 import 'core/graphql/graphql_provider.dart';
 import 'presentation/widgets/cast_mini_controller.dart';
+import 'package:player/core/p2p/libp2p_service.dart';
+import 'package:player/core/p2p/local_proxy_service.dart';
 
-class MyApp extends ConsumerWidget {
+class MyApp extends ConsumerStatefulWidget {
   const MyApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends ConsumerState<MyApp> {
+  @override
+  void initState() {
+    super.initState();
+    // Initialize P2P services
+    Future.microtask(() async {
+      try {
+        await ref.read(libp2pServiceProvider).initialize();
+        await ref.read(localProxyServiceProvider).start();
+      } catch (e) {
+        debugPrint('[MyApp] Failed to initialize P2P: $e');
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final authState = ref.watch(authStateProvider);
 
     debugPrint('[MyApp] authState=$authState');

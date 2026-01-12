@@ -12,7 +12,10 @@ enum StreamingStrategy {
   hlsCopy('HLS_COPY'),
 
   /// HLS streaming with transcoding to H264/AAC
-  transcode('TRANSCODE');
+  transcode('TRANSCODE'),
+
+  /// WebRTC streaming (RTP over UDP/TURN)
+  webRTC('WEBRTC');
 
   const StreamingStrategy(this.value);
   final String value;
@@ -105,6 +108,8 @@ class StreamingStrategyService {
         return 'HLS (Stream Copy)';
       case StreamingStrategy.transcode:
         return 'HLS (Transcoded)';
+      case StreamingStrategy.webRTC:
+        return 'WebRTC';
     }
   }
 }

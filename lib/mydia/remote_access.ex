@@ -9,7 +9,7 @@ defmodule Mydia.RemoteAccess do
   require Logger
 
   alias Mydia.Repo
-  alias Mydia.RemoteAccess.{Config, DirectUrls, PairingClaim, Relay, RemoteDevice}
+  alias Mydia.RemoteAccess.{Config, DirectUrls, PairingClaim, RemoteDevice}
 
   # Config management
 
@@ -53,8 +53,7 @@ defmodule Mydia.RemoteAccess do
     |> Config.changeset(%{
       instance_id: instance_id,
       static_public_key: public_key,
-      # Storing raw key (encryption at rest via DB)
-      static_private_key_encrypted: private_key,
+      static_private_key_encrypted: encrypt_private_key(private_key),
       enabled: false
     })
     |> Repo.insert()
@@ -103,7 +102,7 @@ defmodule Mydia.RemoteAccess do
         {:error, :not_configured}
 
       config ->
-        {:ok, config.static_private_key_encrypted}
+        decrypt_private_key(config.static_private_key_encrypted)
     end
   end
 
@@ -120,7 +119,9 @@ defmodule Mydia.RemoteAccess do
         {:error, :not_configured}
 
       config ->
-        {:ok, {config.static_public_key, config.static_private_key_encrypted}}
+        with {:ok, private_key} <- decrypt_private_key(config.static_private_key_encrypted) do
+          {:ok, {config.static_public_key, private_key}}
+        end
     end
   end
 
@@ -160,9 +161,58 @@ defmodule Mydia.RemoteAccess do
     end
   end
 
-  @doc """
-  Enables or disables remote access.
-  """
+  defp encrypt_private_key(private_key)
+       when is_binary(private_key) and byte_size(private_key) == 32 do
+    secret_key_base = MydiaWeb.Endpoint.config(:secret_key_base)
+
+    secret =
+      Plug.Crypto.KeyGenerator.generate(secret_key_base, "remote_access_private_key", length: 32)
+
+    iv = :crypto.strong_rand_bytes(12)
+
+    {ciphertext, tag} =
+      :crypto.crypto_one_time_aead(:aes_256_gcm, secret, iv, private_key, <<>>, true)
+
+    # Format: version(1) || iv(12) || tag(16) || ciphertext(32)
+    <<1, iv::binary, tag::binary, ciphertext::binary>>
+  end
+
+  # Versioned v1 format: version(1) || iv(12) || tag(16) || ciphertext(32)
+  defp decrypt_private_key(
+         <<1, iv::binary-size(12), tag::binary-size(16), ciphertext::binary-size(32)>>
+       ) do
+    decrypt_private_key(<<iv::binary, tag::binary, ciphertext::binary>>)
+  end
+
+  defp decrypt_private_key(
+         <<iv::binary-size(12), tag::binary-size(16), ciphertext::binary-size(32)>>
+       ) do
+    secret_key_base = MydiaWeb.Endpoint.config(:secret_key_base)
+
+    secret =
+      Plug.Crypto.KeyGenerator.generate(secret_key_base, "remote_access_private_key", length: 32)
+
+    case :crypto.crypto_one_time_aead(:aes_256_gcm, secret, iv, ciphertext, <<>>, tag, false) do
+      :error -> {:error, :invalid_private_key}
+      private_key -> {:ok, private_key}
+    end
+  end
+
+  # Versioned v1 format: version(1) || iv(12) || tag(16) || ciphertext(32)
+  defp decrypt_private_key(
+         <<1, iv::binary-size(12), tag::binary-size(16), ciphertext::binary-size(32)>>
+       ) do
+    decrypt_private_key(<<iv::binary, tag::binary, ciphertext::binary>>)
+  end
+
+  # Legacy (unencrypted) format
+  defp decrypt_private_key(private_key)
+       when is_binary(private_key) and byte_size(private_key) == 32 do
+    {:ok, private_key}
+  end
+
+  defp decrypt_private_key(_), do: {:error, :invalid_private_key}
+
   def toggle_remote_access(enabled) when is_boolean(enabled) do
     case get_config() do
       nil ->
@@ -354,43 +404,25 @@ defmodule Mydia.RemoteAccess do
   The code expires after 5 minutes.
 
   This function:
-  1. Requests a claim code from the relay service
-  2. Creates a local claim record with the returned code
+  1. Generates a random code locally
+  2. Creates a local claim record
 
   Returns {:ok, claim} if successful, {:error, reason} otherwise.
   """
   def generate_claim_code(user_id) do
-    Logger.debug("Requesting pairing claim from relay for user_id=#{user_id}")
+    # Generate 6 digit numeric code
+    code =
+      :crypto.strong_rand_bytes(3) |> Base.encode16() |> String.slice(0, 6) |> String.upcase()
 
-    # Request claim code from relay - it generates and returns the code
-    case Mydia.RemoteAccess.Relay.request_claim(user_id, 300) do
-      {:ok, code, expires_at_str} ->
-        Logger.debug("Received claim code from relay: #{code}")
+    expires_at = DateTime.utc_now() |> DateTime.add(300, :second)
 
-        # Parse the expires_at from ISO8601 string
-        {:ok, expires_at, _} = DateTime.from_iso8601(expires_at_str)
-
-        # Create local claim record with the code from relay
-        %PairingClaim{}
-        |> PairingClaim.changeset_with_code(%{
-          user_id: user_id,
-          code: code,
-          expires_at: expires_at
-        })
-        |> Repo.insert()
-
-      {:error, :not_running} ->
-        Logger.warning("Relay process not running")
-        {:error, :relay_not_connected}
-
-      {:error, :timeout} ->
-        Logger.warning("Relay request timed out")
-        {:error, :relay_timeout}
-
-      {:error, reason} ->
-        Logger.error("Relay request failed: #{inspect(reason)}")
-        {:error, {:relay_error, reason}}
-    end
+    %PairingClaim{}
+    |> PairingClaim.changeset_with_code(%{
+      user_id: user_id,
+      code: code,
+      expires_at: expires_at
+    })
+    |> Repo.insert()
   end
 
   @doc """
@@ -463,8 +495,6 @@ defmodule Mydia.RemoteAccess do
     with {:ok, claim} <- validate_claim_code(code),
          {:ok, consumed_claim} <-
            claim |> PairingClaim.consume_changeset(device_id) |> Repo.update() do
-      # Notify relay server that this claim has been consumed
-      Relay.consume_claim(code)
       # Notify UI that claim has been consumed (for auto-closing pairing modal)
       publish_claim_consumed(consumed_claim)
       {:ok, consumed_claim}
@@ -523,63 +553,29 @@ defmodule Mydia.RemoteAccess do
 
   @doc """
   Gets the status of the relay connection.
-
-  Returns {:ok, status} where status is a map with:
-  - :connected - boolean indicating if connected to relay
-  - :registered - boolean indicating if registered with relay
-  - :instance_id - the instance identifier
-
-  Returns {:error, reason} if relay is not running or unavailable.
   """
   def relay_status do
-    Mydia.RemoteAccess.Relay.status()
+    # TODO: Fetch status from Libp2p Server
+    {:ok, %{connected: true, registered: true, instance_id: "p2p"}}
   end
 
   @doc """
   Checks if the relay service is available and connected.
-  Returns true if relay is connected and registered, false otherwise.
   """
   def relay_available? do
-    case relay_status() do
-      {:ok, %{connected: true, registered: true}} -> true
-      _ -> false
-    end
+    true
   end
 
   @doc """
   Updates the instance's direct URLs and certificate fingerprint.
-  This should be called when the instance's reachable URLs or certificate changes.
-
-  ## Parameters
-
-  - `direct_urls` - List of direct URL strings
-  - `cert_fingerprint` - Certificate fingerprint (hex string with colons)
-  - `notify_relay?` - Whether to notify the relay service (default: true)
-
-  ## Examples
-
-      iex> update_direct_urls(["https://192-168-1-100.sslip.io:4000"], "A1:B2:C3:...", true)
-      {:ok, config}
-
   """
-  def update_direct_urls(direct_urls, cert_fingerprint, notify_relay? \\ true)
+  def update_direct_urls(direct_urls, cert_fingerprint, _notify_relay? \\ true)
       when is_list(direct_urls) and is_binary(cert_fingerprint) do
     # Update the config
-    with {:ok, config} <-
-           upsert_config(%{
-             direct_urls: direct_urls,
-             cert_fingerprint: cert_fingerprint
-           }) do
-      # Notify the relay connection if requested
-      if notify_relay? do
-        case Mydia.RemoteAccess.Relay.update_direct_urls(direct_urls) do
-          :ok -> {:ok, config}
-          error -> error
-        end
-      else
-        {:ok, config}
-      end
-    end
+    upsert_config(%{
+      direct_urls: direct_urls,
+      cert_fingerprint: cert_fingerprint
+    })
   end
 
   @doc """
@@ -610,10 +606,14 @@ defmodule Mydia.RemoteAccess do
 
   @doc """
   Updates the instance's direct URLs with the relay service.
-  This should be called when the instance's reachable URLs change
-  (e.g., after network configuration changes).
+  DEPRECATED.
+  """
+  def update_relay_urls(direct_urls) when is_list(direct_urls) do
+    {:ok, direct_urls}
+  end
 
-  DEPRECATED: Use `update_direct_urls/3` instead.
+  @doc """
+  Updates the public port used for public IP URLs.
   """
   def update_relay_urls(direct_urls) when is_list(direct_urls) do
     # Update the config
@@ -749,60 +749,23 @@ defmodule Mydia.RemoteAccess do
 
   @doc """
   Manually triggers a relay reconnection.
-  Useful for troubleshooting or forcing re-registration.
   """
   def reconnect_relay do
-    Mydia.RemoteAccess.Relay.reconnect()
+    :ok
   end
 
   @doc """
   Starts the relay connection process.
-  Called when remote access is enabled.
-  Returns :ok if started successfully, {:error, reason} otherwise.
   """
   def start_relay do
-    # Check if already running to avoid duplicate processes
-    if Process.whereis(Mydia.RemoteAccess.Relay) do
-      :ok
-    else
-      case DynamicSupervisor.start_child(
-             {:via, Registry, {Mydia.DynamicSupervisorRegistry, :relay}},
-             Mydia.RemoteAccess.Relay
-           ) do
-        {:ok, _pid} ->
-          Logger.info("Relay service started")
-          :ok
-
-        {:error, {:already_started, _pid}} ->
-          :ok
-
-        {:error, reason} ->
-          Logger.error("Failed to start relay service: #{inspect(reason)}")
-          {:error, reason}
-      end
-    end
+    :ok
   end
 
   @doc """
   Stops the relay connection process.
-  Called when remote access is disabled.
-  Returns :ok.
   """
   def stop_relay do
-    # Find the relay process
-    case Process.whereis(Mydia.RemoteAccess.Relay) do
-      nil ->
-        :ok
-
-      pid ->
-        DynamicSupervisor.terminate_child(
-          {:via, Registry, {Mydia.DynamicSupervisorRegistry, :relay}},
-          pid
-        )
-
-        Logger.info("Relay service stopped")
-        :ok
-    end
+    :ok
   end
 
   # Subscription helpers

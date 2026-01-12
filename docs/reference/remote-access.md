@@ -84,10 +84,10 @@ The app will try these URLs when probing for direct connectivity.
 All communication is encrypted end-to-end:
 
 - **WebRTC DataChannels**: Mandatory Noise protocol encryption (E2EE)
-- **Relay tunnel**: TLS to relay + end-to-end encryption via X25519/ChaCha20-Poly1305
+- **Signaling**: TLS to relay (metadata only, payloads encrypted)
 - **Direct connection**: TLS with optional certificate pinning
 
-The relay service cannot read your data; it only forwards encrypted messages. E2EE is mandatory for all WebRTC connections - plaintext communication is not supported.
+The relay service cannot read your data; it only forwards encrypted signaling messages and encrypted WebRTC traffic (via TURN). E2EE is mandatory for all WebRTC connections - plaintext communication is not supported.
 
 ### Authentication
 
@@ -160,11 +160,13 @@ When remote access is enabled, your Mydia instance:
 ### Client Connection
 
 When the app connects:
-1. Connects to relay service
+1. Connects to relay service via WebSocket (Signaling Channel)
 2. Requests connection to specific instance ID
 3. Relay forwards request to instance
-4. X25519 handshake proceeds over relay
-5. Encrypted session established
+4. **WebRTC Negotiation**: Peers exchange SDP offers/answers and ICE candidates via relay
+5. **PeerConnection Established**: Direct P2P or via TURN
+6. **Noise Handshake**: Completed over the `mydia-api` DataChannel
+7. Encrypted session established
 
 ## WebRTC E2EE Protocol Specification
 

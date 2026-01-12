@@ -157,7 +157,13 @@ case "$COMMAND" in
 
     iex)
         echo -e "${GREEN}Starting IEx in $SERVICE_NAME container...${NC}"
-        run_in_container iex -S mix
+        # If you pass flags (e.g. -e), forward them to iex.
+        # Default is interactive iex -S mix.
+        if [ $# -gt 0 ]; then
+            run_in_container iex "$@"
+        else
+            run_in_container iex -S mix
+        fi
         ;;
 
     # Mix command shortcuts

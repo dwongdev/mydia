@@ -83,4 +83,12 @@ impl P2pHost {
             Err(e) => Err(anyhow::anyhow!(e)),
         }
     }
+
+    pub async fn request_media(&self, peer: String, file_path: String) -> anyhow::Result<String> {
+        self.inner.request_media(peer, file_path).await.map_err(|e| anyhow::anyhow!(e))
+    }
+
+    pub async fn read_stream_chunk(&self, stream_id: String, size: u32) -> anyhow::Result<Vec<u8>> {
+        self.inner.read_stream_chunk(stream_id, size as usize).await.map_err(|e| anyhow::anyhow!(e))
+    }
 }

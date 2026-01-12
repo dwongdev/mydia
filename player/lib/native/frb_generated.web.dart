@@ -40,9 +40,21 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 
 @protected String dco_decode_String(dynamic raw);
 
+@protected bool dco_decode_bool(dynamic raw);
+
+@protected FlutterPairingRequest dco_decode_box_autoadd_flutter_pairing_request(dynamic raw);
+
+@protected FlutterPairingRequest dco_decode_flutter_pairing_request(dynamic raw);
+
+@protected FlutterPairingResponse dco_decode_flutter_pairing_response(dynamic raw);
+
 @protected Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
+@protected String? dco_decode_opt_String(dynamic raw);
+
 @protected (P2PHost,String) dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_p_2_p_host_string(dynamic raw);
+
+@protected int dco_decode_u_32(dynamic raw);
 
 @protected int dco_decode_u_8(dynamic raw);
 
@@ -62,9 +74,21 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 
 @protected String sse_decode_String(SseDeserializer deserializer);
 
+@protected bool sse_decode_bool(SseDeserializer deserializer);
+
+@protected FlutterPairingRequest sse_decode_box_autoadd_flutter_pairing_request(SseDeserializer deserializer);
+
+@protected FlutterPairingRequest sse_decode_flutter_pairing_request(SseDeserializer deserializer);
+
+@protected FlutterPairingResponse sse_decode_flutter_pairing_response(SseDeserializer deserializer);
+
 @protected Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
+@protected String? sse_decode_opt_String(SseDeserializer deserializer);
+
 @protected (P2PHost,String) sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_p_2_p_host_string(SseDeserializer deserializer);
+
+@protected int sse_decode_u_32(SseDeserializer deserializer);
 
 @protected int sse_decode_u_8(SseDeserializer deserializer);
 
@@ -73,8 +97,6 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 @protected BigInt sse_decode_usize(SseDeserializer deserializer);
 
 @protected int sse_decode_i_32(SseDeserializer deserializer);
-
-@protected bool sse_decode_bool(SseDeserializer deserializer);
 
 @protected void sse_encode_AnyhowException(AnyhowException self, SseSerializer serializer);
 
@@ -88,9 +110,21 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 
 @protected void sse_encode_String(String self, SseSerializer serializer);
 
+@protected void sse_encode_bool(bool self, SseSerializer serializer);
+
+@protected void sse_encode_box_autoadd_flutter_pairing_request(FlutterPairingRequest self, SseSerializer serializer);
+
+@protected void sse_encode_flutter_pairing_request(FlutterPairingRequest self, SseSerializer serializer);
+
+@protected void sse_encode_flutter_pairing_response(FlutterPairingResponse self, SseSerializer serializer);
+
 @protected void sse_encode_list_prim_u_8_strict(Uint8List self, SseSerializer serializer);
 
+@protected void sse_encode_opt_String(String? self, SseSerializer serializer);
+
 @protected void sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_p_2_p_host_string((P2PHost,String) self, SseSerializer serializer);
+
+@protected void sse_encode_u_32(int self, SseSerializer serializer);
 
 @protected void sse_encode_u_8(int self, SseSerializer serializer);
 
@@ -99,8 +133,6 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 @protected void sse_encode_usize(BigInt self, SseSerializer serializer);
 
 @protected void sse_encode_i_32(int self, SseSerializer serializer);
-
-@protected void sse_encode_bool(bool self, SseSerializer serializer);
                 }
                 
 

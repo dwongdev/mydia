@@ -1,6 +1,8 @@
 use rustler::{Env, LocalPid, ResourceArc, Term, OwnedEnv, Encoder, NifStruct, NifTaggedEnum};
-use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingRequest, PairingResponse, HostConfig};
+use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingRequest, PairingResponse, ReadMediaRequest, HostConfig};
 use std::thread;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 
 // Resource to hold the Host state
 struct HostResource {
@@ -56,9 +58,18 @@ struct ElixirPairingResponse {
     pub error: Option<String>,
 }
 
+#[derive(NifStruct)]
+#[module = "Mydia.Libp2p.ReadMediaRequest"]
+struct ElixirReadMediaRequest {
+    pub file_path: String,
+    pub offset: u64,
+    pub length: u32,
+}
+
 #[derive(NifTaggedEnum)]
 enum ElixirResponse {
     Pairing(ElixirPairingResponse),
+    MediaChunk(Vec<u8>),
     Error(String),
 }
 
@@ -72,6 +83,7 @@ fn send_response(resource: ResourceArc<HostResource>, request_id: String, respon
             device_token: r.device_token,
             error: r.error,
         }),
+        ElixirResponse::MediaChunk(data) => MydiaResponse::MediaChunk(data),
         ElixirResponse::Error(e) => MydiaResponse::Error(e),
     };
 
@@ -79,6 +91,44 @@ fn send_response(resource: ResourceArc<HostResource>, request_id: String, respon
         Ok(_) => Ok("ok".to_string()),
         Err(e) => Err(rustler::Error::Term(Box::new(e))),
     }
+}
+
+// Helper NIF to read file chunk directly in Rust to avoid passing binary back and forth to Elixir if performance matters.
+// But typically Elixir handles this fine. For "Going all the way", let's implement a NIF that reads the file and sends the response directly.
+#[rustler::nif]
+fn respond_with_file_chunk(resource: ResourceArc<HostResource>, request_id: String, file_path: String, offset: u64, length: u32) -> Result<String, rustler::Error> {
+    // Open file, seek, read, send response
+    // We should do this in a thread or task to not block the NIF
+    // But for simplicity in Rustler, small reads are OK? No, disk I/O should be threaded.
+    // Since we are inside a NIF, let's spawn a thread.
+    
+    let host = resource.host.peer_id.clone(); // Just to clone something? No we need the host instance.
+    // We can't move 'resource' into thread easily without Arc (it is Arc).
+    let resource_clone = resource.clone();
+    
+    thread::spawn(move || {
+        let response = match File::open(&file_path) {
+            Ok(mut file) => {
+                if file.seek(SeekFrom::Start(offset)).is_ok() {
+                    let mut buffer = vec![0; length as usize];
+                    match file.read(&mut buffer) {
+                        Ok(n) => {
+                            buffer.truncate(n);
+                            MydiaResponse::MediaChunk(buffer)
+                        }
+                        Err(e) => MydiaResponse::Error(format!("Read error: {}", e))
+                    }
+                } else {
+                    MydiaResponse::Error("Seek error".to_string())
+                }
+            }
+            Err(e) => MydiaResponse::Error(format!("File open error: {}", e))
+        };
+        
+        let _ = resource_clone.host.send_response(request_id, response);
+    });
+
+    Ok("ok".to_string())
 }
 
 #[rustler::nif]
@@ -112,6 +162,14 @@ fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid)
                                         };
                                         (rustler::atoms::ok(), "request_received", "pairing", request_id, elixir_req).encode(env)
                                     },
+                                    MydiaRequest::ReadMedia(req) => {
+                                        let elixir_req = ElixirReadMediaRequest {
+                                            file_path: req.file_path,
+                                            offset: req.offset,
+                                            length: req.length,
+                                        };
+                                        (rustler::atoms::ok(), "request_received", "read_media", request_id, elixir_req).encode(env)
+                                    },
                                     MydiaRequest::Ping => {
                                         (rustler::atoms::ok(), "request_received", "ping", request_id).encode(env)
                                     }
@@ -131,4 +189,4 @@ fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid)
     Ok("ok".to_string())
 }
 
-rustler::init!("Elixir.Mydia.Libp2p", [start_host, listen, dial, start_listening, send_response], load = load);
+rustler::init!("Elixir.Mydia.Libp2p", [start_host, listen, dial, start_listening, send_response, respond_with_file_chunk], load = load);

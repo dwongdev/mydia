@@ -29,7 +29,7 @@ pub struct MydiaBehaviour {
     request_response: request_response::cbor::Behaviour<MydiaRequest, MydiaResponse>,
     relay_client: relay::client::Behaviour,
     dcutr: dcutr::Behaviour,
-    relay_server: relay::Behaviour, // Always include but enable/disable via config if needed
+    relay_server: relay::Behaviour,
 }
 
 // Request/Response Types (using Serde/CBOR)
@@ -37,6 +37,7 @@ pub struct MydiaBehaviour {
 pub enum MydiaRequest {
     Ping,
     Pairing(PairingRequest),
+    ReadMedia(ReadMediaRequest),
     Custom(Vec<u8>),
 }
 
@@ -49,9 +50,17 @@ pub struct PairingRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ReadMediaRequest {
+    pub file_path: String,
+    pub offset: u64,
+    pub length: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum MydiaResponse {
     Pong,
     Pairing(PairingResponse),
+    MediaChunk(Vec<u8>),
     Custom(Vec<u8>),
     Error(String),
 }
@@ -74,7 +83,7 @@ pub enum Command {
         request: MydiaRequest, 
         reply: oneshot::Sender<Result<MydiaResponse, String>> 
     },
-    SendResponse { request_id: String, response: MydiaResponse }, // For responding to requests
+    SendResponse { request_id: String, response: MydiaResponse },
 }
 
 // Events emitted by the Host
@@ -85,9 +94,8 @@ pub enum Event {
     RequestReceived { 
         peer: String, 
         request: MydiaRequest, 
-        request_id: String, // UUID to identify the response channel
+        request_id: String,
     },
-    // Responses are now handled via oneshot channels, but we can still emit an event if needed
 }
 
 // Configuration for the Host
@@ -98,7 +106,7 @@ pub struct HostConfig {
 // The core Host struct that manages the Libp2p Swarm
 pub struct Host {
     pub cmd_tx: mpsc::Sender<Command>,
-    pub event_rx: std::sync::Arc<tokio::sync::Mutex<mpsc::Receiver<Event>>>, // Wrapped in Mutex for easy sharing (though Rx is not Sync, Arc<Mutex> is)
+    pub event_rx: std::sync::Arc<tokio::sync::Mutex<mpsc::Receiver<Event>>>,
     pub peer_id: PeerId,
 }
 
@@ -123,17 +131,16 @@ impl Host {
                         yamux::Config::default,
                     )
                     .unwrap()
+                    .or_transport(relay_transport)
+                    .with_dns()
+                    .unwrap()
                     .with_behaviour(|key| {
                         let peer_id = PeerId::from(key.public());
                         
-                        // mDNS
                         let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), peer_id).unwrap();
-                        
-                        // Kademlia
                         let kad_store = kad::store::MemoryStore::new(peer_id);
                         let kad = kad::Behaviour::new(peer_id, kad_store);
                         
-                        // Request Response
                         let request_response = request_response::cbor::Behaviour::new(
                             [(
                                 libp2p::StreamProtocol::new("/mydia/1.0.0"),
@@ -142,17 +149,9 @@ impl Host {
                             request_response::Config::default(),
                         );
 
-                        // Relay Client
                         let (relay_transport, relay_client) = relay::client::new(peer_id);
-                        
-                        // DCUtR
                         let dcutr = dcutr::Behaviour::new(peer_id);
-
-                        // Relay Server
-                        let relay_server = relay::Behaviour::new(
-                            peer_id,
-                            relay::Config::default(),
-                        );
+                        let relay_server = relay::Behaviour::new(peer_id, relay::Config::default());
 
                         MydiaBehaviour {
                             ping: ping::Behaviour::new(ping::Config::new().with_interval(Duration::from_secs(1))),
@@ -168,13 +167,9 @@ impl Host {
                     .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
                     .build();
 
-                // Use Server mode for Kademlia
                 swarm.behaviour_mut().kad.set_mode(Some(kad::Mode::Server));
 
-                // Map to store response channels temporarily
                 let mut response_channels = std::collections::HashMap::new();
-                
-                // Map to store pending outbound requests: RequestId -> oneshot::Sender
                 let mut pending_requests: std::collections::HashMap<OutboundRequestId, oneshot::Sender<Result<MydiaResponse, String>>> = std::collections::HashMap::new();
 
                 loop {
@@ -185,14 +180,12 @@ impl Host {
                             }
                             SwarmEvent::Behaviour(MydiaBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                                 for (peer_id, _multiaddr) in list {
-                                    println!("mDNS discovered: {:?}", peer_id);
                                     swarm.behaviour_mut().kad.add_address(&peer_id, _multiaddr);
                                     let _ = event_tx.send(Event::PeerDiscovered(peer_id.to_string())).await;
                                 }
                             }
                             SwarmEvent::Behaviour(MydiaBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
                                 for (peer_id, _multiaddr) in list {
-                                    println!("mDNS expired: {:?}", peer_id);
                                     let _ = event_tx.send(Event::PeerExpired(peer_id.to_string())).await;
                                 }
                             }
@@ -254,11 +247,9 @@ impl Host {
                             Some(Command::SendResponse { request_id, response }) => {
                                 if let Some(channel) = response_channels.remove(&request_id) {
                                     let _ = swarm.behaviour_mut().request_response.send_response(channel, response);
-                                } else {
-                                    println!("Response channel not found for request_id: {}", request_id);
                                 }
                             }
-                            None => return, // Channel closed
+                            None => return,
                         }
                     }
                 }

@@ -94,6 +94,20 @@ class Libp2pService {
     }
   }
 
+  // Request a file stream from a peer
+  // Returns the streamId
+  Future<String> requestMedia(String peerId, String filePath) async {
+    if (_host == null) throw Exception("Libp2p host not initialized");
+    return await _host!.requestMedia(peer: peerId, filePath: filePath);
+  }
+
+  // Read a chunk from a stream
+  Future<List<int>> readStreamChunk(String streamId, int size) async {
+    if (_host == null) throw Exception("Libp2p host not initialized");
+    // Returns Uint8List which is List<int>
+    return await _host!.readStreamChunk(streamId: streamId, size: size);
+  }
+
   Future<void> dispose() async {
     // Rust host is dropped when P2PHost is garbage collected or via dispose logic if added
     await _peerController.close();

@@ -12,10 +12,7 @@ enum StreamingStrategy {
   hlsCopy('HLS_COPY'),
 
   /// HLS streaming with transcoding to H264/AAC
-  transcode('TRANSCODE'),
-
-  /// WebRTC streaming (RTP over UDP/TURN)
-  webRTC('WEBRTC');
+  transcode('TRANSCODE');
 
   const StreamingStrategy(this.value);
   final String value;
@@ -64,14 +61,6 @@ class StreamingStrategyService {
     required StreamingStrategy strategy,
     String? mediaToken,
   }) {
-    // WebRTC proxy URL detection
-    // If the serverUrl is our localhost proxy (e.g. http://127.0.0.1:45321),
-    // we should append the request format expected by the proxy: /stream/file_id
-    if (serverUrl.contains('127.0.0.1') || serverUrl.contains('localhost')) {
-      // WebRTC proxy currently only supports direct file streaming via binary pipe
-      return '$serverUrl/stream/$fileId';
-    }
-
     final url = '$serverUrl/api/v1/stream/file/$fileId?strategy=${strategy.value}';
 
     // Append token if provided (for claim code mode)
@@ -108,8 +97,6 @@ class StreamingStrategyService {
         return 'HLS (Stream Copy)';
       case StreamingStrategy.transcode:
         return 'HLS (Transcoded)';
-      case StreamingStrategy.webRTC:
-        return 'WebRTC';
     }
   }
 }

@@ -1,18 +1,16 @@
 /// Result types for connection operations.
 ///
 /// This library provides result types for connection attempts using
-/// direct URLs and relay fallback.
+/// direct URLs.
 library;
-
-import '../webrtc/webrtc_connection_manager.dart';
 
 /// Type of connection established.
 enum ConnectionType {
   /// Direct HTTPS connection to instance.
   direct,
 
-  /// WebRTC connection via relay signaling.
-  webrtc,
+  /// P2P connection via libp2p.
+  p2p,
 }
 
 /// Result of a connection attempt.
@@ -26,9 +24,6 @@ class ConnectionResult {
   /// The connected URL (for direct connections).
   final String? connectedUrl;
 
-  /// The WebRTC connection manager (for WebRTC connections).
-  final WebRTCConnectionManager? webrtc;
-
   /// Error message (if failed).
   final String? error;
 
@@ -36,14 +31,12 @@ class ConnectionResult {
     required this.success,
     this.type,
     this.connectedUrl,
-    this.webrtc,
     this.error,
   });
 
   /// Creates a successful direct connection result.
   ///
   /// The [url] indicates which direct URL was successfully connected.
-  /// The caller is responsible for joining channels as needed.
   factory ConnectionResult.direct({
     required String url,
   }) {
@@ -54,14 +47,11 @@ class ConnectionResult {
     );
   }
 
-  /// Creates a successful WebRTC connection result.
-  factory ConnectionResult.webrtc({
-    required WebRTCConnectionManager manager,
-  }) {
-    return ConnectionResult._(
+  /// Creates a successful P2P connection result.
+  factory ConnectionResult.p2p() {
+    return const ConnectionResult._(
       success: true,
-      type: ConnectionType.webrtc,
-      webrtc: manager,
+      type: ConnectionType.p2p,
     );
   }
 
@@ -76,7 +66,6 @@ class ConnectionResult {
   /// Whether this is a direct connection.
   bool get isDirect => type == ConnectionType.direct;
 
-  /// Whether this is a WebRTC connection.
-  bool get isWebRTC => type == ConnectionType.webrtc;
+  /// Whether this is a P2P connection.
+  bool get isP2P => type == ConnectionType.p2p;
 }
-

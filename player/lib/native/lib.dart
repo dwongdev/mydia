@@ -8,6 +8,10 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<P2pHost>>
 abstract class P2PHost implements RustOpaqueInterface {
+  /// Add a bootstrap peer and initiate DHT bootstrap.
+  /// The address should include the peer ID, e.g., "/ip4/1.2.3.4/tcp/4001/p2p/12D3..."
+  Future<void> bootstrap({required String addr});
+
   Future<void> dial({required String addr});
 
   Stream<String> eventStream();
@@ -16,13 +20,34 @@ abstract class P2PHost implements RustOpaqueInterface {
 
   Future<void> listen({required String addr});
 
-  Future<Uint8List> readStreamChunk(
-      {required String streamId, required int size});
-
-  Future<String> requestMedia({required String peer, required String filePath});
+  /// Lookup a claim code on the DHT to find the provider peer.
+  /// Returns the peer ID and addresses of the server that provided this claim code.
+  Future<FlutterLookupResult> lookupClaimCode({required String claimCode});
 
   Future<FlutterPairingResponse> sendPairingRequest(
       {required String peer, required FlutterPairingRequest req});
+}
+
+/// Result of a DHT lookup for a claim code
+class FlutterLookupResult {
+  final String peerId;
+  final List<String> addresses;
+
+  const FlutterLookupResult({
+    required this.peerId,
+    required this.addresses,
+  });
+
+  @override
+  int get hashCode => peerId.hashCode ^ addresses.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterLookupResult &&
+          runtimeType == other.runtimeType &&
+          peerId == other.peerId &&
+          addresses == other.addresses;
 }
 
 class FlutterPairingRequest {

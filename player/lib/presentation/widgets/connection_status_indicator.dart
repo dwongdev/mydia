@@ -1,6 +1,6 @@
 /// Connection status indicator widget.
 ///
-/// Displays the current connection mode (relay/direct) with a subtle
+/// Displays the current connection mode (P2P/direct) with a subtle
 /// indicator that updates in real-time when the connection mode changes.
 library;
 
@@ -16,18 +16,18 @@ class ConnectionStatusBadge extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connectionState = ref.watch(connectionProvider);
-    final isRelay = connectionState.isWebRTCMode;
+    final isP2P = connectionState.isP2PMode;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: isRelay
-            ? Colors.orange.withValues(alpha: 0.15)
+        color: isP2P
+            ? Colors.blue.withValues(alpha: 0.15)
             : Colors.green.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isRelay
-              ? Colors.orange.withValues(alpha: 0.3)
+          color: isP2P
+              ? Colors.blue.withValues(alpha: 0.3)
               : Colors.green.withValues(alpha: 0.3),
         ),
       ),
@@ -35,17 +35,17 @@ class ConnectionStatusBadge extends ConsumerWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            isRelay ? Icons.cloud_outlined : Icons.wifi,
+            isP2P ? Icons.hub_outlined : Icons.wifi,
             size: 14,
-            color: isRelay ? Colors.orange : Colors.green,
+            color: isP2P ? Colors.blue : Colors.green,
           ),
           const SizedBox(width: 4),
           Text(
-            isRelay ? 'WebRTC' : 'Direct',
+            isP2P ? 'P2P' : 'Direct',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w500,
-              color: isRelay ? Colors.orange : Colors.green,
+              color: isP2P ? Colors.blue : Colors.green,
             ),
           ),
         ],
@@ -61,23 +61,16 @@ class ConnectionStatusTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connectionState = ref.watch(connectionProvider);
-    final isRelay = connectionState.isWebRTCMode;
-    final isTunnelActive = connectionState.webrtcManager != null;
+    final isP2P = connectionState.isP2PMode;
 
     String subtitle;
     IconData icon;
     Color statusColor;
 
-    if (isRelay) {
-      if (isTunnelActive) {
-        subtitle = 'Connected via WebRTC tunnel';
-        icon = Icons.cloud_done_outlined;
-        statusColor = Colors.orange;
-      } else {
-        subtitle = 'WebRTC tunnel disconnected';
-        icon = Icons.cloud_off_outlined;
-        statusColor = Colors.red;
-      }
+    if (isP2P) {
+      subtitle = 'Connected via P2P mesh';
+      icon = Icons.hub_outlined;
+      statusColor = Colors.blue;
     } else {
       subtitle = 'Direct connection to server';
       icon = Icons.wifi;

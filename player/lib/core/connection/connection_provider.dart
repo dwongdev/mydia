@@ -1,15 +1,13 @@
 library connection_provider;
 
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../webrtc/webrtc_connection_manager.dart';
 import '../auth/auth_storage.dart';
 
-/// Storage keys for relay credentials.
+/// Storage keys for connection credentials.
 abstract class _ConnectionStorageKeys {
   static const instanceId = 'instance_id';
   static const relayUrl = 'relay_url';
@@ -20,15 +18,14 @@ enum ConnectionType {
   /// Direct HTTP/HTTPS connection.
   direct,
 
-  /// WebRTC connection via relay signaling.
-  webrtc,
+  /// P2P connection via libp2p.
+  p2p,
 }
 
 /// State of the current connection.
 class ConnectionState {
   const ConnectionState({
     this.type = ConnectionType.direct,
-    this.webrtcManager,
     this.instanceId,
     this.relayUrl,
   });
@@ -36,29 +33,23 @@ class ConnectionState {
   /// The current connection type.
   final ConnectionType type;
 
-  /// The active WebRTC manager (only set when [type] is [ConnectionType.webrtc]).
-  final WebRTCConnectionManager? webrtcManager;
-
-  /// The instance ID for relay connections.
+  /// The instance ID for p2p connections.
   final String? instanceId;
 
   /// The relay URL for re-establishing connections.
   final String? relayUrl;
 
-  /// Whether currently in WebRTC mode.
-  bool get isWebRTCMode => type == ConnectionType.webrtc;
+  /// Whether currently in P2P mode.
+  bool get isP2PMode => type == ConnectionType.p2p;
 
   /// Creates a copy with updated fields.
   ConnectionState copyWith({
     ConnectionType? type,
-    WebRTCConnectionManager? webrtcManager,
     String? instanceId,
     String? relayUrl,
-    bool clearManager = false,
   }) {
     return ConnectionState(
       type: type ?? this.type,
-      webrtcManager: clearManager ? null : (webrtcManager ?? this.webrtcManager),
       instanceId: instanceId ?? this.instanceId,
       relayUrl: relayUrl ?? this.relayUrl,
     );
@@ -69,15 +60,13 @@ class ConnectionState {
     return const ConnectionState(type: ConnectionType.direct);
   }
 
-  /// Creates a WebRTC connection state.
-  factory ConnectionState.webrtc({
-    required WebRTCConnectionManager manager,
+  /// Creates a P2P connection state.
+  factory ConnectionState.p2p({
     String? instanceId,
     String? relayUrl,
   }) {
     return ConnectionState(
-      type: ConnectionType.webrtc,
-      webrtcManager: manager,
+      type: ConnectionType.p2p,
       instanceId: instanceId,
       relayUrl: relayUrl,
     );
@@ -102,30 +91,29 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
     final instanceId = await _authStorage.read(_ConnectionStorageKeys.instanceId);
     final relayUrl = await _authStorage.read(_ConnectionStorageKeys.relayUrl);
 
-    // Check AFTER awaits - setWebRTCManager may have run during the async gap
-    if (state.isWebRTCMode && state.webrtcManager != null) {
-      debugPrint('[ConnectionNotifier] Already in WebRTC mode, skipping stored state load');
+    // Check AFTER awaits - setP2PMode may have run during the async gap
+    if (state.isP2PMode) {
+      debugPrint('[ConnectionNotifier] Already in P2P mode, skipping stored state load');
       return;
     }
 
     // If we have relay credentials (instanceId), store them in state for later use.
     if (instanceId != null) {
-      debugPrint('[ConnectionNotifier] Found relay credentials, will reconnect via relay');
+      debugPrint('[ConnectionNotifier] Found relay credentials, will reconnect via p2p');
       state = ConnectionState(
-        type: ConnectionType.direct, // Start as direct until WebRTC is established
+        type: ConnectionType.direct, // Start as direct until P2P is established
         instanceId: instanceId,
         relayUrl: relayUrl,
       );
     }
   }
 
-  /// Sets the connection to WebRTC mode with the given manager.
-  Future<void> setWebRTCManager(
-    WebRTCConnectionManager manager, {
+  /// Sets the connection to P2P mode.
+  Future<void> setP2PMode({
     String? instanceId,
     String? relayUrl,
   }) async {
-    debugPrint('[ConnectionNotifier] Setting WebRTC manager');
+    debugPrint('[ConnectionNotifier] Setting P2P mode');
 
     // Store relay credentials for reconnection
     if (instanceId != null) {
@@ -135,8 +123,7 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
       await _authStorage.write(_ConnectionStorageKeys.relayUrl, relayUrl);
     }
 
-    state = ConnectionState.webrtc(
-      manager: manager,
+    state = ConnectionState.p2p(
       instanceId: instanceId ?? state.instanceId,
       relayUrl: relayUrl ?? state.relayUrl,
     );
@@ -145,18 +132,11 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
   /// Sets the connection to direct mode.
   Future<void> setDirectMode() async {
     debugPrint('[ConnectionNotifier] Setting direct mode (runtime only)');
-    
-    // Close existing manager if any
-    if (state.webrtcManager != null) {
-      state.webrtcManager!.dispose();
-    }
-
     state = ConnectionState.direct();
   }
   
   Future<void> clear() async {
     debugPrint('[ConnectionNotifier] Clearing connection state');
-    state.webrtcManager?.dispose();
     
     await _authStorage.delete(_ConnectionStorageKeys.instanceId);
     await _authStorage.delete(_ConnectionStorageKeys.relayUrl);
@@ -164,12 +144,10 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
     state = ConnectionState.direct();
   }
 
-  /// Reconnects the relay tunnel if needed.
+  /// Check if tunnel is active (for P2P mode).
   Future<bool> ensureTunnelActive() async {
-    // WebRTC handles its own connection state mostly.
-    // If we need to reconnect, we might need to create a new manager.
-    // For now, assume active if manager exists.
-    return state.webrtcManager != null;
+    // For now, assume active if in P2P mode
+    return state.isP2PMode;
   }
 }
 

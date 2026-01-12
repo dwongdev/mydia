@@ -13,16 +13,16 @@ import '../../core/theme/colors.dart';
 import 'offline_banner.dart';
 
 /// Connection status badge for the settings icon.
-/// Shows green for direct connection, orange for relay connection.
+/// Shows green for direct connection, blue for P2P connection.
 class _ConnectionStatusBadge extends ConsumerWidget {
   const _ConnectionStatusBadge();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connectionState = ref.watch(connectionProvider);
-    final isRelay = connectionState.isWebRTCMode;
-    final color = isRelay ? Colors.orange : Colors.green;
-    final tooltip = isRelay ? 'Connected via WebRTC Relay' : 'Direct connection';
+    final isP2P = connectionState.isP2PMode;
+    final color = isP2P ? Colors.blue : Colors.green;
+    final tooltip = isP2P ? 'Connected via P2P' : 'Direct connection';
 
     return Tooltip(
       message: tooltip,
@@ -86,17 +86,10 @@ class _AppShellState extends ConsumerState<AppShell> {
   }
 
   /// Called when app resumes from background.
-  /// Checks if relay tunnel is dead and triggers reconnection.
+  /// Checks connection status and triggers reconnection if needed.
   void _onAppResume() {
     debugPrint('[AppShell] App resumed from background');
-    final connectionState = ref.read(connectionProvider);
-
-    // Check if we were in relay mode but tunnel is now dead
-    if (connectionState.isWebRTCMode && connectionState.webrtcManager == null) {
-      debugPrint('[AppShell] WebRTC tunnel died while in background, reconnecting...');
-      // Trigger full reconnection (includes key exchange)
-      ref.read(authStateProvider.notifier).retryConnection();
-    }
+    // Connection health checks are handled by the connection provider
   }
 
   int _getSelectedIndex() {

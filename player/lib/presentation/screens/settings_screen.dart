@@ -156,30 +156,20 @@ class _ConnectionDiagnosticsTileState
   Widget build(BuildContext context) {
     // Watch connection provider directly for live status
     final connectionState = ref.watch(connectionProvider);
-    final theme = Theme.of(context);
 
     // Determine status display from live connection state
-    final isWebRTC = connectionState.isWebRTCMode;
-    // We assume tunnel is active if in WebRTC mode (manager exists)
-    final isConnected = connectionState.webrtcManager != null;
+    final isP2P = connectionState.isP2PMode;
 
     IconData icon;
     Color statusColor;
     String statusText;
     String subtitle;
 
-    if (isWebRTC) {
-      if (isConnected) {
-        icon = Icons.cloud_done_outlined;
-        statusColor = Colors.orange;
-        statusText = 'WebRTC Relay';
-        subtitle = 'Connected via secure WebRTC tunnel';
-      } else {
-        icon = Icons.cloud_off_outlined;
-        statusColor = Colors.red;
-        statusText = 'Disconnected';
-        subtitle = 'WebRTC tunnel disconnected';
-      }
+    if (isP2P) {
+      icon = Icons.hub_outlined;
+      statusColor = Colors.blue;
+      statusText = 'P2P';
+      subtitle = 'Connected via P2P mesh';
     } else {
       icon = Icons.wifi;
       statusColor = Colors.green;

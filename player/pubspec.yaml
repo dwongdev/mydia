@@ -4,7 +4,7 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.2.0 <4.0.0'
+  sdk: '>=3.3.0 <4.0.0'
 
 dependencies:
   flutter:
@@ -36,6 +36,8 @@ dependencies:
   url_launcher: ^6.3.0
   flutter_webrtc: ^1.2.1
   flutter_rust_bridge: ^2.0.0
+  mydia_player_p2p:
+    path: rust_builder
   background_downloader: ^9.5.0
   hive_ce: ^2.16.0
   hive_ce_flutter: ^2.3.4

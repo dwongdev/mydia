@@ -911,6 +911,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "5.6.1"
+  mydia_player_p2p:
+    dependency: "direct main"
+    description:
+      path: rust_builder
+      relative: true
+    source: path
+    version: "0.0.1"
   nm:
     dependency: transitive
     description:

@@ -7,37 +7,7 @@ import '../auth/auth_storage.dart';
 import '../auth/media_token_service.dart';
 import '../config/web_config.dart';
 import '../connection/connection_provider.dart';
-import '../connection/reconnection_service.dart';
-import '../webrtc/media_proxy_service.dart';
 import 'client.dart';
-import 'webrtc_link.dart';
-
-// ... (existing providers)
-
-// Media Proxy Service Provider
-final mediaProxyServiceProvider = FutureProvider<MediaProxyService?>((ref) async {
-  // MediaProxyService uses dart:io HttpServer which is not available on web
-  if (kIsWeb) {
-    debugPrint('[mediaProxyServiceProvider] Skipping on web platform');
-    return null;
-  }
-  
-  final connectionState = ref.watch(connectionProvider);
-  debugPrint('[mediaProxyServiceProvider] isWebRTCMode=${connectionState.isWebRTCMode}, hasManager=${connectionState.webrtcManager != null}');
-  if (connectionState.isWebRTCMode && connectionState.webrtcManager != null) {
-    debugPrint('[mediaProxyServiceProvider] Creating media proxy service');
-    final proxy = MediaProxyService(connectionState.webrtcManager!);
-    await proxy.start();
-    debugPrint('[mediaProxyServiceProvider] Media proxy started');
-    // Ensure we stop it when provider is disposed
-    ref.onDispose(() {
-      proxy.stop();
-    });
-    return proxy;
-  }
-  debugPrint('[mediaProxyServiceProvider] Not in WebRTC mode, returning null');
-  return null;
-});
 
 /// Provider for the server URL.
 ///
@@ -45,18 +15,9 @@ final mediaProxyServiceProvider = FutureProvider<MediaProxyService?>((ref) async
 /// browser-accessible URL (not internal Docker hostnames like 'storage:4000').
 /// On native platforms, uses the stored server URL from secure storage.
 final serverUrlProvider = FutureProvider<String?>((ref) async {
-  // Check WebRTC proxy first
-  final mediaProxy = await ref.watch(mediaProxyServiceProvider.future);
-  if (mediaProxy != null) {
-    final url = await mediaProxy.start(); // Returns http://127.0.0.1:port
-    debugPrint('[serverUrlProvider] Using WebRTC proxy: $url');
-    return url;
-  }
-
   // On web, always use the current origin to avoid CORS issues
   // and ensure we use the browser-accessible URL (not Docker internal names)
   if (kIsWeb) {
-
     final origin = getOriginUrl();
     debugPrint('[serverUrlProvider] kIsWeb=true, origin=$origin');
     if (origin != null) {
@@ -94,29 +55,7 @@ final graphqlClientProvider = Provider<GraphQLClient?>((ref) {
   final authTokenAsync = ref.watch(authTokenProvider);
   final authService = ref.watch(authServiceProvider);
 
-  debugPrint('[graphqlClientProvider] Building: isWebRTCMode=${connectionState.isWebRTCMode}, hasManager=${connectionState.webrtcManager != null}');
-
-  // Check if we're in WebRTC mode
-  if (connectionState.isWebRTCMode && connectionState.webrtcManager != null) {
-    return authTokenAsync.when(
-      data: (authToken) {
-        debugPrint('[graphqlClientProvider] Using WebRTC mode with authToken=${authToken != null ? "present" : "null"}');
-        final link = WebRTCLink(connectionState.webrtcManager!, authToken: authToken);
-        return GraphQLClient(
-          link: link,
-          cache: GraphQLCache(store: HiveStore()),
-        );
-      },
-      loading: () {
-        debugPrint('[graphqlClientProvider] Auth token loading...');
-        return null;
-      },
-      error: (error, stackTrace) {
-        debugPrint('[graphqlClientProvider] Auth token error in WebRTC mode: $error\n$stackTrace');
-        return null;
-      },
-    );
-  }
+  debugPrint('[graphqlClientProvider] Building: isP2PMode=${connectionState.isP2PMode}');
 
   // Wait for both async providers to complete (direct mode)
   return serverUrlAsync.when(
@@ -224,13 +163,6 @@ class AuthStateNotifier extends Notifier<AsyncValue<AuthStatus>> {
   AuthService get authService => ref.watch(authServiceProvider);
 
   /// Initialize authentication, checking for injected web config first.
-  ///
-  /// On native platforms, attempts to reconnect to the paired instance using
-  /// the ReconnectionService. This handles:
-  /// - Trying direct URLs first
-  /// - Falling back to relay tunnel if direct fails
-  /// - Refreshing the auth token on successful reconnection
-  /// - Entering offline mode if reconnection fails (preserves credentials)
   Future<void> _initAuth() async {
     state = const AsyncValue.loading();
     try {
@@ -243,81 +175,9 @@ class AuthStateNotifier extends Notifier<AsyncValue<AuthStatus>> {
       // Check if we have stored credentials
       final isAuth = await authService.isAuthenticated();
 
-      // On native platforms with stored credentials, try to reconnect
-      if (!isWebPlatform && isAuth) {
-        debugPrint('[AuthStateNotifier] Native platform with stored auth, attempting reconnection...');
-        final reconnectionResult = await _attemptReconnection();
-        state = AsyncValue.data(reconnectionResult);
-        return;
-      }
-
       state = AsyncValue.data(isAuth ? AuthStatus.authenticated : AuthStatus.unauthenticated);
     } catch (e, st) {
       state = AsyncValue.error(e, st);
-    }
-  }
-
-  /// Attempt to reconnect to the paired instance using ReconnectionService.
-  ///
-  /// Returns [AuthStatus.authenticated] if reconnection succeeded,
-  /// [AuthStatus.offlineMode] if reconnection failed but credentials exist,
-  /// [AuthStatus.unauthenticated] if no valid credentials.
-  Future<AuthStatus> _attemptReconnection() async {
-    final reconnectionService = ref.read(reconnectionServiceProvider);
-
-    try {
-      // Check if relay credentials exist (instanceId) to determine strategy
-      final authStorage = getAuthStorage();
-      final instanceId = await authStorage.read('instance_id');
-
-      // Use relay-first strategy if we have relay credentials (instanceId).
-      // Only force direct-only when there's no instanceId (user logged in directly).
-      final hasRelayCredentials = instanceId != null && instanceId.isNotEmpty;
-      final forceDirectOnly = !hasRelayCredentials;
-      debugPrint('[AuthStateNotifier] instanceId: ${hasRelayCredentials ? "present" : "null"}, strategy: ${forceDirectOnly ? "direct-only" : "relay-first"}');
-      final result = await reconnectionService.reconnect(forceDirectOnly: forceDirectOnly);
-
-      if (result.success && result.session != null) {
-        final session = result.session!;
-        debugPrint('[AuthStateNotifier] Reconnection successful, isRelay=${session.isRelayConnection}');
-
-        // Update auth service with the access token for GraphQL/API authentication
-        // Media token is stored separately for streaming
-        await authService.setSession(
-          token: session.accessToken,
-          serverUrl: session.serverUrl,
-          userId: session.deviceId,
-          username: 'Device ${session.deviceId.substring(0, 8)}',
-        );
-
-        // Also update the pairing tokens storage with refreshed tokens
-        final authStorage = getAuthStorage();
-        await authStorage.write('pairing_media_token', session.mediaToken);
-        await authStorage.write('pairing_access_token', session.accessToken);
-
-        // Set the connection provider mode
-        if (session.isRelayConnection && session.webrtcManager != null) {
-          debugPrint('[AuthStateNotifier] Setting WebRTC manager in connection provider');
-          await ref.read(connectionProvider.notifier).setWebRTCManager(
-            session.webrtcManager,
-            instanceId: session.instanceId,
-            relayUrl: session.relayUrl,
-          );
-        } else {
-          debugPrint('[AuthStateNotifier] Setting direct mode in connection provider');
-          await ref.read(connectionProvider.notifier).setDirectMode();
-        }
-
-        return AuthStatus.authenticated;
-      } else {
-        debugPrint('[AuthStateNotifier] Reconnection failed: ${result.error}, entering offline mode');
-        // Don't clear session - enter offline mode instead to allow downloads access
-        return AuthStatus.offlineMode;
-      }
-    } catch (e) {
-      debugPrint('[AuthStateNotifier] Reconnection error: $e, entering offline mode');
-      // Don't clear session on error - enter offline mode
-      return AuthStatus.offlineMode;
     }
   }
 
@@ -379,23 +239,9 @@ class AuthStateNotifier extends Notifier<AsyncValue<AuthStatus>> {
   }
 
   /// Retry connection to server from offline mode.
-  ///
-  /// Call this when the user taps "Retry Connection" in the offline banner.
-  /// If successful, transitions to authenticated state.
-  /// If failed, stays in offline mode.
   Future<void> retryConnection() async {
     debugPrint('[AuthStateNotifier] retryConnection() called');
-    state = const AsyncValue.loading();
-
-    try {
-      final result = await _attemptReconnection();
-      state = AsyncValue.data(result);
-      debugPrint('[AuthStateNotifier] retryConnection() complete, state=$result');
-    } catch (e) {
-      debugPrint('[AuthStateNotifier] retryConnection() error: $e');
-      // Stay in offline mode on error
-      state = const AsyncValue.data(AuthStatus.offlineMode);
-    }
+    await _checkAuth();
   }
 
   /// Refresh the authentication state.
@@ -414,9 +260,6 @@ final authStateProvider =
 ///
 /// Use this provider in async controllers that need to wait for the client
 /// to be available. This properly handles the async loading of auth state.
-///
-/// NOTE: Uses ref.watch for graphqlClientProvider to ensure updates when
-/// connection mode changes (e.g., from direct to relay mode after pairing).
 final asyncGraphqlClientProvider = FutureProvider<GraphQLClient>((ref) async {
   debugPrint('[asyncGraphqlClientProvider] Starting...');
   

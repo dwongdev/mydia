@@ -64,8 +64,8 @@ class ConnectionDiagnosticsState {
   /// When direct connection was last attempted.
   final DateTime? lastDirectAttempt;
 
-  /// Whether currently connected via WebRTC.
-  final bool isWebRTCMode;
+  /// Whether currently connected via P2P.
+  final bool isP2PMode;
 
   /// Whether diagnostics are still loading.
   final bool isLoading;
@@ -74,7 +74,7 @@ class ConnectionDiagnosticsState {
     this.directUrls = const [],
     this.urlAttempts = const {},
     this.lastDirectAttempt,
-    this.isWebRTCMode = false,
+    this.isP2PMode = false,
     this.isLoading = true,
   });
 
@@ -82,7 +82,7 @@ class ConnectionDiagnosticsState {
     List<String>? directUrls,
     Map<String, DirectUrlAttempt>? urlAttempts,
     DateTime? lastDirectAttempt,
-    bool? isWebRTCMode,
+    bool? isP2PMode,
     bool? isLoading,
     bool clearLastDirectAttempt = false,
   }) {
@@ -91,7 +91,7 @@ class ConnectionDiagnosticsState {
       urlAttempts: urlAttempts ?? this.urlAttempts,
       lastDirectAttempt:
           clearLastDirectAttempt ? null : (lastDirectAttempt ?? this.lastDirectAttempt),
-      isWebRTCMode: isWebRTCMode ?? this.isWebRTCMode,
+      isP2PMode: isP2PMode ?? this.isP2PMode,
       isLoading: isLoading ?? this.isLoading,
     );
   }
@@ -133,7 +133,7 @@ class ConnectionDiagnosticsNotifier extends Notifier<ConnectionDiagnosticsState>
     Future.microtask(_loadDiagnostics);
 
     return ConnectionDiagnosticsState(
-      isWebRTCMode: connectionState.isWebRTCMode,
+      isP2PMode: connectionState.isP2PMode,
       isLoading: true,
     );
   }
@@ -190,7 +190,7 @@ class ConnectionDiagnosticsNotifier extends Notifier<ConnectionDiagnosticsState>
         directUrls: directUrls,
         urlAttempts: urlAttempts,
         lastDirectAttempt: lastDirectAttempt,
-        isWebRTCMode: connectionState.isWebRTCMode,
+        isP2PMode: connectionState.isP2PMode,
         isLoading: false,
       );
     } catch (e) {

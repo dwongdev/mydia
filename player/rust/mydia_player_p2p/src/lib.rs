@@ -1,5 +1,5 @@
 mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be accurate, and you can change it according to your needs. */
-use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingRequest, PairingResponse, HostConfig};
+use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingRequest, HostConfig};
 use flutter_rust_bridge::frb;
 use crate::frb_generated::StreamSink;
 
@@ -28,10 +28,19 @@ pub struct FlutterPairingResponse {
     pub error: Option<String>,
 }
 
+/// Result of a DHT lookup for a claim code
+pub struct FlutterLookupResult {
+    pub peer_id: String,
+    pub addresses: Vec<String>,
+}
+
 impl P2pHost {
     #[frb(sync)]
     pub fn init() -> (Self, String) {
-        let config = HostConfig { enable_relay_server: false };
+        let config = HostConfig {
+            enable_relay_server: false,
+            bootstrap_peers: vec![],
+        };
         let (host, peer_id) = Host::new(config);
         (P2pHost { inner: host }, peer_id)
     }
@@ -52,6 +61,7 @@ impl P2pHost {
                 let msg = match event {
                     Event::PeerDiscovered(id) => format!("peer_discovered:{}", id),
                     Event::PeerExpired(id) => format!("peer_expired:{}", id),
+                    Event::BootstrapCompleted => "bootstrap_completed".to_string(),
                     _ => "unknown".to_string(),
                 };
                 if sink.add(msg).is_err() {
@@ -60,6 +70,24 @@ impl P2pHost {
             }
         });
         Ok(())
+    }
+
+    /// Add a bootstrap peer and initiate DHT bootstrap.
+    /// The address should include the peer ID, e.g., "/ip4/1.2.3.4/tcp/4001/p2p/12D3..."
+    pub fn bootstrap(&self, addr: String) -> anyhow::Result<()> {
+        self.inner.bootstrap(addr).map_err(|e| anyhow::anyhow!(e))
+    }
+
+    /// Lookup a claim code on the DHT to find the provider peer.
+    /// Returns the peer ID and addresses of the server that provided this claim code.
+    pub async fn lookup_claim_code(&self, claim_code: String) -> anyhow::Result<FlutterLookupResult> {
+        match self.inner.lookup_claim_code(claim_code).await {
+            Ok(result) => Ok(FlutterLookupResult {
+                peer_id: result.peer_id,
+                addresses: result.addresses,
+            }),
+            Err(e) => Err(anyhow::anyhow!(e)),
+        }
     }
 
     pub async fn send_pairing_request(&self, peer: String, req: FlutterPairingRequest) -> anyhow::Result<FlutterPairingResponse> {
@@ -84,11 +112,4 @@ impl P2pHost {
         }
     }
 
-    pub async fn request_media(&self, peer: String, file_path: String) -> anyhow::Result<String> {
-        self.inner.request_media(peer, file_path).await.map_err(|e| anyhow::anyhow!(e))
-    }
-
-    pub async fn read_stream_chunk(&self, stream_id: String, size: u32) -> anyhow::Result<Vec<u8>> {
-        self.inner.read_stream_chunk(stream_id, size as usize).await.map_err(|e| anyhow::anyhow!(e))
-    }
 }

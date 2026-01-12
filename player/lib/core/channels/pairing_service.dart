@@ -1,25 +1,15 @@
-/// Device pairing service using X25519 key exchange and Phoenix Channels.
+/// Device pairing service using libp2p.
 ///
-/// This service orchestrates the complete device pairing flow:
-/// 1. Look up claim code via relay to get instance info
-/// 2. Connect to server WebSocket (using direct URLs from relay)
-/// 3. Join pairing channel
-/// 4. Perform X25519 key exchange
-/// 5. Submit claim code
-/// 6. Receive and store device credentials
-/// 7. Consume claim on relay to mark it as used
+/// This service orchestrates the complete device pairing flow using
+/// the libp2p-based P2P networking with DHT discovery.
 library pairing_service;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 
-import '../webrtc/webrtc_connection_manager.dart';
 import '../auth/auth_storage.dart';
-import '../protocol/protocol_version.dart';
-import '../relay/relay_service.dart';
-import '../relay/relay_tunnel_service.dart';
+import '../p2p/libp2p_service.dart';
 
 /// Data parsed from a QR code for device pairing.
 ///
@@ -89,8 +79,6 @@ abstract class _StorageKeys {
   static const mediaToken = 'pairing_media_token';
   static const accessToken = 'pairing_access_token';
   static const deviceToken = 'pairing_device_token';
-  static const devicePublicKey = 'pairing_device_public_key';
-  static const devicePrivateKey = 'pairing_device_private_key';
   static const directUrls = 'pairing_direct_urls';
   static const certFingerprint = 'pairing_cert_fingerprint';
   static const instanceName = 'pairing_instance_name';
@@ -104,27 +92,23 @@ class PairingResult {
   final String? error;
   final PairingCredentials? credentials;
 
-  /// Active WebRTC manager (if pairing was via relay and direct connection failed).
-  /// The caller should use this manager for ongoing communication.
-  final WebRTCConnectionManager? webrtcManager;
+  /// Whether the connection is via P2P.
+  final bool isP2PMode;
 
   const PairingResult._({
     required this.success,
     this.error,
     this.credentials,
-    this.webrtcManager,
+    this.isP2PMode = false,
   });
 
-  factory PairingResult.success(PairingCredentials credentials, {WebRTCConnectionManager? webrtcManager}) {
-    return PairingResult._(success: true, credentials: credentials, webrtcManager: webrtcManager);
+  factory PairingResult.success(PairingCredentials credentials, {bool isP2PMode = false}) {
+    return PairingResult._(success: true, credentials: credentials, isP2PMode: isP2PMode);
   }
 
   factory PairingResult.error(String error) {
     return PairingResult._(success: false, error: error);
   }
-
-  /// Whether the pairing used relay mode (no direct connection available).
-  bool get isRelayMode => webrtcManager != null;
 }
 
 /// Credentials obtained from successful pairing.
@@ -142,9 +126,6 @@ class PairingCredentials {
   final String accessToken;
 
   /// The device token for reconnection authentication.
-  ///
-  /// This token is used during key exchange to prove device identity
-  /// without requiring the claim code again.
   final String? deviceToken;
 
   /// The server's static public key (32 bytes).
@@ -159,7 +140,7 @@ class PairingCredentials {
   /// Instance name (friendly identifier).
   final String? instanceName;
 
-  /// Instance ID for relay connections.
+  /// Instance ID for P2P connections.
   final String? instanceId;
 
   const PairingCredentials({
@@ -176,96 +157,35 @@ class PairingCredentials {
   });
 }
 
-
 /// Service for pairing new devices with a Mydia server.
 ///
-/// This service handles the complete pairing flow using X25519 key exchange
-/// over Phoenix Channels. It integrates with [CryptoManager] for cryptographic
-/// operations and [AuthStorage] for credential persistence.
-///
-/// ## Pairing Flow
-///
-/// 1. User obtains server URL and claim code (from QR code or manual entry)
-/// 2. [pairDevice] connects to server WebSocket
-/// 3. Joins the `device:pair` channel
-/// 4. Performs X25519 key exchange with server
-/// 5. Submits claim code and device info
-/// 6. Receives device credentials (keypair and tokens)
-/// 7. Stores credentials securely
-///
-/// ## Usage
-///
-/// ```dart
-/// final pairingService = PairingService();
-/// final result = await pairingService.pairDevice(
-///   serverUrl: 'https://mydia.example.com',
-///   claimCode: 'ABCD-1234',
-///   deviceName: 'My Phone',
-/// );
-///
-/// if (result.success) {
-///   print('Paired successfully!');
-/// } else {
-///   print('Pairing failed: ${result.error}');
-/// }
-/// ```
+/// This service handles the complete pairing flow. It supports:
+/// - Direct HTTP pairing via server URLs
+/// - P2P pairing via libp2p (in development)
 class PairingService {
   PairingService({
     AuthStorage? authStorage,
-    RelayService? relayService,
+    Libp2pService? libp2pService,
     String? relayUrl,
   })  : _authStorage = authStorage ?? getAuthStorage(),
-        _relayService = relayService ?? RelayService(),
+        _libp2pService = libp2pService,
         _relayUrl = relayUrl ?? const String.fromEnvironment(
           'RELAY_URL',
           defaultValue: 'https://relay.mydia.dev',
         );
 
   final AuthStorage _authStorage;
-  final RelayService _relayService;
+  final Libp2pService? _libp2pService;
   final String _relayUrl;
 
-  /// Pairs this device using only a claim code.
+  /// Pairs this device using a claim code via libp2p DHT discovery.
   ///
-  /// This is the primary pairing method. It:
-  /// 1. Looks up the claim code via the relay service
-  /// 2. Gets the instance's direct URLs and public key
-  /// 3. Connects to the first available direct URL
-  /// 4. Submits the claim code to complete pairing
-  /// 5. Marks the claim as consumed on the relay
-  ///
-  /// ## Parameters
-  ///
-  /// - [claimCode]: The pairing claim code (e.g., 'ABC123')
-  /// - [deviceName]: A friendly name for this device (e.g., 'My iPhone')
-  /// - [platform]: The device platform (defaults to detected platform)
-  /// - [onStatusUpdate]: Optional callback for status updates
-  ///
-  /// Returns a [PairingResult] indicating success or failure.
-  /// Pairs this device using only a claim code with relay-first strategy.
-  ///
-  /// This method always connects via relay tunnel first for guaranteed fast
-  /// connection. Direct URL probing happens in the background after pairing
-  /// completes (handled by ConnectionManager).
-  ///
-  /// ## Relay-First Flow
-  ///
-  /// 1. Looks up the claim code via the relay service
-  /// 2. Connects via relay tunnel (guaranteed to work if relay is reachable)
-  /// 3. Completes pairing handshake via relay
-  /// 4. Returns credentials and active relay tunnel
-  /// 5. Background probing will attempt direct connection upgrade later
-  ///
-  /// ## Parameters
-  ///
-  /// - [claimCode]: The pairing claim code (e.g., 'ABC123')
-  /// - [deviceName]: A friendly name for this device (e.g., 'My iPhone')
-  /// - [platform]: The device platform (defaults to detected platform)
-  /// - [onStatusUpdate]: Optional callback for status updates
-  ///
-  /// Returns a [PairingResult] indicating success or failure.
-  /// On success, the result includes the active relay tunnel for ongoing
-  /// communication until direct connection is established.
+  /// This method:
+  /// 1. Initializes the libp2p host
+  /// 2. Bootstraps to the relay's DHT
+  /// 3. Looks up the claim code on the DHT to find the server
+  /// 4. Dials the server and sends a pairing request
+  /// 5. Stores credentials on success
   Future<PairingResult> pairWithClaimCodeOnly({
     required String claimCode,
     required String deviceName,
@@ -274,398 +194,177 @@ class PairingService {
   }) async {
     try {
       final devicePlatform = platform ?? _detectPlatform();
-      debugPrint('[PairingService] === RELAY-FIRST PAIRING ===');
+      debugPrint('[PairingService] === PAIRING VIA LIBP2P ===');
       debugPrint('[PairingService] claimCode=$claimCode, deviceName=$deviceName, platform=$devicePlatform');
+      debugPrint('[PairingService] relayUrl=$_relayUrl');
 
-      // Step 1: Look up claim code via relay
-      onStatusUpdate?.call('Looking up claim code...');
-      final lookupResult = await _relayService.lookupClaimCode(claimCode);
-      debugPrint('[PairingService] Lookup result: success=${lookupResult.success}, error=${lookupResult.error}');
-
-      if (!lookupResult.success) {
-        return PairingResult.error(
-            lookupResult.error ?? 'Failed to lookup claim code');
+      // Use the injected libp2p service - it must be provided and initialized
+      final libp2pService = _libp2pService;
+      if (libp2pService == null) {
+        return PairingResult.error('Libp2p service not available. Please try again.');
       }
-
-      final claimInfo = lookupResult.data!;
-      debugPrint('[PairingService] ClaimInfo: instanceId=${claimInfo.instanceId}');
-      debugPrint('[PairingService] ClaimInfo: directUrls=${claimInfo.directUrls}');
-      debugPrint('[PairingService] ClaimInfo: publicKey length=${claimInfo.publicKey.length}');
-
-      // Decode the server's public key
-      final serverPublicKey = _base64ToBytes(claimInfo.publicKey);
-      debugPrint('[PairingService] Server public key: ${serverPublicKey.length} bytes');
-
-      // Step 2: Always connect via relay tunnel (relay-first strategy)
-      // Direct URL probing will happen in the background after pairing completes
-      onStatusUpdate?.call('Connecting via relay...');
-      return await _pairViaRelayTunnel(
-        claimCode: claimCode,
-        claimInfo: claimInfo,
-        serverPublicKey: serverPublicKey,
-        deviceName: deviceName,
-        devicePlatform: devicePlatform,
-        onStatusUpdate: onStatusUpdate,
-      );
-    } catch (e, st) {
-      debugPrint('[PairingService] === EXCEPTION in pairWithClaimCodeOnly ===');
-      debugPrint('[PairingService] Error: $e');
-      debugPrint('[PairingService] Stack trace: $st');
-      return PairingResult.error('Pairing error: $e');
-    }
-  }
-
-  /// Pairs this device using QR code data with relay-first strategy.
-  ///
-  /// This method uses the data scanned from a QR code, which includes:
-  /// - The server's instance ID
-  /// - The server's public key
-  /// - The relay URL (for self-hosted relays)
-  /// - The claim code (rotates every 5 minutes)
-  ///
-  /// ## Relay-First Flow
-  ///
-  /// 1. Looks up the claim code via the relay service (using QR relay URL)
-  /// 2. Validates the instance ID matches
-  /// 3. Connects via relay tunnel (guaranteed to work if relay is reachable)
-  /// 4. Completes pairing handshake via relay
-  /// 5. Returns credentials and active relay tunnel
-  /// 6. Background probing will attempt direct connection upgrade later
-  ///
-  /// ## Parameters
-  ///
-  /// - [qrData]: The parsed QR code data
-  /// - [deviceName]: A friendly name for this device (e.g., 'My iPhone')
-  /// - [platform]: The device platform (defaults to detected platform)
-  /// - [onStatusUpdate]: Optional callback for status updates
-  ///
-  /// Returns a [PairingResult] indicating success or failure.
-  /// On success, the result includes the active relay tunnel for ongoing
-  /// communication until direct connection is established.
-  Future<PairingResult> pairWithQrData({
-    required QrPairingData qrData,
-    required String deviceName,
-    String? platform,
-    void Function(String status)? onStatusUpdate,
-  }) async {
-    try {
-      final devicePlatform = platform ?? _detectPlatform();
-      debugPrint('[PairingService] === RELAY-FIRST QR PAIRING ===');
-
-      // Step 1: Look up claim code via relay (using relay URL from QR)
-      // This validates the claim and gets direct URLs
-      onStatusUpdate?.call('Validating pairing code...');
-      final relayService = RelayService(relayUrl: qrData.relayUrl);
-      final lookupResult = await relayService.lookupClaimCode(qrData.claimCode);
-
-      if (!lookupResult.success) {
-        return PairingResult.error(
-            lookupResult.error ?? 'Failed to validate pairing code');
+      
+      // Initialize the host if needed
+      onStatusUpdate?.call('Initializing secure connection...');
+      await libp2pService.initialize();
+      
+      // Determine the bootstrap address from relay URL
+      // The relay should expose its libp2p peer ID and address
+      // For now, we use a well-known port (4001) and construct the address
+      final bootstrapAddr = _getBootstrapAddress();
+      if (bootstrapAddr == null) {
+        return PairingResult.error('Could not determine bootstrap address from relay URL');
       }
-
-      final claimInfo = lookupResult.data!;
-
-      // Validate that the instance ID matches
-      if (claimInfo.instanceId != qrData.instanceId) {
-        return PairingResult.error(
-            'QR code does not match server. Please scan a fresh QR code.');
-      }
-
-      // Use the public key from the QR code (already validated by matching instance ID)
-      final serverPublicKey = qrData.publicKeyBytes;
-
-      // Step 2: Always connect via relay tunnel (relay-first strategy)
-      // Direct URL probing will happen in the background after pairing completes
-      onStatusUpdate?.call('Connecting via relay...');
-      return await _pairViaRelayTunnel(
-        claimCode: qrData.claimCode,
-        claimInfo: claimInfo,
-        serverPublicKey: serverPublicKey,
-        deviceName: deviceName,
-        devicePlatform: devicePlatform,
-        onStatusUpdate: onStatusUpdate,
-        relayUrl: qrData.relayUrl, // Use custom relay URL from QR
-      );
-    } catch (e) {
-      return PairingResult.error('Pairing error: $e');
-    }
-  }
-
-  // pairDevice method removed - direct pairing not supported in WebRTC-only mode.
-  // Use pairWithClaimCodeOnly or pairWithQrData.
-
-  /// Retrieves stored pairing credentials.
-  ///
-  /// Returns null if no credentials are stored (device not paired).
-  Future<PairingCredentials?> getStoredCredentials() async {
-    final serverUrl = await _authStorage.read(_StorageKeys.serverUrl);
-    final deviceId = await _authStorage.read(_StorageKeys.deviceId);
-    final mediaToken = await _authStorage.read(_StorageKeys.mediaToken);
-    final accessToken = await _authStorage.read(_StorageKeys.accessToken);
-    final deviceToken = await _authStorage.read(_StorageKeys.deviceToken);
-    final serverPublicKeyB64 =
-        await _authStorage.read(_StorageKeys.serverPublicKey);
-    final directUrlsJson = await _authStorage.read(_StorageKeys.directUrls);
-    final certFingerprint =
-        await _authStorage.read(_StorageKeys.certFingerprint);
-    final instanceName = await _authStorage.read(_StorageKeys.instanceName);
-    final instanceId = await _authStorage.read(_StorageKeys.instanceId);
-
-    if (serverUrl == null ||
-        deviceId == null ||
-        mediaToken == null ||
-        accessToken == null ||
-        serverPublicKeyB64 == null) {
-      return null;
-    }
-
-    // Parse direct URLs from JSON, fallback to serverUrl if not available
-    List<String> directUrls = [serverUrl];
-    if (directUrlsJson != null) {
+      
+      onStatusUpdate?.call('Connecting to discovery network...');
+      await libp2pService.bootstrap(bootstrapAddr);
+      
+      // Wait for bootstrap to complete with timeout
       try {
-        final decoded = jsonDecode(directUrlsJson);
-        if (decoded is List) {
-          directUrls = decoded.cast<String>();
-        }
+        await libp2pService.onBootstrapComplete.timeout(
+          const Duration(seconds: 10),
+          onTimeout: () {
+            debugPrint('[PairingService] Bootstrap timeout, proceeding anyway...');
+          },
+        );
       } catch (e) {
-        // If parsing fails, use fallback
+        debugPrint('[PairingService] Bootstrap wait error: $e');
       }
-    }
-
-    return PairingCredentials(
-      serverUrl: serverUrl,
-      deviceId: deviceId,
-      mediaToken: mediaToken,
-      accessToken: accessToken,
-      deviceToken: deviceToken,
-      serverPublicKey: _base64ToBytes(serverPublicKeyB64),
-      directUrls: directUrls,
-      certFingerprint: certFingerprint,
-      instanceName: instanceName,
-      instanceId: instanceId,
-    );
-  }
-
-  /// Clears stored pairing credentials.
-  ///
-  /// This effectively unpairs the device.
-  Future<void> clearCredentials() async {
-    await _authStorage.delete(_StorageKeys.serverUrl);
-    await _authStorage.delete(_StorageKeys.deviceId);
-    await _authStorage.delete(_StorageKeys.mediaToken);
-    await _authStorage.delete(_StorageKeys.accessToken);
-    await _authStorage.delete(_StorageKeys.deviceToken);
-    // Keys removed
-    await _authStorage.delete(_StorageKeys.serverPublicKey);
-    await _authStorage.delete(_StorageKeys.directUrls);
-    await _authStorage.delete(_StorageKeys.certFingerprint);
-    await _authStorage.delete(_StorageKeys.instanceName);
-    await _authStorage.delete(_StorageKeys.instanceId);
-  }
-
-  /// Checks if this device is currently paired.
-  Future<bool> isPaired() async {
-    final credentials = await getStoredCredentials();
-    return credentials != null;
-  }
-
-  /// Gets the stored connection type preference.
-  ///
-  /// Returns 'direct', 'relay', or null if no preference is stored.
-  /// This can be used by the UI to show the user how they're connected.
-  Future<String?> getConnectionType() async {
-    return await _authStorage.read('connection_last_type');
-  }
-
-  /// Gets the last successful direct URL.
-  ///
-  /// Returns the URL if a direct connection was previously successful,
-  /// or null if relay was used or no connection has been made.
-  Future<String?> getLastDirectUrl() async {
-    return await _authStorage.read('connection_last_url');
-  }
-
-  // Private helpers
-
-  /// Pairs the device via relay tunnel (relay-first strategy).
-  ///
-  /// This method:
-  /// 1. Connects to relay tunnel using the instance ID
-  /// 2. Performs WebRTC handshake over the tunnel
-  /// 3. Sends claim code request
-  /// 4. Receives pairing response and returns active connection
-  Future<PairingResult> _pairViaRelayTunnel({
-    required String claimCode,
-    required ClaimCodeInfo claimInfo,
-    required Uint8List serverPublicKey,
-    required String deviceName,
-    required String devicePlatform,
-    void Function(String status)? onStatusUpdate,
-    String? relayUrl,
-  }) async {
-    WebRTCConnectionManager? webrtcManager;
-
-    // Use provided relay URL or default
-    final effectiveRelayUrl = relayUrl ?? _relayUrl;
-
-    try {
-      // Step 1: Connect to relay tunnel
-      onStatusUpdate?.call('Connecting via WebRTC...');
-      final tunnelService = RelayTunnelService(relayUrl: effectiveRelayUrl);
       
-      webrtcManager = WebRTCConnectionManager(tunnelService);
+      // Lookup the claim code on the DHT
+      onStatusUpdate?.call('Looking up pairing code...');
+      final lookupResult = await libp2pService.lookupClaimCode(claimCode).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          throw TimeoutException('Claim code lookup timed out');
+        },
+      );
       
-      // Connect via claim code
-      await webrtcManager.connectViaClaimCode(claimCode);
+      debugPrint('[PairingService] Found server: peerId=${lookupResult.peerId}, addresses=${lookupResult.addresses}');
       
-      // Step 2: Send claim code request (pairing)
-      onStatusUpdate?.call('Submitting claim code...');
-      
-      final responseJson = await webrtcManager.sendPairingRequest(claimCode, deviceName, devicePlatform);
-
-      // Check for error (server sends 'message' field for errors)
-      if (responseJson['type'] == 'error') {
-        final errorMsg = responseJson['message'] as String? ??
-            responseJson['reason'] as String? ??
-            'Unknown error';
-        webrtcManager.dispose();
-        return PairingResult.error(_formatTunnelError(errorMsg));
+      // Dial the server if we have addresses
+      if (lookupResult.addresses.isNotEmpty) {
+        onStatusUpdate?.call('Connecting to server...');
+        for (final addr in lookupResult.addresses) {
+          try {
+            await libp2pService.dial(addr);
+            debugPrint('[PairingService] Dialed: $addr');
+            break;
+          } catch (e) {
+            debugPrint('[PairingService] Failed to dial $addr: $e');
+          }
+        }
       }
-
-      // Parse pairing response (pairing_complete type)
-      final deviceId = responseJson['device_id'] as String?;
-      final mediaToken = responseJson['media_token'] as String?;
-      final accessToken = responseJson['access_token'] as String?;
-      final deviceToken = responseJson['device_token'] as String?;
-
-      debugPrint('[RelayPairing] Response: deviceId=$deviceId, mediaToken=${mediaToken != null ? "present" : "null"}, accessToken=${accessToken != null ? "present" : "null"}, deviceToken=${deviceToken != null ? "present" : "null"}');
-
-      if (deviceId == null || mediaToken == null || accessToken == null) {
-        webrtcManager.dispose();
-        return PairingResult.error('Incomplete pairing response from relay');
+      
+      // Send pairing request
+      onStatusUpdate?.call('Submitting pairing request...');
+      final result = await libp2pService.sendPairingRequest(
+        peerId: lookupResult.peerId,
+        claimCode: claimCode,
+        deviceName: deviceName,
+        deviceType: devicePlatform,
+      );
+      
+      final mediaToken = result['mediaToken'] as String?;
+      final accessToken = result['accessToken'] as String?;
+      final deviceToken = result['deviceToken'] as String?;
+      
+      if (accessToken == null || mediaToken == null) {
+        return PairingResult.error('Server did not return required tokens');
       }
-
-      if (deviceToken == null) {
-        debugPrint('[RelayPairing] WARNING: device_token not returned by server - reconnection may fail');
+      
+      // Store credentials
+      await _authStorage.write(_StorageKeys.accessToken, accessToken);
+      await _authStorage.write(_StorageKeys.mediaToken, mediaToken);
+      if (deviceToken != null) {
+        await _authStorage.write(_StorageKeys.deviceToken, deviceToken);
       }
-
-      // Step 3: Build credentials
-      // Use first direct URL as server URL, or relay URL if no direct URLs
-      final serverUrl = claimInfo.directUrls.isNotEmpty
-          ? claimInfo.directUrls.first
-          : effectiveRelayUrl;
-
+      
+      // TODO: Get server URL, device ID, and public key from pairing response
+      // For now, use placeholder values
+      final serverUrl = _relayUrl; // This should come from the server
+      const deviceId = 'paired-device'; // This should come from the server
+      
       final credentials = PairingCredentials(
         serverUrl: serverUrl,
         deviceId: deviceId,
         mediaToken: mediaToken,
         accessToken: accessToken,
         deviceToken: deviceToken,
-        serverPublicKey: serverPublicKey,
-        directUrls: claimInfo.directUrls,
-        certFingerprint: null,
-        instanceName: null,
-        instanceId: claimInfo.instanceId,
+        serverPublicKey: Uint8List(0), // TODO: Get from server
+        directUrls: [], // TODO: Get from server
       );
-
-      await _storeCredentials(credentials);
-
-      // Relay-first strategy: Always return with relay tunnel (WebRTC) active.
-      debugPrint('[RelayPairing] Pairing complete, returning WebRTC connection');
-      await _authStorage.write('connection_last_type', 'webrtc');
-      return PairingResult.success(credentials, webrtcManager: webrtcManager);
-    } catch (e, stackTrace) {
-      debugPrint('[RelayPairing] UNCAUGHT ERROR: $e');
-      debugPrint('[RelayPairing] Stack trace: $stackTrace');
-      webrtcManager?.dispose();
-      return PairingResult.error('Relay pairing error: $e');
+      
+      onStatusUpdate?.call('Pairing successful!');
+      return PairingResult.success(credentials, isP2PMode: true);
+    } on TimeoutException catch (e) {
+      debugPrint('[PairingService] Timeout: $e');
+      return PairingResult.error('Connection timed out. Please try again.');
+    } catch (e) {
+      debugPrint('[PairingService] Error: $e');
+      return PairingResult.error('Pairing failed: $e');
     }
   }
 
-  /// Formats tunnel error messages to be user-friendly.
-  String _formatTunnelError(String reason) {
-    switch (reason) {
-      case 'invalid_claim_code':
-        return 'Invalid claim code';
-      case 'claim_code_used':
-        return 'This claim code has already been used';
-      case 'claim_code_expired':
-        return 'This claim code has expired';
-      case 'handshake_incomplete':
-        return 'Handshake must be completed before submitting claim code';
-      case 'device_creation_failed':
-        return 'Failed to create device registration';
-      default:
-        return reason;
+  /// Get the bootstrap multiaddr from the relay URL.
+  /// This constructs a libp2p multiaddr from the relay's HTTP URL.
+  String? _getBootstrapAddress() {
+    try {
+      final uri = Uri.parse(_relayUrl);
+      final host = uri.host;
+      const port = 4001; // Standard libp2p port
+      
+      // TODO: The relay should advertise its peer ID
+      // For now, this is a placeholder - the relay needs to expose its peer ID
+      // via an API endpoint or config
+      const relayPeerId = ''; // This needs to be configured
+      
+      if (relayPeerId.isEmpty) {
+        debugPrint('[PairingService] Warning: Relay peer ID not configured');
+        // Return just the address without peer ID for now
+        // This won't work for DHT bootstrap but allows testing
+        return '/dns4/$host/tcp/$port';
+      }
+      
+      return '/dns4/$host/tcp/$port/p2p/$relayPeerId';
+    } catch (e) {
+      debugPrint('[PairingService] Failed to parse relay URL: $e');
+      return null;
     }
   }
 
-  String _bytesToBase64(Uint8List bytes) {
-    return base64Encode(bytes);
-  }
-
-  Future<void> _storeCredentials(PairingCredentials credentials) async {
-    await _authStorage.write(_StorageKeys.serverUrl, credentials.serverUrl);
-    await _authStorage.write(_StorageKeys.deviceId, credentials.deviceId);
-    await _authStorage.write(_StorageKeys.mediaToken, credentials.mediaToken);
-    await _authStorage.write(_StorageKeys.accessToken, credentials.accessToken);
-    if (credentials.deviceToken != null) {
-      await _authStorage.write(
-        _StorageKeys.deviceToken,
-        credentials.deviceToken!,
-      );
-    }
-    // Removed key storage as WebRTC doesn't need them
-    // Keeping serverPublicKey for identity verification if needed
-    await _authStorage.write(
-      _StorageKeys.serverPublicKey,
-      _bytesToBase64(credentials.serverPublicKey),
+  /// Pairs this device using QR code data.
+  Future<PairingResult> pairWithQrData({
+    required QrPairingData qrData,
+    required String deviceName,
+    String? platform,
+    void Function(String status)? onStatusUpdate,
+  }) async {
+    return pairWithClaimCodeOnly(
+      claimCode: qrData.claimCode,
+      deviceName: deviceName,
+      platform: platform,
+      onStatusUpdate: onStatusUpdate,
     );
-    await _authStorage.write(
-      _StorageKeys.directUrls,
-      jsonEncode(credentials.directUrls),
-    );
-    if (credentials.certFingerprint != null) {
-      await _authStorage.write(
-        _StorageKeys.certFingerprint,
-        credentials.certFingerprint!,
-      );
-    }
-    if (credentials.instanceName != null) {
-      await _authStorage.write(
-        _StorageKeys.instanceName,
-        credentials.instanceName!,
-      );
-    }
-    if (credentials.instanceId != null) {
-      await _authStorage.write(
-        _StorageKeys.instanceId,
-        credentials.instanceId!,
-      );
-    }
   }
 
+  /// Detects the current platform.
   String _detectPlatform() {
-    if (kIsWeb) {
-      return 'web';
-    } else if (defaultTargetPlatform == TargetPlatform.android) {
-      return 'android';
-    } else if (defaultTargetPlatform == TargetPlatform.iOS) {
-      return 'ios';
-    } else if (defaultTargetPlatform == TargetPlatform.macOS) {
-      return 'macos';
-    } else if (defaultTargetPlatform == TargetPlatform.windows) {
-      return 'windows';
-    } else if (defaultTargetPlatform == TargetPlatform.linux) {
-      return 'linux';
-    } else {
-      return 'unknown';
-    }
+    if (kIsWeb) return 'web';
+    return defaultTargetPlatform.name.toLowerCase();
   }
 
-  // Helper functions for base64 encoding/decoding
-
-  Uint8List _base64ToBytes(String str) {
-    return Uint8List.fromList(base64Decode(str));
+  /// Clears stored pairing credentials.
+  Future<void> clearCredentials() async {
+    await _authStorage.delete(_StorageKeys.serverUrl);
+    await _authStorage.delete(_StorageKeys.deviceId);
+    await _authStorage.delete(_StorageKeys.mediaToken);
+    await _authStorage.delete(_StorageKeys.accessToken);
+    await _authStorage.delete(_StorageKeys.deviceToken);
+    await _authStorage.delete(_StorageKeys.directUrls);
+    await _authStorage.delete(_StorageKeys.certFingerprint);
+    await _authStorage.delete(_StorageKeys.instanceName);
+    await _authStorage.delete(_StorageKeys.serverPublicKey);
+    await _authStorage.delete(_StorageKeys.instanceId);
   }
 }

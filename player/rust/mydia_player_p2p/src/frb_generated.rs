@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1769995448;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -2128155286;
 
 // Section: executor
 
@@ -46,6 +46,58 @@ flutter_rust_bridge::frb_generated_default_handler!();
 
 // Section: wire_funcs
 
+fn wire__crate__P2PHost_bootstrap_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "P2PHost_bootstrap",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<P2pHost>,
+            >>::sse_decode(&mut deserializer);
+            let api_addr = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::P2pHost::bootstrap(&*api_that_guard, api_addr)?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
 fn wire__crate__P2PHost_dial_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -234,7 +286,7 @@ fn wire__crate__P2PHost_listen_impl(
         },
     )
 }
-fn wire__crate__P2PHost_read_stream_chunk_impl(
+fn wire__crate__P2PHost_lookup_claim_code_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -242,7 +294,7 @@ fn wire__crate__P2PHost_read_stream_chunk_impl(
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "P2PHost_read_stream_chunk",
+            debug_name: "P2PHost_lookup_claim_code",
             port: Some(port_),
             mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
         },
@@ -259,8 +311,7 @@ fn wire__crate__P2PHost_read_stream_chunk_impl(
             let api_that = <RustOpaqueMoi<
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<P2pHost>,
             >>::sse_decode(&mut deserializer);
-            let api_stream_id = <String>::sse_decode(&mut deserializer);
-            let api_size = <u32>::sse_decode(&mut deserializer);
+            let api_claim_code = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -282,74 +333,9 @@ fn wire__crate__P2PHost_read_stream_chunk_impl(
                             }
                         }
                         let api_that_guard = api_that_guard.unwrap();
-                        let output_ok = crate::P2pHost::read_stream_chunk(
-                            &*api_that_guard,
-                            api_stream_id,
-                            api_size,
-                        )
-                        .await?;
-                        Ok(output_ok)
-                    })()
-                    .await,
-                )
-            }
-        },
-    )
-}
-fn wire__crate__P2PHost_request_media_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "P2PHost_request_media",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_that = <RustOpaqueMoi<
-                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<P2pHost>,
-            >>::sse_decode(&mut deserializer);
-            let api_peer = <String>::sse_decode(&mut deserializer);
-            let api_file_path = <String>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| async move {
-                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
-                    (move || async move {
-                        let mut api_that_guard = None;
-                        let decode_indices_ =
-                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
-                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
-                                    &api_that, 0, false,
-                                )],
-                            );
-                        for i in decode_indices_ {
-                            match i {
-                                0 => {
-                                    api_that_guard =
-                                        Some(api_that.lockable_decode_async_ref().await)
-                                }
-                                _ => unreachable!(),
-                            }
-                        }
-                        let api_that_guard = api_that_guard.unwrap();
-                        let output_ok = crate::P2pHost::request_media(
-                            &*api_that_guard,
-                            api_peer,
-                            api_file_path,
-                        )
-                        .await?;
+                        let output_ok =
+                            crate::P2pHost::lookup_claim_code(&*api_that_guard, api_claim_code)
+                                .await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -512,6 +498,18 @@ impl SseDecode for bool {
     }
 }
 
+impl SseDecode for crate::FlutterLookupResult {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_peerId = <String>::sse_decode(deserializer);
+        let mut var_addresses = <Vec<String>>::sse_decode(deserializer);
+        return crate::FlutterLookupResult {
+            peer_id: var_peerId,
+            addresses: var_addresses,
+        };
+    }
+}
+
 impl SseDecode for crate::FlutterPairingRequest {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -546,6 +544,18 @@ impl SseDecode for crate::FlutterPairingResponse {
     }
 }
 
+impl SseDecode for Vec<String> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<String>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<u8> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -575,13 +585,6 @@ impl SseDecode for (P2pHost, String) {
         let mut var_field0 = <P2pHost>::sse_decode(deserializer);
         let mut var_field1 = <String>::sse_decode(deserializer);
         return (var_field0, var_field1);
-    }
-}
-
-impl SseDecode for u32 {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        deserializer.cursor.read_u32::<NativeEndian>().unwrap()
     }
 }
 
@@ -620,11 +623,11 @@ fn pde_ffi_dispatcher_primary_impl(
 ) {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        1 => wire__crate__P2PHost_dial_impl(port, ptr, rust_vec_len, data_len),
-        2 => wire__crate__P2PHost_event_stream_impl(port, ptr, rust_vec_len, data_len),
-        4 => wire__crate__P2PHost_listen_impl(port, ptr, rust_vec_len, data_len),
-        5 => wire__crate__P2PHost_read_stream_chunk_impl(port, ptr, rust_vec_len, data_len),
-        6 => wire__crate__P2PHost_request_media_impl(port, ptr, rust_vec_len, data_len),
+        1 => wire__crate__P2PHost_bootstrap_impl(port, ptr, rust_vec_len, data_len),
+        2 => wire__crate__P2PHost_dial_impl(port, ptr, rust_vec_len, data_len),
+        3 => wire__crate__P2PHost_event_stream_impl(port, ptr, rust_vec_len, data_len),
+        5 => wire__crate__P2PHost_listen_impl(port, ptr, rust_vec_len, data_len),
+        6 => wire__crate__P2PHost_lookup_claim_code_impl(port, ptr, rust_vec_len, data_len),
         7 => wire__crate__P2PHost_send_pairing_request_impl(port, ptr, rust_vec_len, data_len),
         8 => wire__crate__init_app_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
@@ -639,7 +642,7 @@ fn pde_ffi_dispatcher_sync_impl(
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        3 => wire__crate__P2PHost_init_impl(ptr, rust_vec_len, data_len),
+        4 => wire__crate__P2PHost_init_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -661,6 +664,22 @@ impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<P2pHost>> for P2pHost {
     }
 }
 
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::FlutterLookupResult {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.peer_id.into_into_dart().into_dart(),
+            self.addresses.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::FlutterLookupResult {}
+impl flutter_rust_bridge::IntoIntoDart<crate::FlutterLookupResult> for crate::FlutterLookupResult {
+    fn into_into_dart(self) -> crate::FlutterLookupResult {
+        self
+    }
+}
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::FlutterPairingRequest {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
@@ -747,6 +766,14 @@ impl SseEncode for bool {
     }
 }
 
+impl SseEncode for crate::FlutterLookupResult {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.peer_id, serializer);
+        <Vec<String>>::sse_encode(self.addresses, serializer);
+    }
+}
+
 impl SseEncode for crate::FlutterPairingRequest {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -765,6 +792,16 @@ impl SseEncode for crate::FlutterPairingResponse {
         <Option<String>>::sse_encode(self.access_token, serializer);
         <Option<String>>::sse_encode(self.device_token, serializer);
         <Option<String>>::sse_encode(self.error, serializer);
+    }
+}
+
+impl SseEncode for Vec<String> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <String>::sse_encode(item, serializer);
+        }
     }
 }
 
@@ -793,13 +830,6 @@ impl SseEncode for (P2pHost, String) {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <P2pHost>::sse_encode(self.0, serializer);
         <String>::sse_encode(self.1, serializer);
-    }
-}
-
-impl SseEncode for u32 {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        serializer.cursor.write_u32::<NativeEndian>(self).unwrap();
     }
 }
 

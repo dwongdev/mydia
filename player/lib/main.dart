@@ -7,7 +7,10 @@ import 'package:media_kit/media_kit.dart';
 import 'app.dart';
 import 'core/downloads/download_service.dart';
 
-import 'package:player/native/frb_generated.dart';
+// Only import FRB on native platforms (not web)
+// ignore: unused_import
+import 'package:player/native/frb_generated.dart'
+    if (dart.library.js_interop) 'package:player/native/frb_stub.dart';
 
 void main() async {
   // Add error logging for debugging
@@ -21,11 +24,19 @@ void main() async {
     () async {
       WidgetsFlutterBinding.ensureInitialized();
 
-      // Initialize Rust Bridge
-      try {
-        await RustLib.init();
-      } catch (e) {
-        debugPrint('Failed to initialize Rust bridge: $e');
+      // Initialize Rust Bridge (native platforms only - not available on web)
+      // This MUST complete before any P2P/Libp2p code runs
+      if (!kIsWeb) {
+        try {
+          await RustLib.init();
+          debugPrint('[RustLib] Rust bridge initialized successfully');
+        } catch (e) {
+          debugPrint('[RustLib] Failed to initialize Rust bridge: $e');
+          // Re-throw to prevent app from starting with broken P2P
+          rethrow;
+        }
+      } else {
+        debugPrint('[RustLib] Skipping Rust bridge initialization on web platform');
       }
 
       // Initialize media_kit for video playback

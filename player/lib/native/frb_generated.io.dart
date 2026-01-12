@@ -53,10 +53,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       dynamic raw);
 
   @protected
+  FlutterLookupResult dco_decode_flutter_lookup_result(dynamic raw);
+
+  @protected
   FlutterPairingRequest dco_decode_flutter_pairing_request(dynamic raw);
 
   @protected
   FlutterPairingResponse dco_decode_flutter_pairing_response(dynamic raw);
+
+  @protected
+  List<String> dco_decode_list_String(dynamic raw);
 
   @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
@@ -70,9 +76,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     String
   ) dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_p_2_p_host_string(
       dynamic raw);
-
-  @protected
-  int dco_decode_u_32(dynamic raw);
 
   @protected
   int dco_decode_u_8(dynamic raw);
@@ -116,12 +119,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  FlutterLookupResult sse_decode_flutter_lookup_result(
+      SseDeserializer deserializer);
+
+  @protected
   FlutterPairingRequest sse_decode_flutter_pairing_request(
       SseDeserializer deserializer);
 
   @protected
   FlutterPairingResponse sse_decode_flutter_pairing_response(
       SseDeserializer deserializer);
+
+  @protected
+  List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
@@ -135,9 +145,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     String
   ) sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_p_2_p_host_string(
       SseDeserializer deserializer);
-
-  @protected
-  int sse_decode_u_32(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_8(SseDeserializer deserializer);
@@ -185,12 +192,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       FlutterPairingRequest self, SseSerializer serializer);
 
   @protected
+  void sse_encode_flutter_lookup_result(
+      FlutterLookupResult self, SseSerializer serializer);
+
+  @protected
   void sse_encode_flutter_pairing_request(
       FlutterPairingRequest self, SseSerializer serializer);
 
   @protected
   void sse_encode_flutter_pairing_response(
       FlutterPairingResponse self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_u_8_strict(
@@ -203,9 +217,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void
       sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_p_2_p_host_string(
           (P2PHost, String) self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_u_32(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_8(int self, SseSerializer serializer);

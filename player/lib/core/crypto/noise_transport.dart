@@ -14,13 +14,13 @@ const int _headerSize = 11;
 /// Rekey threshold: rekey after 2^32 messages.
 const int _rekeyThreshold = 4294967296;
 
-/// Channel type for WebRTC data channels.
+/// Channel type for data channels.
 enum NoiseChannel { api, media }
 
 /// Manages Noise Protocol transport encryption with wire framing.
 ///
 /// Wraps [NoiseIK] and adds the wire format framing used by Mydia's
-/// WebRTC E2EE implementation:
+/// E2EE implementation:
 ///
 /// ```
 /// || version (1) || channel (1) || flags (1) || counter (8) || ciphertext ||
@@ -36,7 +36,7 @@ class NoiseTransport {
   /// Creates a new NoiseTransport as the initiator (client side).
   ///
   /// [serverPublicKey] is the server's static public key (32 bytes).
-  /// [sessionId] is the WebRTC session ID for prologue binding.
+  /// [sessionId] is the session ID for prologue binding.
   /// [instanceId] is the Mydia instance ID for prologue binding.
   static Future<NoiseTransport> initiator({
     required Uint8List serverPublicKey,

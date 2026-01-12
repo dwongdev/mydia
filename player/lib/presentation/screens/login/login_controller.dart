@@ -6,7 +6,7 @@ import '../../../core/auth/device_info_service.dart';
 import '../../../core/auth/auth_service.dart';
 import '../../../core/connection/connection_provider.dart';
 import '../../../core/protocol/protocol_version.dart';
-import '../../../core/relay/relay_service.dart';
+import '../../../core/p2p/libp2p_service.dart';
 
 // Re-export QrPairingData so UI can import from one place
 export '../../../core/channels/pairing_service.dart' show QrPairingData;
@@ -122,12 +122,10 @@ class LoginController extends _$LoginController {
     );
 
     try {
-      // Create relay service with custom URL if provided
-      final relayService = relayUrl != null && relayUrl.isNotEmpty
-          ? RelayService(relayUrl: relayUrl)
-          : null;
+      // Get the libp2p service from the provider (already initialized in app.dart)
+      final libp2pService = ref.read(libp2pServiceProvider);
       final pairingService = PairingService(
-        relayService: relayService,
+        libp2pService: libp2pService,
         relayUrl: relayUrl,
       );
       final deviceInfo = DeviceInfoService();
@@ -175,7 +173,7 @@ class LoginController extends _$LoginController {
 
       // Pairing successful - store credentials in auth service
       debugPrint('[LoginController] Pairing successful! Storing credentials...');
-      debugPrint('[LoginController] isRelayMode=${result.isRelayMode}');
+      debugPrint('[LoginController] isP2PMode=${result.isP2PMode}');
       final credentials = result.credentials!;
       final authService = ref.read(authServiceProvider);
 
@@ -189,19 +187,16 @@ class LoginController extends _$LoginController {
       );
       debugPrint('[LoginController] Credentials stored');
 
-      // If relay mode, set the tunnel in the connection provider
-      if (result.isRelayMode && result.webrtcManager != null) {
-        debugPrint('[LoginController] Setting relay tunnel in connection provider');
-        await ref.read(connectionProvider.notifier).setWebRTCManager(
-          result.webrtcManager!,
+      // Set connection mode
+      if (result.isP2PMode) {
+        debugPrint('[LoginController] Setting P2P mode in connection provider');
+        await ref.read(connectionProvider.notifier).setP2PMode(
           instanceId: credentials.instanceId,
           relayUrl: relayUrl,
         );
-        debugPrint('[LoginController] Relay tunnel set');
-        // Invalidate GraphQL providers to force rebuild with relay mode
+        // Invalidate GraphQL providers to force rebuild
         ref.invalidate(graphqlClientProvider);
         ref.invalidate(asyncGraphqlClientProvider);
-        debugPrint('[LoginController] GraphQL providers invalidated');
       } else {
         debugPrint('[LoginController] Direct mode, ensuring connection provider is in direct mode');
         await ref.read(connectionProvider.notifier).setDirectMode();
@@ -315,7 +310,10 @@ class LoginController extends _$LoginController {
     );
 
     try {
+      // Get the libp2p service from the provider (already initialized in app.dart)
+      final libp2pService = ref.read(libp2pServiceProvider);
       final pairingService = PairingService(
+        libp2pService: libp2pService,
         relayUrl: qrData.relayUrl,
       );
       final deviceInfo = DeviceInfoService();
@@ -358,7 +356,7 @@ class LoginController extends _$LoginController {
       if (!ref.mounted) return;
 
       // Pairing successful - store credentials in auth service
-      debugPrint('[LoginController] QR pairing successful! isRelayMode=${result.isRelayMode}');
+      debugPrint('[LoginController] QR pairing successful! isP2PMode=${result.isP2PMode}');
       final credentials = result.credentials!;
       final authService = ref.read(authServiceProvider);
 
@@ -371,18 +369,16 @@ class LoginController extends _$LoginController {
         username: 'Device ${credentials.deviceId.substring(0, 8)}',
       );
 
-      // If relay mode, set the tunnel in the connection provider
-      if (result.isRelayMode && result.webrtcManager != null) {
-        debugPrint('[LoginController] Setting relay tunnel from QR pairing');
-        await ref.read(connectionProvider.notifier).setWebRTCManager(
-          result.webrtcManager!,
+      // Set connection mode
+      if (result.isP2PMode) {
+        debugPrint('[LoginController] Setting P2P mode from QR pairing');
+        await ref.read(connectionProvider.notifier).setP2PMode(
           instanceId: credentials.instanceId,
           relayUrl: qrData.relayUrl,
         );
-        // Invalidate GraphQL providers to force rebuild with relay mode
+        // Invalidate GraphQL providers to force rebuild
         ref.invalidate(graphqlClientProvider);
         ref.invalidate(asyncGraphqlClientProvider);
-        debugPrint('[LoginController] GraphQL providers invalidated');
       } else {
         await ref.read(connectionProvider.notifier).setDirectMode();
       }

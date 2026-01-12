@@ -1,5 +1,5 @@
 use rustler::{Env, LocalPid, ResourceArc, Term, OwnedEnv, Encoder, NifStruct, NifTaggedEnum};
-use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingRequest, PairingResponse};
+use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingRequest, PairingResponse, HostConfig};
 use std::thread;
 
 // Resource to hold the Host state
@@ -14,7 +14,8 @@ fn load(env: Env, _info: Term) -> bool {
 
 #[rustler::nif]
 fn start_host() -> Result<(ResourceArc<HostResource>, String), rustler::Error> {
-    let (host, peer_id_str) = Host::new();
+    let config = HostConfig { enable_relay_server: false };
+    let (host, peer_id_str) = Host::new(config);
     let resource = HostResource { host };
     Ok((ResourceArc::new(resource), peer_id_str))
 }

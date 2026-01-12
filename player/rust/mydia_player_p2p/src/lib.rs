@@ -1,5 +1,5 @@
 mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be accurate, and you can change it according to your needs. */
-use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingRequest, PairingResponse};
+use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingRequest, PairingResponse, HostConfig};
 use flutter_rust_bridge::frb;
 use crate::frb_generated::StreamSink;
 
@@ -31,7 +31,8 @@ pub struct FlutterPairingResponse {
 impl P2pHost {
     #[frb(sync)]
     pub fn init() -> (Self, String) {
-        let (host, peer_id) = Host::new();
+        let config = HostConfig { enable_relay_server: false };
+        let (host, peer_id) = Host::new(config);
         (P2pHost { inner: host }, peer_id)
     }
 

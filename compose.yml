@@ -34,6 +34,9 @@ services:
       # Mix environment
       MIX_ENV: dev
 
+      # Rust logging for libp2p NIF
+      RUST_LOG: info
+
       # Metadata relay configuration
       METADATA_RELAY_URL: ${METADATA_RELAY_URL:-https://relay.mydia.dev}
 
@@ -44,7 +47,9 @@ services:
       # Flutter cache
       PUB_CACHE: /app/player/.pub-cache
     ports:
-      - "4000:4000"
+      - "4000:4000"      # Phoenix HTTP
+      - "4001:4001/tcp"  # libp2p TCP
+      - "4001:4001/udp"  # libp2p QUIC
     volumes:
       # Mount source code for live reloading
       - .:/app

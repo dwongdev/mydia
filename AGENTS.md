@@ -55,6 +55,26 @@ Mydia uses a companion service called **metadata-relay**, which is a developer-o
 
 The Flutter player has additional workflow guidance in `player/CLAUDE.md`.
 
+### Player Android Builds
+
+Android builds use the player's Nix flake (`player/flake.nix`) which provides Flutter, Android SDK, NDK, and Rust cross-compilation toolchains.
+
+**Commands:**
+
+- `./dev player android build` - Build release APK
+- `./dev player android run` - Build and run on connected Android device
+- `./dev player android shell` - Open nix develop shell for manual commands
+
+**Output:** `player/build/app/outputs/flutter-apk/app-release.apk`
+
+**Requirements:** Nix must be installed on the host system (not Docker).
+
+**What the flake provides:**
+- Flutter SDK
+- Android SDK with NDK 27.0.12077973
+- Rust toolchain with Android targets (aarch64, armv7, x86_64, i686)
+- All necessary environment variables for Rust cross-compilation
+
 ## Project guidelines
 
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues

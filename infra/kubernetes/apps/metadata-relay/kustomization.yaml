@@ -11,6 +11,7 @@ resources:
   - deployment.yaml
   - service.yaml
   - ingress.yaml
+  - dns.yaml
   # Note: secret.yaml must be created from secret.yaml.example
   # and applied separately
 

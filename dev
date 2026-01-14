@@ -91,10 +91,21 @@ ${YELLOW}Player (Flutter in App Container):${NC}
   player e2e           Run player E2E integration tests
   player e2e-build     Pre-build E2E images (faster subsequent runs)
 
+${YELLOW}Player Android (Native, uses player/flake.nix):${NC}
+  player android build Build Android APK (release)
+  player android run   Build and run on connected Android device
+  player android shell Open nix develop shell in player directory
+
 ${YELLOW}Player Development:${NC}
   Access: http://localhost:4000/player
   - FlutterWatcher auto-builds on file changes
   - build_runner watch handles code generation
+
+${YELLOW}Metadata Relay:${NC}
+  relay deploy         Build, push :dev image, and redeploy to k8s
+  relay build          Build :dev Docker image only
+  relay push           Push :dev image to ghcr.io
+  relay restart        Restart deployment (pull latest image)
 
 ${YELLOW}Docker Compose Commands:${NC}
   exec <service> <cmd> Execute command in running service
@@ -322,9 +333,130 @@ case "$COMMAND" in
                 echo -e "${GREEN}E2E images pre-built successfully!${NC}"
                 echo "Now run './dev player e2e' to execute the tests."
                 ;;
+            android)
+                # Android builds use the player's flake.nix (native, not in Docker)
+                if ! command -v nix &> /dev/null; then
+                    echo -e "${RED}Error: nix is not installed${NC}"
+                    echo "Android builds require Nix. Install from: https://nixos.org/download.html"
+                    exit 1
+                fi
+                
+                case "$2" in
+                    build)
+                        echo -e "${GREEN}Building Android APK using player/flake.nix...${NC}"
+                        echo ""
+                        nix develop ./player --command bash -c "cd player && flutter build apk --release"
+                        if [ $? -eq 0 ]; then
+                            echo ""
+                            echo -e "${GREEN}APK built successfully!${NC}"
+                            echo "Output: player/build/app/outputs/flutter-apk/app-release.apk"
+                        fi
+                        ;;
+                    run)
+                        echo -e "${GREEN}Building and running on Android device...${NC}"
+                        echo ""
+                        nix develop ./player --command bash -c "cd player && flutter run"
+                        ;;
+                    shell)
+                        echo -e "${GREEN}Opening nix develop shell in player directory...${NC}"
+                        echo ""
+                        cd player && nix develop
+                        ;;
+                    *)
+                        echo -e "${RED}Error: Unknown android command: $2${NC}"
+                        echo "Usage: ./dev player android <build|run|shell>"
+                        exit 1
+                        ;;
+                esac
+                ;;
             *)
                 echo -e "${RED}Error: Unknown player command: $1${NC}"
-                echo "Usage: ./dev player <logs|build|setup|shell|restart|e2e|e2e-build>"
+                echo "Usage: ./dev player <logs|build|setup|shell|restart|e2e|e2e-build|android>"
+                exit 1
+                ;;
+        esac
+        ;;
+
+    # Metadata relay deployment
+    relay)
+        RELAY_IMAGE="ghcr.io/getmydia/mydia/metadata-relay:dev"
+        RELAY_NAMESPACE="metadata-relay"
+        RELAY_DEPLOYMENT="metadata-relay"
+
+        case "$1" in
+            build)
+                echo -e "${GREEN}Building metadata-relay:dev Docker image...${NC}"
+                docker build -f metadata-relay/Dockerfile -t "$RELAY_IMAGE" .
+                echo -e "${GREEN}Build complete!${NC}"
+                ;;
+            push)
+                echo -e "${GREEN}Pushing metadata-relay:dev to ghcr.io...${NC}"
+                docker push "$RELAY_IMAGE"
+                echo -e "${GREEN}Push complete!${NC}"
+                ;;
+            restart)
+                echo -e "${GREEN}Restarting metadata-relay deployment...${NC}"
+                kubectl rollout restart deployment/"$RELAY_DEPLOYMENT" -n "$RELAY_NAMESPACE"
+                echo -e "${YELLOW}Waiting for rollout to complete...${NC}"
+                kubectl rollout status deployment/"$RELAY_DEPLOYMENT" -n "$RELAY_NAMESPACE" --timeout=120s
+                echo -e "${GREEN}Deployment restarted successfully!${NC}"
+                ;;
+            deploy)
+                echo -e "${GREEN}Building, pushing, and deploying metadata-relay:dev...${NC}"
+                echo ""
+                
+                # Build
+                echo -e "${YELLOW}[1/3] Building Docker image...${NC}"
+                docker build -f metadata-relay/Dockerfile -t "$RELAY_IMAGE" .
+                if [ $? -ne 0 ]; then
+                    echo -e "${RED}Build failed!${NC}"
+                    exit 1
+                fi
+                echo -e "${GREEN}Build complete!${NC}"
+                echo ""
+                
+                # Push
+                echo -e "${YELLOW}[2/3] Pushing to ghcr.io...${NC}"
+                docker push "$RELAY_IMAGE"
+                if [ $? -ne 0 ]; then
+                    echo -e "${RED}Push failed!${NC}"
+                    exit 1
+                fi
+                PUSHED_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$RELAY_IMAGE" 2>/dev/null | cut -d'@' -f2)
+                echo -e "${GREEN}Push complete!${NC}"
+                echo ""
+                
+                # Deploy
+                echo -e "${YELLOW}[3/3] Restarting deployment...${NC}"
+                kubectl rollout restart deployment/"$RELAY_DEPLOYMENT" -n "$RELAY_NAMESPACE"
+                kubectl rollout status deployment/"$RELAY_DEPLOYMENT" -n "$RELAY_NAMESPACE" --timeout=120s
+                if [ $? -ne 0 ]; then
+                    echo -e "${RED}Deployment failed!${NC}"
+                    exit 1
+                fi
+                
+                # Verify digest
+                echo ""
+                echo -e "${YELLOW}Verifying deployment...${NC}"
+                RUNNING_DIGEST=$(kubectl get pod -n "$RELAY_NAMESPACE" -l app.kubernetes.io/name=metadata-relay -o jsonpath='{.items[0].status.containerStatuses[0].imageID}' 2>/dev/null | cut -d'@' -f2)
+                if [ -n "$PUSHED_DIGEST" ] && [ -n "$RUNNING_DIGEST" ]; then
+                    if [ "$PUSHED_DIGEST" = "$RUNNING_DIGEST" ]; then
+                        echo -e "${GREEN}Image digests match!${NC}"
+                    else
+                        echo -e "${YELLOW}Warning: Digests don't match (may need time to pull)${NC}"
+                        echo "  Pushed:  $PUSHED_DIGEST"
+                        echo "  Running: $RUNNING_DIGEST"
+                    fi
+                fi
+                
+                echo ""
+                echo -e "${GREEN}Deployment complete!${NC}"
+                echo "  Image: $RELAY_IMAGE"
+                echo "  Digest: $PUSHED_DIGEST"
+                ;;
+            *)
+                echo -e "${RED}Error: Unknown relay command: $1${NC}"
+                echo "Usage: ./dev relay <deploy|build|push|restart>"
                 exit 1
                 ;;
         esac

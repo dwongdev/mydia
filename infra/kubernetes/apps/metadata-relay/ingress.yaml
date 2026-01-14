@@ -81,7 +81,7 @@ metadata:
     app.kubernetes.io/component: relay-service
   annotations:
     # external-dns will create DNS record pointing to this IP
-    external-dns.alpha.kubernetes.io/target: 194.58.38.130
+    external-dns.alpha.kubernetes.io/target: 149.56.129.39
 spec:
   entryPoints:
     - websecure

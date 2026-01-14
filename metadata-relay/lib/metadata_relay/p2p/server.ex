@@ -61,10 +61,12 @@ defmodule MetadataRelay.P2p.Server do
     case P2p.listen(resource, listen_addr) do
       {:ok, "ok"} ->
         Logger.info("Libp2p Relay listening on #{listen_addr}")
+        add_external_addresses(resource, port)
         {:ok, %{resource: resource, peer_id: peer_id, port: port}}
 
       "ok" ->
         Logger.info("Libp2p Relay listening on #{listen_addr}")
+        add_external_addresses(resource, port)
         {:ok, %{resource: resource, peer_id: peer_id, port: port}}
 
       {:error, reason} ->
@@ -72,6 +74,37 @@ defmodule MetadataRelay.P2p.Server do
 
       error ->
         {:stop, error}
+    end
+  end
+
+  # Add external addresses so the relay server can include them in relay reservations
+  defp add_external_addresses(resource, port) do
+    # Add DNS-based address if configured
+    case System.get_env("LIBP2P_EXTERNAL_HOST") do
+      nil ->
+        :ok
+
+      "" ->
+        :ok
+
+      host ->
+        addr = "/dns4/#{host}/tcp/#{port}"
+        Logger.info("Adding external address: #{addr}")
+        P2p.add_external_address(resource, addr)
+    end
+
+    # Add IP-based address if configured
+    case System.get_env("LIBP2P_EXTERNAL_IP") do
+      nil ->
+        :ok
+
+      "" ->
+        :ok
+
+      ip ->
+        addr = "/ip4/#{ip}/tcp/#{port}"
+        Logger.info("Adding external address: #{addr}")
+        P2p.add_external_address(resource, addr)
     end
   end
 

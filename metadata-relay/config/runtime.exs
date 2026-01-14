@@ -27,5 +27,10 @@ if config_env() != :test do
     config :metadata_relay,
       tmdb_api_key: tmdb_api_key,
       tvdb_api_key: tvdb_api_key
+
+    config :metadata_relay,
+      rendezvous_master_pepper:
+        System.get_env("RENDEZVOUS_MASTER_PEPPER") ||
+          raise("RENDEZVOUS_MASTER_PEPPER not set")
   end
 end

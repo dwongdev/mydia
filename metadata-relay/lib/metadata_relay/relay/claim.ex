@@ -31,6 +31,8 @@ defmodule MetadataRelay.Relay.Claim do
     field(:expires_at, :utc_datetime)
     field(:consumed_at, :utc_datetime)
     field(:consumed_by_device_id, :string)
+    field(:locked_at, :utc_datetime)
+    field(:lock_expires_at, :utc_datetime)
 
     belongs_to(:instance, MetadataRelay.Relay.Instance)
 
@@ -62,6 +64,17 @@ defmodule MetadataRelay.Relay.Claim do
   end
 
   @doc """
+  Changeset for locking a claim code.
+  """
+  def lock_changeset(claim, lock_duration_seconds \\ 30) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    lock_expires_at = DateTime.add(now, lock_duration_seconds, :second)
+
+    claim
+    |> change(locked_at: now, lock_expires_at: lock_expires_at)
+  end
+
+  @doc """
   Checks if a claim code has expired.
   """
   def expired?(%__MODULE__{expires_at: expires_at}) do
@@ -73,6 +86,13 @@ defmodule MetadataRelay.Relay.Claim do
   """
   def consumed?(%__MODULE__{consumed_at: consumed_at}) do
     not is_nil(consumed_at)
+  end
+
+  @doc """
+  Checks if a claim code is currently locked.
+  """
+  def locked?(%__MODULE__{lock_expires_at: lock_expires_at}) do
+    not is_nil(lock_expires_at) and DateTime.compare(DateTime.utc_now(), lock_expires_at) == :lt
   end
 
   @doc """

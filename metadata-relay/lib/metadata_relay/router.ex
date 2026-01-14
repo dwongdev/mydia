@@ -46,12 +46,24 @@ defmodule MetadataRelay.Router do
     |> send_resp(200, Jason.encode!(response))
   end
 
+  # Prometheus Metrics
+  get "/metrics" do
+    metrics = MetadataRelay.Metrics.format()
+
+    conn
+    |> put_resp_content_type("text/plain")
+    |> send_resp(200, metrics)
+  end
+
   # Libp2p relay info endpoint
   # Returns the relay's multiaddr for client bootstrap
+  # Must not be cached as peer ID can change on restart
   get "/p2p/info" do
     case MetadataRelay.P2p.Server.get_info() do
       {:ok, info} ->
         conn
+        |> put_resp_header("cache-control", "no-store, no-cache, must-revalidate")
+        |> put_resp_header("pragma", "no-cache")
         |> put_resp_content_type("application/json")
         |> send_resp(200, Jason.encode!(info))
 
@@ -62,6 +74,8 @@ defmodule MetadataRelay.Router do
         }
 
         conn
+        |> put_resp_header("cache-control", "no-store, no-cache, must-revalidate")
+        |> put_resp_header("pragma", "no-cache")
         |> put_resp_content_type("application/json")
         |> send_resp(503, Jason.encode!(error_response))
     end
@@ -340,6 +354,37 @@ defmodule MetadataRelay.Router do
       handle_relay_request(conn, fn -> RelayHandler.redeem_claim(code) end)
     else
       {:error, :rate_limited} -> send_rate_limited(conn, 60)
+    end
+  end
+
+  # Resolve claim code (Rendezvous)
+  post "/relay/claim/:code/resolve" do
+    # 5 requests/minute per IP
+    with :ok <- check_relay_rate_limit(conn, limit: 5, window_ms: 60_000) do
+      handle_relay_request(
+        conn,
+        fn -> RelayHandler.resolve_claim(code) end,
+        "mydia_relay_claim_resolve_total"
+      )
+    else
+      {:error, :rate_limited} ->
+        MetadataRelay.Metrics.inc("mydia_relay_claim_resolve_total", status: "rate_limited")
+        send_rate_limited(conn, 60)
+    end
+  end
+
+  # Lock claim code
+  post "/relay/claim/:code/lock" do
+    with {:ok, _instance_id} <- verify_relay_auth_from_claim(conn) do
+      handle_relay_request(
+        conn,
+        fn -> RelayHandler.lock_claim(code) end,
+        "mydia_relay_claim_lock_total"
+      )
+    else
+      {:error, :unauthorized} ->
+        MetadataRelay.Metrics.inc("mydia_relay_claim_lock_total", status: "unauthorized")
+        send_unauthorized(conn)
     end
   end
 
@@ -714,14 +759,33 @@ defmodule MetadataRelay.Router do
   end
 
   # Relay request handler
-  defp handle_relay_request(conn, handler_fn) do
+  defp handle_relay_request(conn, handler_fn, metric_name \\ nil) do
     case handler_fn.() do
       {:ok, body} ->
+        if metric_name, do: MetadataRelay.Metrics.inc(metric_name, status: "success")
+
         conn
         |> put_resp_content_type("application/json")
         |> send_resp(200, Jason.encode!(body))
 
+      {:error, {:http_error, status, body}} ->
+        if metric_name do
+          status_label =
+            case status do
+              409 -> "conflict"
+              401 -> "unauthorized"
+              _ -> "error"
+            end
+
+          MetadataRelay.Metrics.inc(metric_name, status: status_label)
+        end
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(status, Jason.encode!(body))
+
       {:error, :not_found} ->
+        if metric_name, do: MetadataRelay.Metrics.inc(metric_name, status: "not_found")
         error_response = %{error: "Not found", message: "Resource not found"}
 
         conn
@@ -729,6 +793,7 @@ defmodule MetadataRelay.Router do
         |> send_resp(404, Jason.encode!(error_response))
 
       {:error, {:validation, message}} ->
+        if metric_name, do: MetadataRelay.Metrics.inc(metric_name, status: "validation_error")
         error_response = %{error: "Validation error", message: message}
 
         conn
@@ -736,6 +801,7 @@ defmodule MetadataRelay.Router do
         |> send_resp(400, Jason.encode!(error_response))
 
       {:error, reason} ->
+        if metric_name, do: MetadataRelay.Metrics.inc(metric_name, status: "internal_error")
         error_response = %{error: "Internal server error", message: inspect(reason)}
 
         conn

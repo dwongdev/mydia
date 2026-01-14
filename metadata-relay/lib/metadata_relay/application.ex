@@ -26,6 +26,8 @@ defmodule MetadataRelay.Application do
         {cache_adapter, cache_opts},
         # Rate limiter for crash reports
         MetadataRelay.RateLimiter,
+        # Metrics collector
+        MetadataRelay.Metrics,
         # Relay claim cleanup process
         MetadataRelay.Relay.Cleanup
       ] ++

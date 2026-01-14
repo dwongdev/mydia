@@ -171,6 +171,42 @@ defmodule MetadataRelay.Relay.Handler do
   end
 
   @doc """
+  Resolves a claim code to rendezvous namespace.
+  """
+  def resolve_claim(code) do
+    case Relay.resolve_claim(code) do
+      {:ok, result} ->
+        {:ok, result}
+
+      {:error, _reason} ->
+        # Generic error to prevent enumeration
+        {:error, {:validation, "Invalid or expired claim code"}}
+    end
+  end
+
+  @doc """
+  Locks a claim code.
+  """
+  def lock_claim(code) do
+    case Relay.lock_claim(code) do
+      {:ok, _claim} ->
+        {:ok, %{status: "locked"}}
+
+      {:error, :not_found} ->
+        {:error, :not_found}
+
+      {:error, :locked} ->
+        {:error, {:http_error, 409, %{error: "Conflict", message: "Claim is already locked"}}}
+
+      {:error, :already_consumed} ->
+        {:error, {:http_error, 409, %{error: "Conflict", message: "Claim already consumed"}}}
+
+      {:error, :expired} ->
+        {:error, {:validation, "Claim expired"}}
+    end
+  end
+
+  @doc """
   Marks a claim as consumed after successful pairing.
 
   ## Request Body

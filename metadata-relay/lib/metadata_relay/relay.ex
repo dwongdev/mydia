@@ -224,6 +224,117 @@ defmodule MetadataRelay.Relay do
     result
   end
 
+  @doc """
+  Resolves a claim code to a rendezvous namespace and connection info.
+
+  Used by the player to find the server via libp2p rendezvous.
+  """
+  def resolve_claim(code) do
+    code = normalize_claim_code(code)
+
+    query =
+      from(c in Claim,
+        where: c.code == ^code
+      )
+
+    case Repo.one(query) do
+      nil ->
+        {:error, :not_found}
+
+      claim ->
+        cond do
+          Claim.consumed?(claim) ->
+            {:error, :already_consumed}
+
+          Claim.expired?(claim) ->
+            {:error, :expired}
+
+          Claim.locked?(claim) ->
+            # If locked but not consumed, it's in progress.
+            # We treat it as valid for resolve so the player can retry if needed?
+            # Or should we block it? The plan says "Lock transitions VALID -> IN_PROGRESS".
+            # Plan says: "If resolve endpoint returns invalid/expired/consumed -> display 'Invalid or expired code'"
+            # It doesn't explicitly say what to do if locked.
+            # However, "Lock mechanism (prevents race conditions): When server receives pairing request, calls POST /relay/claim/:code/lock"
+            # So resolve happens BEFORE lock.
+            # If someone else is pairing (locked), resolve should probably still work?
+            # Actually, if it's locked, it means a pairing attempt is in progress.
+            # If I try to resolve it, maybe I should be allowed to? 
+            # But the lock is to prevent multiple servers claiming the code? No, the server locks it.
+            # Wait, the SERVER calls lock. The PLAYER calls resolve.
+            # 1. Player enters code.
+            # 2. Player calls resolve -> gets namespace.
+            # 3. Player discovers Server.
+            # 4. Player connects to Server.
+            # 5. Server calls lock.
+            # So resolving a locked claim is fine, because the lock is for the final step.
+            # Actually, if it's locked, it means the server is processing a pairing request.
+            # If another player tries to resolve, they might interfere?
+            # But resolve just gives the namespace. It doesn't change state.
+            process_resolve(claim, code)
+
+          true ->
+            process_resolve(claim, code)
+        end
+    end
+  end
+
+  defp process_resolve(claim, code) do
+    # Get relay P2P info for rendezvous points
+    # In a real deployment, these should be stable public addresses
+    rendezvous_points =
+      case MetadataRelay.P2p.Server.get_info() do
+        {:ok, info} -> info.addresses
+        _ -> []
+      end
+
+    namespace = MetadataRelay.Relay.Namespace.derive_namespace(code)
+
+    {:ok,
+     %{
+       namespace: namespace,
+       expires_at: claim.expires_at,
+       rendezvous_points: rendezvous_points
+     }}
+  end
+
+  @doc """
+  Locks a claim code to prevent race conditions during pairing.
+
+  Transitions VALID -> IN_PROGRESS.
+  Returns 409 if already locked.
+  """
+  def lock_claim(code) do
+    code = normalize_claim_code(code)
+
+    query = from(c in Claim, where: c.code == ^code)
+
+    Repo.transaction(fn ->
+      case Repo.one(query, lock: "FOR UPDATE") do
+        nil ->
+          Repo.rollback(:not_found)
+
+        claim ->
+          cond do
+            Claim.consumed?(claim) ->
+              Repo.rollback(:already_consumed)
+
+            Claim.expired?(claim) ->
+              Repo.rollback(:expired)
+
+            Claim.locked?(claim) ->
+              Repo.rollback(:locked)
+
+            true ->
+              case Repo.update(Claim.lock_changeset(claim)) do
+                {:ok, updated} -> updated
+                {:error, changeset} -> Repo.rollback(changeset)
+              end
+          end
+      end
+    end)
+  end
+
   # Log claim redemption attempts for security monitoring
   # Only logs code prefix (first 2 chars) to avoid exposing sensitive codes
   defp log_claim_attempt(code, {:ok, %{instance_id: instance_id}}) do

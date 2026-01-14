@@ -13,8 +13,17 @@ fn load(env: Env, _info: Term) -> bool {
 
 #[rustler::nif]
 fn start_relay() -> Result<(ResourceArc<HostResource>, String), rustler::Error> {
-    // Enable Relay Server
-    let config = HostConfig { enable_relay_server: true };
+    // Get keypair path from environment variable for persistent peer ID
+    let keypair_path = std::env::var("LIBP2P_KEYPAIR_PATH").ok();
+    
+    // Enable Relay Server with default bootstrap peers
+    let config = HostConfig { 
+        enable_relay_server: true,
+        enable_rendezvous_server: true,
+        bootstrap_peers: vec![],
+        keypair_path,
+        ..Default::default()
+    };
     let (host, peer_id_str) = Host::new(config);
     
     // We can also start listening immediately on a standard port if configured,
@@ -32,4 +41,12 @@ fn listen(resource: ResourceArc<HostResource>, addr: String) -> Result<String, r
     }
 }
 
-rustler::init!("Elixir.MetadataRelay.P2p", [start_relay, listen], load = load);
+#[rustler::nif]
+fn add_external_address(resource: ResourceArc<HostResource>, addr: String) -> Result<String, rustler::Error> {
+    match resource.host.add_external_address(addr) {
+        Ok(_) => Ok("ok".to_string()),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
+    }
+}
+
+rustler::init!("Elixir.MetadataRelay.P2p", [start_relay, listen, add_external_address], load = load);

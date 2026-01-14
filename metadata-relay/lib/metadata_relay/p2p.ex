@@ -7,4 +7,6 @@ defmodule MetadataRelay.P2p do
   def start_relay(), do: :erlang.nif_error(:nif_not_loaded)
 
   def listen(_resource, _addr), do: :erlang.nif_error(:nif_not_loaded)
+
+  def add_external_address(_resource, _addr), do: :erlang.nif_error(:nif_not_loaded)
 end

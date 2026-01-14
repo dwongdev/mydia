@@ -12,9 +12,17 @@ abstract class P2PHost implements RustOpaqueInterface {
   /// The address should include the peer ID, e.g., "/ip4/1.2.3.4/tcp/4001/p2p/12D3..."
   Future<void> bootstrap({required String addr});
 
+  /// Connect to a relay server and request a reservation.
+  /// This allows other peers to connect to us through the relay.
+  /// The address should include the relay's peer ID, e.g., "/ip4/1.2.3.4/tcp/4001/p2p/12D3..."
+  Future<void> connectRelay({required String relayAddr});
+
   Future<void> dial({required String addr});
 
   Stream<String> eventStream();
+
+  /// Get DHT statistics (routing table size, provided keys, bootstrap status).
+  FlutterDhtStats getDhtStats();
 
   static (P2PHost, String) init() => RustLib.instance.api.crateP2PHostInit();
 
@@ -26,6 +34,34 @@ abstract class P2PHost implements RustOpaqueInterface {
 
   Future<FlutterPairingResponse> sendPairingRequest(
       {required String peer, required FlutterPairingRequest req});
+}
+
+/// DHT statistics for display in the UI
+class FlutterDhtStats {
+  final BigInt routingTableSize;
+  final BigInt providedKeysCount;
+  final bool bootstrapComplete;
+
+  const FlutterDhtStats({
+    required this.routingTableSize,
+    required this.providedKeysCount,
+    required this.bootstrapComplete,
+  });
+
+  @override
+  int get hashCode =>
+      routingTableSize.hashCode ^
+      providedKeysCount.hashCode ^
+      bootstrapComplete.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterDhtStats &&
+          runtimeType == other.runtimeType &&
+          routingTableSize == other.routingTableSize &&
+          providedKeysCount == other.providedKeysCount &&
+          bootstrapComplete == other.bootstrapComplete;
 }
 
 /// Result of a DHT lookup for a claim code

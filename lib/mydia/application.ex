@@ -50,7 +50,9 @@ defmodule Mydia.Application do
         Mydia.Libp2p.Server,
         {Registry, keys: :unique, name: Mydia.DynamicSupervisorRegistry},
         {DynamicSupervisor,
-         name: {:via, Registry, {Mydia.DynamicSupervisorRegistry, :relay}}, strategy: :one_for_one}
+         name: {:via, Registry, {Mydia.DynamicSupervisorRegistry, :relay}}, strategy: :one_for_one},
+        # Resume active pairing claims on startup
+        Mydia.RemoteAccess.ResumeClaims
       ] ++
         client_health_children() ++
         indexer_health_children() ++

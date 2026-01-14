@@ -23,7 +23,7 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
     socket =
       socket
       |> load_libp2p_status()
-      |> load_dht_stats()
+      |> load_network_stats()
 
     {:ok, socket}
   end
@@ -53,7 +53,7 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
       |> assign_new(:claim_code, fn -> nil end)
       |> assign_new(:claim_expires_at, fn -> nil end)
       |> assign_new(:countdown_seconds, fn -> 0 end)
-      |> assign_new(:claim_code_dht_status, fn -> nil end)
+      |> assign_new(:claim_code_rendezvous_status, fn -> nil end)
       |> assign_new(:pairing_error, fn -> nil end)
       |> assign_new(:show_revoke_modal, fn -> false end)
       |> assign_new(:selected_device, fn -> nil end)
@@ -68,7 +68,7 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
       |> load_config()
       |> load_devices()
       |> load_libp2p_status()
-      |> load_dht_stats()
+      |> load_network_stats()
 
     # Subscribe to claim expiry notifications on first mount
     if connected?(socket) and is_nil(assigns[:subscribed]) do
@@ -196,6 +196,37 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                   </div>
                 </div>
               </div>
+
+              <%!-- Relay Status --%>
+              <div class="flex items-center gap-2">
+                <div class={[
+                  "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
+                  if(@libp2p_status && @libp2p_status.relay_connected,
+                    do: "bg-success/20",
+                    else: "bg-base-300"
+                  )
+                ]}>
+                  <%= if @libp2p_status && @libp2p_status.relay_connected do %>
+                    <.icon name="hero-globe-alt" class="w-4 h-4 text-success" />
+                  <% else %>
+                    <.icon name="hero-globe-alt" class="w-4 h-4 opacity-60" />
+                  <% end %>
+                </div>
+                <div>
+                  <div class="text-xs text-base-content/50 uppercase tracking-wide">Relay</div>
+                  <div class="font-mono text-sm font-medium">
+                    <%= if @libp2p_status do %>
+                      <%= if @libp2p_status.relay_connected do %>
+                        <span class="text-success">Connected</span>
+                      <% else %>
+                        <span class="text-warning">Connecting...</span>
+                      <% end %>
+                    <% else %>
+                      <span class="text-base-content/50">-</span>
+                    <% end %>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <%!-- Status Badge --%>
@@ -227,39 +258,29 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
             </div>
           </div>
 
-          <%!-- DHT Status info --%>
-          <%= if @dht_stats do %>
+          <%!-- Network Status info --%>
+          <%= if @network_stats do %>
             <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-xs text-base-content/60">
-              <%!-- Bootstrap Status --%>
+              <%!-- Rendezvous Status --%>
               <div class="flex items-center gap-1.5">
-                <%= if @dht_stats.bootstrap_complete do %>
+                <%= if @network_stats.rendezvous_connected do %>
                   <.icon name="hero-check-circle" class="w-4 h-4 text-success" />
-                  <span>DHT Ready</span>
+                  <span>Rendezvous Ready</span>
                 <% else %>
                   <.icon name="hero-clock" class="w-4 h-4 text-warning" />
-                  <span>DHT Bootstrapping...</span>
+                  <span>Connecting...</span>
                 <% end %>
               </div>
 
-              <%!-- Routing Table --%>
-              <div class="flex items-center gap-1.5">
-                <.icon name="hero-server-stack" class="w-4 h-4 opacity-50" />
-                <span>
-                  {@dht_stats.routing_table_size} peer{if @dht_stats.routing_table_size != 1,
-                    do: "s",
-                    else: ""} in routing table
-                </span>
-              </div>
-
-              <%!-- Provided Keys (claim codes) --%>
-              <%= if @dht_stats.provided_keys_count > 0 do %>
+              <%!-- Active Registrations (claim codes) --%>
+              <%= if @network_stats.active_registrations > 0 do %>
                 <div class="flex items-center gap-1.5">
                   <.icon name="hero-key" class="w-4 h-4 text-success" />
                   <span>
-                    {@dht_stats.provided_keys_count} claim code{if @dht_stats.provided_keys_count !=
-                                                                     1,
-                                                                   do: "s",
-                                                                   else: ""} active
+                    {@network_stats.active_registrations} registration{if @network_stats.active_registrations !=
+                                                                            1,
+                                                                          do: "s",
+                                                                          else: ""} active
                   </span>
                 </div>
               <% end %>
@@ -610,6 +631,51 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                       <% end %>
                     </div>
                   </div>
+
+                  <%!-- Relay Connection --%>
+                  <div class="flex justify-between items-center p-2.5">
+                    <span class="text-xs text-base-content/60 font-medium">Relay</span>
+                    <%= if @libp2p_status do %>
+                      <div class={[
+                        "badge badge-sm gap-1",
+                        if(@libp2p_status.relay_connected, do: "badge-success", else: "badge-warning")
+                      ]}>
+                        <%= if @libp2p_status.relay_connected do %>
+                          <.icon name="hero-globe-alt" class="w-3 h-3" /> Connected
+                        <% else %>
+                          <.icon name="hero-arrow-path" class="w-3 h-3 animate-spin" /> Connecting
+                        <% end %>
+                      </div>
+                    <% else %>
+                      <span class="text-xs text-base-content/50">Not available</span>
+                    <% end %>
+                  </div>
+
+                  <%!-- Relayed Address --%>
+                  <%= if @libp2p_status && @libp2p_status.relay_connected && @libp2p_status.relayed_address do %>
+                    <div class="flex justify-between items-center p-2.5 gap-2">
+                      <span class="text-xs text-base-content/60 font-medium shrink-0">
+                        Relayed Address
+                      </span>
+                      <div class="flex items-center gap-1.5">
+                        <code
+                          class="font-mono text-xs bg-base-100 px-2 py-1 rounded border border-base-300 truncate max-w-[180px]"
+                          title={@libp2p_status.relayed_address}
+                        >
+                          {truncate_multiaddr(@libp2p_status.relayed_address)}
+                        </code>
+                        <button
+                          class="btn btn-xs btn-ghost btn-square hover:bg-base-100"
+                          phx-click="copy_relayed_address"
+                          phx-target={@myself}
+                          onclick={"navigator.clipboard.writeText('#{@libp2p_status.relayed_address}')"}
+                          title="Copy full relayed address"
+                        >
+                          <.icon name="hero-clipboard" class="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  <% end %>
                 </div>
               </div>
             </div>
@@ -897,8 +963,8 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
             <%= if @claim_code do %>
               <%!-- Active pairing code --%>
               <div class="space-y-5 pt-4">
-                <%!-- QR Code - only show when registered on DHT --%>
-                <%= if @claim_code_dht_status == :registered do %>
+                <%!-- QR Code - only show when registered on rendezvous --%>
+                <%= if @claim_code_rendezvous_status == :registered do %>
                   <% qr_svg = generate_qr_code(@ra_config, @libp2p_status, @claim_code) %>
                   <%= if qr_svg do %>
                     <div class="flex flex-col items-center gap-2">
@@ -934,7 +1000,7 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                 <% end %>
 
                 <%!-- Divider - only show when registered --%>
-                <%= if @claim_code_dht_status == :registered do %>
+                <%= if @claim_code_rendezvous_status == :registered do %>
                   <div class="flex items-center gap-3">
                     <div class="flex-1 h-px bg-base-300"></div>
                     <span class="text-xs text-base-content/40 uppercase tracking-wider">
@@ -946,7 +1012,7 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
 
                 <%!-- Pairing Code --%>
                 <div class="text-center">
-                  <%= if @claim_code_dht_status == :registered do %>
+                  <%= if @claim_code_rendezvous_status == :registered do %>
                     <%!-- Code is registered and ready to use --%>
                     <div class="inline-flex items-center gap-2 bg-base-200 rounded-xl px-5 py-3">
                       <code class="text-2xl font-bold tracking-[0.25em] font-mono">
@@ -971,7 +1037,7 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                     <div class="inline-flex flex-col items-center gap-3 bg-base-200 rounded-xl px-8 py-5">
                       <span class="loading loading-spinner loading-lg text-primary"></span>
                       <div class="text-sm text-base-content/60">
-                        <%= case @claim_code_dht_status do %>
+                        <%= case @claim_code_rendezvous_status do %>
                           <% :pending -> %>
                             Registering pairing code...
                           <% {:error, _reason} -> %>
@@ -1107,6 +1173,10 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
 
   def handle_event("copy_peer_id", _params, socket) do
     {:noreply, put_flash(socket, :info, "Peer ID copied to clipboard")}
+  end
+
+  def handle_event("copy_relayed_address", _params, socket) do
+    {:noreply, put_flash(socket, :info, "Relayed address copied to clipboard")}
   end
 
   def handle_event("open_revoke_modal", %{"id" => id}, socket) do
@@ -1294,7 +1364,7 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
     {:noreply,
      socket
      |> load_libp2p_status()
-     |> load_dht_stats()
+     |> load_network_stats()
      |> put_flash(:info, "Status refreshed")}
   end
 
@@ -1389,11 +1459,13 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
         # Schedule the next tick via the parent
         send(self(), {:remote_access_countdown_tick, socket.assigns.id})
 
-        # Also refresh DHT status if we have a claim code
+        # Also refresh rendezvous status if we have a claim code
         socket =
           if socket.assigns[:claim_code] do
-            dht_status = RemoteAccess.claim_code_dht_status(socket.assigns.claim_code)
-            assign(socket, :claim_code_dht_status, dht_status)
+            rendezvous_status =
+              RemoteAccess.claim_code_rendezvous_status(socket.assigns.claim_code)
+
+            assign(socket, :claim_code_rendezvous_status, rendezvous_status)
           else
             socket
           end
@@ -1404,7 +1476,7 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
         |> assign(:claim_code, nil)
         |> assign(:claim_expires_at, nil)
         |> assign(:countdown_seconds, 0)
-        |> assign(:claim_code_dht_status, nil)
+        |> assign(:claim_code_rendezvous_status, nil)
         |> put_flash(:info, "Pairing code expired")
       end
     else
@@ -1432,16 +1504,16 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
         # Schedule the first countdown tick via the parent LiveView
         send(self(), {:remote_access_countdown_tick, socket.assigns.id})
 
-        # Check DHT registration status (async registration happens in background)
+        # Check rendezvous registration status (async registration happens in background)
         # We'll poll this status during countdown ticks
-        dht_status = RemoteAccess.claim_code_dht_status(claim.code)
+        rendezvous_status = RemoteAccess.claim_code_rendezvous_status(claim.code)
 
         socket
         |> assign(:pairing_error, nil)
         |> assign(:claim_code, claim.code)
         |> assign(:claim_expires_at, expires_at)
         |> assign(:countdown_seconds, max(0, seconds))
-        |> assign(:claim_code_dht_status, dht_status)
+        |> assign(:claim_code_rendezvous_status, rendezvous_status)
 
       {:error, :libp2p_not_running} ->
         Logger.warning("Failed to generate pairing code: libp2p service not running")
@@ -1506,9 +1578,9 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
     assign(socket, :libp2p_status, libp2p_status)
   end
 
-  defp load_dht_stats(socket) do
-    {:ok, dht_stats} = RemoteAccess.dht_stats()
-    assign(socket, :dht_stats, dht_stats)
+  defp load_network_stats(socket) do
+    {:ok, network_stats} = RemoteAccess.network_stats()
+    assign(socket, :network_stats, network_stats)
   end
 
   defp format_countdown(seconds) when seconds <= 0, do: "Expired"
@@ -1566,10 +1638,30 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
 
   defp normalize_code(nil), do: nil
 
+  # Truncate a multiaddr for display, showing the relay peer ID prefix
+  defp truncate_multiaddr(addr) when is_binary(addr) do
+    # Multiaddr format: /ip4/.../p2p/RELAY_PEER_ID/p2p-circuit/p2p/OUR_PEER_ID
+    # We want to show something like "/p2p/12D3K.../p2p-circuit"
+    case Regex.run(~r{/p2p/([^/]+)/p2p-circuit}, addr) do
+      [_, relay_peer_id] ->
+        "/p2p/#{String.slice(relay_peer_id, 0..7)}../p2p-circuit"
+
+      _ ->
+        # Fallback: just truncate the whole thing
+        if String.length(addr) > 30 do
+          String.slice(addr, 0..27) <> "..."
+        else
+          addr
+        end
+    end
+  end
+
+  defp truncate_multiaddr(nil), do: "-"
+
   defp generate_qr_code(config, libp2p_status, claim_code) do
     if config && claim_code do
       # Build QR code content for libp2p-based pairing
-      # The client will use peer_id for DHT lookup and claim_code for validation
+      # The client will use peer_id for rendezvous discovery and claim_code for validation
       content =
         Jason.encode!(%{
           instance_id: config.instance_id,

@@ -26,7 +26,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _claimCodeController = TextEditingController();
-  final _relayUrlController = TextEditingController();
   final _serverUrlFocus = FocusNode();
   final _usernameFocus = FocusNode();
   final _passwordFocus = FocusNode();
@@ -34,7 +33,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
   bool _isLoadingSavedUrl = true;
   bool _obscurePassword = true;
-  bool _showAdvanced = false;
   bool _showDirectConnection = false;
   bool _showQrScanner = false;
   MobileScannerController? _scannerController;
@@ -92,7 +90,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     _usernameController.dispose();
     _passwordController.dispose();
     _claimCodeController.dispose();
-    _relayUrlController.dispose();
     _serverUrlFocus.dispose();
     _usernameFocus.dispose();
     _passwordFocus.dispose();
@@ -176,11 +173,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     if (code.isEmpty) return;
 
     final controller = ref.read(loginControllerProvider.notifier);
-    final customRelayUrl = _relayUrlController.text.trim();
-    await controller.pairWithClaimCode(
-      code,
-      relayUrl: customRelayUrl.isNotEmpty ? customRelayUrl : null,
-    );
+    // Custom relay URL is no longer needed - we use IPFS DHT bootstrap
+    await controller.pairWithClaimCode(code);
 
     if (mounted) {
       final state = ref.read(loginControllerProvider);
@@ -560,9 +554,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           const SizedBox(height: 14),
           _buildErrorMessage(loginState.error!),
         ],
-
-        const SizedBox(height: 16),
-        _buildAdvancedSettings(loginState),
 
         SizedBox(height: isCompact ? 20 : 24),
         _buildClaimCodeButton(loginState),
@@ -947,95 +938,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     );
   }
 
-  Widget _buildAdvancedSettings(LoginState loginState) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Toggle button
-        GestureDetector(
-          onTap: loginState.isLoading
-              ? null
-              : () => setState(() => _showAdvanced = !_showAdvanced),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                _showAdvanced
-                    ? Icons.keyboard_arrow_down_rounded
-                    : Icons.keyboard_arrow_right_rounded,
-                size: 18,
-                color: AppColors.textSecondary.withValues(alpha: 0.6),
-              ),
-              const SizedBox(width: 4),
-              Text(
-                'Advanced',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: AppColors.textSecondary.withValues(alpha: 0.6),
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        // Expandable content
-        if (_showAdvanced) ...[
-          const SizedBox(height: 12),
-          Text(
-            'Self-hosted relay URL',
-            style: TextStyle(
-              fontSize: 11,
-              color: AppColors.textSecondary.withValues(alpha: 0.7),
-            ),
-          ),
-          const SizedBox(height: 6),
-          TextFormField(
-            controller: _relayUrlController,
-            enabled: !loginState.isLoading,
-            keyboardType: TextInputType.url,
-            style: const TextStyle(fontSize: 13, color: AppColors.textPrimary),
-            decoration: InputDecoration(
-              hintText: 'https://relay.mydia.dev',
-              hintStyle: TextStyle(
-                color: AppColors.textDisabled.withValues(alpha: 0.4),
-                fontSize: 13,
-              ),
-              filled: true,
-              fillColor: AppColors.surfaceVariant.withValues(alpha: 0.3),
-              isDense: true,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide.none,
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(
-                  color: AppColors.border.withValues(alpha: 0.1),
-                ),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide:
-                    BorderSide(color: AppColors.primary.withValues(alpha: 0.5)),
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Leave empty to use the default relay service',
-            style: TextStyle(
-              fontSize: 10,
-              color: AppColors.textSecondary.withValues(alpha: 0.5),
-              fontStyle: FontStyle.italic,
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
   Widget _buildTextField({
     required TextEditingController controller,
     required FocusNode focusNode,
@@ -1179,22 +1081,81 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     final icon = showEncrypted ? Icons.lock_rounded : Icons.shield_outlined;
     final text = showEncrypted ? 'End-to-end encrypted' : 'Secure connection';
 
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 12,
+              color: AppColors.textSecondary.withValues(alpha: 0.4),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              text,
+              style: TextStyle(
+                fontSize: 11,
+                color: AppColors.textSecondary.withValues(alpha: 0.4),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _buildDhtStatus(),
+      ],
+    );
+  }
+
+  Widget _buildDhtStatus() {
+    final dhtStatus = ref.watch(dhtStatusProvider);
+    
+    // Don't show anything if not initialized yet
+    if (!dhtStatus.isInitialized) {
+      return const SizedBox.shrink();
+    }
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(
-          icon,
-          size: 12,
-          color: AppColors.textSecondary.withValues(alpha: 0.4),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          text,
-          style: TextStyle(
-            fontSize: 11,
-            color: AppColors.textSecondary.withValues(alpha: 0.4),
+        // Bootstrap status indicator
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: dhtStatus.isBootstrapped
+                ? AppColors.success
+                : AppColors.warning,
           ),
         ),
+        const SizedBox(width: 6),
+        Text(
+          dhtStatus.isBootstrapped ? 'DHT Ready' : 'DHT Bootstrapping...',
+          style: TextStyle(
+            fontSize: 10,
+            color: AppColors.textSecondary.withValues(alpha: 0.5),
+          ),
+        ),
+        // Show peer count when bootstrapped
+        if (dhtStatus.isBootstrapped && dhtStatus.discoveredPeersCount > 0) ...[
+          const SizedBox(width: 8),
+          Icon(
+            Icons.people_outline_rounded,
+            size: 10,
+            color: AppColors.textSecondary.withValues(alpha: 0.4),
+          ),
+          const SizedBox(width: 3),
+          Text(
+            '${dhtStatus.discoveredPeersCount}',
+            style: TextStyle(
+              fontSize: 10,
+              color: AppColors.textSecondary.withValues(alpha: 0.5),
+            ),
+          ),
+        ],
       ],
     );
   }

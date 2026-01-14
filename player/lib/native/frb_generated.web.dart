@@ -55,6 +55,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       dynamic raw);
 
   @protected
+  FlutterDhtStats dco_decode_flutter_dht_stats(dynamic raw);
+
+  @protected
   FlutterLookupResult dco_decode_flutter_lookup_result(dynamic raw);
 
   @protected
@@ -119,6 +122,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   FlutterPairingRequest sse_decode_box_autoadd_flutter_pairing_request(
       SseDeserializer deserializer);
+
+  @protected
+  FlutterDhtStats sse_decode_flutter_dht_stats(SseDeserializer deserializer);
 
   @protected
   FlutterLookupResult sse_decode_flutter_lookup_result(
@@ -192,6 +198,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_flutter_pairing_request(
       FlutterPairingRequest self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_flutter_dht_stats(
+      FlutterDhtStats self, SseSerializer serializer);
 
   @protected
   void sse_encode_flutter_lookup_result(

@@ -70,7 +70,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -2128155286;
+  int get rustContentHash => -1127110059;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -84,9 +84,14 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateP2PHostBootstrap(
       {required P2PHost that, required String addr});
 
+  Future<void> crateP2PHostConnectRelay(
+      {required P2PHost that, required String relayAddr});
+
   Future<void> crateP2PHostDial({required P2PHost that, required String addr});
 
   Stream<String> crateP2PHostEventStream({required P2PHost that});
+
+  FlutterDhtStats crateP2PHostGetDhtStats({required P2PHost that});
 
   (P2PHost, String) crateP2PHostInit();
 
@@ -146,6 +151,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateP2PHostConnectRelay(
+      {required P2PHost that, required String relayAddr}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerP2pHost(
+            that, serializer);
+        sse_encode_String(relayAddr, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 2, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateP2PHostConnectRelayConstMeta,
+      argValues: [that, relayAddr],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateP2PHostConnectRelayConstMeta => const TaskConstMeta(
+        debugName: "P2PHost_connect_relay",
+        argNames: ["that", "relayAddr"],
+      );
+
+  @override
   Future<void> crateP2PHostDial({required P2PHost that, required String addr}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -154,7 +186,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_String(addr, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 2, port: port_);
+            funcId: 3, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -181,7 +213,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_StreamSink_String_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 3, port: port_);
+            funcId: 4, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -200,11 +232,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  FlutterDhtStats crateP2PHostGetDhtStats({required P2PHost that}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerP2pHost(
+            that, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 5)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_flutter_dht_stats,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateP2PHostGetDhtStatsConstMeta,
+      argValues: [that],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateP2PHostGetDhtStatsConstMeta => const TaskConstMeta(
+        debugName: "P2PHost_get_dht_stats",
+        argNames: ["that"],
+      );
+
+  @override
   (P2PHost, String) crateP2PHostInit() {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 4)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 6)!;
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -232,7 +288,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_String(addr, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 5, port: port_);
+            funcId: 7, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -259,7 +315,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_String(claimCode, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 6, port: port_);
+            funcId: 8, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_flutter_lookup_result,
@@ -290,7 +346,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(peer, serializer);
         sse_encode_box_autoadd_flutter_pairing_request(req, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 7, port: port_);
+            funcId: 9, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_flutter_pairing_response,
@@ -314,7 +370,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 8, port: port_);
+            funcId: 10, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -392,6 +448,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_flutter_pairing_request(raw);
+  }
+
+  @protected
+  FlutterDhtStats dco_decode_flutter_dht_stats(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FlutterDhtStats(
+      routingTableSize: dco_decode_usize(arr[0]),
+      providedKeysCount: dco_decode_usize(arr[1]),
+      bootstrapComplete: dco_decode_bool(arr[2]),
+    );
   }
 
   @protected
@@ -548,6 +617,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_flutter_pairing_request(deserializer));
+  }
+
+  @protected
+  FlutterDhtStats sse_decode_flutter_dht_stats(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_routingTableSize = sse_decode_usize(deserializer);
+    var var_providedKeysCount = sse_decode_usize(deserializer);
+    var var_bootstrapComplete = sse_decode_bool(deserializer);
+    return FlutterDhtStats(
+        routingTableSize: var_routingTableSize,
+        providedKeysCount: var_providedKeysCount,
+        bootstrapComplete: var_bootstrapComplete);
   }
 
   @protected
@@ -725,6 +806,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_flutter_dht_stats(
+      FlutterDhtStats self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_usize(self.routingTableSize, serializer);
+    sse_encode_usize(self.providedKeysCount, serializer);
+    sse_encode_bool(self.bootstrapComplete, serializer);
+  }
+
+  @protected
   void sse_encode_flutter_lookup_result(
       FlutterLookupResult self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -838,10 +928,21 @@ class P2PHostImpl extends RustOpaque implements P2PHost {
   Future<void> bootstrap({required String addr}) =>
       RustLib.instance.api.crateP2PHostBootstrap(that: this, addr: addr);
 
+  /// Connect to a relay server and request a reservation.
+  /// This allows other peers to connect to us through the relay.
+  /// The address should include the relay's peer ID, e.g., "/ip4/1.2.3.4/tcp/4001/p2p/12D3..."
+  Future<void> connectRelay({required String relayAddr}) => RustLib.instance.api
+      .crateP2PHostConnectRelay(that: this, relayAddr: relayAddr);
+
   Future<void> dial({required String addr}) =>
       RustLib.instance.api.crateP2PHostDial(that: this, addr: addr);
 
   Stream<String> eventStream() => RustLib.instance.api.crateP2PHostEventStream(
+        that: this,
+      );
+
+  /// Get DHT statistics (routing table size, provided keys, bootstrap status).
+  FlutterDhtStats getDhtStats() => RustLib.instance.api.crateP2PHostGetDhtStats(
         that: this,
       );
 

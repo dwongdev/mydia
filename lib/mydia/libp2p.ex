@@ -25,34 +25,64 @@ defmodule Mydia.Libp2p do
   def bootstrap(_resource, _addr), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
-  Provide a claim code on the DHT, announcing this peer as the provider.
-  Call this when a new claim code is generated.
+  Connect to a relay server and request a reservation.
+  This allows other peers to connect to us through the relay.
+  The address should include the relay's peer ID, e.g., "/ip4/1.2.3.4/tcp/4001/p2p/12D3..."
   """
-  def provide_claim_code(_resource, _claim_code), do: :erlang.nif_error(:nif_not_loaded)
+  def connect_relay(_resource, _relay_addr), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
-  Get DHT statistics including routing table size, provided keys count, and bootstrap status.
+  Register under a namespace with the rendezvous point.
+  This is used during pairing mode to make the server discoverable.
   """
-  def get_dht_stats(_resource), do: :erlang.nif_error(:nif_not_loaded)
+  def register_namespace(_resource, _namespace, _ttl_secs), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc """
+  Unregister from a namespace.
+  """
+  def unregister_namespace(_resource, _namespace), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc """
+  Get network statistics including routing table size, active registrations, and rendezvous connection status.
+  """
+  def get_network_stats(_resource), do: :erlang.nif_error(:nif_not_loaded)
 end
 
 defmodule Mydia.Libp2p.PairingRequest do
+  @moduledoc """
+  A pairing request received from a player.
+  """
   defstruct [:claim_code, :device_name, :device_type, :device_os]
 end
 
 defmodule Mydia.Libp2p.PairingResponse do
+  @moduledoc """
+  A pairing response to send back to a player.
+  """
   defstruct [:success, :media_token, :access_token, :device_token, :error]
 end
 
-defmodule Mydia.Libp2p.DhtStats do
+defmodule Mydia.Libp2p.NetworkStats do
   @moduledoc """
-  DHT statistics from the libp2p host.
+  Network statistics from the libp2p host.
   """
-  defstruct [:routing_table_size, :provided_keys_count, :bootstrap_complete]
+  defstruct [:routing_table_size, :active_registrations, :rendezvous_connected]
 
   @type t :: %__MODULE__{
           routing_table_size: non_neg_integer(),
-          provided_keys_count: non_neg_integer(),
-          bootstrap_complete: boolean()
+          active_registrations: non_neg_integer(),
+          rendezvous_connected: boolean()
+        }
+end
+
+defmodule Mydia.Libp2p.DiscoveredPeer do
+  @moduledoc """
+  A peer discovered via rendezvous.
+  """
+  defstruct [:peer_id, :addresses]
+
+  @type t :: %__MODULE__{
+          peer_id: String.t(),
+          addresses: [String.t()]
         }
 end

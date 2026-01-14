@@ -16,7 +16,7 @@ struct HostResource {
 }
 
 fn load(env: Env, _info: Term) -> bool {
-    rustler::resource!(HostResource, env);
+    let _ = rustler::resource!(HostResource, env);
     true
 }
 
@@ -24,7 +24,11 @@ fn load(env: Env, _info: Term) -> bool {
 fn start_host() -> Result<(ResourceArc<HostResource>, String), rustler::Error> {
     let config = HostConfig {
         enable_relay_server: false,
-        bootstrap_peers: vec![],  // Can be extended to accept custom bootstrap peers
+        enable_kademlia: true,
+        enable_rendezvous_client: true,  // Enable for home server
+        enable_rendezvous_server: false,
+        rendezvous_point_addresses: vec![],  // Will be set via connect_rendezvous
+        ..Default::default()
     };
     let (host, peer_id_str) = Host::new(config);
     let resource = HostResource { host };
@@ -55,32 +59,52 @@ fn bootstrap(resource: ResourceArc<HostResource>, addr: String) -> Result<String
     }
 }
 
+#[rustler::nif]
+fn connect_relay(resource: ResourceArc<HostResource>, relay_addr: String) -> Result<String, rustler::Error> {
+    match resource.host.connect_relay(relay_addr) {
+        Ok(_) => Ok("ok".to_string()),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
+    }
+}
+
+/// Register under a namespace with the rendezvous point.
+/// This is used during pairing mode to make the server discoverable.
 #[rustler::nif(schedule = "DirtyCpu")]
-fn provide_claim_code(resource: ResourceArc<HostResource>, claim_code: String) -> Result<String, rustler::Error> {
-    match resource.host.provide_claim_code(claim_code) {
+fn register_namespace(resource: ResourceArc<HostResource>, namespace: String, ttl_secs: u64) -> Result<String, rustler::Error> {
+    match resource.host.register_namespace(namespace, ttl_secs) {
+        Ok(_) => Ok("ok".to_string()),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
+    }
+}
+
+/// Unregister from a namespace.
+#[rustler::nif]
+fn unregister_namespace(resource: ResourceArc<HostResource>, namespace: String) -> Result<String, rustler::Error> {
+    match resource.host.unregister_namespace(namespace) {
         Ok(_) => Ok("ok".to_string()),
         Err(e) => Err(rustler::Error::Term(Box::new(e))),
     }
 }
 
 #[rustler::nif]
-fn get_dht_stats(resource: ResourceArc<HostResource>) -> ElixirDhtStats {
-    let stats = resource.host.get_dht_stats();
-    ElixirDhtStats {
+fn get_network_stats(resource: ResourceArc<HostResource>) -> ElixirNetworkStats {
+    let stats = resource.host.get_network_stats();
+    ElixirNetworkStats {
         routing_table_size: stats.routing_table_size,
-        provided_keys_count: stats.provided_keys_count,
-        bootstrap_complete: stats.bootstrap_complete,
+        active_registrations: stats.active_registrations,
+        rendezvous_connected: stats.rendezvous_connected,
     }
 }
 
 // Mirror structs for Elixir interop
 #[derive(NifStruct)]
-#[module = "Mydia.Libp2p.DhtStats"]
-struct ElixirDhtStats {
+#[module = "Mydia.Libp2p.NetworkStats"]
+struct ElixirNetworkStats {
     pub routing_table_size: usize,
-    pub provided_keys_count: usize,
-    pub bootstrap_complete: bool,
+    pub active_registrations: usize,
+    pub rendezvous_connected: bool,
 }
+
 #[derive(NifStruct)]
 #[module = "Mydia.Libp2p.PairingRequest"]
 struct ElixirPairingRequest {
@@ -106,6 +130,13 @@ struct ElixirReadMediaRequest {
     pub file_path: String,
     pub offset: u64,
     pub length: u32,
+}
+
+#[derive(NifStruct)]
+#[module = "Mydia.Libp2p.DiscoveredPeer"]
+struct ElixirDiscoveredPeer {
+    pub peer_id: String,
+    pub addresses: Vec<String>,
 }
 
 #[derive(NifTaggedEnum)]
@@ -173,6 +204,7 @@ fn respond_with_file_chunk(resource: ResourceArc<HostResource>, request_id: Stri
 }
 
 #[rustler::nif]
+#[allow(unused_variables)]
 fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid) -> Result<String, rustler::Error> {
     let host = &resource.host;
     let event_rx = host.event_rx.clone();
@@ -184,7 +216,7 @@ fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid)
             loop {
                 if let Some(event) = rx.recv().await {
                     let mut msg_env = OwnedEnv::new();
-                    msg_env.send_and_clear(&pid, |env| {
+                    let _ = msg_env.send_and_clear(&pid, |env| {
                         match event {
                             Event::PeerDiscovered(peer_id) => {
                                 (atoms::ok(), "peer_discovered", peer_id).encode(env)
@@ -192,7 +224,13 @@ fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid)
                             Event::PeerExpired(peer_id) => {
                                 (atoms::ok(), "peer_expired", peer_id).encode(env)
                             }
-                            Event::RequestReceived { peer, request, request_id } => {
+                            Event::PeerConnected(peer_id) => {
+                                (atoms::ok(), "peer_connected", peer_id).encode(env)
+                            }
+                            Event::PeerDisconnected(peer_id) => {
+                                (atoms::ok(), "peer_disconnected", peer_id).encode(env)
+                            }
+                            Event::RequestReceived { peer: _, request, request_id } => {
                                 match request {
                                     MydiaRequest::Pairing(req) => {
                                         let elixir_req = ElixirPairingRequest {
@@ -219,6 +257,30 @@ fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid)
                             }
                             Event::BootstrapCompleted => {
                                 (atoms::ok(), "bootstrap_completed").encode(env)
+                            }
+                            Event::NewListenAddr(addr) => {
+                                (atoms::ok(), "new_listen_addr", addr).encode(env)
+                            }
+                            Event::RelayReservationReady { relay_peer_id, relayed_addr } => {
+                                (atoms::ok(), "relay_ready", relay_peer_id, relayed_addr).encode(env)
+                            }
+                            Event::RelayReservationFailed { relay_peer_id, error } => {
+                                (atoms::ok(), "relay_failed", relay_peer_id, error).encode(env)
+                            }
+                            Event::RendezvousRegistered { namespace } => {
+                                (atoms::ok(), "rendezvous_registered", namespace).encode(env)
+                            }
+                            Event::RendezvousRegistrationFailed { namespace, error } => {
+                                (atoms::ok(), "rendezvous_registration_failed", namespace, error).encode(env)
+                            }
+                            Event::RendezvousDiscovered { namespace, peers } => {
+                                let elixir_peers: Vec<ElixirDiscoveredPeer> = peers.into_iter().map(|p| {
+                                    ElixirDiscoveredPeer {
+                                        peer_id: p.peer_id,
+                                        addresses: p.addresses,
+                                    }
+                                }).collect();
+                                (atoms::ok(), "rendezvous_discovered", namespace, elixir_peers).encode(env)
                             }
                         }
                     });

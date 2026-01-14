@@ -404,43 +404,177 @@ defmodule Mydia.RemoteAccess do
   The code expires after 5 minutes.
 
   This function:
-  1. Generates a random code locally
+  1. Requests a new claim code from the relay service
   2. Creates a local claim record
-  3. Provides the code on the DHT for discovery
+  3. Registers under a rendezvous namespace for discovery
 
   Returns {:ok, claim} if successful, {:error, reason} otherwise.
   """
   def generate_claim_code(user_id) do
-    # Generate 6 digit numeric code
-    code =
-      :crypto.strong_rand_bytes(3) |> Base.encode16() |> String.slice(0, 6) |> String.upcase()
+    config = get_config!()
 
-    expires_at = DateTime.utc_now() |> DateTime.add(300, :second)
+    with {:ok, token} <- ensure_relay_registration(config),
+         {:ok, %{"code" => code, "expires_at" => expires_at_str}} <-
+           create_claim_on_relay(token, user_id),
+         {:ok, expires_at, _} <- DateTime.from_iso8601(expires_at_str),
+         {:ok, %{"namespace" => namespace}} <- resolve_claim_on_relay(code) do
+      # Store local claim record
+      {:ok, claim} =
+        %PairingClaim{}
+        |> PairingClaim.changeset_with_code(%{
+          user_id: user_id,
+          code: code,
+          expires_at: expires_at
+        })
+        |> Repo.insert()
 
-    with {:ok, claim} <-
-           %PairingClaim{}
-           |> PairingClaim.changeset_with_code(%{
-             user_id: user_id,
-             code: code,
-             expires_at: expires_at
-           })
-           |> Repo.insert() do
-      # Provide the claim code on the DHT for discovery
+      # Register under a rendezvous namespace for discovery
       # This runs async - failures don't affect claim creation
       Task.start(fn ->
-        case Mydia.Libp2p.Server.provide_claim_code(code) do
+        case Mydia.Libp2p.Server.register_namespace(namespace, 120) do
           {:ok, _} ->
             require Logger
-            Logger.debug("Claim code #{code} provided on DHT")
+            Logger.debug("Claim code #{code} registered in rendezvous namespace #{namespace}")
 
           {:error, reason} ->
             require Logger
-            Logger.warning("Failed to provide claim code on DHT: #{inspect(reason)}")
+            Logger.warning("Failed to register claim code in rendezvous: #{inspect(reason)}")
         end
       end)
 
       {:ok, claim}
     end
+  end
+
+  defp get_relay_url do
+    System.get_env("METADATA_RELAY_URL") || System.get_env("RELAY_URL") ||
+      "https://relay.mydia.dev"
+  end
+
+  defp ensure_relay_registration(config) do
+    if config.relay_token do
+      {:ok, config.relay_token}
+    else
+      register_with_relay(config)
+    end
+  end
+
+  defp register_with_relay(config) do
+    url = "#{get_relay_url()}/relay/instances"
+
+    body = %{
+      instance_id: config.instance_id,
+      public_key: Base.encode64(config.static_public_key),
+      direct_urls: config.direct_urls || []
+    }
+
+    case Req.post(url, json: body) do
+      {:ok, %Req.Response{status: 200, body: %{"token" => token}}} ->
+        # Store the token
+        case upsert_config(%{relay_token: token}) do
+          {:ok, _updated_config} -> {:ok, token}
+          {:error, changeset} -> {:error, changeset}
+        end
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        Logger.error("Relay registration failed: #{status} - #{inspect(body)}")
+        {:error, :registration_failed}
+
+      {:error, reason} ->
+        Logger.error("Relay registration error: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  defp create_claim_on_relay(token, user_id) do
+    config = get_config!()
+    url = "#{get_relay_url()}/relay/instances/#{config.instance_id}/claim"
+
+    body = %{
+      user_id: user_id,
+      ttl_seconds: 300
+    }
+
+    case Req.post(url, json: body, headers: [{"authorization", "Bearer #{token}"}]) do
+      {:ok, %Req.Response{status: 200, body: body}} ->
+        {:ok, body}
+
+      {:ok, %Req.Response{status: 401}} ->
+        # Token might be expired, clear it and retry once?
+        # For now just fail, user can retry
+        upsert_config(%{relay_token: nil})
+        {:error, :unauthorized}
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        Logger.error("Create claim failed: #{status} - #{inspect(body)}")
+        {:error, :create_claim_failed}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp resolve_claim_on_relay(code) do
+    url = "#{get_relay_url()}/relay/claim/#{code}/resolve"
+
+    case Req.post(url, json: %{}) do
+      {:ok, %Req.Response{status: 200, body: body}} ->
+        {:ok, body}
+
+      {:ok, %Req.Response{status: 404}} ->
+        {:error, :not_found}
+
+      {:ok, %Req.Response{status: 429}} ->
+        {:error, :rate_limited}
+
+      {:ok, %Req.Response{status: status}} ->
+        Logger.warning("Resolve claim failed during generation: #{status}")
+        {:error, :resolve_failed}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Resumes registration for active claims on startup.
+  Called by startup task.
+  """
+  def resume_active_claims do
+    # Get all users (or just iterate all claims if we had a function for it)
+    # Since we don't have list_all_active_claims, we can do it via Repo directly
+    now = DateTime.utc_now()
+
+    query =
+      from c in PairingClaim,
+        where: is_nil(c.used_at) and c.expires_at > ^now
+
+    claims = Repo.all(query)
+
+    Logger.info("Resuming #{length(claims)} active pairing claims")
+
+    Enum.each(claims, fn claim ->
+      Task.start(fn ->
+        case resolve_claim_on_relay(claim.code) do
+          {:ok, %{"namespace" => namespace}} ->
+            ttl_secs = DateTime.diff(claim.expires_at, DateTime.utc_now(), :second)
+
+            if ttl_secs > 0 do
+              Mydia.Libp2p.Server.register_namespace(namespace, ttl_secs)
+              Logger.debug("Resumed registration for claim #{claim.code}")
+            end
+
+          {:error, :not_found} ->
+            # Claim expired/consumed on relay but not locally?
+            # Delete it
+            Repo.delete(claim)
+            Logger.info("Deleted stale claim #{claim.code}")
+
+          _ ->
+            :ok
+        end
+      end)
+    end)
   end
 
   @doc """
@@ -621,39 +755,40 @@ defmodule Mydia.RemoteAccess do
 
   Returns {:ok, stats} with:
   - routing_table_size: Number of peers in the Kademlia routing table
-  - provided_keys_count: Number of claim codes currently being provided on DHT
-  - bootstrap_complete: Whether DHT bootstrap has completed
+  - active_registrations: Number of active rendezvous namespace registrations
+  - rendezvous_connected: Whether connected to a rendezvous point
   """
-  def dht_stats do
+  def network_stats do
     try do
-      stats = Mydia.Libp2p.Server.dht_stats()
+      stats = Mydia.Libp2p.Server.network_stats()
       {:ok, stats}
     rescue
       _ ->
         {:ok,
-         %Mydia.Libp2p.DhtStats{
+         %Mydia.Libp2p.NetworkStats{
            routing_table_size: 0,
-           provided_keys_count: 0,
-           bootstrap_complete: false
+           active_registrations: 0,
+           rendezvous_connected: false
          }}
     catch
       :exit, _ ->
         {:ok,
-         %Mydia.Libp2p.DhtStats{
+         %Mydia.Libp2p.NetworkStats{
            routing_table_size: 0,
-           provided_keys_count: 0,
-           bootstrap_complete: false
+           active_registrations: 0,
+           rendezvous_connected: false
          }}
     end
   end
 
   @doc """
-  Gets the DHT registration status of a claim code.
+  Gets the rendezvous registration status of a claim code.
   Returns :not_found, :pending, :registered, or {:error, reason}.
   """
-  def claim_code_dht_status(claim_code) do
+  def claim_code_rendezvous_status(claim_code) do
     try do
-      Mydia.Libp2p.Server.claim_code_status(claim_code)
+      namespace = "mydia-claim:#{claim_code}"
+      Mydia.Libp2p.Server.namespace_status(namespace)
     rescue
       _ -> :not_found
     catch

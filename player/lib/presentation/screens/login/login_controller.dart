@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../core/graphql/graphql_provider.dart';
@@ -12,8 +13,48 @@ import '../../../core/p2p/libp2p_service.dart';
 export '../../../core/channels/pairing_service.dart' show QrPairingData;
 // Re-export UpdateRequiredError so UI can import from one place
 export '../../../core/protocol/protocol_version.dart' show UpdateRequiredError;
+// Re-export DhtStatus so UI can import from one place
+export '../../../core/p2p/libp2p_service.dart' show DhtStatus;
 
 part 'login_controller.g.dart';
+
+/// Provider for DHT status that auto-initializes the libp2p service
+/// and streams status updates.
+@riverpod
+class DhtStatusNotifier extends _$DhtStatusNotifier {
+  StreamSubscription<DhtStatus>? _subscription;
+  
+  @override
+  DhtStatus build() {
+    // Initialize the libp2p service and start listening for status updates
+    _initializeAndListen();
+    
+    ref.onDispose(() {
+      _subscription?.cancel();
+    });
+    
+    return const DhtStatus.initial();
+  }
+  
+  Future<void> _initializeAndListen() async {
+    try {
+      final libp2pService = ref.read(libp2pServiceProvider);
+      
+      // Subscribe to DHT status updates
+      _subscription = libp2pService.onDhtStatusChanged.listen((status) {
+        state = status;
+      });
+      
+      // Initialize the service (this auto-bootstraps to IPFS DHT)
+      await libp2pService.initialize();
+      
+      // Emit current status immediately after initialization
+      state = libp2pService.dhtStatus;
+    } catch (e) {
+      debugPrint('[DhtStatusNotifier] Failed to initialize: $e');
+    }
+  }
+}
 
 /// Connection mode for the login flow.
 enum ConnectionMode {
@@ -29,11 +70,17 @@ enum ConnectionMode {
 enum ClaimCodeStatus {
   /// Waiting for user to enter code
   idle,
-  /// Looking up claim code on relay
+  /// Resolving claim code via Relay HTTP API
+  resolving,
+  /// Looking up claim code on relay (Legacy) or Connecting to rendezvous point
   lookingUp,
   /// Connecting to instance via relay
   connecting,
-  /// Performing Noise handshake
+  /// Discovering server via rendezvous
+  discovering,
+  /// Dialing server
+  dialing,
+  /// Performing Noise handshake / sending pairing request
   handshaking,
   /// Pairing complete
   paired,
@@ -111,9 +158,7 @@ class LoginController extends _$LoginController {
   /// 2. Get the instance's direct URLs and public key
   /// 3. Connect to the instance and submit the claim code
   /// 4. Store credentials and complete pairing
-  ///
-  /// If [relayUrl] is provided, uses that instead of the default relay.
-  Future<void> pairWithClaimCode(String claimCode, {String? relayUrl}) async {
+  Future<void> pairWithClaimCode(String claimCode) async {
     state = state.copyWith(
       isLoading: true,
       error: null,
@@ -126,7 +171,6 @@ class LoginController extends _$LoginController {
       final libp2pService = ref.read(libp2pServiceProvider);
       final pairingService = PairingService(
         libp2pService: libp2pService,
-        relayUrl: relayUrl,
       );
       final deviceInfo = DeviceInfoService();
       final deviceName = await deviceInfo.getDeviceName();
@@ -140,12 +184,16 @@ class LoginController extends _$LoginController {
 
           // Map status messages to claim code statuses
           ClaimCodeStatus claimStatus;
-          if (status.contains('Looking up')) {
-            claimStatus = ClaimCodeStatus.lookingUp;
+          if (status.contains('Resolving')) {
+            claimStatus = ClaimCodeStatus.resolving;
+          } else if (status.contains('Looking up') || status.contains('Finding')) {
+            claimStatus = ClaimCodeStatus.discovering;
           } else if (status.contains('Connecting') ||
                      status.contains('Joining') ||
                      status.contains('relay')) {
             claimStatus = ClaimCodeStatus.connecting;
+          } else if (status.contains('Dialing')) {
+            claimStatus = ClaimCodeStatus.dialing;
           } else if (status.contains('Establishing') ||
                      status.contains('Submitting') ||
                      status.contains('secure')) {
@@ -192,7 +240,6 @@ class LoginController extends _$LoginController {
         debugPrint('[LoginController] Setting P2P mode in connection provider');
         await ref.read(connectionProvider.notifier).setP2PMode(
           instanceId: credentials.instanceId,
-          relayUrl: relayUrl,
         );
         // Invalidate GraphQL providers to force rebuild
         ref.invalidate(graphqlClientProvider);
@@ -314,7 +361,7 @@ class LoginController extends _$LoginController {
       final libp2pService = ref.read(libp2pServiceProvider);
       final pairingService = PairingService(
         libp2pService: libp2pService,
-        relayUrl: qrData.relayUrl,
+        // relayUrl defaults to the global relay - QR code no longer contains relay URL
       );
       final deviceInfo = DeviceInfoService();
       final deviceName = await deviceInfo.getDeviceName();
@@ -374,7 +421,7 @@ class LoginController extends _$LoginController {
         debugPrint('[LoginController] Setting P2P mode from QR pairing');
         await ref.read(connectionProvider.notifier).setP2PMode(
           instanceId: credentials.instanceId,
-          relayUrl: qrData.relayUrl,
+          // relayUrl defaults to the global relay
         );
         // Invalidate GraphQL providers to force rebuild
         ref.invalidate(graphqlClientProvider);

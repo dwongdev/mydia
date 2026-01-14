@@ -22,6 +22,8 @@ defmodule Mydia.RemoteAccess.Config do
     # Port overrides for public IP URLs (overrides env var if set)
     field :public_port, :integer
     field :public_https_port, :integer
+    # Authentication token for the relay service
+    field :relay_token, :string
 
     timestamps(type: :utc_datetime)
   end
@@ -39,7 +41,8 @@ defmodule Mydia.RemoteAccess.Config do
       :direct_urls,
       :cert_fingerprint,
       :public_port,
-      :public_https_port
+      :public_https_port,
+      :relay_token
     ])
     |> validate_required([
       :instance_id,

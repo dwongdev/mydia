@@ -52,7 +52,9 @@ jobs:
           # Build amd64 only for PRs (faster CI), both platforms for master push
           platforms: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' }}
-          build-args: DATABASE_TYPE=sqlite
+          build-args: |
+            DATABASE_TYPE=sqlite
+            BASE_IMAGE=ghcr.io/${{ github.repository }}-base:builder
           tags: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' && steps.meta.outputs.tags || 'mydia:ci-test' }}
           labels: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' && steps.meta.outputs.labels || '' }}
           # Read from both scopes - Flutter stage is shared between SQLite and PostgreSQL
@@ -114,7 +116,9 @@ jobs:
           # Build amd64 only for PRs (faster CI), both platforms for master push
           platforms: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' }}
-          build-args: DATABASE_TYPE=postgres
+          build-args: |
+            DATABASE_TYPE=postgres
+            BASE_IMAGE=ghcr.io/${{ github.repository }}-base:builder
           tags: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' && steps.meta_pg.outputs.tags || 'mydia:ci-test-pg' }}
           labels: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' && steps.meta_pg.outputs.labels || '' }}
           # Read from both scopes - Flutter stage is shared between SQLite and PostgreSQL

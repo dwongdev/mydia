@@ -27,14 +27,13 @@ RUN --mount=type=cache,target=/root/.pub-cache,sharing=locked \
 # ============================================
 # Elixir Build Stage
 # ============================================
-FROM elixir:1.18-alpine AS builder
+# Use pre-built base image with Rust, Node, Hex, Rebar already installed
+# CI workflows pass BASE_IMAGE=ghcr.io/getmydia/mydia-base:builder for faster builds
+# Default to standard elixir image for standalone builds
+ARG BASE_IMAGE=elixir:1.18-alpine
+FROM ${BASE_IMAGE} AS builder
 
-# Database type: sqlite (default) or postgres
-# This is a BUILD-TIME argument that determines which database adapter is compiled into the release
-# It CANNOT be changed at runtime - each Docker image is built for a specific database
-ARG DATABASE_TYPE=sqlite
-
-# Install build dependencies (including Rust for NIF compilation)
+# Install build dependencies (idempotent - fast if already in base image)
 RUN apk add --no-cache \
     build-base \
     git \
@@ -43,19 +42,24 @@ RUN apk add --no-cache \
     sqlite-dev \
     postgresql16-dev \
     rust \
-    cargo
+    cargo \
+    curl \
+    ca-certificates
+
+# Increase hex timeout for slow networks/CI
+ENV HEX_HTTP_TIMEOUT=300000
+
+# Install Hex and Rebar (idempotent)
+RUN mix local.hex --force && mix local.rebar --force
+
+# Database type: sqlite (default) or postgres
+# This is a BUILD-TIME argument that determines which database adapter is compiled into the release
+# It CANNOT be changed at runtime - each Docker image is built for a specific database
+ARG DATABASE_TYPE=sqlite
 
 # Set build environment
 ENV MIX_ENV=prod
 ENV DATABASE_TYPE=${DATABASE_TYPE}
-# Increase hex timeout for slow networks/CI (5 minutes)
-ENV HEX_HTTP_TIMEOUT=300000
-
-# Install Hex and Rebar
-RUN --mount=type=cache,target=/root/.hex,sharing=locked \
-    --mount=type=cache,target=/root/.mix,sharing=locked \
-    mix local.hex --force && \
-    mix local.rebar --force
 
 # Create app directory
 WORKDIR /app

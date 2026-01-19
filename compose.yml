@@ -16,6 +16,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
+      args:
+        # Use pre-built base image for faster builds
+        # Pull with: docker pull ghcr.io/getmydia/mydia-base:dev
+        BASE_IMAGE: ${BASE_IMAGE:-ghcr.io/getmydia/mydia-base:dev}
     container_name: mydia_dev
     environment:
       # User mapping for host filesystem permissions

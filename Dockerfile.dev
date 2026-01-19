@@ -1,9 +1,11 @@
-FROM elixir:1.18
+# syntax=docker/dockerfile:1.4
+# Use pre-built base image with all dev tools (Elixir, Rust, Node, Flutter, Chrome)
+# compose.yml passes BASE_IMAGE=ghcr.io/getmydia/mydia-base:dev for faster builds
+# Default to standard elixir image for standalone builds (works without base image)
+ARG BASE_IMAGE=elixir:1.18
+FROM ${BASE_IMAGE}
 
-# Install build dependencies and Node.js
-# Includes both SQLite and PostgreSQL development libraries
-# Also includes Chrome and chromedriver for Wallaby browser tests
-# gosu is used for proper user switching in the entrypoint
+# Install build dependencies and development tools (idempotent if using base image)
 RUN apt-get update -qq && \
     apt-get install -y \
       build-essential \
@@ -19,38 +21,34 @@ RUN apt-get update -qq && \
       chromium-driver \
       ca-certificates \
       xz-utils \
-      gosu && \
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get install -y nodejs && \
+      gosu 2>/dev/null || true && \
+    (which node || (curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs)) && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* 2>/dev/null || true
 
-# Install Rust (required for ex_sctp - WebRTC DataChannels)
-ENV RUSTUP_HOME=/opt/rustup
-ENV CARGO_HOME=/opt/cargo
-ENV PATH="${CARGO_HOME}/bin:${PATH}"
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable && \
-    chmod -R a+w /opt/rustup /opt/cargo
+# Install Rust if not present
+RUN which rustc || (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable && \
+    chmod -R a+w /opt/rustup /opt/cargo 2>/dev/null || true)
 
-# Install Flutter SDK for FlutterWatcher builds
-# Using official installation method from https://docs.flutter.dev/install/manual
-ENV FLUTTER_VERSION=3.38.5
-ENV FLUTTER_HOME=/opt/flutter
-ENV PATH="${FLUTTER_HOME}/bin:${PATH}"
-RUN curl -L https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz \
-    -o flutter.tar.xz && \
+# Install Flutter if not present
+RUN which flutter || ( \
+    curl -L https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.38.5-stable.tar.xz -o flutter.tar.xz && \
     tar xf flutter.tar.xz -C /opt && \
     rm flutter.tar.xz && \
     git config --global --add safe.directory /opt/flutter && \
     flutter config --no-analytics && \
     flutter precache --web --no-android --no-ios --no-linux --no-windows --no-macos --no-fuchsia && \
-    flutter --version && \
-    # Make Flutter SDK writable by any user (needed for LOCAL_UID user mapping)
-    chmod -R a+w /opt/flutter
+    chmod -R a+w /opt/flutter)
 
-# Install Hex and Rebar
-RUN mix local.hex --force && \
-    mix local.rebar --force
+# Install Hex and Rebar if not present
+RUN mix local.hex --force && mix local.rebar --force 2>/dev/null || true
+
+# Environment variables for tools (paths set in base image)
+ENV RUSTUP_HOME=/opt/rustup
+ENV CARGO_HOME=/opt/cargo
+ENV PATH="${CARGO_HOME}/bin:${PATH}"
+ENV FLUTTER_HOME=/opt/flutter
+ENV PATH="${FLUTTER_HOME}/bin:${PATH}"
 
 WORKDIR /app
 

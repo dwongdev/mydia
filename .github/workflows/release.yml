@@ -73,7 +73,9 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: DATABASE_TYPE=sqlite
+          build-args: |
+            DATABASE_TYPE=sqlite
+            BASE_IMAGE=ghcr.io/${{ github.repository }}-base:builder
           tags: ${{ steps.check_prerelease.outputs.is_prerelease == 'true' && steps.meta_beta.outputs.tags || steps.meta.outputs.tags }}
           labels: ${{ steps.check_prerelease.outputs.is_prerelease == 'true' && steps.meta_beta.outputs.labels || steps.meta.outputs.labels }}
           # Read from both scopes - Flutter stage is shared between SQLite and PostgreSQL
@@ -159,7 +161,9 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: DATABASE_TYPE=postgres
+          build-args: |
+            DATABASE_TYPE=postgres
+            BASE_IMAGE=ghcr.io/${{ github.repository }}-base:builder
           tags: ${{ steps.check_prerelease.outputs.is_prerelease == 'true' && steps.meta_pg_beta.outputs.tags || steps.meta_pg.outputs.tags }}
           labels: ${{ steps.check_prerelease.outputs.is_prerelease == 'true' && steps.meta_pg_beta.outputs.labels || steps.meta_pg.outputs.labels }}
           # Read from both scopes - Flutter stage is shared between SQLite and PostgreSQL

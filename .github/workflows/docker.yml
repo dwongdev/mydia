@@ -49,12 +49,17 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          # Build amd64 only for PRs (faster CI), both platforms for master push
+          platforms: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' }}
           build-args: DATABASE_TYPE=sqlite
           tags: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' && steps.meta.outputs.tags || 'mydia:ci-test' }}
           labels: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' && steps.meta.outputs.labels || '' }}
-          cache-from: type=gha,scope=sqlite
+          # Read from both scopes - Flutter stage is shared between SQLite and PostgreSQL
+          cache-from: |
+            type=gha,scope=sqlite
+            type=gha,scope=postgres
+            type=gha,scope=flutter
           cache-to: type=gha,mode=max,scope=sqlite
 
       - name: Generate artifact attestation
@@ -67,6 +72,8 @@ jobs:
 
   docker-build-postgres:
     name: Build PostgreSQL Image
+    # Run after SQLite build to benefit from shared cached layers (Flutter stage, etc.)
+    needs: docker-build-sqlite
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -104,12 +111,17 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          # Build amd64 only for PRs (faster CI), both platforms for master push
+          platforms: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' }}
           build-args: DATABASE_TYPE=postgres
           tags: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' && steps.meta_pg.outputs.tags || 'mydia:ci-test-pg' }}
           labels: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' && steps.meta_pg.outputs.labels || '' }}
-          cache-from: type=gha,scope=postgres
+          # Read from both scopes - Flutter stage is shared between SQLite and PostgreSQL
+          cache-from: |
+            type=gha,scope=postgres
+            type=gha,scope=sqlite
+            type=gha,scope=flutter
           cache-to: type=gha,mode=max,scope=postgres
 
       - name: Generate artifact attestation for PostgreSQL image

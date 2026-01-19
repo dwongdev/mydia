@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 # ============================================
 # Flutter Build Stage
 # ============================================
@@ -16,7 +17,9 @@ COPY player/rust_builder ./rust_builder
 COPY priv/graphql/schema.graphql ./lib/graphql/schema.graphql
 
 # Install dependencies, generate code, and build
-RUN flutter config --no-analytics && \
+# Cache pub packages to avoid re-downloading 1656 dependencies each build
+RUN --mount=type=cache,target=/root/.pub-cache,sharing=locked \
+    flutter config --no-analytics && \
     flutter pub get && \
     dart run build_runner build --delete-conflicting-outputs && \
     flutter build web --release --base-href /player/
@@ -49,7 +52,9 @@ ENV DATABASE_TYPE=${DATABASE_TYPE}
 ENV HEX_HTTP_TIMEOUT=300000
 
 # Install Hex and Rebar
-RUN mix local.hex --force && \
+RUN --mount=type=cache,target=/root/.hex,sharing=locked \
+    --mount=type=cache,target=/root/.mix,sharing=locked \
+    mix local.hex --force && \
     mix local.rebar --force
 
 # Create app directory
@@ -59,7 +64,9 @@ WORKDIR /app
 COPY mix.exs mix.lock ./
 
 # Install dependencies
-RUN mix deps.get --only prod
+# Cache hex packages to avoid re-downloading each build
+RUN --mount=type=cache,target=/root/.hex,sharing=locked \
+    mix deps.get --only prod
 
 # Apply patches to dependencies
 # Fix ueberauth_oidcc to respect user-provided response_mode option
@@ -68,7 +75,11 @@ RUN mix deps.get --only prod
 COPY patches/ueberauth_oidcc_request.ex ./deps/ueberauth_oidcc/lib/ueberauth_oidcc/request.ex
 
 # Compile dependencies
-RUN mix deps.compile
+# Cache cargo registry for Rust NIF compilation (mydia_p2p_core)
+RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
+    --mount=type=cache,target=/root/.cargo/git,sharing=locked \
+    --mount=type=cache,target=/app/native/mydia_p2p_core/target,sharing=locked \
+    mix deps.compile
 
 # Copy application source
 COPY config ./config
@@ -81,10 +92,16 @@ COPY native ./native
 COPY --from=flutter-builder /app/player/build/web ./priv/static/player
 
 # Compile application (includes building Rust NIFs via Rustler)
-RUN mix compile
+# Cache cargo for Rust NIF compilation
+RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
+    --mount=type=cache,target=/root/.cargo/git,sharing=locked \
+    --mount=type=cache,target=/app/native/mydia_p2p_core/target,sharing=locked \
+    mix compile
 
 # Build Phoenix assets
-RUN cd assets && \
+# Cache npm packages to avoid re-downloading each build
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    cd assets && \
     npm ci --prefix . --progress=false --no-audit --loglevel=error && \
     cd .. && \
     mix assets.deploy

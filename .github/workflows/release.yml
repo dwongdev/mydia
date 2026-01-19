@@ -76,7 +76,11 @@ jobs:
           build-args: DATABASE_TYPE=sqlite
           tags: ${{ steps.check_prerelease.outputs.is_prerelease == 'true' && steps.meta_beta.outputs.tags || steps.meta.outputs.tags }}
           labels: ${{ steps.check_prerelease.outputs.is_prerelease == 'true' && steps.meta_beta.outputs.labels || steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=sqlite
+          # Read from both scopes - Flutter stage is shared between SQLite and PostgreSQL
+          cache-from: |
+            type=gha,scope=sqlite
+            type=gha,scope=postgres
+            type=gha,scope=flutter
           cache-to: type=gha,mode=max,scope=sqlite
 
       - name: Generate artifact attestation
@@ -88,6 +92,8 @@ jobs:
 
   build-and-push-postgres:
     name: Build PostgreSQL Image
+    # Run after SQLite build to benefit from shared cached layers (Flutter stage, etc.)
+    needs: build-and-push-sqlite
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -156,7 +162,11 @@ jobs:
           build-args: DATABASE_TYPE=postgres
           tags: ${{ steps.check_prerelease.outputs.is_prerelease == 'true' && steps.meta_pg_beta.outputs.tags || steps.meta_pg.outputs.tags }}
           labels: ${{ steps.check_prerelease.outputs.is_prerelease == 'true' && steps.meta_pg_beta.outputs.labels || steps.meta_pg.outputs.labels }}
-          cache-from: type=gha,scope=postgres
+          # Read from both scopes - Flutter stage is shared between SQLite and PostgreSQL
+          cache-from: |
+            type=gha,scope=postgres
+            type=gha,scope=sqlite
+            type=gha,scope=flutter
           cache-to: type=gha,mode=max,scope=postgres
 
       - name: Generate artifact attestation for PostgreSQL image

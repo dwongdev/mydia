@@ -1065,6 +1065,82 @@ defmodule Mydia.Settings do
     Repo.delete(config)
   end
 
+  @doc """
+  Resolves environment variable inheritance for an indexer configuration.
+
+  When an IndexerConfig has an `env_name` set, this function resolves the
+  `base_url` and `api_key` from environment variables named `{ENV_NAME}_BASE_URL`
+  and `{ENV_NAME}_API_KEY` respectively.
+
+  This allows storing configuration like indexer_ids and priority in the database
+  while keeping sensitive credentials in environment variables.
+
+  ## Examples
+
+      # Config with env_name: "PROWLARR"
+      # Environment has PROWLARR_BASE_URL=http://prowlarr:9696 and PROWLARR_API_KEY=secret
+      iex> config = %IndexerConfig{env_name: "PROWLARR", base_url: nil, api_key: nil}
+      iex> resolved = resolve_env_inheritance(config)
+      iex> resolved.base_url
+      "http://prowlarr:9696"
+      iex> resolved.api_key
+      "secret"
+
+      # Config without env_name is returned unchanged
+      iex> config = %IndexerConfig{env_name: nil, base_url: "http://example.com", api_key: "key"}
+      iex> resolved = resolve_env_inheritance(config)
+      iex> resolved == config
+      true
+  """
+  def resolve_env_inheritance(%IndexerConfig{env_name: nil} = config), do: config
+  def resolve_env_inheritance(%IndexerConfig{env_name: ""} = config), do: config
+
+  def resolve_env_inheritance(%IndexerConfig{env_name: env_name} = config)
+      when is_binary(env_name) do
+    # Build environment variable names
+    base_url_var = "#{env_name}_BASE_URL"
+    api_key_var = "#{env_name}_API_KEY"
+
+    # Resolve from environment, falling back to existing values
+    resolved_base_url = System.get_env(base_url_var) || config.base_url
+    resolved_api_key = System.get_env(api_key_var) || config.api_key
+
+    %{config | base_url: resolved_base_url, api_key: resolved_api_key}
+  end
+
+  @doc """
+  Lists available environment-configured indexer sources.
+
+  Scans environment variables for patterns like `{PREFIX}_BASE_URL` and returns
+  a list of available prefixes that can be used with `env_name`.
+
+  ## Examples
+
+      # With PROWLARR_BASE_URL and JACKETT_BASE_URL set:
+      iex> list_available_env_indexers()
+      [
+        %{env_name: "PROWLARR", base_url: "http://prowlarr:9696", has_api_key: true},
+        %{env_name: "JACKETT", base_url: "http://jackett:9117", has_api_key: true}
+      ]
+  """
+  def list_available_env_indexers do
+    System.get_env()
+    |> Enum.filter(fn {key, _value} -> String.ends_with?(key, "_BASE_URL") end)
+    |> Enum.map(fn {key, base_url} ->
+      # Extract prefix: "PROWLARR_BASE_URL" -> "PROWLARR"
+      env_name = String.replace_suffix(key, "_BASE_URL", "")
+      api_key_var = "#{env_name}_API_KEY"
+      has_api_key = System.get_env(api_key_var) != nil
+
+      %{
+        env_name: env_name,
+        base_url: base_url,
+        has_api_key: has_api_key
+      }
+    end)
+    |> Enum.sort_by(& &1.env_name)
+  end
+
   ## Media Server Configs
 
   @doc """

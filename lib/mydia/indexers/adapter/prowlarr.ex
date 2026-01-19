@@ -454,4 +454,54 @@ defmodule Mydia.Indexers.Adapter.Prowlarr do
   end
 
   defp build_magnet_from_info_hash(_, _), do: nil
+
+  @doc """
+  Lists all indexers configured in Prowlarr.
+
+  Returns a list of indexer maps with id, name, enabled status, and protocol.
+
+  ## Parameters
+    - `config` - Configuration map with host, port, api_key, use_ssl
+
+  ## Examples
+
+      iex> list_indexers(%{host: "localhost", port: 9696, api_key: "abc123"})
+      {:ok, [%{id: 1, name: "TorrentLeech", enabled: true, protocol: "torrent"}, ...]}
+  """
+  def list_indexers(config) do
+    url = build_url(config, "/api/v1/indexer")
+    headers = build_headers(config)
+
+    case Req.get(url, headers: headers, receive_timeout: 10_000) do
+      {:ok, %Req.Response{status: 200, body: body}} when is_list(body) ->
+        indexers =
+          body
+          |> Enum.map(fn item ->
+            %{
+              id: item["id"],
+              name: item["name"],
+              enabled: item["enable"] || false,
+              protocol: item["protocol"] || "torrent"
+            }
+          end)
+          |> Enum.sort_by(& &1.name)
+
+        {:ok, indexers}
+
+      {:ok, %Req.Response{status: 401}} ->
+        {:error, Error.connection_failed("Authentication failed - invalid API key")}
+
+      {:ok, %Req.Response{status: status}} ->
+        {:error, Error.connection_failed("HTTP #{status}")}
+
+      {:error, %Mint.TransportError{reason: :timeout}} ->
+        {:error, Error.connection_failed("Request timeout")}
+
+      {:error, %Mint.TransportError{reason: reason}} ->
+        {:error, Error.connection_failed("Connection failed: #{inspect(reason)}")}
+
+      {:error, reason} ->
+        {:error, Error.connection_failed("Request failed: #{inspect(reason)}")}
+    end
+  end
 end

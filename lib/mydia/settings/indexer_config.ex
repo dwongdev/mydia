@@ -21,6 +21,7 @@ defmodule Mydia.Settings.IndexerConfig do
     field :categories, {:array, :string}
     field :rate_limit, :integer
     field :connection_settings, Mydia.Settings.JsonMapType
+    field :env_name, :string
 
     belongs_to :updated_by, Mydia.Accounts.User
 
@@ -43,15 +44,37 @@ defmodule Mydia.Settings.IndexerConfig do
       :categories,
       :rate_limit,
       :connection_settings,
-      :updated_by_id
+      :updated_by_id,
+      :env_name
     ])
-    |> validate_required([:name, :type, :base_url])
+    |> validate_required([:name, :type])
+    |> validate_base_url_or_env_name()
     |> validate_inclusion(:type, @indexer_types)
     |> validate_number(:priority, greater_than: 0)
     |> validate_number(:rate_limit, greater_than: 0)
     |> normalize_base_url()
     |> validate_base_url()
     |> unique_constraint(:name)
+  end
+
+  # Validates that either base_url or env_name is provided
+  defp validate_base_url_or_env_name(changeset) do
+    base_url = get_field(changeset, :base_url)
+    env_name = get_field(changeset, :env_name)
+
+    cond do
+      # env_name is set - base_url is optional
+      is_binary(env_name) and env_name != "" ->
+        changeset
+
+      # base_url is set - valid
+      is_binary(base_url) and base_url != "" ->
+        changeset
+
+      # Neither is set - error
+      true ->
+        add_error(changeset, :base_url, "is required unless env_name is set")
+    end
   end
 
   # Auto-prepend http:// if no scheme is provided

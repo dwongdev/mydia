@@ -260,6 +260,58 @@ defmodule Mydia.Indexers do
     end
   end
 
+  @doc """
+  Lists all indexers available in a Prowlarr instance.
+
+  This is used to populate the indexer selection UI when configuring
+  which Prowlarr indexers to enable for searches.
+
+  ## Parameters
+    - `config` - Either an IndexerConfig struct or a map with connection details
+                 (base_url, api_key required)
+
+  ## Returns
+    - `{:ok, indexers}` - List of %{id, name, enabled, protocol} maps
+    - `{:error, reason}` - If the config is not Prowlarr or connection fails
+
+  ## Examples
+
+      iex> config = Settings.get_indexer_config!(id)
+      iex> Mydia.Indexers.list_prowlarr_indexers(config)
+      {:ok, [%{id: 1, name: "TorrentLeech", enabled: true, protocol: "torrent"}, ...]}
+  """
+  def list_prowlarr_indexers(%Settings.IndexerConfig{type: :prowlarr} = config) do
+    adapter_config = indexer_config_to_adapter_config(config)
+    Adapter.Prowlarr.list_indexers(adapter_config)
+  end
+
+  def list_prowlarr_indexers(%Settings.IndexerConfig{type: type}) do
+    {:error, "Cannot list indexers for type #{type} - only supported for Prowlarr"}
+  end
+
+  def list_prowlarr_indexers(%{base_url: base_url, api_key: api_key})
+      when is_binary(base_url) and is_binary(api_key) do
+    # Build a minimal adapter config from raw connection details
+    uri = URI.parse(base_url)
+
+    adapter_config = %{
+      type: :prowlarr,
+      host: uri.host || "localhost",
+      port: uri.port || default_port(uri.scheme),
+      api_key: api_key,
+      use_ssl: uri.scheme == "https",
+      options: %{
+        base_path: uri.path
+      }
+    }
+
+    Adapter.Prowlarr.list_indexers(adapter_config)
+  end
+
+  def list_prowlarr_indexers(_config) do
+    {:error, "Invalid config - requires base_url and api_key"}
+  end
+
   ## Private Functions
 
   # Fetches enabled Cardigann definitions and converts them to adapter config format
@@ -385,27 +437,30 @@ defmodule Mydia.Indexers do
   end
 
   defp indexer_config_to_adapter_config(%Settings.IndexerConfig{} = config) do
+    # Resolve environment variable inheritance if env_name is set
+    resolved_config = Settings.resolve_env_inheritance(config)
+
     # Parse base_url to extract host, port, and use_ssl
-    uri = URI.parse(config.base_url)
+    uri = URI.parse(resolved_config.base_url)
 
     # Get timeout from connection_settings or use default
     timeout =
-      case config.connection_settings do
+      case resolved_config.connection_settings do
         %{"timeout" => timeout} when is_integer(timeout) -> timeout
         _ -> 30_000
       end
 
     %{
-      type: config.type,
-      name: config.name,
+      type: resolved_config.type,
+      name: resolved_config.name,
       host: uri.host || "localhost",
       port: uri.port || default_port(uri.scheme),
-      api_key: config.api_key,
+      api_key: resolved_config.api_key,
       use_ssl: uri.scheme == "https",
       options: %{
-        indexer_ids: config.indexer_ids || [],
-        categories: config.categories || [],
-        rate_limit: config.rate_limit,
+        indexer_ids: resolved_config.indexer_ids || [],
+        categories: resolved_config.categories || [],
+        rate_limit: resolved_config.rate_limit,
         timeout: timeout,
         base_path: uri.path
       }

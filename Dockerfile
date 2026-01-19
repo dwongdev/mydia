@@ -10,6 +10,7 @@ COPY player/pubspec.yaml player/pubspec.lock ./
 COPY player/build.yaml ./
 COPY player/lib ./lib
 COPY player/web ./web
+COPY player/rust_builder ./rust_builder
 
 # Copy the GraphQL schema (resolves symlink from priv/graphql/)
 COPY priv/graphql/schema.graphql ./lib/graphql/schema.graphql

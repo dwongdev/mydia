@@ -80,7 +80,7 @@ jobs:
       - name: Build Docker image
         uses: docker/build-push-action@v6
         with:
-          context: ./metadata-relay
+          context: .
           file: ./metadata-relay/Dockerfile
           push: false
           tags: metadata-relay:ci-test

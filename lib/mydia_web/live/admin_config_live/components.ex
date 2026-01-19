@@ -2544,53 +2544,52 @@ defmodule MydiaWeb.AdminConfigLive.Components do
     ~H"""
     <div class="modal modal-open">
       <div class="modal-box max-w-2xl">
-        <%!-- Header --%>
-        <div class="flex items-center justify-between mb-5">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
-              <.icon
-                name={
-                  if(@download_client_mode == :new,
-                    do: "hero-plus-circle",
-                    else: "hero-pencil-square"
-                  )
-                }
-                class="w-5 h-5 text-primary"
-              />
-            </div>
-            <div>
-              <h3 class="font-bold text-lg">
-                {if @download_client_mode == :new,
-                  do: "Add Download Client",
-                  else: "Edit Download Client"}
-              </h3>
-              <p class="text-sm text-base-content/60">
-                {if @download_client_mode == :new,
-                  do: "Configure a new download client",
-                  else: "Update client settings"}
-              </p>
-            </div>
-          </div>
-          <label class="label cursor-pointer gap-2">
-            <span class="label-text text-sm">Enabled</span>
-            <input
-              type="checkbox"
-              name={@download_client_form[:enabled].name}
-              value="true"
-              checked={
-                Phoenix.HTML.Form.normalize_value("checkbox", @download_client_form[:enabled].value)
-              }
-              class="toggle toggle-success toggle-sm"
-            />
-          </label>
-        </div>
-
         <.form
           for={@download_client_form}
           id="download-client-form"
           phx-change="validate_download_client"
           phx-submit="save_download_client"
         >
+          <%!-- Header --%>
+          <div class="flex items-center justify-between mb-5">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
+                <.icon
+                  name={
+                    if(@download_client_mode == :new,
+                      do: "hero-plus-circle",
+                      else: "hero-pencil-square"
+                    )
+                  }
+                  class="w-5 h-5 text-primary"
+                />
+              </div>
+              <div>
+                <h3 class="font-bold text-lg">
+                  {if @download_client_mode == :new,
+                    do: "Add Download Client",
+                    else: "Edit Download Client"}
+                </h3>
+                <p class="text-sm text-base-content/60">
+                  {if @download_client_mode == :new,
+                    do: "Configure a new download client",
+                    else: "Update client settings"}
+                </p>
+              </div>
+            </div>
+            <label class="label cursor-pointer gap-2">
+              <span class="label-text text-sm">Enabled</span>
+              <input
+                type="checkbox"
+                name={@download_client_form[:enabled].name}
+                value="true"
+                checked={
+                  Phoenix.HTML.Form.normalize_value("checkbox", @download_client_form[:enabled].value)
+                }
+                class="toggle toggle-success toggle-sm"
+              />
+            </label>
+          </div>
           <div class="space-y-5">
             <%!-- Basic Settings Row --%>
             <div class="grid grid-cols-6 gap-3">
@@ -2840,44 +2839,43 @@ defmodule MydiaWeb.AdminConfigLive.Components do
     ~H"""
     <div class="modal modal-open">
       <div class="modal-box max-w-2xl">
-        <%!-- Header --%>
-        <div class="flex items-center justify-between mb-5">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
-              <.icon
-                name={if(@indexer_mode == :new, do: "hero-plus-circle", else: "hero-pencil-square")}
-                class="w-5 h-5 text-primary"
-              />
-            </div>
-            <div>
-              <h3 class="font-bold text-lg">
-                {if @indexer_mode == :new, do: "Add Indexer", else: "Edit Indexer"}
-              </h3>
-              <p class="text-sm text-base-content/60">
-                {if @indexer_mode == :new,
-                  do: "Configure a new search indexer",
-                  else: "Update indexer settings"}
-              </p>
-            </div>
-          </div>
-          <label class="label cursor-pointer gap-2">
-            <span class="label-text text-sm">Enabled</span>
-            <input
-              type="checkbox"
-              name={@indexer_form[:enabled].name}
-              value="true"
-              checked={Phoenix.HTML.Form.normalize_value("checkbox", @indexer_form[:enabled].value)}
-              class="toggle toggle-success toggle-sm"
-            />
-          </label>
-        </div>
-
         <.form
           for={@indexer_form}
           id="indexer-form"
           phx-change="validate_indexer"
           phx-submit="save_indexer"
         >
+          <%!-- Header --%>
+          <div class="flex items-center justify-between mb-5">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
+                <.icon
+                  name={if(@indexer_mode == :new, do: "hero-plus-circle", else: "hero-pencil-square")}
+                  class="w-5 h-5 text-primary"
+                />
+              </div>
+              <div>
+                <h3 class="font-bold text-lg">
+                  {if @indexer_mode == :new, do: "Add Indexer", else: "Edit Indexer"}
+                </h3>
+                <p class="text-sm text-base-content/60">
+                  {if @indexer_mode == :new,
+                    do: "Configure a new search indexer",
+                    else: "Update indexer settings"}
+                </p>
+              </div>
+            </div>
+            <label class="label cursor-pointer gap-2">
+              <span class="label-text text-sm">Enabled</span>
+              <input
+                type="checkbox"
+                name={@indexer_form[:enabled].name}
+                value="true"
+                checked={Phoenix.HTML.Form.normalize_value("checkbox", @indexer_form[:enabled].value)}
+                class="toggle toggle-success toggle-sm"
+              />
+            </label>
+          </div>
           <div class="space-y-5">
             <%!-- Basic Settings - Compact Row --%>
             <div class="grid grid-cols-6 gap-3">
@@ -3109,48 +3107,47 @@ defmodule MydiaWeb.AdminConfigLive.Components do
     ~H"""
     <div class="modal modal-open">
       <div class="modal-box max-w-xl">
-        <%!-- Header --%>
-        <div class="flex items-center justify-between mb-5">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
-              <.icon
-                name={
-                  if(@library_path_mode == :new, do: "hero-folder-plus", else: "hero-pencil-square")
-                }
-                class="w-5 h-5 text-primary"
-              />
-            </div>
-            <div>
-              <h3 class="font-bold text-lg">
-                {if @library_path_mode == :new, do: "Add Library", else: "Edit Library"}
-              </h3>
-              <p class="text-sm text-base-content/60">
-                {if @library_path_mode == :new,
-                  do: "Configure a new media directory",
-                  else: "Update library settings"}
-              </p>
-            </div>
-          </div>
-          <label class="label cursor-pointer gap-2">
-            <span class="label-text text-sm">Monitored</span>
-            <input
-              type="checkbox"
-              name={@library_path_form[:monitored].name}
-              value="true"
-              checked={
-                Phoenix.HTML.Form.normalize_value("checkbox", @library_path_form[:monitored].value)
-              }
-              class="toggle toggle-success toggle-sm"
-            />
-          </label>
-        </div>
-
         <.form
           for={@library_path_form}
           id="library-path-form"
           phx-change="validate_library_path"
           phx-submit="save_library_path"
         >
+          <%!-- Header --%>
+          <div class="flex items-center justify-between mb-5">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
+                <.icon
+                  name={
+                    if(@library_path_mode == :new, do: "hero-folder-plus", else: "hero-pencil-square")
+                  }
+                  class="w-5 h-5 text-primary"
+                />
+              </div>
+              <div>
+                <h3 class="font-bold text-lg">
+                  {if @library_path_mode == :new, do: "Add Library", else: "Edit Library"}
+                </h3>
+                <p class="text-sm text-base-content/60">
+                  {if @library_path_mode == :new,
+                    do: "Configure a new media directory",
+                    else: "Update library settings"}
+                </p>
+              </div>
+            </div>
+            <label class="label cursor-pointer gap-2">
+              <span class="label-text text-sm">Monitored</span>
+              <input
+                type="checkbox"
+                name={@library_path_form[:monitored].name}
+                value="true"
+                checked={
+                  Phoenix.HTML.Form.normalize_value("checkbox", @library_path_form[:monitored].value)
+                }
+                class="toggle toggle-success toggle-sm"
+              />
+            </label>
+          </div>
           <div class="space-y-5">
             <%!-- Path and Type Row --%>
             <div class="grid grid-cols-6 gap-3">

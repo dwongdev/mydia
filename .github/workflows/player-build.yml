@@ -1,4 +1,4 @@
-name: Player Build (macOS & Linux)
+name: Player Build (Desktop)
 
 on:
   push:
@@ -18,6 +18,70 @@ env:
   PLAYER_PATH: 'player'
 
 jobs:
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check for Windows platform support
+        id: check_windows
+        shell: bash
+        run: |
+          if [ -d "${{ env.PLAYER_PATH }}/windows" ]; then
+            echo "enabled=true" >> $GITHUB_OUTPUT
+          else
+            echo "enabled=false" >> $GITHUB_OUTPUT
+            echo "::warning::Windows platform not configured yet. Skipping build."
+          fi
+
+      - name: Setup Flutter
+        if: steps.check_windows.outputs.enabled == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Cache pub dependencies
+        if: steps.check_windows.outputs.enabled == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\.pub-cache
+            ${{ env.PLAYER_PATH }}\.dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Install dependencies
+        if: steps.check_windows.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter pub get
+
+      - name: Run code generation
+        if: steps.check_windows.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter pub run build_runner build --delete-conflicting-outputs
+
+      - name: Generate icons
+        if: steps.check_windows.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: dart run flutter_launcher_icons
+
+      - name: Build Windows release
+        if: steps.check_windows.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter build windows --release
+
+      - name: Upload Windows build artifact
+        if: steps.check_windows.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: player-windows-release
+          path: ${{ env.PLAYER_PATH }}/build/windows/x64/runner/Release/
+          retention-days: 7
+
   build-macos:
     name: Build macOS
     runs-on: macos-latest

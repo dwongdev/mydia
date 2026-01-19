@@ -1138,21 +1138,52 @@ defmodule MydiaWeb.AdminConfigLive.Index do
      |> assign(:show_indexer_modal, true)
      |> assign(:indexer_form, to_form(changeset))
      |> assign(:indexer_mode, :new)
-     |> assign(:testing_indexer_connection, false)}
+     |> assign(:testing_indexer_connection, false)
+     |> assign(:available_env_indexers, Settings.list_available_env_indexers())
+     |> init_prowlarr_indexer_assigns([])
+     |> maybe_auto_fetch_prowlarr_indexers(changeset)}
   end
 
   @impl true
   def handle_event("edit_indexer", %{"id" => id}, socket) do
     indexer = Settings.get_indexer_config!(id)
+    available_env_indexers = Settings.list_available_env_indexers()
+    existing_indexer_ids = indexer.indexer_ids || []
 
-    # Check if this is a runtime config and prevent editing
+    # Check if this is a runtime config - convert to DB-managed with env_name
     if Settings.runtime_config?(indexer) do
+      # Find matching env source by base_url
+      matching_env =
+        Enum.find(available_env_indexers, fn env ->
+          env.base_url == indexer.base_url
+        end)
+
+      # Pre-fill with runtime config data, setting env_name if we found a match
+      attrs = %{
+        "name" => indexer.name,
+        "type" => to_string(indexer.type),
+        "enabled" => indexer.enabled,
+        "priority" => indexer.priority,
+        "indexer_ids" => indexer.indexer_ids,
+        "categories" => indexer.categories,
+        "rate_limit" => indexer.rate_limit,
+        "env_name" => if(matching_env, do: matching_env.env_name, else: nil),
+        "base_url" => if(matching_env, do: nil, else: indexer.base_url),
+        "api_key" => if(matching_env, do: nil, else: indexer.api_key)
+      }
+
+      changeset = IndexerConfig.changeset(%IndexerConfig{}, attrs)
+
       {:noreply,
        socket
-       |> put_flash(
-         :error,
-         "Cannot edit runtime-configured indexer. This indexer is configured via environment variables and is read-only in the UI."
-       )}
+       |> assign(:show_indexer_modal, true)
+       |> assign(:indexer_form, to_form(changeset))
+       |> assign(:indexer_mode, :new)
+       |> assign(:testing_indexer_connection, false)
+       |> assign(:available_env_indexers, available_env_indexers)
+       |> init_prowlarr_indexer_assigns(existing_indexer_ids)
+       |> maybe_auto_fetch_prowlarr_indexers(changeset)
+       |> put_flash(:info, "Converting runtime indexer to database-managed configuration")}
     else
       changeset = IndexerConfig.changeset(indexer, %{})
 
@@ -1162,7 +1193,10 @@ defmodule MydiaWeb.AdminConfigLive.Index do
        |> assign(:indexer_form, to_form(changeset))
        |> assign(:indexer_mode, :edit)
        |> assign(:editing_indexer, indexer)
-       |> assign(:testing_indexer_connection, false)}
+       |> assign(:testing_indexer_connection, false)
+       |> assign(:available_env_indexers, available_env_indexers)
+       |> init_prowlarr_indexer_assigns(existing_indexer_ids)
+       |> maybe_auto_fetch_prowlarr_indexers(changeset)}
     end
   end
 
@@ -1184,6 +1218,9 @@ defmodule MydiaWeb.AdminConfigLive.Index do
 
   @impl true
   def handle_event("save_indexer", %{"indexer_config" => params}, socket) do
+    # Add selected Prowlarr indexer IDs to params
+    params = merge_prowlarr_indexer_ids(params, socket.assigns)
+
     result =
       case socket.assigns.indexer_mode do
         :new ->
@@ -1247,6 +1284,95 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   @impl true
   def handle_event("close_indexer_modal", _params, socket) do
     {:noreply, assign(socket, :show_indexer_modal, false)}
+  end
+
+  @impl true
+  def handle_event("fetch_prowlarr_indexers", _params, socket) do
+    # Get connection details from the form
+    changeset = socket.assigns.indexer_form.source
+    params = Ecto.Changeset.apply_changes(changeset)
+
+    # Check if we're using env-based config
+    env_name = params.env_name
+
+    {base_url, api_key} =
+      if env_name && env_name != "" do
+        # Get connection details from environment variables
+        # Use Elixir.System to avoid conflict with aliased Mydia.System
+        base_url = Elixir.System.get_env("#{env_name}_BASE_URL")
+        api_key = Elixir.System.get_env("#{env_name}_API_KEY")
+        {base_url, api_key}
+      else
+        {params.base_url, params.api_key}
+      end
+
+    if is_nil(base_url) or base_url == "" or is_nil(api_key) or api_key == "" do
+      {:noreply,
+       socket
+       |> assign(:prowlarr_indexers_error, "Base URL and API Key are required to fetch indexers")}
+    else
+      socket = assign(socket, :fetching_prowlarr_indexers, true)
+
+      # Fetch indexers asynchronously
+      config = %{base_url: base_url, api_key: api_key}
+
+      case Indexers.list_prowlarr_indexers(config) do
+        {:ok, indexers} ->
+          {:noreply,
+           socket
+           |> assign(:prowlarr_indexers, indexers)
+           |> assign(:fetching_prowlarr_indexers, false)
+           |> assign(:prowlarr_indexers_error, nil)}
+
+        {:error, error} ->
+          error_msg =
+            case error do
+              %{message: msg} -> msg
+              msg when is_binary(msg) -> msg
+              _ -> "Failed to fetch indexers"
+            end
+
+          {:noreply,
+           socket
+           |> assign(:prowlarr_indexers, nil)
+           |> assign(:fetching_prowlarr_indexers, false)
+           |> assign(:prowlarr_indexers_error, error_msg)}
+      end
+    end
+  end
+
+  @impl true
+  def handle_event("toggle_prowlarr_indexer", %{"id" => id_str}, socket) do
+    id = String.to_integer(id_str)
+    selected = socket.assigns.selected_prowlarr_indexer_ids
+
+    updated =
+      if MapSet.member?(selected, id) do
+        MapSet.delete(selected, id)
+      else
+        MapSet.put(selected, id)
+      end
+
+    {:noreply, assign(socket, :selected_prowlarr_indexer_ids, updated)}
+  end
+
+  @impl true
+  def handle_event("select_all_prowlarr_indexers", _params, socket) do
+    indexers = socket.assigns.prowlarr_indexers || []
+
+    # Select only enabled indexers
+    all_enabled_ids =
+      indexers
+      |> Enum.filter(& &1.enabled)
+      |> Enum.map(& &1.id)
+      |> MapSet.new()
+
+    {:noreply, assign(socket, :selected_prowlarr_indexer_ids, all_enabled_ids)}
+  end
+
+  @impl true
+  def handle_event("deselect_all_prowlarr_indexers", _params, socket) do
+    {:noreply, assign(socket, :selected_prowlarr_indexer_ids, MapSet.new())}
   end
 
   @impl true
@@ -2293,6 +2419,116 @@ defmodule MydiaWeb.AdminConfigLive.Index do
          socket
          |> assign(:testing_media_server_connection, false)
          |> put_flash(:error, "Connection test timed out after 10 seconds")}
+    end
+  end
+
+  ## Prowlarr Indexer Selection Helpers
+
+  # Auto-fetch Prowlarr indexers when opening modal if type is Prowlarr and we have credentials
+  defp maybe_auto_fetch_prowlarr_indexers(socket, changeset) do
+    type = Ecto.Changeset.get_field(changeset, :type)
+    env_name = Ecto.Changeset.get_field(changeset, :env_name)
+    base_url = Ecto.Changeset.get_field(changeset, :base_url)
+    api_key = Ecto.Changeset.get_field(changeset, :api_key)
+
+    is_prowlarr = type == :prowlarr or type == "prowlarr"
+
+    if is_prowlarr do
+      # Get connection details - either from env or from form fields
+      {url, key} =
+        if env_name && env_name != "" do
+          {Elixir.System.get_env("#{env_name}_BASE_URL"),
+           Elixir.System.get_env("#{env_name}_API_KEY")}
+        else
+          {base_url, api_key}
+        end
+
+      if url && url != "" && key && key != "" do
+        fetch_prowlarr_indexers_async(socket, url, key)
+      else
+        socket
+      end
+    else
+      socket
+    end
+  end
+
+  # Fetch indexers from Prowlarr API
+  defp fetch_prowlarr_indexers_async(socket, base_url, api_key) do
+    socket = assign(socket, :fetching_prowlarr_indexers, true)
+
+    config = %{base_url: base_url, api_key: api_key}
+
+    case Indexers.list_prowlarr_indexers(config) do
+      {:ok, indexers} ->
+        socket
+        |> assign(:prowlarr_indexers, indexers)
+        |> assign(:fetching_prowlarr_indexers, false)
+        |> assign(:prowlarr_indexers_error, nil)
+
+      {:error, error} ->
+        error_msg =
+          case error do
+            %{message: msg} -> msg
+            msg when is_binary(msg) -> msg
+            _ -> "Failed to fetch indexers"
+          end
+
+        socket
+        |> assign(:prowlarr_indexers, nil)
+        |> assign(:fetching_prowlarr_indexers, false)
+        |> assign(:prowlarr_indexers_error, error_msg)
+    end
+  end
+
+  # Initialize assigns for Prowlarr indexer selection in the modal
+  # Stores IDs as integers internally (for MapSet membership checks against Prowlarr API response)
+  defp init_prowlarr_indexer_assigns(socket, existing_ids) do
+    # Convert existing IDs to integers and create MapSet
+    # The schema stores strings, but Prowlarr API returns integers
+    selected_ids =
+      (existing_ids || [])
+      |> Enum.map(fn
+        id when is_integer(id) ->
+          id
+
+        id when is_binary(id) ->
+          case Integer.parse(id) do
+            {int, ""} -> int
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end)
+      |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
+
+    socket
+    |> assign(:prowlarr_indexers, nil)
+    |> assign(:fetching_prowlarr_indexers, false)
+    |> assign(:prowlarr_indexers_error, nil)
+    |> assign(:selected_prowlarr_indexer_ids, selected_ids)
+  end
+
+  # Merge selected Prowlarr indexer IDs into save params
+  defp merge_prowlarr_indexer_ids(params, assigns) do
+    # Get selected IDs from assigns
+    selected_ids = Map.get(assigns, :selected_prowlarr_indexer_ids, MapSet.new())
+
+    # Convert to list of strings for storage (schema expects {:array, :string})
+    indexer_ids =
+      selected_ids
+      |> MapSet.to_list()
+      |> Enum.map(&to_string/1)
+
+    # Only add indexer_ids if type is prowlarr
+    type = params["type"]
+
+    if type == "prowlarr" do
+      Map.put(params, "indexer_ids", indexer_ids)
+    else
+      params
     end
   end
 

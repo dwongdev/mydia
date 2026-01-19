@@ -1193,12 +1193,15 @@ defmodule MydiaWeb.AdminConfigLive.Components do
                         >
                           <.icon name="hero-signal" class="w-4 h-4" />
                         </button>
+                        <button
+                          class="btn btn-sm btn-ghost join-item"
+                          phx-click="edit_indexer"
+                          phx-value-id={indexer.id}
+                          title={if is_runtime, do: "Convert to database-managed", else: "Edit"}
+                        >
+                          <.icon name="hero-pencil" class="w-4 h-4" />
+                        </button>
                         <%= if is_runtime do %>
-                          <div class="tooltip" data-tip="Cannot edit runtime-configured indexers">
-                            <button class="btn btn-sm btn-ghost join-item" disabled>
-                              <.icon name="hero-pencil" class="w-4 h-4 opacity-30" />
-                            </button>
-                          </div>
                           <div
                             class="tooltip"
                             data-tip="Cannot delete runtime-configured indexers"
@@ -1208,14 +1211,6 @@ defmodule MydiaWeb.AdminConfigLive.Components do
                             </button>
                           </div>
                         <% else %>
-                          <button
-                            class="btn btn-sm btn-ghost join-item"
-                            phx-click="edit_indexer"
-                            phx-value-id={indexer.id}
-                            title="Edit"
-                          >
-                            <.icon name="hero-pencil" class="w-4 h-4" />
-                          </button>
                           <button
                             class="btn btn-sm btn-ghost join-item text-error"
                             phx-click="delete_indexer"
@@ -2549,11 +2544,46 @@ defmodule MydiaWeb.AdminConfigLive.Components do
     ~H"""
     <div class="modal modal-open">
       <div class="modal-box max-w-2xl">
-        <h3 class="font-bold text-lg mb-4">
-          {if @download_client_mode == :new,
-            do: "New Download Client",
-            else: "Edit Download Client"}
-        </h3>
+        <%!-- Header --%>
+        <div class="flex items-center justify-between mb-5">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
+              <.icon
+                name={
+                  if(@download_client_mode == :new,
+                    do: "hero-plus-circle",
+                    else: "hero-pencil-square"
+                  )
+                }
+                class="w-5 h-5 text-primary"
+              />
+            </div>
+            <div>
+              <h3 class="font-bold text-lg">
+                {if @download_client_mode == :new,
+                  do: "Add Download Client",
+                  else: "Edit Download Client"}
+              </h3>
+              <p class="text-sm text-base-content/60">
+                {if @download_client_mode == :new,
+                  do: "Configure a new download client",
+                  else: "Update client settings"}
+              </p>
+            </div>
+          </div>
+          <label class="label cursor-pointer gap-2">
+            <span class="label-text text-sm">Enabled</span>
+            <input
+              type="checkbox"
+              name={@download_client_form[:enabled].name}
+              value="true"
+              checked={
+                Phoenix.HTML.Form.normalize_value("checkbox", @download_client_form[:enabled].value)
+              }
+              class="toggle toggle-success toggle-sm"
+            />
+          </label>
+        </div>
 
         <.form
           for={@download_client_form}
@@ -2561,124 +2591,205 @@ defmodule MydiaWeb.AdminConfigLive.Components do
           phx-change="validate_download_client"
           phx-submit="save_download_client"
         >
-          <div class="space-y-4">
-            <.input field={@download_client_form[:name]} type="text" label="Name" required />
-            <.input
-              field={@download_client_form[:type]}
-              type="select"
-              label="Type"
-              options={[
-                {"qBittorrent", "qbittorrent"},
-                {"Transmission", "transmission"},
-                {"rTorrent", "rtorrent"},
-                {"Blackhole", "blackhole"},
-                {"SABnzbd", "sabnzbd"},
-                {"NZBGet", "nzbget"},
-                {"HTTP", "http"}
-              ]}
-              required
-            />
+          <div class="space-y-5">
+            <%!-- Basic Settings Row --%>
+            <div class="grid grid-cols-6 gap-3">
+              <div class="col-span-6 md:col-span-3">
+                <.input field={@download_client_form[:name]} type="text" label="Name" required />
+              </div>
+              <div class="col-span-4 md:col-span-2">
+                <.input
+                  field={@download_client_form[:type]}
+                  type="select"
+                  label="Type"
+                  options={[
+                    {"qBittorrent", "qbittorrent"},
+                    {"Transmission", "transmission"},
+                    {"rTorrent", "rtorrent"},
+                    {"Blackhole", "blackhole"},
+                    {"SABnzbd", "sabnzbd"},
+                    {"NZBGet", "nzbget"},
+                    {"HTTP", "http"}
+                  ]}
+                  required
+                />
+              </div>
+              <div class="col-span-2 md:col-span-1">
+                <.input field={@download_client_form[:priority]} type="number" label="Priority" />
+              </div>
+            </div>
+
+            <div class="divider my-1"></div>
 
             <%= if @selected_type == "blackhole" do %>
               <%!-- Blackhole-specific fields --%>
-              <div class="alert alert-info text-sm">
-                <.icon name="hero-information-circle" class="w-5 h-5" />
-                <span>
-                  Blackhole writes .torrent files to a watch folder. An external process
-                  (seedbox, script, etc.) handles the actual downloading.
-                </span>
+              <div class="space-y-3">
+                <div class="flex items-center gap-2 text-sm font-medium text-base-content/80">
+                  <.icon name="hero-folder" class="w-4 h-4" />
+                  <span>Folder Settings</span>
+                </div>
+
+                <div class="alert alert-info text-sm py-2">
+                  <.icon name="hero-information-circle" class="w-4 h-4" />
+                  <span>
+                    Blackhole writes .torrent files to a watch folder for external processing.
+                  </span>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <.input
+                    name="download_client_config[connection_settings][watch_folder]"
+                    type="text"
+                    label="Watch Folder"
+                    placeholder="/path/to/watch"
+                    value={
+                      get_in(
+                        Phoenix.HTML.Form.input_value(@download_client_form, :connection_settings) ||
+                          %{},
+                        ["watch_folder"]
+                      ) || ""
+                    }
+                    required
+                  />
+                  <.input
+                    name="download_client_config[connection_settings][completed_folder]"
+                    type="text"
+                    label="Completed Folder"
+                    placeholder="/path/to/completed"
+                    value={
+                      get_in(
+                        Phoenix.HTML.Form.input_value(@download_client_form, :connection_settings) ||
+                          %{},
+                        ["completed_folder"]
+                      ) || ""
+                    }
+                    required
+                  />
+                </div>
+
+                <div class="flex items-center justify-between bg-base-200 rounded-lg px-4 py-3">
+                  <div class="flex items-center gap-3">
+                    <.icon name="hero-folder-open" class="w-4 h-4 text-base-content/60" />
+                    <div>
+                      <span class="text-sm font-medium">Category Subfolders</span>
+                      <p class="text-xs text-base-content/50">Create movies/tv subfolders</p>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    name="download_client_config[connection_settings][use_category_subfolders]"
+                    value="true"
+                    checked={
+                      get_in(
+                        Phoenix.HTML.Form.input_value(@download_client_form, :connection_settings) ||
+                          %{},
+                        ["use_category_subfolders"]
+                      ) == true
+                    }
+                    class="toggle toggle-primary toggle-sm"
+                  />
+                </div>
               </div>
-
-              <.input
-                name="download_client_config[connection_settings][watch_folder]"
-                type="text"
-                label="Watch Folder"
-                placeholder="/path/to/watch"
-                value={
-                  get_in(
-                    Phoenix.HTML.Form.input_value(@download_client_form, :connection_settings) || %{},
-                    ["watch_folder"]
-                  ) || ""
-                }
-                required
-              />
-              <p class="text-xs text-base-content/60 -mt-2">
-                Mydia will drop .torrent files here for your external process to pick up.
-              </p>
-
-              <.input
-                name="download_client_config[connection_settings][completed_folder]"
-                type="text"
-                label="Completed Folder"
-                placeholder="/path/to/completed"
-                value={
-                  get_in(
-                    Phoenix.HTML.Form.input_value(@download_client_form, :connection_settings) || %{},
-                    ["completed_folder"]
-                  ) || ""
-                }
-                required
-              />
-              <p class="text-xs text-base-content/60 -mt-2">
-                Mydia will look here for completed downloads to import.
-              </p>
-
-              <.input
-                name="download_client_config[connection_settings][use_category_subfolders]"
-                type="checkbox"
-                label="Use Category Subfolders"
-                checked={
-                  get_in(
-                    Phoenix.HTML.Form.input_value(@download_client_form, :connection_settings) || %{},
-                    ["use_category_subfolders"]
-                  ) == true
-                }
-              />
-              <p class="text-xs text-base-content/60 -mt-2">
-                Create movies/tv subfolders in the watch folder.
-              </p>
             <% else %>
               <%!-- Network client fields --%>
-              <.input field={@download_client_form[:host]} type="text" label="Host" required />
-              <.input field={@download_client_form[:port]} type="number" label="Port" required />
-              <.input field={@download_client_form[:username]} type="text" label="Username" />
-              <.input field={@download_client_form[:password]} type="password" label="Password" />
-              <.input field={@download_client_form[:api_key]} type="password" label="API Key" />
-              <.input field={@download_client_form[:url_base]} type="text" label="URL Base" />
-              <.input field={@download_client_form[:category]} type="text" label="Category" />
-              <.input
-                field={@download_client_form[:download_directory]}
-                type="text"
-                label="Download Directory"
-              />
-              <.input field={@download_client_form[:use_ssl]} type="checkbox" label="Use SSL" />
+              <div class="space-y-3">
+                <div class="flex items-center gap-2 text-sm font-medium text-base-content/80">
+                  <.icon name="hero-server" class="w-4 h-4" />
+                  <span>Connection</span>
+                </div>
+
+                <div class="grid grid-cols-6 gap-3">
+                  <div class="col-span-6 md:col-span-4">
+                    <.input
+                      field={@download_client_form[:host]}
+                      type="text"
+                      label="Host"
+                      placeholder="localhost"
+                      required
+                    />
+                  </div>
+                  <div class="col-span-3 md:col-span-1">
+                    <.input field={@download_client_form[:port]} type="number" label="Port" required />
+                  </div>
+                  <div class="col-span-3 md:col-span-1">
+                    <.input field={@download_client_form[:use_ssl]} type="checkbox" label="SSL" />
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <.input field={@download_client_form[:username]} type="text" label="Username" />
+                  <.input field={@download_client_form[:password]} type="password" label="Password" />
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <.input field={@download_client_form[:api_key]} type="password" label="API Key" />
+                  <.input
+                    field={@download_client_form[:url_base]}
+                    type="text"
+                    label="URL Base"
+                    placeholder="/transmission/"
+                  />
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <.input
+                    field={@download_client_form[:category]}
+                    type="text"
+                    label="Category"
+                    placeholder="mydia"
+                  />
+                  <.input
+                    field={@download_client_form[:download_directory]}
+                    type="text"
+                    label="Download Directory"
+                  />
+                </div>
+              </div>
             <% end %>
 
-            <.input
-              field={@download_client_form[:enabled]}
-              type="checkbox"
-              label="Enabled"
-              checked
-            />
-            <.input
-              field={@download_client_form[:remove_completed]}
-              type="checkbox"
-              label="Remove from client after import"
-            />
-            <p class="text-xs text-base-content/60 -mt-2">
-              When disabled (default), completed downloads remain in the client for seeding.
-              When enabled, downloads are removed from the client after successful import.
-            </p>
-            <.input field={@download_client_form[:priority]} type="number" label="Priority" />
+            <div class="divider my-1"></div>
+
+            <%!-- Options Section --%>
+            <div class="space-y-3">
+              <div class="flex items-center gap-2 text-sm font-medium text-base-content/80">
+                <.icon name="hero-cog-6-tooth" class="w-4 h-4" />
+                <span>Options</span>
+              </div>
+
+              <div class="flex items-center justify-between bg-base-200 rounded-lg px-4 py-3">
+                <div class="flex items-center gap-3">
+                  <.icon name="hero-trash" class="w-4 h-4 text-base-content/60" />
+                  <div>
+                    <span class="text-sm font-medium">Remove After Import</span>
+                    <p class="text-xs text-base-content/50">
+                      Remove downloads from client after importing
+                    </p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  name={@download_client_form[:remove_completed].name}
+                  value="true"
+                  checked={
+                    Phoenix.HTML.Form.normalize_value(
+                      "checkbox",
+                      @download_client_form[:remove_completed].value
+                    )
+                  }
+                  class="toggle toggle-primary toggle-sm"
+                />
+              </div>
+            </div>
           </div>
 
-          <div class="modal-action">
-            <button type="button" class="btn" phx-click="close_download_client_modal">
+          <%!-- Modal Actions --%>
+          <div class="modal-action mt-6 pt-4 border-t border-base-300">
+            <button type="button" class="btn btn-ghost" phx-click="close_download_client_modal">
               Cancel
             </button>
             <button
               type="button"
-              class="btn btn-secondary"
+              class="btn btn-outline btn-secondary gap-2"
               phx-click="test_download_client_connection"
               disabled={@testing_download_client_connection}
             >
@@ -2688,10 +2799,14 @@ defmodule MydiaWeb.AdminConfigLive.Components do
                 <.icon name="hero-signal" class="w-4 h-4" /> Test Connection
               <% end %>
             </button>
-            <button type="submit" class="btn btn-primary">Save</button>
+            <button type="submit" class="btn btn-primary gap-2">
+              <.icon name="hero-check" class="w-4 h-4" />
+              {if @download_client_mode == :new, do: "Add Client", else: "Save Changes"}
+            </button>
           </div>
         </.form>
       </div>
+      <div class="modal-backdrop bg-black/50" phx-click="close_download_client_modal"></div>
     </div>
     """
   end
@@ -2702,14 +2817,60 @@ defmodule MydiaWeb.AdminConfigLive.Components do
   attr :indexer_form, :any, required: true
   attr :indexer_mode, :atom, required: true
   attr :testing_indexer_connection, :boolean, default: false
+  attr :available_env_indexers, :list, default: []
+  attr :prowlarr_indexers, :list, default: nil
+  attr :fetching_prowlarr_indexers, :boolean, default: false
+  attr :prowlarr_indexers_error, :string, default: nil
+  attr :selected_prowlarr_indexer_ids, :any, default: nil
 
   def indexer_modal(assigns) do
+    # Check if an env_name is currently set
+    env_name = Phoenix.HTML.Form.input_value(assigns.indexer_form, :env_name)
+    assigns = assign(assigns, :using_env_source, env_name != nil and env_name != "")
+
+    # Check if type is prowlarr (handle both atom and string)
+    indexer_type = Phoenix.HTML.Form.input_value(assigns.indexer_form, :type)
+    is_prowlarr = indexer_type == "prowlarr" or indexer_type == :prowlarr
+    assigns = assign(assigns, :is_prowlarr, is_prowlarr)
+
+    # Ensure selected_prowlarr_indexer_ids is a MapSet
+    selected_ids = assigns.selected_prowlarr_indexer_ids || MapSet.new()
+    assigns = assign(assigns, :selected_prowlarr_indexer_ids, selected_ids)
+
     ~H"""
     <div class="modal modal-open">
       <div class="modal-box max-w-2xl">
-        <h3 class="font-bold text-lg mb-4">
-          {if @indexer_mode == :new, do: "New Indexer", else: "Edit Indexer"}
-        </h3>
+        <%!-- Header --%>
+        <div class="flex items-center justify-between mb-5">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
+              <.icon
+                name={if(@indexer_mode == :new, do: "hero-plus-circle", else: "hero-pencil-square")}
+                class="w-5 h-5 text-primary"
+              />
+            </div>
+            <div>
+              <h3 class="font-bold text-lg">
+                {if @indexer_mode == :new, do: "Add Indexer", else: "Edit Indexer"}
+              </h3>
+              <p class="text-sm text-base-content/60">
+                {if @indexer_mode == :new,
+                  do: "Configure a new search indexer",
+                  else: "Update indexer settings"}
+              </p>
+            </div>
+          </div>
+          <label class="label cursor-pointer gap-2">
+            <span class="label-text text-sm">Enabled</span>
+            <input
+              type="checkbox"
+              name={@indexer_form[:enabled].name}
+              value="true"
+              checked={Phoenix.HTML.Form.normalize_value("checkbox", @indexer_form[:enabled].value)}
+              class="toggle toggle-success toggle-sm"
+            />
+          </label>
+        </div>
 
         <.form
           for={@indexer_form}
@@ -2717,31 +2878,207 @@ defmodule MydiaWeb.AdminConfigLive.Components do
           phx-change="validate_indexer"
           phx-submit="save_indexer"
         >
-          <div class="space-y-4">
-            <.input field={@indexer_form[:name]} type="text" label="Name" required />
-            <.input
-              field={@indexer_form[:type]}
-              type="select"
-              label="Type"
-              options={[
-                {"Prowlarr", "prowlarr"},
-                {"Jackett", "jackett"},
-                {"NZBHydra2", "nzbhydra2"},
-                {"Public", "public"}
-              ]}
-              required
-            />
-            <.input field={@indexer_form[:base_url]} type="text" label="Base URL" required />
-            <.input field={@indexer_form[:api_key]} type="password" label="API Key" />
-            <.input field={@indexer_form[:enabled]} type="checkbox" label="Enabled" checked />
-            <.input field={@indexer_form[:priority]} type="number" label="Priority" />
+          <div class="space-y-5">
+            <%!-- Basic Settings - Compact Row --%>
+            <div class="grid grid-cols-6 gap-3">
+              <div class="col-span-6 md:col-span-3">
+                <.input field={@indexer_form[:name]} type="text" label="Name" required />
+              </div>
+              <div class="col-span-3 md:col-span-2">
+                <.input
+                  field={@indexer_form[:type]}
+                  type="select"
+                  label="Type"
+                  options={[
+                    {"Prowlarr", "prowlarr"},
+                    {"Jackett", "jackett"},
+                    {"NZBHydra2", "nzbhydra2"},
+                    {"Public", "public"}
+                  ]}
+                  required
+                />
+              </div>
+              <div class="col-span-3 md:col-span-1">
+                <.input field={@indexer_form[:priority]} type="number" label="Priority" />
+              </div>
+            </div>
+
+            <div class="divider my-1"></div>
+
+            <%!-- Connection Settings Section --%>
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2 text-sm font-medium text-base-content/80">
+                  <.icon name="hero-server" class="w-4 h-4" />
+                  <span>Connection</span>
+                </div>
+                <%= if @using_env_source do %>
+                  <span class="badge badge-info badge-sm gap-1">
+                    <.icon name="hero-shield-check" class="w-3 h-3" /> From environment
+                  </span>
+                <% end %>
+              </div>
+
+              <%!-- Connection Source Selection --%>
+              <%= if @available_env_indexers != [] do %>
+                <.input
+                  field={@indexer_form[:env_name]}
+                  type="select"
+                  label="Source"
+                  options={
+                    [{"Manual Configuration", ""}] ++
+                      Enum.map(@available_env_indexers, fn env ->
+                        label =
+                          if env.has_api_key,
+                            do: "#{env.env_name} (#{env.base_url})",
+                            else: "#{env.env_name} (#{env.base_url}) - No API Key"
+
+                        {label, env.env_name}
+                      end)
+                  }
+                />
+              <% end %>
+
+              <%!-- Show credential fields only when not using env source --%>
+              <%= if !@using_env_source do %>
+                <div class="grid grid-cols-3 gap-3">
+                  <div class="col-span-3 md:col-span-2">
+                    <.input
+                      field={@indexer_form[:base_url]}
+                      type="text"
+                      label="Base URL"
+                      placeholder="http://localhost:9696"
+                    />
+                  </div>
+                  <div class="col-span-3 md:col-span-1">
+                    <.input
+                      field={@indexer_form[:api_key]}
+                      type="password"
+                      label="API Key"
+                      placeholder="API key"
+                    />
+                  </div>
+                </div>
+              <% end %>
+            </div>
+
+            <%!-- Prowlarr Indexer Selection (only shown for Prowlarr type) --%>
+            <%= if @is_prowlarr do %>
+              <div class="divider my-2"></div>
+
+              <div class="space-y-4">
+                <div class="flex items-center gap-2 text-sm font-medium text-base-content/80">
+                  <.icon name="hero-queue-list" class="w-4 h-4" />
+                  <span>Indexer Selection</span>
+                </div>
+
+                <p class="text-sm text-base-content/60">
+                  Choose which Prowlarr indexers to search. Leave empty to search all enabled indexers.
+                </p>
+
+                <%!-- Loading State --%>
+                <%= if @fetching_prowlarr_indexers do %>
+                  <div class="flex items-center justify-center gap-3 py-8 bg-base-200 rounded-lg">
+                    <span class="loading loading-spinner loading-md text-primary"></span>
+                    <span class="text-sm text-base-content/70">
+                      Loading indexers from Prowlarr...
+                    </span>
+                  </div>
+                <% end %>
+
+                <%!-- Error State --%>
+                <%= if @prowlarr_indexers_error do %>
+                  <div class="alert alert-error">
+                    <.icon name="hero-exclamation-circle" class="w-5 h-5" />
+                    <div>
+                      <p class="font-medium">Failed to load indexers</p>
+                      <p class="text-sm opacity-80">{@prowlarr_indexers_error}</p>
+                    </div>
+                  </div>
+                <% end %>
+
+                <%!-- Indexer List --%>
+                <%= if @prowlarr_indexers do %>
+                  <%= if @prowlarr_indexers == [] do %>
+                    <div class="alert alert-warning">
+                      <.icon name="hero-exclamation-triangle" class="w-5 h-5" />
+                      <div>
+                        <p class="font-medium">No indexers found</p>
+                        <p class="text-sm opacity-80">
+                          Add indexers in your Prowlarr instance first
+                        </p>
+                      </div>
+                    </div>
+                  <% else %>
+                    <%!-- Quick Selection Header --%>
+                    <div class="flex items-center justify-between bg-base-200 rounded-lg px-4 py-2">
+                      <div class="flex items-center gap-2">
+                        <button
+                          type="button"
+                          class="btn btn-xs btn-ghost gap-1"
+                          phx-click="select_all_prowlarr_indexers"
+                        >
+                          <.icon name="hero-check-circle" class="w-3.5 h-3.5" /> All
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn-xs btn-ghost gap-1"
+                          phx-click="deselect_all_prowlarr_indexers"
+                        >
+                          <.icon name="hero-x-circle" class="w-3.5 h-3.5" /> None
+                        </button>
+                      </div>
+                      <span class="badge badge-primary badge-sm">
+                        {MapSet.size(@selected_prowlarr_indexer_ids)}/{length(@prowlarr_indexers)} selected
+                      </span>
+                    </div>
+
+                    <%!-- Indexer Checkboxes --%>
+                    <div class="max-h-64 overflow-y-auto border border-base-300 rounded-lg divide-y divide-base-200">
+                      <%= for indexer <- @prowlarr_indexers do %>
+                        <label class={[
+                          "flex items-center gap-3 px-4 py-3 hover:bg-base-200/50 cursor-pointer transition-colors",
+                          !indexer.enabled && "opacity-50"
+                        ]}>
+                          <input
+                            type="checkbox"
+                            class="checkbox checkbox-sm checkbox-primary"
+                            checked={MapSet.member?(@selected_prowlarr_indexer_ids, indexer.id)}
+                            phx-click="toggle_prowlarr_indexer"
+                            phx-value-id={indexer.id}
+                          />
+                          <span class="flex-1 text-sm font-medium">{indexer.name}</span>
+                          <div class="flex items-center gap-2">
+                            <span class={[
+                              "badge badge-sm",
+                              indexer.protocol == "torrent" && "badge-primary",
+                              indexer.protocol == "usenet" && "badge-secondary"
+                            ]}>
+                              {indexer.protocol}
+                            </span>
+                            <%= if !indexer.enabled do %>
+                              <span class="badge badge-sm badge-warning gap-1">
+                                <.icon name="hero-pause" class="w-3 h-3" /> disabled
+                              </span>
+                            <% end %>
+                          </div>
+                        </label>
+                      <% end %>
+                    </div>
+                  <% end %>
+                <% end %>
+              </div>
+            <% end %>
           </div>
 
-          <div class="modal-action">
-            <button type="button" class="btn" phx-click="close_indexer_modal">Cancel</button>
+          <%!-- Modal Actions --%>
+          <div class="modal-action mt-6 pt-4 border-t border-base-300">
+            <button type="button" class="btn btn-ghost" phx-click="close_indexer_modal">
+              Cancel
+            </button>
             <button
               type="button"
-              class="btn btn-secondary"
+              class="btn btn-outline btn-secondary gap-2"
               phx-click="test_indexer_connection"
               disabled={@testing_indexer_connection}
             >
@@ -2751,10 +3088,13 @@ defmodule MydiaWeb.AdminConfigLive.Components do
                 <.icon name="hero-signal" class="w-4 h-4" /> Test Connection
               <% end %>
             </button>
-            <button type="submit" class="btn btn-primary">Save</button>
+            <button type="submit" class="btn btn-primary gap-2">
+              <.icon name="hero-check" class="w-4 h-4" /> Save Indexer
+            </button>
           </div>
         </.form>
       </div>
+      <div class="modal-backdrop bg-black/50" phx-click="close_indexer_modal"></div>
     </div>
     """
   end
@@ -2768,27 +3108,41 @@ defmodule MydiaWeb.AdminConfigLive.Components do
   def library_path_modal(assigns) do
     ~H"""
     <div class="modal modal-open">
-      <div class="modal-box max-w-lg">
+      <div class="modal-box max-w-xl">
         <%!-- Header --%>
-        <div class="flex items-center gap-3 mb-6">
-          <div class="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
-            <.icon
-              name={
-                if(@library_path_mode == :new, do: "hero-folder-plus", else: "hero-pencil-square")
+        <div class="flex items-center justify-between mb-5">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
+              <.icon
+                name={
+                  if(@library_path_mode == :new, do: "hero-folder-plus", else: "hero-pencil-square")
+                }
+                class="w-5 h-5 text-primary"
+              />
+            </div>
+            <div>
+              <h3 class="font-bold text-lg">
+                {if @library_path_mode == :new, do: "Add Library", else: "Edit Library"}
+              </h3>
+              <p class="text-sm text-base-content/60">
+                {if @library_path_mode == :new,
+                  do: "Configure a new media directory",
+                  else: "Update library settings"}
+              </p>
+            </div>
+          </div>
+          <label class="label cursor-pointer gap-2">
+            <span class="label-text text-sm">Monitored</span>
+            <input
+              type="checkbox"
+              name={@library_path_form[:monitored].name}
+              value="true"
+              checked={
+                Phoenix.HTML.Form.normalize_value("checkbox", @library_path_form[:monitored].value)
               }
-              class="w-5 h-5 text-primary"
+              class="toggle toggle-success toggle-sm"
             />
-          </div>
-          <div>
-            <h3 class="font-bold text-lg">
-              {if @library_path_mode == :new, do: "Add Library Path", else: "Edit Library Path"}
-            </h3>
-            <p class="text-sm text-base-content/60">
-              {if @library_path_mode == :new,
-                do: "Configure a new directory for media storage",
-                else: "Update library path settings"}
-            </p>
-          </div>
+          </label>
         </div>
 
         <.form
@@ -2798,70 +3152,98 @@ defmodule MydiaWeb.AdminConfigLive.Components do
           phx-submit="save_library_path"
         >
           <div class="space-y-5">
-            <%!-- Path Input --%>
-            <div>
-              <.input
-                field={@library_path_form[:path]}
-                type="text"
-                label="Directory Path"
-                placeholder="/path/to/media"
-                required
-              />
-              <p class="text-xs text-base-content/50 mt-1.5">
-                Full path to the directory containing your media files
-              </p>
-            </div>
-
-            <%!-- Type Select with Icons --%>
-            <div>
-              <.input
-                field={@library_path_form[:type]}
-                type="select"
-                label="Library Type"
-                options={[
-                  {"🎬 Movies", "movies"},
-                  {"📺 TV Shows", "series"},
-                  {"📁 Mixed Content", "mixed"},
-                  {"🎵 Music", "music"},
-                  {"📚 Books", "books"},
-                  {"🔞 Adult", "adult"}
-                ]}
-                required
-              />
-              <p class="text-xs text-base-content/50 mt-1.5">
-                Select the type of content stored in this directory
-              </p>
-            </div>
-
-            <%!-- Monitored Toggle --%>
-            <div class="form-control bg-base-200 rounded-lg p-4">
-              <label class="label cursor-pointer justify-start gap-4">
-                <input
-                  type="checkbox"
-                  name={@library_path_form[:monitored].name}
-                  value="true"
-                  checked={
-                    Phoenix.HTML.Form.normalize_value(
-                      "checkbox",
-                      @library_path_form[:monitored].value
-                    )
-                  }
-                  class="toggle toggle-primary"
+            <%!-- Path and Type Row --%>
+            <div class="grid grid-cols-6 gap-3">
+              <div class="col-span-6 md:col-span-4">
+                <.input
+                  field={@library_path_form[:path]}
+                  type="text"
+                  label="Path"
+                  placeholder="/path/to/media"
+                  required
                 />
-                <div>
-                  <span class="label-text font-medium">Enable Monitoring</span>
-                  <p class="text-xs text-base-content/50 mt-0.5">
-                    Automatically scan this directory for new and updated files
-                  </p>
-                </div>
-              </label>
+              </div>
+              <div class="col-span-6 md:col-span-2">
+                <.input
+                  field={@library_path_form[:type]}
+                  type="select"
+                  label="Type"
+                  options={[
+                    {"Movies", "movies"},
+                    {"TV Shows", "series"},
+                    {"Mixed", "mixed"},
+                    {"Music", "music"},
+                    {"Books", "books"},
+                    {"Adult", "adult"}
+                  ]}
+                  required
+                />
+              </div>
             </div>
 
-            <%!-- Auto-Organize Toggle (only for movies/series/mixed) --%>
-            <.auto_organize_section form={@library_path_form} />
+            <div class="divider my-1"></div>
+
+            <%!-- Options Section --%>
+            <div class="space-y-3">
+              <div class="flex items-center gap-2 text-sm font-medium text-base-content/80">
+                <.icon name="hero-cog-6-tooth" class="w-4 h-4" />
+                <span>Options</span>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <%!-- Auto Import Toggle --%>
+                <div class="flex items-center justify-between bg-base-200 rounded-lg px-4 py-3">
+                  <div class="flex items-center gap-3">
+                    <.icon name="hero-arrow-down-tray" class="w-4 h-4 text-base-content/60" />
+                    <div>
+                      <span class="text-sm font-medium">Auto Import</span>
+                      <p class="text-xs text-base-content/50">Import new files automatically</p>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    name={@library_path_form[:auto_import].name}
+                    value="true"
+                    checked={
+                      Phoenix.HTML.Form.normalize_value(
+                        "checkbox",
+                        @library_path_form[:auto_import].value
+                      )
+                    }
+                    class="toggle toggle-primary toggle-sm"
+                  />
+                </div>
+
+                <%!-- Auto Organize Toggle --%>
+                <div class="flex items-center justify-between bg-base-200 rounded-lg px-4 py-3">
+                  <div class="flex items-center gap-3">
+                    <.icon name="hero-folder-open" class="w-4 h-4 text-base-content/60" />
+                    <div>
+                      <span class="text-sm font-medium">Auto Organize</span>
+                      <p class="text-xs text-base-content/50">Sort into category folders</p>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    name={@library_path_form[:auto_organize].name}
+                    value="true"
+                    checked={
+                      Phoenix.HTML.Form.normalize_value(
+                        "checkbox",
+                        @library_path_form[:auto_organize].value
+                      )
+                    }
+                    class="toggle toggle-secondary toggle-sm"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <%!-- Category Paths (only shown when auto-organize is enabled) --%>
+            <.auto_organize_paths form={@library_path_form} />
           </div>
 
-          <div class="modal-action mt-6">
+          <div class="modal-action mt-6 pt-4 border-t border-base-300">
             <button type="button" class="btn btn-ghost" phx-click="close_library_path_modal">
               Cancel
             </button>
@@ -2872,12 +3254,43 @@ defmodule MydiaWeb.AdminConfigLive.Components do
           </div>
         </.form>
       </div>
-      <div class="modal-backdrop" phx-click="close_library_path_modal"></div>
+      <div class="modal-backdrop bg-black/50" phx-click="close_library_path_modal"></div>
     </div>
     """
   end
 
-  # Renders the auto-organize section for library paths.
+  # Renders only the category paths section (when auto-organize is enabled).
+  # Used by the compact library path modal.
+  attr :form, :any, required: true
+
+  defp auto_organize_paths(assigns) do
+    library_type = get_library_type_from_form(assigns.form)
+    categories = Mydia.Media.MediaCategory.for_library_type(library_type)
+
+    assigns =
+      assigns
+      |> assign(:categories, categories)
+      |> assign(:show_paths, auto_organize_enabled?(assigns.form) and categories != [])
+
+    ~H"""
+    <%= if @show_paths do %>
+      <div class="space-y-3">
+        <div class="flex items-center gap-2 text-sm font-medium text-base-content/80">
+          <.icon name="hero-folder-open" class="w-4 h-4" />
+          <span>Category Paths</span>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <.category_path_input :for={category <- @categories} form={@form} category={category} />
+        </div>
+
+        <.category_path_preview form={@form} categories={@categories} />
+      </div>
+    <% end %>
+    """
+  end
+
+  # Renders the auto-organize section for library paths (legacy, kept for compatibility).
   # This section allows users to enable automatic file organization by media category
   # and configure category-specific subfolder paths.
   attr :form, :any, required: true
@@ -3496,35 +3909,43 @@ defmodule MydiaWeb.AdminConfigLive.Components do
     <div class="modal modal-open" id="media-server-modal" phx-hook="PlexOAuth">
       <div class="modal-box max-w-xl">
         <%!-- Modal Header --%>
-        <div class="flex items-center gap-3 mb-6">
-          <div class={[
-            "p-2 rounded-lg",
-            if(@current_type, do: media_server_type_bg_class(@current_type), else: "bg-primary/10")
-          ]}>
-            <.icon
-              name={
-                if @current_type, do: media_server_type_icon(@current_type), else: "hero-server-stack"
-              }
-              class={"w-6 h-6 #{if @current_type, do: media_server_type_icon_class(@current_type), else: "text-primary"}"}
+        <div class="flex items-center justify-between mb-5">
+          <div class="flex items-center gap-3">
+            <div class={[
+              "w-10 h-10 rounded-xl flex items-center justify-center",
+              if(@current_type, do: media_server_type_bg_class(@current_type), else: "bg-primary/20")
+            ]}>
+              <.icon
+                name={
+                  if @current_type,
+                    do: media_server_type_icon(@current_type),
+                    else: "hero-server-stack"
+                }
+                class={"w-5 h-5 #{if @current_type, do: media_server_type_icon_class(@current_type), else: "text-primary"}"}
+              />
+            </div>
+            <div>
+              <h3 class="font-bold text-lg">
+                {if @media_server_mode == :new, do: "Add Media Server", else: "Edit Media Server"}
+              </h3>
+              <p class="text-sm text-base-content/60">
+                {if @media_server_mode == :new,
+                  do: "Connect to Plex or Jellyfin",
+                  else: "Update server configuration"}
+              </p>
+            </div>
+          </div>
+          <label class="label cursor-pointer gap-2">
+            <span class="label-text text-sm">Enabled</span>
+            <input type="hidden" name={@media_server_form[:enabled].name} value="false" />
+            <input
+              type="checkbox"
+              name={@media_server_form[:enabled].name}
+              value="true"
+              checked={Phoenix.HTML.Form.input_value(@media_server_form, :enabled) in [true, "true"]}
+              class="toggle toggle-success toggle-sm"
             />
-          </div>
-          <div class="flex-1">
-            <h3 class="font-bold text-lg">
-              {if @media_server_mode == :new, do: "Add Media Server", else: "Edit Media Server"}
-            </h3>
-            <p class="text-sm text-base-content/60">
-              {if @media_server_mode == :new,
-                do: "Connect to Plex or Jellyfin",
-                else: "Update server configuration"}
-            </p>
-          </div>
-          <button
-            type="button"
-            class="btn btn-ghost btn-sm btn-circle"
-            phx-click="close_media_server_modal"
-          >
-            <.icon name="hero-x-mark" class="w-5 h-5" />
-          </button>
+          </label>
         </div>
 
         <.form
@@ -3535,19 +3956,25 @@ defmodule MydiaWeb.AdminConfigLive.Components do
         >
           <div class="space-y-5">
             <%!-- Basic Info Section --%>
-            <div class="grid gap-4 sm:grid-cols-2">
-              <.input field={@media_server_form[:name]} type="text" label="Name" required />
-              <.input
-                field={@media_server_form[:type]}
-                type="select"
-                label="Type"
-                options={[
-                  {"Plex", "plex"},
-                  {"Jellyfin", "jellyfin"}
-                ]}
-                required
-              />
+            <div class="grid grid-cols-6 gap-3">
+              <div class="col-span-6 md:col-span-4">
+                <.input field={@media_server_form[:name]} type="text" label="Name" required />
+              </div>
+              <div class="col-span-6 md:col-span-2">
+                <.input
+                  field={@media_server_form[:type]}
+                  type="select"
+                  label="Type"
+                  options={[
+                    {"Plex", "plex"},
+                    {"Jellyfin", "jellyfin"}
+                  ]}
+                  required
+                />
+              </div>
             </div>
+
+            <div class="divider my-1"></div>
 
             <%!-- Plex OAuth Section - only shown when Plex is selected and not in manual mode --%>
             <%= if @current_type == :plex and not @plex_manual_entry do %>
@@ -3863,46 +4290,23 @@ defmodule MydiaWeb.AdminConfigLive.Components do
                 </div>
               </div>
             <% end %>
-
-            <%!-- Enable Toggle --%>
-            <div class="form-control">
-              <label class="label cursor-pointer justify-start gap-3 bg-base-200/50 rounded-lg p-3">
-                <input type="hidden" name={@media_server_form[:enabled].name} value="false" />
-                <input
-                  type="checkbox"
-                  name={@media_server_form[:enabled].name}
-                  value="true"
-                  checked={
-                    Phoenix.HTML.Form.input_value(@media_server_form, :enabled) in [true, "true"]
-                  }
-                  class="toggle toggle-success"
-                />
-                <div>
-                  <span class="label-text font-medium">Enable Server</span>
-                  <p class="text-xs text-base-content/60">
-                    Automatically notify server when new content is imported
-                  </p>
-                </div>
-              </label>
-            </div>
           </div>
 
           <%!-- Modal Actions --%>
-          <div class="modal-action border-t border-base-200 pt-4 mt-6">
+          <div class="modal-action mt-6 pt-4 border-t border-base-300">
             <button type="button" class="btn btn-ghost" phx-click="close_media_server_modal">
               Cancel
             </button>
-            <div class="flex-1"></div>
             <button
               type="button"
-              class="btn btn-outline gap-2"
+              class="btn btn-outline btn-secondary gap-2"
               phx-click="test_media_server_connection"
               disabled={@testing_media_server_connection}
             >
               <%= if @testing_media_server_connection do %>
                 <span class="loading loading-spinner loading-sm"></span> Testing...
               <% else %>
-                <.icon name="hero-signal" class="w-4 h-4" /> Test
+                <.icon name="hero-signal" class="w-4 h-4" /> Test Connection
               <% end %>
             </button>
             <button type="submit" class="btn btn-primary gap-2">

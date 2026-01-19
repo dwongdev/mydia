@@ -198,6 +198,11 @@
         indexer_form={@indexer_form}
         indexer_mode={@indexer_mode}
         testing_indexer_connection={assigns[:testing_indexer_connection] || false}
+        available_env_indexers={assigns[:available_env_indexers] || []}
+        prowlarr_indexers={assigns[:prowlarr_indexers]}
+        fetching_prowlarr_indexers={assigns[:fetching_prowlarr_indexers] || false}
+        prowlarr_indexers_error={assigns[:prowlarr_indexers_error]}
+        selected_prowlarr_indexer_ids={assigns[:selected_prowlarr_indexer_ids] || MapSet.new()}
       />
     <% end %>
     <%!-- Indexer Library Modal --%>

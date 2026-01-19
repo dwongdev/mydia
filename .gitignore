@@ -99,6 +99,9 @@ docs/.venv/
 # Rust build artifacts
 **/target/
 
+# Compiled Rust NIFs (built by Rustler during compilation)
+/priv/native/
+
 # Terraform
 *.tfstate
 *.tfstate.*

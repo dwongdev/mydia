@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/root/.pub-cache,sharing=locked \
     flutter config --no-analytics && \
     flutter pub get && \
     dart run build_runner build --delete-conflicting-outputs && \
-    flutter build web --release --base-href /player/
+    flutter build web --release --base-href /player/ --tree-shake-icons
 
 # ============================================
 # Elixir Build Stage

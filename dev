@@ -278,7 +278,7 @@ case "$COMMAND" in
                 ;;
             build)
                 echo -e "${GREEN}Building player web assets...${NC}"
-                run_in_container sh -c "cd player && flutter build web --base-href /player/"
+                run_in_container sh -c "cd player && flutter build web --release --base-href /player/ --tree-shake-icons"
                 echo -e "${GREEN}Player web assets built successfully!${NC}"
                 echo -e "${GREEN}Copying build output to priv/static/player...${NC}"
                 run_in_container sh -c "rm -rf priv/static/player && cp -r player/build/web priv/static/player"

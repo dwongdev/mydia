@@ -77,7 +77,8 @@ jobs:
         run: |
           flutter build web \
             --release \
-            --base-href /player/
+            --base-href /player/ \
+            --tree-shake-icons
 
       - name: Upload web build artifact
         uses: actions/upload-artifact@v4

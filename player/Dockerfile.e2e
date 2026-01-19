@@ -49,6 +49,7 @@ RUN --mount=type=cache,target=/root/.pub-cache \
 RUN --mount=type=cache,target=/root/.pub-cache \
     flutter build web \
     --release \
+    --tree-shake-icons \
     --dart-define=RELAY_URL=${RELAY_URL} \
     --dart-define=MYDIA_URL=${MYDIA_URL} \
     --dart-define=E2E_MODE=true

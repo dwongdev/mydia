@@ -30,7 +30,8 @@ flutter pub run build_runner build --delete-conflicting-outputs
 echo "Building web release..."
 flutter build web \
   --release \
-  --base-href /player/
+  --base-href /player/ \
+  --tree-shake-icons
 
 # Copy to Phoenix static directory
 echo "Copying to Phoenix static assets..."

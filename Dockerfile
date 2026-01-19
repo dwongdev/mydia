@@ -31,14 +31,16 @@ FROM elixir:1.18-alpine AS builder
 # It CANNOT be changed at runtime - each Docker image is built for a specific database
 ARG DATABASE_TYPE=sqlite
 
-# Install build dependencies
+# Install build dependencies (including Rust for NIF compilation)
 RUN apk add --no-cache \
     build-base \
     git \
     nodejs \
     npm \
     sqlite-dev \
-    postgresql16-dev
+    postgresql16-dev \
+    rust \
+    cargo
 
 # Set build environment
 ENV MIX_ENV=prod
@@ -73,11 +75,12 @@ COPY config ./config
 COPY priv ./priv
 COPY lib ./lib
 COPY assets ./assets
+COPY native ./native
 
 # Copy Flutter build output from flutter-builder stage
 COPY --from=flutter-builder /app/player/build/web ./priv/static/player
 
-# Compile application
+# Compile application (includes building Rust NIFs via Rustler)
 RUN mix compile
 
 # Build Phoenix assets

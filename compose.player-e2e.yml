@@ -27,8 +27,8 @@ services:
   # ============================================
   relay:
     build:
-      context: ./metadata-relay
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: metadata-relay/Dockerfile
     container_name: e2e_relay
     environment:
       PORT: "4001"

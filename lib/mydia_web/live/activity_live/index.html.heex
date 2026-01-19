@@ -58,6 +58,13 @@
         >
           Search
         </button>
+        <button
+          class={["tab", @category_filter == "errors" && "tab-active text-error"]}
+          phx-click="filter_category"
+          phx-value-category="errors"
+        >
+          <.icon name="hero-exclamation-triangle" class="w-4 h-4 mr-1" /> Errors
+        </button>
       </div>
     </div>
     

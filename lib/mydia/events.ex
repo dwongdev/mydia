@@ -1206,6 +1206,60 @@ defmodule Mydia.Events do
   end
 
   @doc """
+  Records a download.initiation_failed event when a download cannot be initiated.
+
+  This is different from `download_failed/3` which is for downloads that were
+  started but then failed during transfer.
+
+  ## Parameters
+    - `media_item` - The MediaItem the download was for
+    - `reason` - The failure reason atom (e.g., :no_clients_configured, :duplicate_download)
+    - `metadata` - Additional metadata including:
+      - `selected_release` - The release that was selected
+      - `query` - The search query used
+    - `opts` - Optional parameters:
+      - `:episode` - The Episode if this is a TV show episode download
+
+  ## Examples
+
+      iex> download_initiation_failed(media_item, :no_clients_configured, %{"selected_release" => "Movie.2024.1080p"})
+      :ok
+  """
+  def download_initiation_failed(media_item, reason, metadata \\ %{}, opts \\ []) do
+    episode = opts[:episode]
+
+    error_message = format_download_error(reason)
+
+    base_metadata =
+      %{
+        "title" => media_item.title,
+        "media_type" => media_item.type,
+        "error_reason" => to_string(reason),
+        "error_message" => error_message
+      }
+      |> Map.merge(metadata)
+      |> maybe_add_episode_context(episode)
+
+    create_event_async(%{
+      category: "download",
+      type: "download.failed",
+      actor_type: :job,
+      actor_id: search_actor_id(media_item),
+      resource_type: resource_type_for_search(episode),
+      resource_id: resource_id_for_search(media_item, episode),
+      severity: :error,
+      metadata: base_metadata
+    })
+  end
+
+  defp format_download_error(:no_clients_configured), do: "No download clients configured"
+  defp format_download_error(:duplicate_download), do: "Download already exists"
+  defp format_download_error(:no_suitable_client), do: "No suitable download client found"
+  defp format_download_error(:client_error), do: "Download client error"
+  defp format_download_error(reason) when is_binary(reason), do: reason
+  defp format_download_error(reason), do: inspect(reason)
+
+  @doc """
   Records a search.started event when a search begins.
 
   ## Parameters

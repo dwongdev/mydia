@@ -41,10 +41,15 @@ defmodule MydiaWeb.ActivityLive.Index do
 
   @impl true
   def handle_info({:event_created, event}, socket) do
+    filter = socket.assigns.category_filter
+
     # Only add event if it matches current filter
     should_add =
-      socket.assigns.category_filter == "all" ||
-        event.category == socket.assigns.category_filter
+      case filter do
+        "all" -> true
+        "errors" -> event.severity == :error
+        category -> event.category == category
+      end
 
     socket =
       if should_add do
@@ -61,13 +66,13 @@ defmodule MydiaWeb.ActivityLive.Index do
   ## Private Helpers
 
   defp load_events(socket) do
-    category = socket.assigns.category_filter
+    filter = socket.assigns.category_filter
 
     filter_opts =
-      if category == "all" do
-        []
-      else
-        [category: category]
+      case filter do
+        "all" -> []
+        "errors" -> [severity: :error]
+        category -> [category: category]
       end
 
     events = Events.list_events(filter_opts ++ [limit: 50])
@@ -113,7 +118,15 @@ defmodule MydiaWeb.ActivityLive.Index do
       "download.failed" ->
         title = event.metadata["title"] || "Unknown"
         error = event.metadata["error_message"] || "Unknown error"
-        "Download failed: #{title} (#{error})"
+        selected = event.metadata["selected_release"]
+
+        base = format_search_description("Download failed for", title, event.metadata)
+
+        if selected do
+          "#{base}: #{selected} (#{error})"
+        else
+          "#{base} (#{error})"
+        end
 
       "download.cancelled" ->
         title = event.metadata["title"] || "Unknown"
@@ -225,6 +238,7 @@ defmodule MydiaWeb.ActivityLive.Index do
       "system" -> "System"
       "auth" -> "Authentication"
       "search" -> "Search"
+      "errors" -> "Error"
       "all" -> "All"
       _ -> String.capitalize(category)
     end

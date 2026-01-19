@@ -241,20 +241,29 @@ defmodule Mydia.Jobs.MovieSearch do
           breakdown: breakdown
         )
 
-        result = initiate_download(movie, best_result)
+        case initiate_download(movie, best_result) do
+          :ok ->
+            # Log search completed event only on successful download
+            Events.search_completed(movie, %{
+              "query" => query,
+              "results_count" => length(results),
+              "selected_release" => best_result.title,
+              "score" => score,
+              "breakdown" => stringify_keys(breakdown)
+            })
 
-        # Log search completed event
-        Events.search_completed(movie, %{
-          "query" => query,
-          "results_count" => length(results),
-          "selected_release" => best_result.title,
-          "score" => score,
-          "breakdown" => stringify_keys(breakdown)
-        })
+            {:ok, 1}
 
-        case result do
-          :ok -> {:ok, 1}
-          {:error, _} -> {:no_results, 0}
+          {:error, reason} ->
+            # Log download failure event
+            Events.download_initiation_failed(movie, reason, %{
+              "query" => query,
+              "results_count" => length(results),
+              "selected_release" => best_result.title,
+              "score" => score
+            })
+
+            {:no_results, 0}
         end
     end
   end
@@ -359,18 +368,30 @@ defmodule Mydia.Jobs.MovieSearch do
           breakdown: breakdown
         )
 
-        result = initiate_download(movie, best_result)
+        case initiate_download(movie, best_result) do
+          :ok ->
+            # Log search completed event only on successful download
+            Events.search_completed(movie, %{
+              "query" => query,
+              "results_count" => length(results),
+              "selected_release" => best_result.title,
+              "score" => score,
+              "breakdown" => stringify_keys(breakdown)
+            })
 
-        # Log search completed event
-        Events.search_completed(movie, %{
-          "query" => query,
-          "results_count" => length(results),
-          "selected_release" => best_result.title,
-          "score" => score,
-          "breakdown" => stringify_keys(breakdown)
-        })
+            :ok
 
-        result
+          {:error, reason} ->
+            # Log download failure event
+            Events.download_initiation_failed(movie, reason, %{
+              "query" => query,
+              "results_count" => length(results),
+              "selected_release" => best_result.title,
+              "score" => score
+            })
+
+            :no_results
+        end
     end
   end
 

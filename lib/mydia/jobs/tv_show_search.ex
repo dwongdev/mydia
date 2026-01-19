@@ -705,24 +705,42 @@ defmodule Mydia.Jobs.TVShowSearch do
           episodes_count: length(episodes)
         )
 
-        result = initiate_season_pack_download(media_item, season_number, episodes, best_result)
+        case initiate_season_pack_download(media_item, season_number, episodes, best_result) do
+          :ok ->
+            # Log search completed event only on successful download
+            Events.search_completed(
+              media_item,
+              %{
+                "query" => query,
+                "results_count" => length(results),
+                "selected_release" => best_result.title,
+                "score" => score,
+                "breakdown" => stringify_keys(breakdown),
+                "season_number" => season_number,
+                "search_type" => "season_pack",
+                "episodes_included" => length(episodes)
+              }
+            )
 
-        # Log search completed event
-        Events.search_completed(
-          media_item,
-          %{
-            "query" => query,
-            "results_count" => length(results),
-            "selected_release" => best_result.title,
-            "score" => score,
-            "breakdown" => stringify_keys(breakdown),
-            "season_number" => season_number,
-            "search_type" => "season_pack",
-            "episodes_included" => length(episodes)
-          }
-        )
+            :ok
 
-        result
+          {:error, reason} ->
+            # Log download failure event
+            Events.download_initiation_failed(
+              media_item,
+              reason,
+              %{
+                "query" => query,
+                "results_count" => length(results),
+                "selected_release" => best_result.title,
+                "score" => score,
+                "season_number" => season_number,
+                "search_type" => "season_pack"
+              }
+            )
+
+            {:error, reason}
+        end
     end
   end
 
@@ -892,22 +910,39 @@ defmodule Mydia.Jobs.TVShowSearch do
           breakdown: breakdown
         )
 
-        result = initiate_episode_download(episode, best_result)
+        case initiate_episode_download(episode, best_result) do
+          :ok ->
+            # Log search completed event only on successful download
+            Events.search_completed(
+              episode.media_item,
+              %{
+                "query" => query,
+                "results_count" => length(results),
+                "selected_release" => best_result.title,
+                "score" => score,
+                "breakdown" => stringify_keys(breakdown)
+              },
+              episode: episode
+            )
 
-        # Log search completed event
-        Events.search_completed(
-          episode.media_item,
-          %{
-            "query" => query,
-            "results_count" => length(results),
-            "selected_release" => best_result.title,
-            "score" => score,
-            "breakdown" => stringify_keys(breakdown)
-          },
-          episode: episode
-        )
+            :ok
 
-        result
+          {:error, reason} ->
+            # Log download failure event
+            Events.download_initiation_failed(
+              episode.media_item,
+              reason,
+              %{
+                "query" => query,
+                "results_count" => length(results),
+                "selected_release" => best_result.title,
+                "score" => score
+              },
+              episode: episode
+            )
+
+            {:error, reason}
+        end
     end
   end
 

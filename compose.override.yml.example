@@ -38,11 +38,6 @@
 #       # Override database path
 #       # DATABASE_PATH: /app/mydia_custom.db
 #
-#       # Enable runtime configuration loading in development
-#       # REQUIRED: This allows the download client and indexer environment variables
-#       # below to be loaded and used by the application in development mode
-#       LOAD_RUNTIME_CONFIG: "true"
-#
 #       # -------------------------------------------------------------------------
 #       # AUTOMATIC SERVICE CONFIGURATION
 #       # -------------------------------------------------------------------------

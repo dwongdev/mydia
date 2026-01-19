@@ -6,7 +6,6 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpers do
 
   alias Mydia.Indexers
   alias Mydia.Indexers.SearchResult
-  alias Mydia.Indexers.QualityParser
   alias Mydia.Settings.QualityProfile
 
   def generate_result_id(%SearchResult{} = result) do
@@ -15,6 +14,27 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpers do
     hash = :erlang.phash2({result.download_url, result.indexer})
     "search-result-#{hash}"
   end
+
+  @doc """
+  Prepare results for streaming by adding position-based IDs to preserve sort order.
+  LiveView streams may reorder items based on DOM IDs, so we include position.
+  """
+  def prepare_for_stream(sorted_results) do
+    sorted_results
+    |> Enum.with_index()
+    |> Enum.map(fn {result, index} ->
+      # Add a position field that will be used in the DOM ID
+      Map.put(result, :stream_position, index)
+    end)
+  end
+
+  def generate_positioned_id(%{stream_position: pos} = result) do
+    # Include position as a zero-padded prefix to ensure correct ordering
+    hash = :erlang.phash2({result.download_url, result.indexer})
+    "search-result-#{String.pad_leading(Integer.to_string(pos), 5, "0")}-#{hash}"
+  end
+
+  def generate_positioned_id(result), do: generate_result_id(result)
 
   def perform_search(query, min_seeders) do
     opts = [
@@ -43,9 +63,11 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpers do
         search_query
       )
 
+    prepared_results = prepare_for_stream(sorted_results)
+
     socket
     |> Phoenix.Component.assign(:results_empty?, sorted_results == [])
-    |> Phoenix.LiveView.stream(:search_results, sorted_results, reset: true)
+    |> Phoenix.LiveView.stream(:search_results, prepared_results, reset: true)
   end
 
   def apply_search_sort(socket) do
@@ -66,8 +88,10 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpers do
         search_query
       )
 
+    prepared_results = prepare_for_stream(sorted_results)
+
     socket
-    |> Phoenix.LiveView.stream(:search_results, sorted_results, reset: true)
+    |> Phoenix.LiveView.stream(:search_results, prepared_results, reset: true)
   end
 
   def filter_search_results(results, assigns) do
@@ -120,6 +144,11 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpers do
         media_type \\ :movie,
         search_query \\ nil
       )
+
+  def sort_search_results(results, :quality, nil, _media_type, _search_query) do
+    # No quality profile - just sort by seeders (most available first)
+    Enum.sort_by(results, & &1.seeders, :desc)
+  end
 
   def sort_search_results(results, :quality, quality_profile, media_type, search_query) do
     # Sort by profile-based quality score + title relevance, then by seeders
@@ -238,32 +267,69 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpers do
       String.match?(word, year_pattern)
   end
 
-  defp quality_score(%SearchResult{quality: nil}), do: 0
-
-  defp quality_score(%SearchResult{quality: quality}) do
-    QualityParser.quality_score(quality)
-  end
-
   @doc """
   Calculate profile-based score for a search result.
   Returns the quality profile score (0-100) if a profile is set,
   otherwise falls back to the generic quality score.
   """
-  def profile_score(%SearchResult{} = result, nil, _media_type) do
-    # No profile set, use generic quality score (scaled to 0-100 for consistency)
-    quality_score(result) / 20
+  def profile_score(%SearchResult{} = result, nil, media_type) do
+    # Use the same scoring logic as breakdown for consistency
+    score_result = profile_score_breakdown(result, nil, media_type)
+    score_result.score
   end
 
   def profile_score(%SearchResult{} = result, %QualityProfile{} = profile, media_type) do
+    score_result = profile_score_breakdown(result, profile, media_type)
+    score_result.score
+  end
+
+  @doc """
+  Calculate profile-based score with full breakdown for a search result.
+  Returns the full score result including breakdown of individual components.
+
+  Returns a map with:
+  - `:score` - Overall quality score (0.0 - 100.0)
+  - `:breakdown` - Map with individual component scores and weights
+  - `:violations` - List of constraint violations (if any)
+  - `:detected` - Map of detected quality attributes from the result
+  """
+  def profile_score_breakdown(%SearchResult{} = result, nil, _media_type) do
+    # No profile set - score is just seeders count (sorted by most seeders)
+    %{
+      score: result.seeders,
+      breakdown: %{
+        seeders: result.seeders
+      },
+      violations: if(result.seeders == 0, do: ["No seeders available"], else: []),
+      detected: extract_detected_quality(result)
+    }
+  end
+
+  def profile_score_breakdown(%SearchResult{} = result, %QualityProfile{} = profile, media_type) do
     # Convert search result to media_attrs format for scoring
     media_attrs = search_result_to_media_attrs(result, media_type)
 
     # Ensure quality_standards has preferred_resolutions set from the qualities field
-    # This is the fallback when the user hasn't explicitly set preferred_resolutions
     profile_with_resolution_fallback = ensure_preferred_resolutions(profile)
 
     score_result = QualityProfile.score_media_file(profile_with_resolution_fallback, media_attrs)
-    score_result.score
+
+    # Add detected attributes for display
+    Map.put(score_result, :detected, extract_detected_quality(result))
+  end
+
+  # Extract detected quality attributes from search result for display
+  defp extract_detected_quality(%SearchResult{quality: nil}), do: %{}
+
+  defp extract_detected_quality(%SearchResult{quality: quality} = result) do
+    %{
+      resolution: quality.resolution,
+      source: quality.source,
+      video_codec: normalize_codec(quality.codec),
+      audio_codec: normalize_audio_codec(quality.audio),
+      hdr: quality.hdr,
+      size_mb: if(result.size, do: Float.round(result.size / (1024 * 1024), 1), else: nil)
+    }
   end
 
   # Ensure preferred_resolutions in quality_standards falls back to the qualities field

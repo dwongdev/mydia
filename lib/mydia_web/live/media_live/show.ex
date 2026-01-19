@@ -124,7 +124,7 @@ defmodule MydiaWeb.MediaLive.Show do
      |> assign(:show_trailer_modal, false)
      # Collection state
      |> load_collection_data(media_item)
-     |> stream_configure(:search_results, dom_id: &generate_result_id/1)
+     |> stream_configure(:search_results, dom_id: &generate_positioned_id/1)
      |> stream(:search_results, [])}
   end
 
@@ -1528,6 +1528,8 @@ defmodule MydiaWeb.MediaLive.Show do
         search_query
       )
 
+    prepared_results = prepare_for_stream(sorted_results)
+
     duration = System.monotonic_time(:millisecond) - start_time
 
     Logger.info(
@@ -1541,7 +1543,7 @@ defmodule MydiaWeb.MediaLive.Show do
      |> assign(:searching, false)
      |> assign(:results_empty?, sorted_results == [])
      |> assign(:raw_search_results, results)
-     |> stream(:search_results, sorted_results, reset: true)}
+     |> stream(:search_results, prepared_results, reset: true)}
   end
 
   def handle_async(:search, {:ok, {:error, reason}}, socket) do

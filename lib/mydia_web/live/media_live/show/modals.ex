@@ -596,23 +596,122 @@ defmodule MydiaWeb.MediaLive.Show.Modals do
                 id={id}
                 class="list-row hover:bg-base-200/50 transition-colors px-4 py-3 border-b border-base-200 last:border-b-0"
               >
-                <%!-- Score (prominently displayed) --%>
-                <% score = profile_score(result, @quality_profile, @media_type) %>
-                <div class="flex items-center justify-center">
+                <%!-- Score display --%>
+                <%= if @quality_profile do %>
+                  <%!-- Profile-based score with breakdown dropdown --%>
+                  <% score_data = profile_score_breakdown(result, @quality_profile, @media_type) %>
+                  <% score = score_data.score %>
+                  <div class="dropdown dropdown-hover dropdown-right">
+                    <div
+                      tabindex="0"
+                      role="button"
+                      class={[
+                        "radial-progress text-sm font-bold cursor-pointer",
+                        score >= 80 && "text-success",
+                        score >= 50 && score < 80 && "text-warning",
+                        score < 50 && "text-error"
+                      ]}
+                      style={"--value:#{trunc(score)}; --size:3rem; --thickness:4px;"}
+                      title="Hover for score breakdown"
+                    >
+                      {trunc(score)}
+                    </div>
+                    <div
+                      tabindex="0"
+                      class="dropdown-content z-50 card card-compact bg-base-200 shadow-xl w-72 ml-2"
+                    >
+                      <div class="card-body p-3">
+                        <h4 class="card-title text-sm mb-2">Score Breakdown</h4>
+                        <div class="space-y-1.5 text-xs">
+                          <.score_row
+                            label="Resolution"
+                            value={score_data.detected[:resolution]}
+                            score={score_data.breakdown[:resolution]}
+                            weight={20}
+                          />
+                          <.score_row
+                            label="Video Codec"
+                            value={score_data.detected[:video_codec]}
+                            score={score_data.breakdown[:video_codec]}
+                            weight={20}
+                          />
+                          <.score_row
+                            label="Audio Codec"
+                            value={score_data.detected[:audio_codec]}
+                            score={score_data.breakdown[:audio_codec]}
+                            weight={15}
+                          />
+                          <.score_row
+                            label="Source"
+                            value={score_data.detected[:source]}
+                            score={score_data.breakdown[:source]}
+                            weight={10}
+                          />
+                          <.score_row
+                            label="Audio Channels"
+                            value={nil}
+                            score={score_data.breakdown[:audio_channels]}
+                            weight={10}
+                          />
+                          <.score_row
+                            label="Video Bitrate"
+                            value={nil}
+                            score={score_data.breakdown[:video_bitrate]}
+                            weight={10}
+                          />
+                          <.score_row
+                            label="File Size"
+                            value={
+                              if(score_data.detected[:size_mb],
+                                do: "#{score_data.detected[:size_mb]} MB",
+                                else: nil
+                              )
+                            }
+                            score={score_data.breakdown[:file_size]}
+                            weight={5}
+                          />
+                          <.score_row
+                            label="Audio Bitrate"
+                            value={nil}
+                            score={score_data.breakdown[:audio_bitrate]}
+                            weight={5}
+                          />
+                          <.score_row
+                            label="HDR"
+                            value={if(score_data.detected[:hdr], do: "Yes", else: "No")}
+                            score={score_data.breakdown[:hdr]}
+                            weight={5}
+                          />
+                        </div>
+                        <%= if score_data.violations != [] do %>
+                          <div class="divider my-1"></div>
+                          <div class="text-error text-xs">
+                            <span class="font-semibold">Violations:</span>
+                            <ul class="list-disc list-inside">
+                              <%= for violation <- score_data.violations do %>
+                                <li>{violation}</li>
+                              <% end %>
+                            </ul>
+                          </div>
+                        <% end %>
+                      </div>
+                    </div>
+                  </div>
+                <% else %>
+                  <%!-- No profile - just show seeders count (sorted by most seeders) --%>
                   <div
                     class={[
-                      "radial-progress text-sm font-bold",
-                      score >= 80 && "text-success",
-                      score >= 50 && score < 80 && "text-warning",
-                      score < 50 && "text-error"
+                      "flex items-center justify-center w-12 h-12 rounded-full font-bold text-sm",
+                      result.seeders >= 50 && "bg-success/20 text-success",
+                      result.seeders >= 10 && result.seeders < 50 && "bg-warning/20 text-warning",
+                      result.seeders < 10 && "bg-base-300 text-base-content/70"
                     ]}
-                    style={"--value:#{trunc(score)}; --size:3rem; --thickness:4px;"}
-                    role="progressbar"
-                    title={"Profile Score: #{Float.round(score, 1)}"}
+                    title={"#{result.seeders} seeders"}
                   >
-                    {trunc(score)}
+                    <.icon name="hero-arrow-up" class="w-3 h-3 mr-0.5" />
+                    {result.seeders}
                   </div>
-                </div>
+                <% end %>
                 <%!-- Main content (title + badges) --%>
                 <div class="flex-1 min-w-0">
                   <%!-- Release Title --%>
@@ -1107,4 +1206,46 @@ defmodule MydiaWeb.MediaLive.Show.Modals do
     </div>
     """
   end
+
+  # Private helper component for score breakdown rows
+  attr :label, :string, required: true
+  attr :value, :any, default: nil
+  attr :score, :float, default: nil
+  attr :weight, :integer, required: true
+
+  defp score_row(assigns) do
+    ~H"""
+    <div class="flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2 flex-1 min-w-0">
+        <span class="text-base-content/70 whitespace-nowrap">{@label}:</span>
+        <span class="font-medium truncate">
+          {display_value(@value)}
+        </span>
+      </div>
+      <div class="flex items-center gap-1.5 flex-shrink-0">
+        <span class={[
+          "font-mono font-semibold w-8 text-right",
+          score_color(@score)
+        ]}>
+          {format_score(@score)}
+        </span>
+        <span class="text-base-content/50 text-[10px] w-8">
+          ({@weight}%)
+        </span>
+      </div>
+    </div>
+    """
+  end
+
+  defp display_value(nil), do: "-"
+  defp display_value(value), do: value
+
+  defp format_score(nil), do: "-"
+  defp format_score(score) when is_float(score), do: trunc(score)
+  defp format_score(score), do: score
+
+  defp score_color(nil), do: "text-base-content/50"
+  defp score_color(score) when score >= 80, do: "text-success"
+  defp score_color(score) when score >= 50, do: "text-warning"
+  defp score_color(_score), do: "text-error"
 end

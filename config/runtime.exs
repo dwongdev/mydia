@@ -259,10 +259,18 @@ if config_env() == :prod do
       _ -> Application.get_env(:mydia, :features)[:import_lists_enabled] || false
     end
 
+  remote_access_enabled =
+    case System.get_env("ENABLE_REMOTE_ACCESS") do
+      "true" -> true
+      "false" -> false
+      _ -> Application.get_env(:mydia, :features)[:remote_access_enabled] || false
+    end
+
   config :mydia, :features,
     playback_enabled: playback_enabled,
     cardigann_enabled: cardigann_enabled,
-    import_lists_enabled: import_lists_enabled
+    import_lists_enabled: import_lists_enabled,
+    remote_access_enabled: remote_access_enabled
 
   # Helper function for safe integer parsing
   parse_integer = fn value, default ->
@@ -474,10 +482,18 @@ if config_env() in [:dev, :test] do
       _ -> Application.get_env(:mydia, :features)[:import_lists_enabled] || false
     end
 
+  remote_access_enabled =
+    case System.get_env("ENABLE_REMOTE_ACCESS") do
+      "true" -> true
+      "false" -> false
+      _ -> Application.get_env(:mydia, :features)[:remote_access_enabled] || false
+    end
+
   config :mydia, :features,
     playback_enabled: playback_enabled,
     cardigann_enabled: cardigann_enabled,
-    import_lists_enabled: import_lists_enabled
+    import_lists_enabled: import_lists_enabled,
+    remote_access_enabled: remote_access_enabled
 end
 
 # Ueberauth OIDC configuration (all environments)

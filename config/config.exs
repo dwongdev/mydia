@@ -344,7 +344,12 @@ config :mydia, :features,
   # Enable/disable Import Lists feature
   # When enabled, shows the Import Lists UI for syncing external lists (TMDB watchlists, etc.)
   # Can be overridden via ENABLE_IMPORT_LISTS environment variable
-  import_lists_enabled: false
+  import_lists_enabled: false,
+  # Enable/disable Remote Access feature (libp2p-based peer-to-peer connectivity)
+  # When enabled, starts the libp2p server for remote device pairing and media streaming
+  # Set to true to enable remote access functionality
+  # Can be overridden via ENABLE_REMOTE_ACCESS environment variable
+  remote_access_enabled: false
 
 # Configure Ueberauth with empty providers by default
 # This is overridden in dev.exs if OIDC is configured

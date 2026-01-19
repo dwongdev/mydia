@@ -51,6 +51,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
      |> assign(:page_title, "Configuration")
      |> assign(:active_tab, "status")
      |> assign(:cardigann_enabled, CardigannFeatureFlags.enabled?())
+     |> assign(:remote_access_enabled, remote_access_enabled?())
      |> assign(:reorganizing_library_ids, MapSet.new())
      |> assign(:reclassifying_library_ids, MapSet.new())
      |> load_configuration_data()
@@ -3076,5 +3077,10 @@ defmodule MydiaWeb.AdminConfigLive.Index do
       "#{field}: #{Enum.join(errors, ", ")}"
     end)
     |> Enum.join("; ")
+  end
+
+  defp remote_access_enabled? do
+    Application.get_env(:mydia, :features, [])
+    |> Keyword.get(:remote_access_enabled, false)
   end
 end

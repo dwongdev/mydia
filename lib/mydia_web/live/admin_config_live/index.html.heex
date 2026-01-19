@@ -64,14 +64,16 @@
       >
         <.icon name="hero-server-stack" class="w-4 h-4" /> Media Servers
       </button>
-      <button
-        role="tab"
-        class={["tab gap-2", @active_tab == "remote_access" && "tab-active"]}
-        phx-click="change_tab"
-        phx-value-tab="remote_access"
-      >
-        <.icon name="hero-signal" class="w-4 h-4" /> Remote Access
-      </button>
+      <%= if @remote_access_enabled do %>
+        <button
+          role="tab"
+          class={["tab gap-2", @active_tab == "remote_access" && "tab-active"]}
+          phx-click="change_tab"
+          phx-value-tab="remote_access"
+        >
+          <.icon name="hero-signal" class="w-4 h-4" /> Remote Access
+        </button>
+      <% end %>
     </div>
     <%!-- Tab Content --%>
     <div class="bg-base-100">
@@ -148,7 +150,7 @@
         />
       <% end %>
       <%!-- Remote Access Tab --%>
-      <%= if @active_tab == "remote_access" do %>
+      <%= if @remote_access_enabled and @active_tab == "remote_access" do %>
         <.live_component
           module={MydiaWeb.AdminConfigLive.RemoteAccessComponent}
           id="remote-access"

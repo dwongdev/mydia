@@ -47,13 +47,11 @@ defmodule Mydia.Application do
         Mydia.CrashReporter.Queue,
         Mydia.RemoteAccess.ClaimRateLimiter,
         Mydia.Accounts.ApiKeyRateLimiter,
-        Mydia.Libp2p.Server,
         {Registry, keys: :unique, name: Mydia.DynamicSupervisorRegistry},
         {DynamicSupervisor,
-         name: {:via, Registry, {Mydia.DynamicSupervisorRegistry, :relay}}, strategy: :one_for_one},
-        # Resume active pairing claims on startup
-        Mydia.RemoteAccess.ResumeClaims
+         name: {:via, Registry, {Mydia.DynamicSupervisorRegistry, :relay}}, strategy: :one_for_one}
       ] ++
+        remote_access_children() ++
         client_health_children() ++
         indexer_health_children() ++
         relay_children() ++
@@ -107,6 +105,19 @@ defmodule Mydia.Application do
   def config_change(changed, _new, removed) do
     MydiaWeb.Endpoint.config_change(changed, removed)
     :ok
+  end
+
+  defp remote_access_children do
+    # Only start libp2p server and related processes if remote access is enabled
+    if Application.get_env(:mydia, :features)[:remote_access_enabled] do
+      [
+        Mydia.Libp2p.Server,
+        # Resume active pairing claims on startup
+        Mydia.RemoteAccess.ResumeClaims
+      ]
+    else
+      []
+    end
   end
 
   defp client_health_children do

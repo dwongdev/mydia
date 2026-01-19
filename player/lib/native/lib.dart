@@ -19,57 +19,47 @@ abstract class P2PHost implements RustOpaqueInterface {
 
   Future<void> dial({required String addr});
 
+  /// Discover peers in a rendezvous namespace.
+  /// Returns the list of discovered peers and their addresses.
+  Future<FlutterDiscoverResult> discoverNamespace({required String namespace});
+
   Stream<String> eventStream();
 
-  /// Get DHT statistics (routing table size, provided keys, bootstrap status).
-  FlutterDhtStats getDhtStats();
+  /// Get network statistics (routing table size, active registrations, etc.).
+  FlutterNetworkStats getNetworkStats();
 
   static (P2PHost, String) init() => RustLib.instance.api.crateP2PHostInit();
 
   Future<void> listen({required String addr});
 
-  /// Lookup a claim code on the DHT to find the provider peer.
-  /// Returns the peer ID and addresses of the server that provided this claim code.
-  Future<FlutterLookupResult> lookupClaimCode({required String claimCode});
-
   Future<FlutterPairingResponse> sendPairingRequest(
       {required String peer, required FlutterPairingRequest req});
 }
 
-/// DHT statistics for display in the UI
-class FlutterDhtStats {
-  final BigInt routingTableSize;
-  final BigInt providedKeysCount;
-  final bool bootstrapComplete;
+/// Result of a rendezvous discovery
+class FlutterDiscoverResult {
+  final List<FlutterDiscoveredPeer> peers;
 
-  const FlutterDhtStats({
-    required this.routingTableSize,
-    required this.providedKeysCount,
-    required this.bootstrapComplete,
+  const FlutterDiscoverResult({
+    required this.peers,
   });
 
   @override
-  int get hashCode =>
-      routingTableSize.hashCode ^
-      providedKeysCount.hashCode ^
-      bootstrapComplete.hashCode;
+  int get hashCode => peers.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is FlutterDhtStats &&
+      other is FlutterDiscoverResult &&
           runtimeType == other.runtimeType &&
-          routingTableSize == other.routingTableSize &&
-          providedKeysCount == other.providedKeysCount &&
-          bootstrapComplete == other.bootstrapComplete;
+          peers == other.peers;
 }
 
-/// Result of a DHT lookup for a claim code
-class FlutterLookupResult {
+class FlutterDiscoveredPeer {
   final String peerId;
   final List<String> addresses;
 
-  const FlutterLookupResult({
+  const FlutterDiscoveredPeer({
     required this.peerId,
     required this.addresses,
   });
@@ -80,10 +70,38 @@ class FlutterLookupResult {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is FlutterLookupResult &&
+      other is FlutterDiscoveredPeer &&
           runtimeType == other.runtimeType &&
           peerId == other.peerId &&
           addresses == other.addresses;
+}
+
+/// Network statistics for display in the UI
+class FlutterNetworkStats {
+  final BigInt routingTableSize;
+  final BigInt activeRegistrations;
+  final bool rendezvousConnected;
+
+  const FlutterNetworkStats({
+    required this.routingTableSize,
+    required this.activeRegistrations,
+    required this.rendezvousConnected,
+  });
+
+  @override
+  int get hashCode =>
+      routingTableSize.hashCode ^
+      activeRegistrations.hashCode ^
+      rendezvousConnected.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterNetworkStats &&
+          runtimeType == other.runtimeType &&
+          routingTableSize == other.routingTableSize &&
+          activeRegistrations == other.activeRegistrations &&
+          rendezvousConnected == other.rendezvousConnected;
 }
 
 class FlutterPairingRequest {

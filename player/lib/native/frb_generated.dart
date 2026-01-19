@@ -70,7 +70,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -1127110059;
+  int get rustContentHash => 1908089588;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -89,17 +89,17 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateP2PHostDial({required P2PHost that, required String addr});
 
+  Future<FlutterDiscoverResult> crateP2PHostDiscoverNamespace(
+      {required P2PHost that, required String namespace});
+
   Stream<String> crateP2PHostEventStream({required P2PHost that});
 
-  FlutterDhtStats crateP2PHostGetDhtStats({required P2PHost that});
+  FlutterNetworkStats crateP2PHostGetNetworkStats({required P2PHost that});
 
   (P2PHost, String) crateP2PHostInit();
 
   Future<void> crateP2PHostListen(
       {required P2PHost that, required String addr});
-
-  Future<FlutterLookupResult> crateP2PHostLookupClaimCode(
-      {required P2PHost that, required String claimCode});
 
   Future<FlutterPairingResponse> crateP2PHostSendPairingRequest(
       {required P2PHost that,
@@ -204,6 +204,34 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<FlutterDiscoverResult> crateP2PHostDiscoverNamespace(
+      {required P2PHost that, required String namespace}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerP2pHost(
+            that, serializer);
+        sse_encode_String(namespace, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 4, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_flutter_discover_result,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateP2PHostDiscoverNamespaceConstMeta,
+      argValues: [that, namespace],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateP2PHostDiscoverNamespaceConstMeta =>
+      const TaskConstMeta(
+        debugName: "P2PHost_discover_namespace",
+        argNames: ["that", "namespace"],
+      );
+
+  @override
   Stream<String> crateP2PHostEventStream({required P2PHost that}) {
     final sink = RustStreamSink<String>();
     unawaited(handler.executeNormal(NormalTask(
@@ -213,7 +241,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_StreamSink_String_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 4, port: port_);
+            funcId: 5, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -232,26 +260,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  FlutterDhtStats crateP2PHostGetDhtStats({required P2PHost that}) {
+  FlutterNetworkStats crateP2PHostGetNetworkStats({required P2PHost that}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerP2pHost(
             that, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 5)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 6)!;
       },
       codec: SseCodec(
-        decodeSuccessData: sse_decode_flutter_dht_stats,
+        decodeSuccessData: sse_decode_flutter_network_stats,
         decodeErrorData: null,
       ),
-      constMeta: kCrateP2PHostGetDhtStatsConstMeta,
+      constMeta: kCrateP2PHostGetNetworkStatsConstMeta,
       argValues: [that],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateP2PHostGetDhtStatsConstMeta => const TaskConstMeta(
-        debugName: "P2PHost_get_dht_stats",
+  TaskConstMeta get kCrateP2PHostGetNetworkStatsConstMeta =>
+      const TaskConstMeta(
+        debugName: "P2PHost_get_network_stats",
         argNames: ["that"],
       );
 
@@ -260,7 +289,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 6)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 7)!;
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -288,7 +317,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_String(addr, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 7, port: port_);
+            funcId: 8, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -303,34 +332,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateP2PHostListenConstMeta => const TaskConstMeta(
         debugName: "P2PHost_listen",
         argNames: ["that", "addr"],
-      );
-
-  @override
-  Future<FlutterLookupResult> crateP2PHostLookupClaimCode(
-      {required P2PHost that, required String claimCode}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerP2pHost(
-            that, serializer);
-        sse_encode_String(claimCode, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 8, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_flutter_lookup_result,
-        decodeErrorData: sse_decode_AnyhowException,
-      ),
-      constMeta: kCrateP2PHostLookupClaimCodeConstMeta,
-      argValues: [that, claimCode],
-      apiImpl: this,
-    ));
-  }
-
-  TaskConstMeta get kCrateP2PHostLookupClaimCodeConstMeta =>
-      const TaskConstMeta(
-        debugName: "P2PHost_lookup_claim_code",
-        argNames: ["that", "claimCode"],
       );
 
   @override
@@ -451,27 +452,38 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  FlutterDhtStats dco_decode_flutter_dht_stats(dynamic raw) {
+  FlutterDiscoverResult dco_decode_flutter_discover_result(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
-    return FlutterDhtStats(
-      routingTableSize: dco_decode_usize(arr[0]),
-      providedKeysCount: dco_decode_usize(arr[1]),
-      bootstrapComplete: dco_decode_bool(arr[2]),
+    if (arr.length != 1)
+      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
+    return FlutterDiscoverResult(
+      peers: dco_decode_list_flutter_discovered_peer(arr[0]),
     );
   }
 
   @protected
-  FlutterLookupResult dco_decode_flutter_lookup_result(dynamic raw) {
+  FlutterDiscoveredPeer dco_decode_flutter_discovered_peer(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
     if (arr.length != 2)
       throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
-    return FlutterLookupResult(
+    return FlutterDiscoveredPeer(
       peerId: dco_decode_String(arr[0]),
       addresses: dco_decode_list_String(arr[1]),
+    );
+  }
+
+  @protected
+  FlutterNetworkStats dco_decode_flutter_network_stats(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FlutterNetworkStats(
+      routingTableSize: dco_decode_usize(arr[0]),
+      activeRegistrations: dco_decode_usize(arr[1]),
+      rendezvousConnected: dco_decode_bool(arr[2]),
     );
   }
 
@@ -508,6 +520,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<String> dco_decode_list_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_String).toList();
+  }
+
+  @protected
+  List<FlutterDiscoveredPeer> dco_decode_list_flutter_discovered_peer(
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_flutter_discovered_peer)
+        .toList();
   }
 
   @protected
@@ -620,24 +641,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  FlutterDhtStats sse_decode_flutter_dht_stats(SseDeserializer deserializer) {
+  FlutterDiscoverResult sse_decode_flutter_discover_result(
+      SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_routingTableSize = sse_decode_usize(deserializer);
-    var var_providedKeysCount = sse_decode_usize(deserializer);
-    var var_bootstrapComplete = sse_decode_bool(deserializer);
-    return FlutterDhtStats(
-        routingTableSize: var_routingTableSize,
-        providedKeysCount: var_providedKeysCount,
-        bootstrapComplete: var_bootstrapComplete);
+    var var_peers = sse_decode_list_flutter_discovered_peer(deserializer);
+    return FlutterDiscoverResult(peers: var_peers);
   }
 
   @protected
-  FlutterLookupResult sse_decode_flutter_lookup_result(
+  FlutterDiscoveredPeer sse_decode_flutter_discovered_peer(
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_peerId = sse_decode_String(deserializer);
     var var_addresses = sse_decode_list_String(deserializer);
-    return FlutterLookupResult(peerId: var_peerId, addresses: var_addresses);
+    return FlutterDiscoveredPeer(peerId: var_peerId, addresses: var_addresses);
+  }
+
+  @protected
+  FlutterNetworkStats sse_decode_flutter_network_stats(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_routingTableSize = sse_decode_usize(deserializer);
+    var var_activeRegistrations = sse_decode_usize(deserializer);
+    var var_rendezvousConnected = sse_decode_bool(deserializer);
+    return FlutterNetworkStats(
+        routingTableSize: var_routingTableSize,
+        activeRegistrations: var_activeRegistrations,
+        rendezvousConnected: var_rendezvousConnected);
   }
 
   @protected
@@ -680,6 +710,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <String>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_String(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FlutterDiscoveredPeer> sse_decode_list_flutter_discovered_peer(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FlutterDiscoveredPeer>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_flutter_discovered_peer(deserializer));
     }
     return ans_;
   }
@@ -806,20 +849,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_flutter_dht_stats(
-      FlutterDhtStats self, SseSerializer serializer) {
+  void sse_encode_flutter_discover_result(
+      FlutterDiscoverResult self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_usize(self.routingTableSize, serializer);
-    sse_encode_usize(self.providedKeysCount, serializer);
-    sse_encode_bool(self.bootstrapComplete, serializer);
+    sse_encode_list_flutter_discovered_peer(self.peers, serializer);
   }
 
   @protected
-  void sse_encode_flutter_lookup_result(
-      FlutterLookupResult self, SseSerializer serializer) {
+  void sse_encode_flutter_discovered_peer(
+      FlutterDiscoveredPeer self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.peerId, serializer);
     sse_encode_list_String(self.addresses, serializer);
+  }
+
+  @protected
+  void sse_encode_flutter_network_stats(
+      FlutterNetworkStats self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_usize(self.routingTableSize, serializer);
+    sse_encode_usize(self.activeRegistrations, serializer);
+    sse_encode_bool(self.rendezvousConnected, serializer);
   }
 
   @protected
@@ -849,6 +899,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_String(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_flutter_discovered_peer(
+      List<FlutterDiscoveredPeer> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_flutter_discovered_peer(item, serializer);
     }
   }
 
@@ -937,23 +997,25 @@ class P2PHostImpl extends RustOpaque implements P2PHost {
   Future<void> dial({required String addr}) =>
       RustLib.instance.api.crateP2PHostDial(that: this, addr: addr);
 
+  /// Discover peers in a rendezvous namespace.
+  /// Returns the list of discovered peers and their addresses.
+  Future<FlutterDiscoverResult> discoverNamespace(
+          {required String namespace}) =>
+      RustLib.instance.api
+          .crateP2PHostDiscoverNamespace(that: this, namespace: namespace);
+
   Stream<String> eventStream() => RustLib.instance.api.crateP2PHostEventStream(
         that: this,
       );
 
-  /// Get DHT statistics (routing table size, provided keys, bootstrap status).
-  FlutterDhtStats getDhtStats() => RustLib.instance.api.crateP2PHostGetDhtStats(
+  /// Get network statistics (routing table size, active registrations, etc.).
+  FlutterNetworkStats getNetworkStats() =>
+      RustLib.instance.api.crateP2PHostGetNetworkStats(
         that: this,
       );
 
   Future<void> listen({required String addr}) =>
       RustLib.instance.api.crateP2PHostListen(that: this, addr: addr);
-
-  /// Lookup a claim code on the DHT to find the provider peer.
-  /// Returns the peer ID and addresses of the server that provided this claim code.
-  Future<FlutterLookupResult> lookupClaimCode({required String claimCode}) =>
-      RustLib.instance.api
-          .crateP2PHostLookupClaimCode(that: this, claimCode: claimCode);
 
   Future<FlutterPairingResponse> sendPairingRequest(
           {required String peer, required FlutterPairingRequest req}) =>

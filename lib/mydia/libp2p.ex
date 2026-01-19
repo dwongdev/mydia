@@ -66,12 +66,13 @@ defmodule Mydia.Libp2p.NetworkStats do
   @moduledoc """
   Network statistics from the libp2p host.
   """
-  defstruct [:routing_table_size, :active_registrations, :rendezvous_connected]
+  defstruct [:routing_table_size, :active_registrations, :rendezvous_connected, :kademlia_enabled]
 
   @type t :: %__MODULE__{
           routing_table_size: non_neg_integer(),
           active_registrations: non_neg_integer(),
-          rendezvous_connected: boolean()
+          rendezvous_connected: boolean(),
+          kademlia_enabled: boolean()
         }
 end
 

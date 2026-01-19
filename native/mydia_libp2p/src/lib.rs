@@ -24,7 +24,7 @@ fn load(env: Env, _info: Term) -> bool {
 fn start_host() -> Result<(ResourceArc<HostResource>, String), rustler::Error> {
     let config = HostConfig {
         enable_relay_server: false,
-        enable_kademlia: true,
+        enable_kademlia: false,  // Disabled - using rendezvous for discovery
         enable_rendezvous_client: true,  // Enable for home server
         enable_rendezvous_server: false,
         rendezvous_point_addresses: vec![],  // Will be set via connect_rendezvous
@@ -93,6 +93,7 @@ fn get_network_stats(resource: ResourceArc<HostResource>) -> ElixirNetworkStats 
         routing_table_size: stats.routing_table_size,
         active_registrations: stats.active_registrations,
         rendezvous_connected: stats.rendezvous_connected,
+        kademlia_enabled: stats.kademlia_enabled,
     }
 }
 
@@ -103,6 +104,7 @@ struct ElixirNetworkStats {
     pub routing_table_size: usize,
     pub active_registrations: usize,
     pub rendezvous_connected: bool,
+    pub kademlia_enabled: bool,
 }
 
 #[derive(NifStruct)]

@@ -768,7 +768,8 @@ defmodule Mydia.RemoteAccess do
          %Mydia.Libp2p.NetworkStats{
            routing_table_size: 0,
            active_registrations: 0,
-           rendezvous_connected: false
+           rendezvous_connected: false,
+           kademlia_enabled: false
          }}
     catch
       :exit, _ ->
@@ -776,7 +777,8 @@ defmodule Mydia.RemoteAccess do
          %Mydia.Libp2p.NetworkStats{
            routing_table_size: 0,
            active_registrations: 0,
-           rendezvous_connected: false
+           rendezvous_connected: false,
+           kademlia_enabled: false
          }}
     end
   end

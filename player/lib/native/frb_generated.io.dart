@@ -53,10 +53,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       dynamic raw);
 
   @protected
-  FlutterDhtStats dco_decode_flutter_dht_stats(dynamic raw);
+  FlutterDiscoverResult dco_decode_flutter_discover_result(dynamic raw);
 
   @protected
-  FlutterLookupResult dco_decode_flutter_lookup_result(dynamic raw);
+  FlutterDiscoveredPeer dco_decode_flutter_discovered_peer(dynamic raw);
+
+  @protected
+  FlutterNetworkStats dco_decode_flutter_network_stats(dynamic raw);
 
   @protected
   FlutterPairingRequest dco_decode_flutter_pairing_request(dynamic raw);
@@ -66,6 +69,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<FlutterDiscoveredPeer> dco_decode_list_flutter_discovered_peer(
+      dynamic raw);
 
   @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
@@ -122,10 +129,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
-  FlutterDhtStats sse_decode_flutter_dht_stats(SseDeserializer deserializer);
+  FlutterDiscoverResult sse_decode_flutter_discover_result(
+      SseDeserializer deserializer);
 
   @protected
-  FlutterLookupResult sse_decode_flutter_lookup_result(
+  FlutterDiscoveredPeer sse_decode_flutter_discovered_peer(
+      SseDeserializer deserializer);
+
+  @protected
+  FlutterNetworkStats sse_decode_flutter_network_stats(
       SseDeserializer deserializer);
 
   @protected
@@ -138,6 +150,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<FlutterDiscoveredPeer> sse_decode_list_flutter_discovered_peer(
+      SseDeserializer deserializer);
 
   @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
@@ -198,12 +214,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       FlutterPairingRequest self, SseSerializer serializer);
 
   @protected
-  void sse_encode_flutter_dht_stats(
-      FlutterDhtStats self, SseSerializer serializer);
+  void sse_encode_flutter_discover_result(
+      FlutterDiscoverResult self, SseSerializer serializer);
 
   @protected
-  void sse_encode_flutter_lookup_result(
-      FlutterLookupResult self, SseSerializer serializer);
+  void sse_encode_flutter_discovered_peer(
+      FlutterDiscoveredPeer self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_flutter_network_stats(
+      FlutterNetworkStats self, SseSerializer serializer);
 
   @protected
   void sse_encode_flutter_pairing_request(
@@ -215,6 +235,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_flutter_discovered_peer(
+      List<FlutterDiscoveredPeer> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_u_8_strict(

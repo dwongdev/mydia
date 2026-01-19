@@ -123,6 +123,7 @@ pub struct NetworkStats {
     pub routing_table_size: usize,
     pub active_registrations: usize,
     pub rendezvous_connected: bool,
+    pub kademlia_enabled: bool,
 }
 
 // Events emitted by the Host
@@ -742,18 +743,20 @@ impl Host {
                                 }
                             }
                             Some(Command::GetNetworkStats { reply }) => {
-                                // Count peers in routing table if Kademlia is enabled
+                                // Check if Kademlia is enabled and count peers in routing table
+                                let kademlia_enabled = swarm.behaviour().kad.is_enabled();
                                 let routing_table_size: usize = swarm
                                     .behaviour_mut()
                                     .kad
                                     .as_mut()
                                     .map(|kad| kad.kbuckets().map(|bucket| bucket.num_entries()).sum())
                                     .unwrap_or(0);
-                                
+
                                 let _ = reply.send(NetworkStats {
                                     routing_table_size,
                                     active_registrations: active_registrations.len(),
                                     rendezvous_connected: !rendezvous_points.is_empty(),
+                                    kademlia_enabled,
                                 });
                             }
                             None => return,
@@ -872,12 +875,14 @@ impl Host {
                     routing_table_size: 0,
                     active_registrations: 0,
                     rendezvous_connected: false,
+                    kademlia_enabled: false,
                 })
             }
             Err(_) => NetworkStats {
                 routing_table_size: 0,
                 active_registrations: 0,
                 rendezvous_connected: false,
+                kademlia_enabled: false,
             },
         }
     }

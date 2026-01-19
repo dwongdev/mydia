@@ -178,24 +178,26 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                 </div>
               </div>
 
-              <%!-- Connected Peers --%>
-              <div class="flex items-center gap-2">
-                <div class="w-8 h-8 rounded-full bg-base-300 flex items-center justify-center shrink-0">
-                  <.icon name="hero-users" class="w-4 h-4 opacity-60" />
-                </div>
-                <div>
-                  <div class="text-xs text-base-content/50 uppercase tracking-wide">Connected</div>
-                  <div class="font-mono text-sm font-medium">
-                    <%= if @libp2p_status do %>
-                      {@libp2p_status.connected_peers} peer{if @libp2p_status.connected_peers != 1,
-                        do: "s",
-                        else: ""}
-                    <% else %>
-                      <span class="text-base-content/50">-</span>
-                    <% end %>
+              <%!-- DHT Peers (only shown when Kademlia is enabled) --%>
+              <%= if @network_stats && @network_stats.kademlia_enabled do %>
+                <div class="flex items-center gap-2">
+                  <div class="w-8 h-8 rounded-full bg-base-300 flex items-center justify-center shrink-0">
+                    <.icon name="hero-server-stack" class="w-4 h-4 opacity-60" />
+                  </div>
+                  <div>
+                    <div class="text-xs text-base-content/50 uppercase tracking-wide">DHT Peers</div>
+                    <div class="font-mono text-sm font-medium">
+                      <%= if @libp2p_status do %>
+                        {@libp2p_status.connected_peers} peer{if @libp2p_status.connected_peers != 1,
+                          do: "s",
+                          else: ""}
+                      <% else %>
+                        <span class="text-base-content/50">-</span>
+                      <% end %>
+                    </div>
                   </div>
                 </div>
-              </div>
+              <% end %>
 
               <%!-- Relay Status --%>
               <div class="flex items-center gap-2">

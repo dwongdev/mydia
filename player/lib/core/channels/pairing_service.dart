@@ -335,50 +335,57 @@ class PairingService {
         debugPrint('[PairingService] Relay connection failed (continuing anyway): $e');
       }
       
-      // Wait for DHT bootstrap to complete
-      onStatusUpdate?.call('Connecting to discovery network...');
-      try {
-        await libp2pService.onBootstrapComplete.timeout(
-          const Duration(seconds: 15),
-          onTimeout: () {
-            debugPrint('[PairingService] Bootstrap timeout, proceeding anyway...');
-          },
-        );
-        debugPrint('[PairingService] DHT bootstrap completed');
-      } catch (e) {
-        debugPrint('[PairingService] Bootstrap wait error: $e');
-      }
-      
-      // Lookup the claim code on the DHT to find the server's addresses
-      // Even with QR code, we need addresses to dial the peer
-      onStatusUpdate?.call('Looking up server address...');
+      // Resolve claim code via relay API to get namespace for discovery
+      onStatusUpdate?.call('Resolving pairing code...');
       bool connectedToServer = false;
       try {
-        final lookupResult = await libp2pService.lookupClaimCode(qrData.claimCode).timeout(
-          const Duration(seconds: 30),
-          onTimeout: () {
-            throw TimeoutException('Server lookup timed out');
-          },
-        );
-        
-        debugPrint('[PairingService] Found server via DHT: addresses=${lookupResult.addresses}');
-        
-        // Dial the server if we have addresses
-        if (lookupResult.addresses.isNotEmpty) {
-          onStatusUpdate?.call('Connecting to server...');
-          for (final addr in lookupResult.addresses) {
+        final relayClient = RelayApiClient();
+        final resolveResult = await relayClient.resolveClaimCode(qrData.claimCode);
+        debugPrint('[PairingService] Resolved namespace: ${resolveResult.namespace}');
+
+        // Connect to rendezvous points if available
+        if (resolveResult.rendezvousPoints.isNotEmpty) {
+          for (final addr in resolveResult.rendezvousPoints) {
             try {
-              await libp2pService.dial(addr);
-              debugPrint('[PairingService] Dialed: $addr');
-              connectedToServer = true;
+              await libp2pService.connectRelay(addr);
+              debugPrint('[PairingService] Connected to rendezvous point: $addr');
               break;
             } catch (e) {
-              debugPrint('[PairingService] Failed to dial $addr: $e');
+              debugPrint('[PairingService] Failed to connect to rendezvous point $addr: $e');
+            }
+          }
+        }
+
+        // Discover server via rendezvous namespace
+        onStatusUpdate?.call('Finding server...');
+        final discoveredPeers = await libp2pService.discoverNamespace(resolveResult.namespace).timeout(
+          const Duration(seconds: 15),
+          onTimeout: () {
+            throw TimeoutException('Server discovery timed out');
+          },
+        );
+
+        if (discoveredPeers.isNotEmpty) {
+          final serverPeer = discoveredPeers.first;
+          debugPrint('[PairingService] Found server via rendezvous: peerId=${serverPeer.peerId}, addresses=${serverPeer.addresses}');
+
+          // Dial the server if we have addresses
+          if (serverPeer.addresses.isNotEmpty) {
+            onStatusUpdate?.call('Connecting to server...');
+            for (final addr in serverPeer.addresses) {
+              try {
+                await libp2pService.dial(addr);
+                debugPrint('[PairingService] Dialed: $addr');
+                connectedToServer = true;
+                break;
+              } catch (e) {
+                debugPrint('[PairingService] Failed to dial $addr: $e');
+              }
             }
           }
         }
       } catch (e) {
-        debugPrint('[PairingService] DHT lookup failed (will try relay circuit): $e');
+        debugPrint('[PairingService] Rendezvous discovery failed (will try relay circuit): $e');
       }
       
       // If DHT lookup failed or returned no addresses, try connecting via relay circuit

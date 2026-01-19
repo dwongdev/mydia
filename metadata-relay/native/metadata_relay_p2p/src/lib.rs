@@ -16,10 +16,11 @@ fn start_relay() -> Result<(ResourceArc<HostResource>, String), rustler::Error> 
     // Get keypair path from environment variable for persistent peer ID
     let keypair_path = std::env::var("LIBP2P_KEYPAIR_PATH").ok();
     
-    // Enable Relay Server with default bootstrap peers
-    let config = HostConfig { 
+    // Enable Relay Server with rendezvous (Kademlia disabled)
+    let config = HostConfig {
         enable_relay_server: true,
         enable_rendezvous_server: true,
+        enable_kademlia: false,  // Disabled - using rendezvous for discovery
         bootstrap_peers: vec![],
         keypair_path,
         ..Default::default()

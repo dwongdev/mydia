@@ -462,7 +462,7 @@ defmodule MydiaWeb.AdminConfigLive.Components do
                       <div class="avatar placeholder">
                         <div class="bg-base-300 text-base-content rounded-full w-8">
                           <span class="text-xs">
-                            {String.slice(progress.user.username, 0, 1) |> String.upcase()}
+                            {(progress.user.username || "?") |> String.slice(0, 1) |> String.upcase()}
                           </span>
                         </div>
                       </div>
@@ -489,7 +489,7 @@ defmodule MydiaWeb.AdminConfigLive.Components do
                               </div>
                             </div>
                           <% end %>
-                          <span>{progress.user.username}</span>
+                          <span>{progress.user.username || "Unknown"}</span>
                         </div>
                       </div>
                     </div>

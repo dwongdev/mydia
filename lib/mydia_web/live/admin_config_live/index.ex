@@ -3,6 +3,9 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   alias Mydia.DB
   alias Mydia.Repo
   alias Mydia.Settings
+  alias Mydia.Streaming
+  alias Mydia.Playback
+  alias Mydia.Downloads
 
   alias Mydia.Settings.{
     QualityProfile,
@@ -35,6 +38,12 @@ defmodule MydiaWeb.AdminConfigLive.Index do
       :timer.send_interval(5000, self(), :refresh_system_data)
       # Subscribe to library scanner topic for job updates
       Phoenix.PubSub.subscribe(Mydia.PubSub, "library_scanner")
+      # Subscribe to remote access claim events (for auto-closing pairing modal)
+      Phoenix.PubSub.subscribe(Mydia.PubSub, "remote_access:claims")
+      # Subscribe to player session events
+      Phoenix.PubSub.subscribe(Mydia.PubSub, "hls_sessions")
+      # Subscribe to transcode job updates
+      Phoenix.PubSub.subscribe(Mydia.PubSub, "transcodes")
     end
 
     {:ok,
@@ -42,10 +51,12 @@ defmodule MydiaWeb.AdminConfigLive.Index do
      |> assign(:page_title, "Configuration")
      |> assign(:active_tab, "status")
      |> assign(:cardigann_enabled, CardigannFeatureFlags.enabled?())
+     |> assign(:remote_access_enabled, remote_access_enabled?())
      |> assign(:reorganizing_library_ids, MapSet.new())
      |> assign(:reclassifying_library_ids, MapSet.new())
      |> load_configuration_data()
-     |> load_system_data()}
+     |> load_system_data()
+     |> load_player_data()}
   end
 
   @impl true
@@ -61,6 +72,20 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   @impl true
   def handle_info(:refresh_system_data, socket) do
     {:noreply, load_system_data(socket)}
+  end
+
+  # Player session handlers
+  @impl true
+  def handle_info(:session_started, socket) do
+    {:noreply, update(socket, :active_sessions, fn _ -> Streaming.list_active_sessions() end)}
+  end
+
+  @impl true
+  def handle_info({:job_updated, _id}, socket) do
+    {:noreply,
+     update(socket, :transcode_jobs, fn _ ->
+       Downloads.list_transcode_jobs(preload: [:user, media_file: [:media_item, :episode]])
+     end)}
   end
 
   # Library reorganization job handlers
@@ -209,9 +234,70 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     end
   end
 
+  # Remote Access Component handlers
+  @impl true
+  def handle_info({:remote_access_countdown_tick, component_id}, socket) do
+    # Schedule the tick and update the component
+    Process.send_after(self(), {:remote_access_do_countdown_tick, component_id}, 1000)
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:remote_access_do_countdown_tick, component_id}, socket) do
+    send_update(MydiaWeb.AdminConfigLive.RemoteAccessComponent,
+      id: component_id,
+      countdown_tick: true
+    )
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:remote_access_refresh_libp2p, component_id}, socket) do
+    send_update(MydiaWeb.AdminConfigLive.RemoteAccessComponent,
+      id: component_id,
+      refresh_libp2p: true
+    )
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:claim_consumed, %{code: code, user_id: user_id}}, socket) do
+    # Forward claim consumed event to the RemoteAccessComponent
+    # Only if the current user matches (to avoid clearing other users' modals)
+    if socket.assigns.current_scope && socket.assigns.current_scope.user.id == user_id do
+      send_update(MydiaWeb.AdminConfigLive.RemoteAccessComponent,
+        id: "remote_access",
+        claim_consumed: code
+      )
+    end
+
+    {:noreply, socket}
+  end
+
   @impl true
   def handle_event("change_tab", %{"tab" => tab}, socket) do
     {:noreply, push_patch(socket, to: ~p"/admin/config?tab=#{tab}")}
+  end
+
+  @impl true
+  def handle_event("delete_transcode_job", %{"id" => job_id}, socket) do
+    case Mydia.Repo.get(Mydia.Downloads.TranscodeJob, job_id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Job not found")}
+
+      job ->
+        # cancel_transcode_job always returns {:ok, job}
+        {:ok, _} = Downloads.cancel_transcode_job(job)
+        {:noreply, put_flash(socket, :info, "Transcode job deleted")}
+    end
+  end
+
+  @impl true
+  def handle_event("clear_completed_jobs", _params, socket) do
+    Downloads.delete_all_completed_jobs()
+    {:noreply, put_flash(socket, :info, "Cleared all completed transcode jobs")}
   end
 
   ## General Settings Events
@@ -2381,6 +2467,16 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     |> Map.new()
   end
 
+  defp load_player_data(socket) do
+    socket
+    |> assign(:active_sessions, Streaming.list_active_sessions())
+    |> assign(
+      :transcode_jobs,
+      Downloads.list_transcode_jobs(preload: [:user, media_file: [:media_item, :episode]])
+    )
+    |> assign(:watch_history, Playback.list_recent_history(limit: 20))
+  end
+
   defp get_media_server_health_status(media_servers) do
     # For now, we don't track health status actively (would require background polling)
     # Return unknown status for all servers - test connection is done on demand
@@ -2981,5 +3077,10 @@ defmodule MydiaWeb.AdminConfigLive.Index do
       "#{field}: #{Enum.join(errors, ", ")}"
     end)
     |> Enum.join("; ")
+  end
+
+  defp remote_access_enabled? do
+    Application.get_env(:mydia, :features, [])
+    |> Keyword.get(:remote_access_enabled, false)
   end
 end

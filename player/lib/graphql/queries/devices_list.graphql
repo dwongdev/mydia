@@ -1,0 +1,10 @@
+query DevicesList {
+  devices {
+    id
+    deviceName
+    platform
+    lastSeenAt
+    isRevoked
+    createdAt
+  }
+}

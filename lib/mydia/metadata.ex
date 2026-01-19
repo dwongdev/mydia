@@ -283,10 +283,10 @@ defmodule Mydia.Metadata do
   ## Examples
 
       iex> Mydia.Metadata.metadata_relay_url()
-      "https://metadata-relay.arsfeld.dev"
+      "https://relay.mydia.dev"
   """
   def metadata_relay_url do
-    System.get_env("METADATA_RELAY_URL", "https://metadata-relay.arsfeld.dev")
+    System.get_env("METADATA_RELAY_URL", "https://relay.mydia.dev")
   end
 
   @doc """
@@ -303,7 +303,7 @@ defmodule Mydia.Metadata do
       iex> Mydia.Metadata.default_relay_config()
       %{
         type: :metadata_relay,
-        base_url: "https://metadata-relay.arsfeld.dev",
+        base_url: "https://relay.mydia.dev",
         options: %{language: "en-US", include_adult: false}
       }
   """

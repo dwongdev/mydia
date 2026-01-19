@@ -1,0 +1,621 @@
+name: Player Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: true
+
+env:
+  PLAYER_PATH: 'player'
+
+jobs:
+  # Extract version from tag
+  prepare:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      version_code: ${{ steps.get_version.outputs.version_code }}
+    steps:
+      - name: Get version from tag
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${{ github.ref_name }}"
+          fi
+          # Remove 'v' prefix
+          VERSION_NUM="${VERSION#v}"
+          # Convert version to version code (e.g., 1.2.3 -> 10203)
+          IFS='.' read -ra PARTS <<< "$VERSION_NUM"
+          VERSION_CODE=$((${PARTS[0]} * 10000 + ${PARTS[1]} * 100 + ${PARTS[2]}))
+          echo "version=$VERSION_NUM" >> $GITHUB_OUTPUT
+          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION_NUM (code: $VERSION_CODE)"
+
+  # Build Flutter Web (integrates with Phoenix release)
+  build-web:
+    name: Build Web
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Update version in pubspec.yaml
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          VERSION_CODE="${{ needs.prepare.outputs.version_code }}"
+          # Update version and build number
+          sed -i "s/^version: .*/version: ${VERSION}+${VERSION_CODE}/" pubspec.yaml
+          echo "Updated pubspec.yaml version to ${VERSION}+${VERSION_CODE}"
+          cat pubspec.yaml | grep "^version:"
+
+      - name: Install dependencies
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter pub get
+
+      - name: Run code generation
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter pub run build_runner build --delete-conflicting-outputs
+
+      - name: Build web release
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: |
+          flutter build web \
+            --release \
+            --base-href /player/
+
+      - name: Upload web build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: player-web
+          path: ${{ env.PLAYER_PATH }}/build/web
+          retention-days: 7
+
+  # Build Android APK
+  build-android:
+    name: Build Android APK
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check for Android platform support
+        id: check_android
+        run: |
+          if [ -d "${{ env.PLAYER_PATH }}/android" ]; then
+            echo "enabled=true" >> $GITHUB_OUTPUT
+          else
+            echo "enabled=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Android platform not configured yet. Skipping build."
+          fi
+
+      - name: Setup Flutter
+        if: steps.check_android.outputs.enabled == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Setup Java
+        if: steps.check_android.outputs.enabled == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Update version in pubspec.yaml
+        if: steps.check_android.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          VERSION_CODE="${{ needs.prepare.outputs.version_code }}"
+          sed -i "s/^version: .*/version: ${VERSION}+${VERSION_CODE}/" pubspec.yaml
+
+      - name: Install dependencies
+        if: steps.check_android.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter pub get
+
+      - name: Run code generation
+        if: steps.check_android.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter pub run build_runner build --delete-conflicting-outputs
+
+      - name: Decode keystore
+        if: steps.check_android.outputs.enabled == 'true' && env.ANDROID_KEYSTORE_BASE64 != ''
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/upload-keystore.jks
+
+      - name: Create key.properties
+        if: steps.check_android.outputs.enabled == 'true' && env.ANDROID_KEYSTORE_BASE64 != ''
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: |
+          cat > android/key.properties << EOF
+          storeFile=app/upload-keystore.jks
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          EOF
+
+      - name: Build APK
+        if: steps.check_android.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter build apk --release
+
+      - name: Build AAB (for Play Store)
+        if: steps.check_android.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter build appbundle --release
+
+      - name: Setup Ruby for Fastlane
+        if: steps.check_android.outputs.enabled == 'true' && env.PLAY_STORE_CREDENTIALS != ''
+        env:
+          PLAY_STORE_CREDENTIALS: ${{ secrets.PLAY_STORE_CREDENTIALS }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+          working-directory: ${{ env.PLAYER_PATH }}/android
+
+      - name: Upload to Play Store (internal track)
+        if: steps.check_android.outputs.enabled == 'true' && env.PLAY_STORE_CREDENTIALS != ''
+        env:
+          PLAY_STORE_CREDENTIALS: ${{ secrets.PLAY_STORE_CREDENTIALS }}
+        working-directory: ${{ env.PLAYER_PATH }}/android
+        run: |
+          echo "${{ secrets.PLAY_STORE_CREDENTIALS }}" | base64 -d > play-store-credentials.json
+          export GOOGLE_PLAY_JSON_KEY_PATH="$(pwd)/play-store-credentials.json"
+          bundle exec fastlane internal
+          rm play-store-credentials.json
+
+      - name: Upload APK artifact
+        if: steps.check_android.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: player-android-apk
+          path: ${{ env.PLAYER_PATH }}/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
+
+  # Build iOS for TestFlight
+  build-ios:
+    name: Build iOS
+    needs: prepare
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check for iOS platform support
+        id: check_ios
+        run: |
+          if [ -d "${{ env.PLAYER_PATH }}/ios" ]; then
+            echo "enabled=true" >> $GITHUB_OUTPUT
+          else
+            echo "enabled=false" >> $GITHUB_OUTPUT
+            echo "⚠️ iOS platform not configured yet. Skipping build."
+          fi
+
+      - name: Setup Flutter
+        if: steps.check_ios.outputs.enabled == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Update version in pubspec.yaml
+        if: steps.check_ios.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          VERSION_CODE="${{ needs.prepare.outputs.version_code }}"
+          sed -i '' "s/^version: .*/version: ${VERSION}+${VERSION_CODE}/" pubspec.yaml
+
+      - name: Install dependencies
+        if: steps.check_ios.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter pub get
+
+      - name: Run code generation
+        if: steps.check_ios.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter pub run build_runner build --delete-conflicting-outputs
+
+      - name: Install Apple certificate and provisioning profile
+        if: steps.check_ios.outputs.enabled == 'true' && env.IOS_CERTIFICATE_BASE64 != ''
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          # Create variables
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          # Import certificate and provisioning profile from secrets
+          echo -n "$IOS_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
+          echo -n "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode -o $PP_PATH
+
+          # Create temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # Import certificate to keychain
+          security import $CERTIFICATE_PATH -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+          # Apply provisioning profile
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
+
+      - name: Build iOS release (without signing for unsigned artifact)
+        if: steps.check_ios.outputs.enabled == 'true' && env.IOS_CERTIFICATE_BASE64 == ''
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter build ios --release --no-codesign
+
+      - name: Build iOS release (with signing)
+        if: steps.check_ios.outputs.enabled == 'true' && env.IOS_CERTIFICATE_BASE64 != ''
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter build ios --release
+
+      - name: Setup Ruby for Fastlane
+        if: steps.check_ios.outputs.enabled == 'true' && env.APP_STORE_CONNECT_API_KEY_ID != ''
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+          working-directory: ${{ env.PLAYER_PATH }}/ios
+
+      - name: Upload to TestFlight
+        if: steps.check_ios.outputs.enabled == 'true' && env.APP_STORE_CONNECT_API_KEY_ID != ''
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
+        working-directory: ${{ env.PLAYER_PATH }}/ios
+        run: bundle exec fastlane beta
+
+      - name: Clean up keychain
+        if: always() && steps.check_ios.outputs.enabled == 'true'
+        run: |
+          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
+
+  # Build macOS DMG
+  build-macos:
+    name: Build macOS
+    needs: prepare
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check for macOS platform support
+        id: check_macos
+        run: |
+          if [ -d "${{ env.PLAYER_PATH }}/macos" ]; then
+            echo "enabled=true" >> $GITHUB_OUTPUT
+          else
+            echo "enabled=false" >> $GITHUB_OUTPUT
+            echo "⚠️ macOS platform not configured yet. Skipping build."
+          fi
+
+      - name: Setup Flutter
+        if: steps.check_macos.outputs.enabled == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Update version in pubspec.yaml
+        if: steps.check_macos.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          VERSION_CODE="${{ needs.prepare.outputs.version_code }}"
+          sed -i '' "s/^version: .*/version: ${VERSION}+${VERSION_CODE}/" pubspec.yaml
+
+      - name: Install dependencies
+        if: steps.check_macos.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter pub get
+
+      - name: Run code generation
+        if: steps.check_macos.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter pub run build_runner build --delete-conflicting-outputs
+
+      - name: Build macOS release
+        if: steps.check_macos.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter build macos --release
+
+      # TODO: Add DMG creation and notarization when macOS is configured
+      # - name: Create DMG
+      #   if: steps.check_macos.outputs.enabled == 'true'
+      #   run: |
+      #     # Use create-dmg or similar tool to package the .app
+      #     # ...
+      #
+      # - name: Notarize DMG
+      #   if: steps.check_macos.outputs.enabled == 'true'
+      #   env:
+      #     APPLE_ID: ${{ secrets.APPLE_ID }}
+      #     APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      #     APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      #   run: |
+      #     # Submit for notarization
+      #     # ...
+
+      - name: Upload macOS build artifact
+        if: steps.check_macos.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: player-macos-app
+          path: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/Mydia.app
+          retention-days: 30
+
+  # Build Windows MSIX
+  build-windows:
+    name: Build Windows
+    needs: prepare
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check for Windows platform support
+        id: check_windows
+        shell: bash
+        run: |
+          if [ -d "${{ env.PLAYER_PATH }}/windows" ]; then
+            echo "enabled=true" >> $GITHUB_OUTPUT
+          else
+            echo "enabled=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Windows platform not configured yet. Skipping build."
+          fi
+
+      - name: Setup Flutter
+        if: steps.check_windows.outputs.enabled == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Update version in pubspec.yaml
+        if: steps.check_windows.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        shell: bash
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          VERSION_CODE="${{ needs.prepare.outputs.version_code }}"
+          sed -i "s/^version: .*/version: ${VERSION}+${VERSION_CODE}/" pubspec.yaml
+
+      - name: Install dependencies
+        if: steps.check_windows.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter pub get
+
+      - name: Run code generation
+        if: steps.check_windows.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter pub run build_runner build --delete-conflicting-outputs
+
+      - name: Build Windows release
+        if: steps.check_windows.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter build windows --release
+
+      # TODO: Add MSIX packaging and signing when Windows is configured
+      # - name: Create and sign MSIX
+      #   if: steps.check_windows.outputs.enabled == 'true'
+      #   env:
+      #     CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+      #     CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      #   run: |
+      #     # Install certificate
+      #     # Build MSIX package
+      #     # Sign MSIX
+      #     # ...
+
+      - name: Upload Windows build artifact
+        if: steps.check_windows.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: player-windows-exe
+          path: ${{ env.PLAYER_PATH }}/build/windows/x64/runner/Release
+          retention-days: 30
+
+  # Build Linux AppImage
+  build-linux:
+    name: Build Linux
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check for Linux platform support
+        id: check_linux
+        run: |
+          if [ -d "${{ env.PLAYER_PATH }}/linux" ]; then
+            echo "enabled=true" >> $GITHUB_OUTPUT
+          else
+            echo "enabled=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Linux platform not configured yet. Skipping build."
+          fi
+
+      - name: Install Linux dependencies
+        if: steps.check_linux.outputs.enabled == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libgtk-3-dev \
+            liblzma-dev \
+            libsecret-1-dev
+
+      - name: Setup Flutter
+        if: steps.check_linux.outputs.enabled == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Update version in pubspec.yaml
+        if: steps.check_linux.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          VERSION_CODE="${{ needs.prepare.outputs.version_code }}"
+          sed -i "s/^version: .*/version: ${VERSION}+${VERSION_CODE}/" pubspec.yaml
+
+      - name: Install dependencies
+        if: steps.check_linux.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter pub get
+
+      - name: Run code generation
+        if: steps.check_linux.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter pub run build_runner build --delete-conflicting-outputs
+
+      - name: Build Linux release
+        if: steps.check_linux.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter build linux --release
+
+      # TODO: Add AppImage creation when Linux is configured
+      # - name: Create AppImage
+      #   if: steps.check_linux.outputs.enabled == 'true'
+      #   run: |
+      #     # Download appimagetool
+      #     # Create AppDir structure
+      #     # Generate AppImage
+      #     # ...
+
+      - name: Upload Linux build artifact
+        if: steps.check_linux.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: player-linux-bundle
+          path: ${{ env.PLAYER_PATH }}/build/linux/x64/release/bundle
+          retention-days: 30
+
+  # Create GitHub Release with all artifacts
+  create-release:
+    name: Create GitHub Release
+    needs: [prepare, build-web, build-android, build-ios, build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List downloaded artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          ls -R artifacts/
+
+      - name: Create release archives
+        run: |
+          cd artifacts
+          # Only archive if the artifact exists
+          [ -d "player-android-apk" ] && \
+            mv player-android-apk/app-release.apk player-android-v${{ needs.prepare.outputs.version }}.apk || true
+
+          # macOS: Reconstruct the .app bundle structure before archiving
+          # upload-artifact uploads directory contents, so we need to wrap it back in the .app bundle
+          [ -d "player-macos-app" ] && \
+            mv player-macos-app Mydia.app && \
+            tar -czf player-macos-v${{ needs.prepare.outputs.version }}.tar.gz Mydia.app || true
+
+          [ -d "player-windows-exe" ] && \
+            cd player-windows-exe && zip -r ../player-windows-v${{ needs.prepare.outputs.version }}.zip . && cd .. || true
+
+          [ -d "player-linux-bundle" ] && \
+            tar -czf player-linux-v${{ needs.prepare.outputs.version }}.tar.gz -C player-linux-bundle . || true
+
+      - name: Determine if prerelease
+        id: check_prerelease
+        run: |
+          if [[ "${{ github.ref_name }}" =~ -beta|-rc|-alpha ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Mydia Player ${{ needs.prepare.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ steps.check_prerelease.outputs.is_prerelease }}
+          generate_release_notes: true
+          body: |
+            ## Mydia Player v${{ needs.prepare.outputs.version }}
+
+            Cross-platform media player client for Mydia.
+
+            ### Downloads
+
+            - **Android**: APK available as release asset (if configured)
+            - **iOS**: Available on TestFlight (if configured)
+            - **macOS**: DMG available as release asset (if configured)
+            - **Windows**: MSIX available as release asset (if configured)
+            - **Linux**: AppImage available as release asset (if configured)
+            - **Web**: Integrated into Mydia server release
+
+            ### Installation
+
+            For native apps, download the appropriate package for your platform.
+            For web, access at `/player` on your Mydia server instance.
+
+            ---
+
+            **Note**: Some platforms may not be available yet during early development.
+          files: |
+            artifacts/player-android-*.apk
+            artifacts/player-macos-*.tar.gz
+            artifacts/player-windows-*.zip
+            artifacts/player-linux-*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

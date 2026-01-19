@@ -130,12 +130,21 @@ The service is configured entirely via environment variables for maximum flexibi
 
 ### Environment Variables
 
-| Variable       | Required | Default | Description                                                                                                             |
-| -------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `PORT`         | No       | `4000`  | HTTP port the server listens on                                                                                         |
-| `TMDB_API_KEY` | Yes      | -       | API key for The Movie Database. Get one at https://www.themoviedb.org/settings/api                                      |
-| `TVDB_API_KEY` | Yes      | -       | API key for TheTVDB. Get one at https://thetvdb.com/api-information                                                     |
-| `REDIS_URL`    | No       | -       | Redis connection URL for persistent caching. Format: `redis://[password@]host:port`. If not set, uses in-memory caching |
+| Variable          | Required | Default            | Description                                                                                                             |
+| ----------------- | -------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `PORT`            | No       | `4001`             | HTTP port the server listens on                                                                                         |
+| `TMDB_API_KEY`    | Yes      | -                  | API key for The Movie Database. Get one at https://www.themoviedb.org/settings/api                                      |
+| `TVDB_API_KEY`    | Yes      | -                  | API key for TheTVDB. Get one at https://thetvdb.com/api-information                                                     |
+| `REDIS_URL`       | No       | -                  | Redis connection URL for persistent caching. Format: `redis://[password@]host:port`. If not set, uses in-memory caching |
+| `TURN_ENABLED`    | No       | `false`            | Set to `true` to enable the integrated STUN/TURN server                                                                 |
+| `TURN_SECRET`     | Yes*     | -                  | Shared secret for TURN credential generation. Required if TURN is enabled or using external TURN                        |
+| `TURN_PUBLIC_IP`  | Yes*     | -                  | Public IP address for TURN relay. Required if integrated TURN is enabled                                                |
+| `TURN_PORT`       | No       | `3478`             | UDP port for STUN/TURN server                                                                                           |
+| `TURN_REALM`      | No       | `metadata-relay`   | Authentication realm for TURN                                                                                           |
+| `TURN_MIN_PORT`   | No       | `49152`            | Minimum port for TURN relay allocations                                                                                 |
+| `TURN_MAX_PORT`   | No       | `65535`            | Maximum port for TURN relay allocations                                                                                 |
+| `TURN_MAX_RATE`   | No       | `1000000`          | Max bandwidth per connection in bytes/sec (default ~1MB/s = 8Mbps)                                                      |
+| `TURN_URI`        | No       | -                  | External TURN server URI (only if not using integrated server)                                                          |
 
 ### Cache Configuration
 
@@ -814,6 +823,58 @@ A `200 OK` status indicates the service is running and able to respond to reques
 - Default TTL: 1 hour
 - No size limit (relies on Fly.io memory constraints)
 - Cache is lost on machine restart
+
+### TURN Server Configuration
+
+The metadata-relay includes an integrated STUN/TURN server powered by the `processone/stun` library. This eliminates the need for external Coturn deployments for WebRTC NAT traversal.
+
+#### Option 1: Integrated TURN Server (Recommended)
+
+Enable the built-in TURN server:
+
+```bash
+TURN_ENABLED=true
+TURN_SECRET=your-secret-key-here
+TURN_PUBLIC_IP=203.0.113.42  # Your server's public IP
+```
+
+**Features:**
+- Pure Erlang implementation (no external dependencies)
+- Full STUN (RFC 5389) and TURN (RFC 5766) support
+- Time-limited credentials with HMAC-SHA1 authentication
+- Automatic credential generation for WebRTC clients
+
+**Port Configuration:**
+
+By default, the TURN server listens on UDP port 3478. You may need to:
+1. Open UDP port 3478 in your firewall
+2. Open the relay port range (default: 49152-65535) for media traffic
+
+```bash
+# Custom port configuration
+TURN_PORT=3478
+TURN_MIN_PORT=49152
+TURN_MAX_PORT=65535
+```
+
+#### Option 2: External Coturn Server
+
+If you prefer to use an external Coturn server:
+
+```bash
+TURN_URI=turn:turn.example.com:3478
+TURN_SECRET=your-coturn-static-auth-secret
+```
+
+Configure Coturn with `use-auth-secret` and the same shared secret.
+
+#### Option 3: No TURN Server
+
+If `TURN_ENABLED` is not set and `TURN_URI` is not provided, only public STUN servers are used. This works for:
+- Clients on the same network
+- Connections that don't require NAT traversal
+
+Note: WebRTC connections may fail in restrictive NAT environments without TURN.
 
 **Recommended Monitoring:**
 

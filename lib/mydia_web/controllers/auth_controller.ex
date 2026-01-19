@@ -78,11 +78,15 @@ defmodule MydiaWeb.AuthController do
         # Update last login timestamp
         Accounts.update_last_login(user)
 
-        # Sign the JWT token and store in session
+        # Sign in the user via Guardian, which stores the token in session
+        # under the :guardian_default_token key that VerifySession expects.
+        # Also store under :guardian_token for backward compatibility with
+        # code that reads that key directly (e.g., logout, Flutter cookie auth).
         {:ok, token, _claims} = Guardian.create_token(user)
 
         conn
         |> Guardian.Plug.sign_in(user)
+        |> put_session(:guardian_default_token, token)
         |> put_session(:guardian_token, token)
         |> put_flash(:info, "Successfully authenticated!")
         |> redirect(to: "/")
@@ -114,6 +118,7 @@ defmodule MydiaWeb.AuthController do
           user ->
             conn
             |> Guardian.Plug.sign_in(user)
+            |> put_session(:guardian_default_token, token)
             |> put_session(:guardian_token, token)
             |> redirect(to: "/")
         end

@@ -228,6 +228,19 @@ config :mydia, Mydia.Auth.Guardian,
   verify_issuer: true,
   secret_key: "REPLACE_IN_RUNTIME_CONFIG"
 
+# Configure Guardian for media tokens (remote device access)
+config :mydia, Mydia.RemoteAccess.MediaToken,
+  issuer: "mydia",
+  ttl: {24, :hours},
+  allowed_drift: 2000,
+  verify_issuer: true,
+  secret_key: "REPLACE_IN_RUNTIME_CONFIG"
+
+# Relay tunnel shared secret for defense-in-depth authentication
+# Used to sign internal relay tunnel requests with HMAC-SHA256
+# This provides additional security beyond localhost IP checks
+config :mydia, :relay_tunnel_secret, "REPLACE_IN_RUNTIME_CONFIG"
+
 # Configure Oban for background job processing
 # Use Lite engine for SQLite, Basic engine for PostgreSQL
 oban_engine =
@@ -331,7 +344,12 @@ config :mydia, :features,
   # Enable/disable Import Lists feature
   # When enabled, shows the Import Lists UI for syncing external lists (TMDB watchlists, etc.)
   # Can be overridden via ENABLE_IMPORT_LISTS environment variable
-  import_lists_enabled: false
+  import_lists_enabled: false,
+  # Enable/disable Remote Access feature (libp2p-based peer-to-peer connectivity)
+  # When enabled, starts the libp2p server for remote device pairing and media streaming
+  # Set to true to enable remote access functionality
+  # Can be overridden via ENABLE_REMOTE_ACCESS environment variable
+  remote_access_enabled: false
 
 # Configure Ueberauth with empty providers by default
 # This is overridden in dev.exs if OIDC is configured
@@ -356,6 +374,11 @@ config :mydia, Mydia.CrashReporter.Queue,
   max_retries: 10,
   # Maximum total retry duration: 24 hours
   max_retry_duration: 24 * 60 * 60
+
+# Configure downloads and transcoding
+config :mydia, :downloads,
+  transcode_cache_dir: "priv/data/transcodes",
+  max_concurrent_transcodes: 2
 
 # Configure Logger backends for crash reporting
 # The crash reporter backend will automatically capture errors when enabled

@@ -33,7 +33,7 @@ defmodule Mydia.Jobs.MovieSearch do
 
   import Ecto.Query, warn: false
 
-  alias Mydia.{Repo, Media, Indexers, Downloads}
+  alias Mydia.{Repo, Media, Indexers, Downloads, Events}
   alias Mydia.Indexers.ReleaseRanker
   alias Mydia.Media.MediaItem
   alias Phoenix.PubSub
@@ -177,6 +177,12 @@ defmodule Mydia.Jobs.MovieSearch do
           query: query
         )
 
+        # Log search event for no results
+        Events.search_no_results(movie, %{
+          "query" => query,
+          "indexers_searched" => indexers_count
+        })
+
         {:no_results,
          %{
            indexers_searched: indexers_count,
@@ -190,7 +196,8 @@ defmodule Mydia.Jobs.MovieSearch do
           title: movie.title
         )
 
-        {status, downloads_initiated} = process_search_results_with_count(movie, results, args)
+        {status, downloads_initiated} =
+          process_search_results_with_count(movie, results, args, query)
 
         stats = %{
           indexers_searched: indexers_count,
@@ -205,7 +212,7 @@ defmodule Mydia.Jobs.MovieSearch do
     end
   end
 
-  defp process_search_results_with_count(movie, results, args) do
+  defp process_search_results_with_count(movie, results, args, query) do
     ranking_opts = build_ranking_options(movie, args)
 
     case ReleaseRanker.select_best_result(results, ranking_opts) do
@@ -215,6 +222,13 @@ defmodule Mydia.Jobs.MovieSearch do
           title: movie.title,
           total_results: length(results)
         )
+
+        # Log search event for all results filtered out
+        Events.search_filtered_out(movie, %{
+          "query" => query,
+          "results_count" => length(results),
+          "filter_stats" => build_filter_stats(results, ranking_opts)
+        })
 
         {:no_results, 0}
 
@@ -227,7 +241,18 @@ defmodule Mydia.Jobs.MovieSearch do
           breakdown: breakdown
         )
 
-        case initiate_download(movie, best_result) do
+        result = initiate_download(movie, best_result)
+
+        # Log search completed event
+        Events.search_completed(movie, %{
+          "query" => query,
+          "results_count" => length(results),
+          "selected_release" => best_result.title,
+          "score" => score,
+          "breakdown" => stringify_keys(breakdown)
+        })
+
+        case result do
           :ok -> {:ok, 1}
           {:error, _} -> {:no_results, 0}
         end
@@ -279,6 +304,12 @@ defmodule Mydia.Jobs.MovieSearch do
           query: query
         )
 
+        # Log search event for no results
+        Events.search_no_results(movie, %{
+          "query" => query,
+          "indexers_searched" => count_enabled_indexers()
+        })
+
         :no_results
 
       {:ok, results} ->
@@ -287,7 +318,7 @@ defmodule Mydia.Jobs.MovieSearch do
           title: movie.title
         )
 
-        process_search_results(movie, results, args)
+        process_search_results(movie, results, args, query)
     end
   end
 
@@ -299,7 +330,7 @@ defmodule Mydia.Jobs.MovieSearch do
     "#{title} #{year}"
   end
 
-  defp process_search_results(movie, results, args) do
+  defp process_search_results(movie, results, args, query) do
     ranking_opts = build_ranking_options(movie, args)
 
     case ReleaseRanker.select_best_result(results, ranking_opts) do
@@ -309,6 +340,13 @@ defmodule Mydia.Jobs.MovieSearch do
           title: movie.title,
           total_results: length(results)
         )
+
+        # Log search event for all results filtered out
+        Events.search_filtered_out(movie, %{
+          "query" => query,
+          "results_count" => length(results),
+          "filter_stats" => build_filter_stats(results, ranking_opts)
+        })
 
         :no_results
 
@@ -321,7 +359,18 @@ defmodule Mydia.Jobs.MovieSearch do
           breakdown: breakdown
         )
 
-        initiate_download(movie, best_result)
+        result = initiate_download(movie, best_result)
+
+        # Log search completed event
+        Events.search_completed(movie, %{
+          "query" => query,
+          "results_count" => length(results),
+          "selected_release" => best_result.title,
+          "score" => score,
+          "breakdown" => stringify_keys(breakdown)
+        })
+
+        result
     end
   end
 
@@ -407,4 +456,30 @@ defmodule Mydia.Jobs.MovieSearch do
         {:error, reason}
     end
   end
+
+  ## Private Functions - Event Helpers
+
+  # Build a map of filter statistics for rejected results
+  defp build_filter_stats(results, ranking_opts) do
+    min_seeders = Keyword.get(ranking_opts, :min_seeders, 5)
+
+    low_seeders = Enum.count(results, fn r -> (r[:seeders] || 0) < min_seeders end)
+
+    %{
+      "total_results" => length(results),
+      "low_seeders" => low_seeders,
+      "below_quality_threshold" => length(results) - low_seeders
+    }
+  end
+
+  # Convert a map with atom keys to string keys for JSON serialization
+  defp stringify_keys(%{__struct__: _} = struct) do
+    struct |> Map.from_struct() |> stringify_keys()
+  end
+
+  defp stringify_keys(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {to_string(k), v} end)
+  end
+
+  defp stringify_keys(other), do: other
 end

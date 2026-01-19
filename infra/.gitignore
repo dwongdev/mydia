@@ -1,0 +1,24 @@
+# Configuration files with secrets
+config.yaml
+ovh.conf
+
+# Sensitive credentials and secrets
+*.pem
+*.key
+*.crt
+secrets/
+
+# Kubernetes secrets
+**/secret.yaml
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-*

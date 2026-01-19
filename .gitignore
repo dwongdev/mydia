@@ -14,6 +14,8 @@
 # Nix development environment cache directories
 /.nix-hex/
 /.nix-mix/
+**/.nix-mix/
+**/.nix-hex/
 
 # Nix build result symlink
 /result
@@ -39,8 +41,18 @@ mydia-*.tar
 # Ignore assets that are produced by build tools.
 /priv/static/assets/
 
+# Flutter player web build output (built via CI/CD)
+/priv/static/player/
+
 # Ignore digested assets cache.
 /priv/static/cache_manifest.json
+
+# Ignore Phoenix digest artifacts (fingerprinted and gzipped files)
+/priv/static/**/*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].*
+/priv/static/**/*.gz
+
+# macOS
+.DS_Store
 
 # In case you use Node.js/npm, you want to ignore these.
 npm-debug.log
@@ -83,4 +95,24 @@ compose.override.yml
 # Python virtual environment
 .venv/
 docs/.venv/
+
+# Rust build artifacts
+**/target/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+*.auto.tfvars
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
 

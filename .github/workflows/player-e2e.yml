@@ -1,0 +1,81 @@
+name: Player E2E Tests
+
+on:
+  workflow_dispatch: # Allow manual triggering
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - "player/**"
+      - "lib/mydia/remote_access/**"
+      - "lib/mydia_web/channels/device_channel.ex"
+      - "metadata-relay/**"
+      - "compose.player-e2e.yml"
+      - "Dockerfile.e2e"
+      - ".github/workflows/player-e2e.yml"
+  pull_request:
+    paths:
+      - "player/**"
+      - "lib/mydia/remote_access/**"
+      - "lib/mydia_web/channels/device_channel.ex"
+      - "metadata-relay/**"
+      - "compose.player-e2e.yml"
+      - "Dockerfile.e2e"
+      - ".github/workflows/player-e2e.yml"
+
+jobs:
+  player-e2e:
+    name: Flutter Player E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          install: true
+
+      - name: Build E2E images with caching
+        run: |
+          echo "Building Docker images with BuildKit caching..."
+          docker buildx bake \
+            -f compose.player-e2e.yml \
+            --set "*.cache-from=type=gha,scope=player-e2e" \
+            --set "*.cache-to=type=gha,mode=max,scope=player-e2e" \
+            --load
+        env:
+          DOCKER_BUILDKIT: 1
+
+      - name: Run E2E tests
+        run: |
+          echo "Starting E2E test suite..."
+          docker compose -f compose.player-e2e.yml up \
+            --abort-on-container-exit \
+            --exit-code-from test
+        env:
+          DOCKER_BUILDKIT: 1
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          echo "=== Relay logs ==="
+          docker compose -f compose.player-e2e.yml logs relay || true
+          echo ""
+          echo "=== Mydia logs ==="
+          docker compose -f compose.player-e2e.yml logs mydia || true
+          echo ""
+          echo "=== Player logs ==="
+          docker compose -f compose.player-e2e.yml logs player || true
+          echo ""
+          echo "=== Test runner logs ==="
+          docker compose -f compose.player-e2e.yml logs test || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker compose -f compose.player-e2e.yml down -v --remove-orphans || true

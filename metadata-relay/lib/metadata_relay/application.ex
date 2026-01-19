@@ -6,6 +6,9 @@ defmodule MetadataRelay.Application do
 
   @impl true
   def start(_type, _args) do
+    # Create ETS tables before supervision tree for O(1) connection lookups
+    create_ets_tables()
+
     # Determine cache adapter based on REDIS_URL environment variable
     {cache_adapter, cache_opts} = configure_cache()
 
@@ -17,15 +20,20 @@ defmodule MetadataRelay.Application do
       [
         # Database repository
         MetadataRelay.Repo,
-        # PubSub for Phoenix LiveView
+        # PubSub for Phoenix LiveView and relay
         {Phoenix.PubSub, name: MetadataRelay.PubSub},
         # Cache adapter (Redis or in-memory)
         {cache_adapter, cache_opts},
         # Rate limiter for crash reports
-        MetadataRelay.RateLimiter
+        MetadataRelay.RateLimiter,
+        # Metrics collector
+        MetadataRelay.Metrics,
+        # Relay claim cleanup process
+        MetadataRelay.Relay.Cleanup
       ] ++
         maybe_tvdb_auth() ++
         maybe_opensubtitles_auth() ++
+        maybe_p2p_relay() ++
         [
           # Phoenix endpoint (serves both API and ErrorTracker dashboard)
           MetadataRelayWeb.Endpoint
@@ -110,5 +118,23 @@ defmodule MetadataRelay.Application do
       Logger.info("OpenSubtitles credentials not configured, subtitle support disabled")
       []
     end
+  end
+
+  defp maybe_p2p_relay do
+    if System.get_env("LIBP2P_RELAY_ENABLED") == "true" do
+      Logger.info("Libp2p Relay enabled, starting P2P host")
+      [MetadataRelay.P2p.Server]
+    else
+      Logger.info("Libp2p Relay disabled")
+      []
+    end
+  end
+
+  defp create_ets_tables do
+    # Create ETS tables for O(1) relay connection lookups
+    # These must be created before the supervision tree starts
+    Logger.info("Creating ETS tables for relay connection registry")
+    MetadataRelay.Relay.ConnectionRegistry.create_table()
+    MetadataRelay.Relay.PendingRequests.create_table()
   end
 end

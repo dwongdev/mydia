@@ -22,6 +22,7 @@ defmodule Mydia.Streaming.HlsSessionSupervisor do
   use DynamicSupervisor
 
   alias Mydia.Streaming.HlsSession
+  alias Mydia.Streaming.DirectPlaySession
 
   @registry_name Mydia.Streaming.HlsSessionRegistry
 
@@ -43,13 +44,14 @@ defmodule Mydia.Streaming.HlsSessionSupervisor do
 
     * `media_file_id` - ID of the media file to transcode
     * `user_id` - ID of the user requesting the stream
+    * `mode` - (optional) Streaming mode: `:copy` or `:transcode` (default: `:transcode`)
 
   ## Returns
 
     * `{:ok, pid}` - Session process
     * `{:error, reason}` - If session failed to start
   """
-  def start_session(media_file_id, user_id) do
+  def start_session(media_file_id, user_id, mode \\ :transcode) do
     session_key = session_key(media_file_id, user_id)
 
     case Registry.lookup(@registry_name, session_key) do
@@ -67,13 +69,75 @@ defmodule Mydia.Streaming.HlsSessionSupervisor do
                [
                  media_file_id: media_file_id,
                  user_id: user_id,
-                 registry_key: session_key
+                 registry_key: session_key,
+                 mode: mode
                ]
              ]},
           restart: :temporary
         }
 
         DynamicSupervisor.start_child(__MODULE__, child_spec)
+    end
+  end
+
+  @doc """
+  Starts a new Direct Play tracking session.
+
+  Uses a unique registry key different from HLS sessions to allow tracking direct plays separately.
+  Handles race conditions using :via tuple registration.
+  """
+  def start_direct_session(media_file_id, user_id) do
+    session_key = {:direct_session, media_file_id, user_id}
+    started_at = DateTime.utc_now()
+
+    metadata = %{
+      media_file_id: media_file_id,
+      user_id: user_id,
+      mode: :direct,
+      started_at: started_at
+    }
+
+    name = {:via, Registry, {@registry_name, session_key, metadata}}
+
+    child_spec = %{
+      id: {DirectPlaySession, media_file_id, user_id},
+      start:
+        {DirectPlaySession, :start_link,
+         [
+           [
+             media_file_id: media_file_id,
+             user_id: user_id,
+             name: name,
+             started_at: started_at
+           ]
+         ]},
+      restart: :temporary
+    }
+
+    case DynamicSupervisor.start_child(__MODULE__, child_spec) do
+      {:ok, pid} ->
+        {:ok, pid}
+
+      {:error, {:already_started, pid}} ->
+        {:ok, pid}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Stops a Direct Play session.
+  """
+  def stop_direct_session(media_file_id, user_id) do
+    session_key = {:direct_session, media_file_id, user_id}
+
+    case Registry.lookup(@registry_name, session_key) do
+      [{pid, _}] ->
+        DynamicSupervisor.terminate_child(__MODULE__, pid)
+
+      [] ->
+        :ok
     end
   end
 

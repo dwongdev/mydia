@@ -81,6 +81,22 @@ config :mydia,
   database_auto_repair: false,
   sql_sandbox: true
 
+# Guardian JWT configuration for tests
+config :mydia, Mydia.Auth.Guardian,
+  issuer: "mydia",
+  secret_key: "test-secret-key-for-jwt-signing",
+  ttl: {30, :days},
+  allowed_drift: 0
+
+config :mydia, Mydia.RemoteAccess.MediaToken,
+  issuer: "mydia",
+  secret_key: "test-secret-key-for-jwt-signing",
+  ttl: {24, :hours},
+  allowed_drift: 0
+
+# Relay tunnel shared secret for tests
+config :mydia, :relay_tunnel_secret, "test-relay-tunnel-secret"
+
 # Wallaby configuration for browser-based feature tests
 # Uses Chrome/Chromium in headless mode
 # Chromedriver path is auto-detected, or can be set via CHROMEDRIVER_PATH

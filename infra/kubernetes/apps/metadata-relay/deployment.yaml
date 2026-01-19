@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metadata-relay
+  namespace: metadata-relay
+  labels:
+    app.kubernetes.io/name: metadata-relay
+    app.kubernetes.io/component: relay-service
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # Use Recreate because we have a single PVC that can't be shared
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: metadata-relay
+      app.kubernetes.io/component: relay-service
+      app.kubernetes.io/part-of: mydia
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: metadata-relay
+        app.kubernetes.io/component: relay-service
+        app.kubernetes.io/part-of: mydia
+    spec:
+      # Use host network for TURN server to avoid NAT issues with UDP
+      # This allows the TURN server to receive and relay media traffic directly
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: metadata-relay
+          image: ghcr.io/getmydia/mydia/metadata-relay:dev
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 4000
+              protocol: TCP
+            # Libp2p Relay ports
+            - name: p2p-tcp
+              containerPort: 4001
+              protocol: TCP
+            - name: p2p-udp
+              containerPort: 4001
+              protocol: UDP
+          envFrom:
+            - configMapRef:
+                name: metadata-relay-config
+            - secretRef:
+                name: metadata-relay-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: metadata-relay-data

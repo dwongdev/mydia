@@ -1,5 +1,27 @@
 # ============================================
-# Build Stage
+# Flutter Build Stage
+# ============================================
+FROM ghcr.io/cirruslabs/flutter:stable AS flutter-builder
+
+WORKDIR /app/player
+
+# Copy player source
+COPY player/pubspec.yaml player/pubspec.lock ./
+COPY player/build.yaml ./
+COPY player/lib ./lib
+COPY player/web ./web
+
+# Copy the GraphQL schema (resolves symlink from priv/graphql/)
+COPY priv/graphql/schema.graphql ./lib/graphql/schema.graphql
+
+# Install dependencies, generate code, and build
+RUN flutter config --no-analytics && \
+    flutter pub get && \
+    dart run build_runner build --delete-conflicting-outputs && \
+    flutter build web --release --base-href /player/
+
+# ============================================
+# Elixir Build Stage
 # ============================================
 FROM elixir:1.18-alpine AS builder
 
@@ -9,22 +31,19 @@ FROM elixir:1.18-alpine AS builder
 ARG DATABASE_TYPE=sqlite
 
 # Install build dependencies
-# postgresql16-dev is needed for postgrex compilation
 RUN apk add --no-cache \
     build-base \
     git \
     nodejs \
     npm \
     sqlite-dev \
-    postgresql16-dev \
-    curl \
-    ffmpeg-dev \
-    fdk-aac-dev \
-    pkgconfig
+    postgresql16-dev
 
 # Set build environment
 ENV MIX_ENV=prod
 ENV DATABASE_TYPE=${DATABASE_TYPE}
+# Increase hex timeout for slow networks/CI (5 minutes)
+ENV HEX_HTTP_TIMEOUT=300000
 
 # Install Hex and Rebar
 RUN mix local.hex --force && \
@@ -54,10 +73,13 @@ COPY priv ./priv
 COPY lib ./lib
 COPY assets ./assets
 
+# Copy Flutter build output from flutter-builder stage
+COPY --from=flutter-builder /app/player/build/web ./priv/static/player
+
 # Compile application
 RUN mix compile
 
-# Build assets
+# Build Phoenix assets
 RUN cd assets && \
     npm ci --prefix . --progress=false --no-audit --loglevel=error && \
     cd .. && \
@@ -88,6 +110,7 @@ LABEL org.opencontainers.image.title="Mydia" \
 # Install runtime dependencies including LSIO-compatible tools
 # libpq is needed for PostgreSQL connections at runtime
 # sqlite provides the sqlite3 CLI for database inspection
+# openssl is needed for self-signed certificate generation
 RUN apk add --no-cache \
     sqlite \
     libpq \
@@ -97,7 +120,8 @@ RUN apk add --no-cache \
     fdk-aac \
     su-exec \
     tzdata \
-    shadow
+    shadow \
+    openssl
 
 # Create app user with default UID/GID (will be updated by entrypoint if needed)
 RUN addgroup -g 1000 mydia && \
@@ -133,8 +157,8 @@ ENV HOME=/app \
     PGID=1000 \
     TZ=UTC
 
-# Expose HTTP port
-EXPOSE 4000
+# Expose HTTP and HTTPS ports
+EXPOSE 4000 4443
 
 # Declare volumes following LSIO conventions
 VOLUME ["/config", "/data", "/media"]

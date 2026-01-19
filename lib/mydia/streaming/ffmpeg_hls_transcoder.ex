@@ -59,9 +59,12 @@ defmodule Mydia.Streaming.FfmpegHlsTranscoder do
       :on_progress,
       :on_complete,
       :on_error,
+      :on_ready,
+      :playlist_path,
       :buffer,
       :duration,
-      :started_at
+      :started_at,
+      ready_notified: false
     ]
 
     @type t :: %__MODULE__{
@@ -72,9 +75,12 @@ defmodule Mydia.Streaming.FfmpegHlsTranscoder do
             on_progress: (map() -> any()) | nil,
             on_complete: (-> any()) | nil,
             on_error: (String.t() -> any()) | nil,
+            on_ready: (-> any()) | nil,
+            playlist_path: String.t() | nil,
             buffer: String.t(),
             duration: float() | nil,
-            started_at: DateTime.t()
+            started_at: DateTime.t(),
+            ready_notified: boolean()
           }
   end
 
@@ -159,12 +165,16 @@ defmodule Mydia.Streaming.FfmpegHlsTranscoder do
     on_progress = Keyword.get(opts, :on_progress)
     on_complete = Keyword.get(opts, :on_complete)
     on_error = Keyword.get(opts, :on_error)
+    on_ready = Keyword.get(opts, :on_ready)
 
     # Build FFmpeg command
     args = build_ffmpeg_args(input_path, output_dir, opts)
 
     Logger.info("Starting FFmpeg HLS transcoding: #{input_path}")
     Logger.debug("FFmpeg args: #{inspect(args)}")
+
+    # Calculate playlist path for ready detection
+    playlist_path = Path.join(output_dir, "index.m3u8")
 
     # Start FFmpeg process
     case start_ffmpeg_process(args) do
@@ -177,10 +187,17 @@ defmodule Mydia.Streaming.FfmpegHlsTranscoder do
           on_progress: on_progress,
           on_complete: on_complete,
           on_error: on_error,
+          on_ready: on_ready,
+          playlist_path: playlist_path,
           buffer: "",
           duration: nil,
           started_at: DateTime.utc_now()
         }
+
+        # Schedule first playlist check if we have an on_ready callback
+        if on_ready do
+          Process.send_after(self(), :check_playlist_ready, 100)
+        end
 
         {:ok, state}
 
@@ -281,6 +298,28 @@ defmodule Mydia.Streaming.FfmpegHlsTranscoder do
   def handle_info({:DOWN, _ref, :process, _pid, reason}, state) do
     Logger.warning("FFmpeg process terminated: #{inspect(reason)}")
     {:stop, {:ffmpeg_terminated, reason}, state}
+  end
+
+  def handle_info(:check_playlist_ready, %{ready_notified: true} = state) do
+    # Already notified, stop checking
+    {:noreply, state}
+  end
+
+  def handle_info(:check_playlist_ready, state) do
+    if File.exists?(state.playlist_path) do
+      Logger.debug("Playlist file detected: #{state.playlist_path}")
+
+      # Call the on_ready callback
+      if state.on_ready do
+        state.on_ready.()
+      end
+
+      {:noreply, %{state | ready_notified: true}}
+    else
+      # Not ready yet, check again in 100ms
+      Process.send_after(self(), :check_playlist_ready, 100)
+      {:noreply, state}
+    end
   end
 
   def handle_info(msg, state) do

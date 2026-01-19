@@ -605,6 +605,16 @@
 
               <button
                 type="button"
+                class="btn btn-sm btn-secondary gap-2"
+                phx-click="show_add_to_collection"
+                title="Add selected items to collection"
+              >
+                <.icon name="hero-folder-plus" class="w-4 h-4" />
+                <span>Add to Collection</span>
+              </button>
+
+              <button
+                type="button"
                 class="btn btn-sm btn-error gap-2"
                 phx-click="show_delete_confirmation"
                 title="Delete selected items"
@@ -697,6 +707,69 @@
         >
           <.icon name="hero-check" class="w-4 h-4" /> Apply Changes
         </button>
+      </:actions>
+    </.modal>
+
+    <%!-- Add to Collection Modal --%>
+    <.modal
+      id="add-to-collection-modal"
+      show={@show_add_to_collection_modal}
+      on_cancel={JS.push("cancel_add_to_collection")}
+    >
+      <:title>Add to Collection</:title>
+
+      <div class="space-y-4">
+        <div class="alert alert-info">
+          <.icon name="hero-information-circle" class="w-5 h-5" />
+          <span>
+            Adding <strong>{MapSet.size(@selected_ids)}</strong>
+            {if MapSet.size(@selected_ids) == 1, do: "item", else: "items"} to a collection.
+          </span>
+        </div>
+
+        <%= if Enum.empty?(@user_collections) do %>
+          <div class="text-center py-8">
+            <.icon name="hero-folder-open" class="w-12 h-12 mx-auto text-base-content/30 mb-4" />
+            <p class="text-base-content/70 mb-4">You don't have any collections yet.</p>
+            <.link navigate={~p"/collections"} class="btn btn-primary">
+              <.icon name="hero-plus" class="w-4 h-4" /> Create Your First Collection
+            </.link>
+          </div>
+        <% else %>
+          <div class="space-y-2">
+            <p class="text-sm text-base-content/70">Select a collection:</p>
+            <ul class="menu bg-base-200 rounded-box">
+              <%= for collection <- @user_collections do %>
+                <li>
+                  <button
+                    type="button"
+                    phx-click="batch_add_to_collection"
+                    phx-value-collection-id={collection.id}
+                    class="justify-start"
+                  >
+                    <.icon
+                      name={if collection.is_system, do: "hero-star", else: "hero-folder"}
+                      class="w-5 h-5"
+                    />
+                    <span>{collection.name}</span>
+                    <%= if collection.is_system do %>
+                      <span class="badge badge-ghost badge-sm">System</span>
+                    <% end %>
+                  </button>
+                </li>
+              <% end %>
+            </ul>
+          </div>
+        <% end %>
+      </div>
+
+      <:actions>
+        <button type="button" class="btn btn-ghost" phx-click="cancel_add_to_collection">
+          Cancel
+        </button>
+        <.link navigate={~p"/collections"} class="btn btn-outline">
+          <.icon name="hero-folder-open" class="w-4 h-4" /> Manage Collections
+        </.link>
       </:actions>
     </.modal>
   </div>

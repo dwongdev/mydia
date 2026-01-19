@@ -1,0 +1,20 @@
+[package]
+name = "mydia_p2p_e2e"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+mydia_p2p_core = { path = "../mydia_p2p_core" }
+tokio = { version = "1.43", features = ["full"] }
+clap = { version = "4.4", features = ["derive"] }
+env_logger = "0.11"
+log = "0.4"
+anyhow = "1.0"
+libp2p = { version = "0.56.0", features = ["tokio", "gossipsub", "mdns", "noise", "macros", "tcp", "yamux", "quic", "dns", "kad", "ping", "identify", "request-response", "cbor", "relay", "dcutr"] }
+futures = "0.3"
+uuid = { version = "1.0", features = ["v4"] }
+
+[dev-dependencies]
+bollard = "0.15"
+tokio = { version = "1.43", features = ["full", "test-util"] }
+futures-util = "0.3"

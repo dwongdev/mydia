@@ -20,6 +20,8 @@ defmodule Mydia.Media do
     - `:monitored` - Filter by monitored status (true/false)
     - `:category` - Filter by category (atom or string, e.g., :anime_movie or "anime_movie")
     - `:library_path_type` - Filter by library path type (:adult, :music, :books, etc.)
+    - `:search` - Search by title (case-insensitive substring match)
+    - `:added_since` - Filter to items inserted after this DateTime
     - `:preload` - List of associations to preload
   """
   def list_media_items(opts \\ []) do
@@ -1225,6 +1227,13 @@ defmodule Mydia.Media do
       {:library_path_type, library_type}, query ->
         filter_by_library_path_type(query, library_type)
 
+      {:search, search_term}, query when is_binary(search_term) ->
+        search_pattern = "%#{search_term}%"
+        where(query, [m], ilike(m.title, ^search_pattern))
+
+      {:added_since, datetime}, query ->
+        where(query, [m], m.inserted_at >= ^datetime)
+
       _other, query ->
         query
     end)
@@ -1680,5 +1689,80 @@ defmodule Mydia.Media do
     diff = DateTime.diff(now, media_item.seasons_refreshed_at, :second)
 
     diff < threshold_seconds
+  end
+
+  ## Favorites (delegated to Collections context)
+  ##
+  ## These functions now delegate to the Collections context which uses the
+  ## unified collection system. The user_favorites table is deprecated.
+
+  @doc """
+  Checks if a media item is favorited by a user.
+
+  Delegates to Collections.is_favorite?/2.
+
+  ## Examples
+
+      iex> is_favorite?(user_id, media_item_id)
+      true
+
+      iex> is_favorite?(user_id, non_favorited_media_item_id)
+      false
+
+  """
+  def is_favorite?(user_id, media_item_id) do
+    user = Mydia.Accounts.get_user!(user_id)
+    Mydia.Collections.is_favorite?(user, media_item_id)
+  end
+
+  @doc """
+  Toggles favorite status for a media item.
+
+  Delegates to Collections.toggle_favorite/2.
+
+  Returns {:ok, :added} or {:ok, :removed} on success.
+
+  ## Examples
+
+      iex> toggle_favorite(user_id, media_item_id)
+      {:ok, :added}
+
+      iex> toggle_favorite(user_id, media_item_id)
+      {:ok, :removed}
+
+  """
+  def toggle_favorite(user_id, media_item_id) do
+    user = Mydia.Accounts.get_user!(user_id)
+    Mydia.Collections.toggle_favorite(user, media_item_id)
+  end
+
+  @doc """
+  Lists all favorite media items for a user.
+
+  Delegates to Collections context and returns the media items from
+  the user's Favorites collection.
+
+  ## Options
+    - `:preload` - List of associations to preload on media_items
+
+  ## Examples
+
+      iex> list_user_favorites(user_id)
+      [%MediaItem{}, ...]
+
+      iex> list_user_favorites(user_id, preload: [:media_files])
+      [%MediaItem{media_files: [...]}, ...]
+
+  """
+  def list_user_favorites(user_id, opts \\ []) do
+    user = Mydia.Accounts.get_user!(user_id)
+
+    case Mydia.Collections.get_or_create_favorites(user) do
+      {:ok, favorites} ->
+        Mydia.Collections.list_collection_items(favorites, opts)
+
+      {:error, _} ->
+        []
+    end
   end
 end

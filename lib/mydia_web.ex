@@ -18,7 +18,7 @@ defmodule MydiaWeb do
   """
 
   def static_paths,
-    do: ~w(assets fonts images favicon.ico robots.txt manifest.json service-worker.js)
+    do: ~w(assets fonts images player favicon.ico robots.txt manifest.json service-worker.js)
 
   def router do
     quote do
@@ -89,6 +89,8 @@ defmodule MydiaWeb do
       import MydiaWeb.CoreComponents
       # Library components for media/music/books views
       import MydiaWeb.LibraryComponents
+      # Collection components for collection views
+      import MydiaWeb.CollectionComponents
       # Metadata search components
       import MydiaWeb.Live.Components.MetadataSearchForm
 

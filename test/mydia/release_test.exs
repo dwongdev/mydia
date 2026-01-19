@@ -14,10 +14,11 @@ defmodule Mydia.ReleaseTest do
     # Create a test database file
     File.write!(@test_db_path, "test database content")
 
-    # Override the database path for testing
+    # Override the database path for testing while preserving other config
     original_config = Application.get_env(:mydia, Mydia.Repo)
+    updated_config = Keyword.put(original_config, :database, @test_db_path)
 
-    Application.put_env(:mydia, Mydia.Repo, database: @test_db_path)
+    Application.put_env(:mydia, Mydia.Repo, updated_config)
 
     on_exit(fn ->
       # Restore original config

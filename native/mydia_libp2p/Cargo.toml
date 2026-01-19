@@ -1,0 +1,15 @@
+[package]
+name = "mydia_libp2p"
+version = "0.1.0"
+authors = []
+edition = "2021"
+
+[lib]
+name = "mydia_libp2p"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.34.0"
+mydia_p2p_core = { path = "../mydia_p2p_core" }
+tokio = { version = "1.43", features = ["rt-multi-thread"] }

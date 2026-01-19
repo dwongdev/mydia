@@ -44,6 +44,7 @@ defmodule Mydia.ImportLists.ImportList do
 
     belongs_to :quality_profile, Mydia.Settings.QualityProfile
     belongs_to :library_path, Mydia.Settings.LibraryPath
+    belongs_to :target_collection, Mydia.Collections.Collection
     has_many :items, Mydia.ImportLists.ImportListItem
 
     timestamps(type: :utc_datetime)
@@ -67,6 +68,7 @@ defmodule Mydia.ImportLists.ImportList do
       :sync_error,
       :quality_profile_id,
       :library_path_id,
+      :target_collection_id,
       :list_url
     ])
     |> validate_required([:name, :type, :media_type])
@@ -78,6 +80,7 @@ defmodule Mydia.ImportLists.ImportList do
     |> maybe_add_unique_constraint()
     |> foreign_key_constraint(:quality_profile_id)
     |> foreign_key_constraint(:library_path_id)
+    |> foreign_key_constraint(:target_collection_id)
   end
 
   # Validates that list_url is provided when the type requires config

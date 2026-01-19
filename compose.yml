@@ -11,11 +11,6 @@ services:
       - postgres_data:/var/lib/postgresql/data
     profiles:
       - postgres
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
 
   app:
     build:
@@ -23,6 +18,11 @@ services:
       dockerfile: Dockerfile.dev
     container_name: mydia_dev
     environment:
+      # User mapping for host filesystem permissions
+      # Set via ./dev script to match host user
+      LOCAL_UID: ${LOCAL_UID:-0}
+      LOCAL_GID: ${LOCAL_GID:-0}
+
       # Phoenix configuration
       PHX_HOST: localhost
       PORT: 4000
@@ -34,14 +34,22 @@ services:
       # Mix environment
       MIX_ENV: dev
 
+      # Rust logging for libp2p NIF
+      RUST_LOG: info
+
       # Metadata relay configuration
-      METADATA_RELAY_URL: ${METADATA_RELAY_URL:-https://metadata-relay.arsfeld.dev}
+      METADATA_RELAY_URL: ${METADATA_RELAY_URL:-https://relay.mydia.dev}
 
       # For interactive debugging
       MIX_HOME: /app/.mix
       HEX_HOME: /app/.hex
+
+      # Flutter cache
+      PUB_CACHE: /app/player/.pub-cache
     ports:
-      - "4000:4000"
+      - "4000:4000"      # Phoenix HTTP
+      - "4001:4001/tcp"  # libp2p TCP
+      - "4001:4001/udp"  # libp2p QUIC
     volumes:
       # Mount source code for live reloading
       - .:/app
@@ -54,6 +62,12 @@ services:
       - node_modules:/app/assets/node_modules
       # Persist NIF cache to avoid redownloading/recompiling on every run
       - elixir_make_cache:/root/.cache/elixir_make
+      # Persist Flutter pub cache
+      - player_pub_cache:/app/player/.pub-cache
+      # Isolate Flutter environment-specific directories from host (nix develop)
+      # These contain SDK-specific artifacts that conflict between environments
+      - player_dart_tool:/app/player/.dart_tool
+      - player_build:/app/player/build
     stdin_open: true
     tty: true
     restart: unless-stopped
@@ -65,6 +79,13 @@ services:
       retries: 3
 
 volumes:
+  player_pub_cache:
+    driver: local
+  # Flutter environment isolation (prevents conflicts with nix develop)
+  player_dart_tool:
+    driver: local
+  player_build:
+    driver: local
   # Named volumes for caching
   build_cache:
     driver: local

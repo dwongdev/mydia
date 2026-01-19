@@ -152,6 +152,7 @@ defmodule Mydia.Jobs.ImportListAutoAdd do
     case Media.create_media_item(attrs) do
       {:ok, media_item} ->
         ImportLists.mark_item_added(item, media_item.id)
+        maybe_add_to_target_collection(import_list, media_item)
 
         Logger.info("[ImportListAutoAdd] Added media item",
           title: metadata.title,
@@ -171,6 +172,40 @@ defmodule Mydia.Jobs.ImportListAutoAdd do
 
         ImportLists.mark_item_failed(item, error_message)
         :failed
+    end
+  end
+
+  defp maybe_add_to_target_collection(%{target_collection_id: nil}, _media_item), do: :ok
+
+  defp maybe_add_to_target_collection(%{target_collection_id: collection_id}, media_item) do
+    alias Mydia.Collections
+
+    case Collections.get_collection_by_id(collection_id) do
+      nil ->
+        Logger.debug("[ImportListAutoAdd] Target collection not found, skipping",
+          collection_id: collection_id
+        )
+
+        :ok
+
+      collection ->
+        if collection.type == "manual" do
+          case Collections.add_item(collection, media_item.id) do
+            {:ok, _} ->
+              Logger.info("[ImportListAutoAdd] Added to target collection",
+                collection_id: collection_id,
+                media_item_id: media_item.id
+              )
+
+            {:error, reason} ->
+              Logger.warning("[ImportListAutoAdd] Failed to add to target collection",
+                collection_id: collection_id,
+                error: inspect(reason)
+              )
+          end
+        end
+
+        :ok
     end
   end
 

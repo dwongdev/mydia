@@ -868,5 +868,207 @@ defmodule Mydia.Indexers.ReleaseRankerTest do
       # Should have high title match with year included
       assert breakdown.title_match > 600
     end
+
+    test "exact series title ranks higher than similar but different series" do
+      # Real-world case: searching for "The Girlfriend S01"
+      # The actual series should rank higher than unrelated series with similar names
+      mb = 1024 * 1024
+      gb = 1024 * mb
+
+      results = [
+        # Unrelated documentary series with similar words
+        build_result(%{
+          title:
+            "Untold.The.Girlfriend.Who.Didnt.Exist.S01.1080p.NF.WEB-DL.ENG.SPA.DDP5.1.x264-themoviesboss",
+          size: 6 * gb,
+          seeders: 3
+        }),
+        # The actual series we want
+        build_result(%{
+          title: "The.Girlfriend.S01E01-06.1080p.AMZN.WEB-DL.ITA.ENG.DDP5.1.H.265-G66",
+          size: 8 * gb,
+          seeders: 11
+        }),
+        # Different series with similar name
+        build_result(%{
+          title: "The.Girlfriend.Experience.S01E01-13.1080p.AMZN.WEB-DL.ITA.ENG.DDP5.1.H.265-G66",
+          size: 13 * gb,
+          seeders: 6
+        }),
+        # Unrelated show with "girlfriend" in title
+        build_result(%{
+          title:
+            "Jimmy.Carrs.Am.I.The.Asshole.S01E01.Bill.Splitting.Angst.and.a.Gassy.Girlfriend.1080p.AMZN.WEB-DL",
+          size: 3 * gb,
+          seeders: 22
+        }),
+        # Another unrelated show
+        build_result(%{
+          title: "Trying.S01E02.The.Ex.Girlfriend.1080p.ATVP.WEB-DL.DDP.5.1.Atmos.H.264-FLUX",
+          size: 2 * gb,
+          seeders: 16
+        }),
+        # The actual series (season pack with 2025)
+        build_result(%{
+          title: "The.Girlfriend.2025.S01.1080p.10bit.WEBRip.6CH.x265.HEVC.PSA",
+          size: 4 * gb,
+          seeders: 311
+        }),
+        # Another version of the actual series
+        build_result(%{
+          title: "The.Girlfriend.2025.S01.1080p.WEBRip.x265-KONTRAST",
+          size: 7 * gb,
+          seeders: 36
+        }),
+        # Completely different anime series with "girlfriends" in title
+        build_result(%{
+          title:
+            "The.100.Girlfriends.Who.Really.Really.Really.Really.REALLY.Love.You.S01E06.1080p.HEVC.x265-MeGusta",
+          size: 285 * mb,
+          seeders: 2
+        })
+      ]
+
+      ranked =
+        ReleaseRanker.rank_all(results,
+          search_query: "The Girlfriend S01",
+          min_seeders: 1,
+          size_range: {100, 20_000}
+        )
+
+      # Find the indices of key results
+      actual_series_indices =
+        ranked
+        |> Enum.with_index()
+        |> Enum.filter(fn {r, _idx} ->
+          # The actual "The Girlfriend" 2025 series
+          (String.contains?(r.result.title, "The.Girlfriend.2025") or
+             String.contains?(r.result.title, "The.Girlfriend.S01E01")) and
+            not String.contains?(r.result.title, "Experience") and
+            not String.contains?(r.result.title, "Untold") and
+            not String.contains?(r.result.title, "100.Girlfriends")
+        end)
+        |> Enum.map(fn {_r, idx} -> idx end)
+
+      unrelated_series_indices =
+        ranked
+        |> Enum.with_index()
+        |> Enum.filter(fn {r, _idx} ->
+          String.contains?(r.result.title, "Untold") or
+            String.contains?(r.result.title, "Experience") or
+            String.contains?(r.result.title, "Jimmy.Carrs") or
+            String.contains?(r.result.title, "Trying") or
+            String.contains?(r.result.title, "100.Girlfriends")
+        end)
+        |> Enum.map(fn {_r, idx} -> idx end)
+
+      # The actual series should rank before all unrelated series
+      max_actual_idx = Enum.max(actual_series_indices)
+      min_unrelated_idx = Enum.min(unrelated_series_indices)
+
+      assert max_actual_idx < min_unrelated_idx,
+             """
+             Expected actual series "The Girlfriend" to rank before unrelated series.
+
+             Ranking order:
+             #{ranked |> Enum.with_index() |> Enum.map(fn {r, idx} -> "  #{idx + 1}. #{r.result.title} (score: #{Float.round(r.score, 1)}, title_match: #{Float.round(r.breakdown.title_match, 1)})" end) |> Enum.join("\n")}
+
+             Actual series at indices: #{inspect(actual_series_indices)}
+             Unrelated series at indices: #{inspect(unrelated_series_indices)}
+             """
+    end
+
+    test "ISSUE: without search_query, unrelated series can outrank actual series" do
+      # This test documents the current issue where search results are sorted
+      # by quality profile without considering title relevance.
+      #
+      # When searching for "The Girlfriend S01", results like "The Girlfriend Experience"
+      # or "Untold: The Girlfriend Who Didn't Exist" can rank higher than the actual
+      # series "The Girlfriend (2025)" if they have similar quality specs.
+      #
+      # The fix requires passing the search query to the ranker so title matching
+      # contributes to the score.
+      mb = 1024 * 1024
+      gb = 1024 * mb
+
+      results = [
+        # Unrelated documentary - scores high on quality alone
+        build_result(%{
+          title:
+            "Untold.The.Girlfriend.Who.Didnt.Exist.S01.1080p.NF.WEB-DL.ENG.SPA.DDP5.1.x264-themoviesboss",
+          size: 6 * gb,
+          seeders: 3
+        }),
+        # The actual series we want
+        build_result(%{
+          title: "The.Girlfriend.2025.S01.1080p.WEBRip.x265-KONTRAST",
+          size: 7 * gb,
+          seeders: 36
+        }),
+        # Different series with similar name - scores high on quality alone
+        build_result(%{
+          title: "The.Girlfriend.Experience.S01E01-13.1080p.AMZN.WEB-DL.ITA.ENG.DDP5.1.H.265-G66",
+          size: 13 * gb,
+          seeders: 6
+        })
+      ]
+
+      # Without search_query, all results get neutral title_match score of 500
+      ranked_without_query =
+        ReleaseRanker.rank_all(results,
+          min_seeders: 1,
+          size_range: {100, 20_000}
+        )
+
+      # With search_query, the actual series should rank higher
+      ranked_with_query =
+        ReleaseRanker.rank_all(results,
+          search_query: "The Girlfriend S01",
+          min_seeders: 1,
+          size_range: {100, 20_000}
+        )
+
+      # Find title_match scores
+      without_query_scores =
+        Enum.map(ranked_without_query, fn r ->
+          {r.result.title |> String.split(".") |> Enum.take(3) |> Enum.join("."),
+           r.breakdown.title_match}
+        end)
+
+      with_query_scores =
+        Enum.map(ranked_with_query, fn r ->
+          {r.result.title |> String.split(".") |> Enum.take(3) |> Enum.join("."),
+           r.breakdown.title_match}
+        end)
+
+      # Without query, all title_match scores should be neutral (500)
+      assert Enum.all?(ranked_without_query, fn r -> r.breakdown.title_match == 500.0 end),
+             "Without search_query, title_match should be neutral 500. Got: #{inspect(without_query_scores)}"
+
+      # With query, the actual series should have higher title_match than unrelated
+      actual_series =
+        Enum.find(ranked_with_query, &String.contains?(&1.result.title, "The.Girlfriend.2025"))
+
+      experience_series =
+        Enum.find(ranked_with_query, &String.contains?(&1.result.title, "Experience"))
+
+      assert actual_series.breakdown.title_match > experience_series.breakdown.title_match,
+             """
+             Actual series should have higher title_match than "The Girlfriend Experience".
+             Actual: #{actual_series.breakdown.title_match}
+             Experience: #{experience_series.breakdown.title_match}
+             """
+
+      # The actual series should rank first when search_query is provided
+      first_with_query = List.first(ranked_with_query)
+
+      assert String.contains?(first_with_query.result.title, "The.Girlfriend.2025"),
+             """
+             With search_query, "The Girlfriend 2025" should rank first.
+             Got: #{first_with_query.result.title}
+
+             With query ranking: #{inspect(with_query_scores)}
+             """
+    end
   end
 end

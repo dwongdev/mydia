@@ -1,0 +1,848 @@
+schema {
+  subscription: RootSubscriptionType
+  mutation: RootMutationType
+  query: RootQueryType
+}
+
+type RootQueryType {
+  "Get any node by its global ID"
+  node(id: ID!): Node
+
+  "List all library paths"
+  libraries: [LibraryPath]
+
+  "Get a movie by ID"
+  movie(id: ID!): Movie
+
+  "Get a TV show by ID"
+  tvShow(id: ID!): TvShow
+
+  "Get an episode by ID"
+  episode(id: ID!): Episode
+
+  "List all movies with pagination"
+  movies(first: Int, after: String, sort: SortInput, category: MediaCategory): MovieConnection
+
+  "List all TV shows with pagination"
+  tvShows(first: Int, after: String, sort: SortInput, category: MediaCategory): TvShowConnection
+
+  "Get episodes for a specific season of a TV show"
+  seasonEpisodes(showId: ID!, seasonNumber: Int!): [Episode]
+
+  "Get items the user is currently watching (in-progress)"
+  continueWatching(first: Int, after: String): [ContinueWatchingItem]
+
+  "Get recently added content"
+  recentlyAdded(first: Int, after: String, types: [MediaType]): [RecentlyAddedItem]
+
+  "Get next episodes to watch across all TV shows"
+  upNext(first: Int, after: String): [UpNextItem]
+
+  "Search across movies and TV shows"
+  search(query: String!, types: [MediaType], first: Int): SearchResults
+
+  "List all API keys for the current user"
+  apiKeys: [ApiKey]
+
+  "List all devices for the current user"
+  devices: [RemoteDevice]
+}
+
+type RootMutationType {
+  "Update playback progress for a movie"
+  updateMovieProgress(movieId: ID!, positionSeconds: Int!, durationSeconds: Int): Progress
+
+  "Update playback progress for an episode"
+  updateEpisodeProgress(episodeId: ID!, positionSeconds: Int!, durationSeconds: Int): Progress
+
+  "Mark a movie as watched"
+  markMovieWatched(movieId: ID!): Movie
+
+  "Mark a movie as unwatched"
+  markMovieUnwatched(movieId: ID!): Movie
+
+  "Mark an episode as watched"
+  markEpisodeWatched(episodeId: ID!): Episode
+
+  "Mark an episode as unwatched"
+  markEpisodeUnwatched(episodeId: ID!): Episode
+
+  "Mark all episodes in a season as watched"
+  markSeasonWatched(showId: ID!, seasonNumber: Int!): TvShow
+
+  "Toggle favorite status for a media item"
+  toggleFavorite(mediaItemId: ID!): ToggleFavoriteResult
+
+  "Refresh a media access token before it expires"
+  refreshMediaToken(token: String!): MediaToken
+
+  "Generate a pairing claim code for device pairing (requires authentication)"
+  generateClaimCode: ClaimCode
+
+  "Create a new API key for the current user"
+  createApiKey(name: String!, permissions: [String!], expiresAt: DateTime): CreateApiKeyResult
+
+  "Revoke an API key"
+  revokeApiKey(id: ID!): ApiKey
+
+  "Delete an API key"
+  deleteApiKey(id: ID!): Boolean
+
+  "Login with username\/password and device information"
+  login(input: LoginInput!): LoginResult
+
+  "Revoke a device"
+  revokeDevice(id: ID!): RevokeDeviceResult
+}
+
+type RootSubscriptionType {
+  "Subscribe to playback progress updates for a specific content item"
+  progressUpdated(nodeId: ID!): Progress
+
+  "Subscribe to device status changes for a user"
+  deviceStatusChanged(userId: ID!): DeviceStatusEvent
+}
+
+"Device status change event"
+type DeviceStatusEvent {
+  "The device that changed status"
+  device: Device!
+
+  "The type of status change"
+  event: DeviceEventType!
+}
+
+"Remote device information"
+type Device {
+  "Device ID"
+  id: ID!
+
+  "User-friendly device name"
+  deviceName: String!
+
+  "Platform (ios, android, web)"
+  platform: String!
+
+  "Last time device connected"
+  lastSeenAt: DateTime
+
+  "Revocation timestamp if revoked"
+  revokedAt: DateTime
+
+  "Initial pairing timestamp"
+  insertedAt: DateTime!
+}
+
+"Type of device status event"
+enum DeviceEventType {
+  "Device connected"
+  CONNECTED
+
+  "Device disconnected (no heartbeat)"
+  DISCONNECTED
+
+  "Device was revoked by user"
+  REVOKED
+
+  "Device was deleted"
+  DELETED
+}
+
+"A node that can be fetched by global ID with hierarchical navigation"
+interface Node {
+  "Global node ID"
+  id: ID!
+
+  "Parent node in the hierarchy"
+  parent: Node
+
+  children(first: Int, after: String): NodeConnection
+
+  "Full path from root to this node"
+  ancestors: [Node]
+
+  "Whether this node can be played"
+  isPlayable: Boolean!
+}
+
+"Edge for node connection"
+type NodeEdge {
+  node: Node!
+  cursor: String!
+}
+
+"Connection for paginated node children"
+type NodeConnection {
+  edges: [NodeEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+"An item in the continue watching rail"
+type ContinueWatchingItem {
+  id: ID!
+
+  type: MediaType!
+
+  title: String!
+
+  artwork: Artwork
+
+  progress: Progress!
+
+  "For episodes, includes show context"
+  showId: ID
+
+  showTitle: String
+
+  seasonNumber: Int
+
+  episodeNumber: Int
+}
+
+"An item in the recently added rail"
+type RecentlyAddedItem {
+  id: ID!
+  type: MediaType!
+  title: String!
+  year: Int
+  artwork: Artwork
+  addedAt: DateTime!
+}
+
+"An item in the up next rail (next episode to watch)"
+type UpNextItem {
+  episode: Episode!
+
+  show: TvShow!
+
+  "One of: continue, next, start"
+  progressState: String!
+}
+
+"A movie"
+type Movie implements Node {
+  id: ID!
+
+  parent: Node
+
+  children(first: Int, after: String): NodeConnection
+
+  ancestors: [Node]
+
+  isPlayable: Boolean!
+
+  title: String!
+
+  originalTitle: String
+
+  year: Int
+
+  tmdbId: Int
+
+  imdbId: String
+
+  category: MediaCategory
+
+  monitored: Boolean!
+
+  addedAt: DateTime!
+
+  "Movie overview\/synopsis"
+  overview: String
+
+  "Movie runtime in minutes"
+  runtime: Int
+
+  "Genres list"
+  genres: [String]
+
+  "Content rating (e.g., PG-13, R)"
+  contentRating: String
+
+  "Average rating (0-10)"
+  rating: Float
+
+  "Artwork images"
+  artwork: Artwork
+
+  "Available video files"
+  files: [MediaFile]
+
+  "User playback progress"
+  progress: Progress
+
+  "Whether this item is in user favorites"
+  isFavorite: Boolean!
+}
+
+"A TV show"
+type TvShow implements Node {
+  id: ID!
+
+  parent: Node
+
+  children(first: Int, after: String): NodeConnection
+
+  ancestors: [Node]
+
+  isPlayable: Boolean!
+
+  title: String!
+
+  originalTitle: String
+
+  year: Int
+
+  tmdbId: Int
+
+  imdbId: String
+
+  category: MediaCategory
+
+  monitored: Boolean!
+
+  addedAt: DateTime!
+
+  "Show overview\/synopsis"
+  overview: String
+
+  "Show status (Continuing, Ended, etc.)"
+  status: String
+
+  "Genres list"
+  genres: [String]
+
+  "Content rating"
+  contentRating: String
+
+  "Average rating (0-10)"
+  rating: Float
+
+  "Artwork images"
+  artwork: Artwork
+
+  "List of seasons"
+  seasons: [Season]
+
+  "Total number of seasons"
+  seasonCount: Int
+
+  "Total number of episodes"
+  episodeCount: Int
+
+  "Next episode to watch for the current user"
+  nextEpisode: Episode
+
+  "Whether this item is in user favorites"
+  isFavorite: Boolean!
+}
+
+"A season of a TV show"
+type Season implements Node {
+  "Season global ID (season:<show_id>:<season_number>)"
+  id: ID!
+
+  parent: Node
+
+  children(first: Int, after: String): NodeConnection
+
+  ancestors: [Node]
+
+  isPlayable: Boolean!
+
+  seasonNumber: Int!
+
+  episodeCount: Int!
+
+  airedEpisodeCount: Int
+
+  hasFiles: Boolean!
+
+  "Episodes in this season"
+  episodes: [Episode]
+}
+
+"A TV episode"
+type Episode implements Node {
+  id: ID!
+
+  parent: Node
+
+  children(first: Int, after: String): NodeConnection
+
+  ancestors: [Node]
+
+  isPlayable: Boolean!
+
+  seasonNumber: Int!
+
+  episodeNumber: Int!
+
+  title: String
+
+  airDate: Date
+
+  monitored: Boolean!
+
+  "Episode overview\/synopsis"
+  overview: String
+
+  "Episode runtime in minutes"
+  runtime: Int
+
+  "Episode thumbnail image"
+  thumbnailUrl: String
+
+  "Available video files"
+  files: [MediaFile]
+
+  "User playback progress"
+  progress: Progress
+
+  "Whether this episode has at least one file"
+  hasFile: Boolean!
+
+  "Parent TV show info (for context when showing episodes)"
+  show: TvShow
+}
+
+"Edge for movie connection"
+type MovieEdge {
+  node: Movie!
+  cursor: String!
+}
+
+"Connection for paginated movies"
+type MovieConnection {
+  edges: [MovieEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+"Edge for TV show connection"
+type TvShowEdge {
+  node: TvShow!
+  cursor: String!
+}
+
+"Connection for paginated TV shows"
+type TvShowConnection {
+  edges: [TvShowEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+"Artwork URLs for a media item"
+type Artwork {
+  "Poster image URL"
+  posterUrl: String
+
+  "Backdrop\/fanart image URL"
+  backdropUrl: String
+
+  "Thumbnail image URL"
+  thumbnailUrl: String
+}
+
+"A playable video file"
+type MediaFile {
+  "File ID"
+  id: ID!
+
+  "Video resolution (e.g., 1080p)"
+  resolution: String
+
+  "Video codec (e.g., hevc, h264)"
+  codec: String
+
+  "Audio codec (e.g., dts, aac)"
+  audioCodec: String
+
+  "HDR format if applicable (e.g., dolby_vision)"
+  hdrFormat: String
+
+  "File size in bytes"
+  size: Int
+
+  "Bitrate in bits per second"
+  bitrate: Int
+
+  "Whether this file can be direct played (no transcoding needed)"
+  directPlaySupported: Boolean
+
+  "Streaming URL for this file"
+  streamUrl: String
+
+  "Direct play URL (no transcoding)"
+  directPlayUrl: String
+
+  "Available subtitle tracks (embedded and external)"
+  subtitles: [SubtitleTrack]
+}
+
+"User playback progress on a media item or episode"
+type Progress {
+  "Current position in seconds"
+  positionSeconds: Int!
+
+  "Total duration in seconds"
+  durationSeconds: Int
+
+  "Completion percentage (0-100)"
+  percentage: Float
+
+  "Whether marked as watched"
+  watched: Boolean!
+
+  "Last watched timestamp"
+  lastWatchedAt: DateTime
+}
+
+"Input for sorting lists"
+input SortInput {
+  field: SortField
+  direction: SortDirection
+}
+
+"Pagination info for cursor-based pagination"
+type PageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+  endCursor: String
+}
+
+"Search result with relevance score"
+type SearchResult {
+  id: ID!
+
+  type: MediaType!
+
+  title: String!
+
+  year: Int
+
+  artwork: Artwork
+
+  "Relevance score"
+  score: Float
+}
+
+"Search results container"
+type SearchResults {
+  results: [SearchResult!]!
+  totalCount: Int!
+}
+
+"A library path for organizing media"
+type LibraryPath implements Node {
+  id: ID!
+
+  parent: Node
+
+  children(first: Int, after: String): NodeConnection
+
+  ancestors: [Node]
+
+  isPlayable: Boolean!
+
+  "Filesystem path"
+  path: String!
+
+  "Type of content in this library"
+  type: LibraryType!
+
+  "Whether this path is actively monitored"
+  monitored: Boolean!
+
+  "Scan interval in seconds"
+  scanInterval: Int
+
+  "Last scan timestamp"
+  lastScanAt: DateTime
+
+  "Whether auto-organization is enabled"
+  autoOrganize: Boolean!
+
+  "Whether auto-import is enabled"
+  autoImport: Boolean!
+}
+
+"Result of toggling favorite status"
+type ToggleFavoriteResult {
+  "New favorite status"
+  isFavorite: Boolean!
+
+  "ID of the media item"
+  mediaItemId: ID!
+}
+
+"Media access token for direct media requests"
+type MediaToken {
+  "JWT token for media access"
+  token: String!
+
+  "Token expiration timestamp"
+  expiresAt: DateTime!
+
+  "List of granted permissions"
+  permissions: [String!]!
+}
+
+"API key for programmatic access"
+type ApiKey {
+  "API key ID"
+  id: ID!
+
+  "User-given name"
+  name: String!
+
+  "Key prefix for identification"
+  keyPrefix: String!
+
+  "List of granted permissions"
+  permissions: [String!]!
+
+  "Last time the key was used"
+  lastUsedAt: DateTime
+
+  "Optional expiration timestamp"
+  expiresAt: DateTime
+
+  "Revocation timestamp"
+  revokedAt: DateTime
+
+  "Creation timestamp"
+  insertedAt: DateTime!
+}
+
+"Result of creating an API key"
+type CreateApiKeyResult {
+  "The created API key"
+  apiKey: ApiKey!
+
+  "The plain API key (shown only once)"
+  key: String!
+}
+
+"Input for login mutation"
+input LoginInput {
+  "Username or email"
+  username: String!
+
+  "User password"
+  password: String!
+
+  "Unique device identifier"
+  deviceId: String!
+
+  "Human-readable device name"
+  deviceName: String!
+
+  "Platform (ios, android, web)"
+  platform: String!
+}
+
+"Result of login mutation"
+type LoginResult {
+  "JWT authentication token"
+  token: String!
+
+  "Authenticated user information"
+  user: User!
+
+  "Token expiration in seconds"
+  expiresIn: Int!
+}
+
+"User information"
+type User {
+  "User ID"
+  id: ID!
+
+  "Username"
+  username: String
+
+  "Email address"
+  email: String
+
+  "Display name"
+  displayName: String
+}
+
+"A remote device paired to a user account"
+type RemoteDevice {
+  "Device ID"
+  id: ID!
+
+  "Human-readable device name"
+  deviceName: String!
+
+  "Platform (ios, android, web)"
+  platform: String!
+
+  "Last time device was active"
+  lastSeenAt: DateTime
+
+  "Whether device has been revoked"
+  isRevoked: Boolean!
+
+  "When device was paired"
+  createdAt: DateTime!
+}
+
+"Result of revoking a device"
+type RevokeDeviceResult {
+  "Whether the revoke operation succeeded"
+  success: Boolean!
+
+  "The revoked device"
+  device: RemoteDevice
+}
+
+"A pairing claim code for device pairing"
+type ClaimCode {
+  "The claim code (e.g., 'ABC-XYZ')"
+  code: String!
+
+  "When the code expires"
+  expiresAt: DateTime!
+}
+
+"A subtitle track available for a media file"
+type SubtitleTrack {
+  "Track identifier (integer for embedded, UUID for external)"
+  trackId: String!
+
+  "ISO 639-2 language code (e.g., 'eng', 'spa')"
+  language: String!
+
+  "Display title (e.g., 'English', 'Spanish (Forced)')"
+  title: String!
+
+  "Subtitle format (srt, vtt, ass, etc.)"
+  format: String!
+
+  "Whether the subtitle is embedded in the media file"
+  embedded: Boolean!
+
+  "URL to download this subtitle in the requested format"
+  url(format: SubtitleFormat): String
+}
+
+"Media content types"
+enum MediaType {
+  "A movie"
+  MOVIE
+
+  "A TV show"
+  TV_SHOW
+
+  "A TV episode"
+  EPISODE
+}
+
+"Library path type"
+enum LibraryType {
+  "Movie library"
+  MOVIES
+
+  "TV series library"
+  SERIES
+
+  "Mixed content library"
+  MIXED
+
+  "Music library"
+  MUSIC
+
+  "Book library"
+  BOOKS
+
+  "Adult content library"
+  ADULT
+}
+
+"Sort field for media lists"
+enum SortField {
+  "Sort by title"
+  TITLE
+
+  "Sort by date added"
+  ADDED_AT
+
+  "Sort by year"
+  YEAR
+
+  "Sort by rating"
+  RATING
+}
+
+"Sort direction"
+enum SortDirection {
+  "Ascending order"
+  ASC
+
+  "Descending order"
+  DESC
+}
+
+"Media category (auto-classified or user-override)"
+enum MediaCategory {
+  "Standard movie"
+  MOVIE
+
+  "Anime movie"
+  ANIME_MOVIE
+
+  "Animated\/cartoon movie"
+  CARTOON_MOVIE
+
+  "Standard TV show"
+  TV_SHOW
+
+  "Anime series"
+  ANIME_SERIES
+
+  "Animated\/cartoon series"
+  CARTOON_SERIES
+}
+
+"Subtitle format"
+enum SubtitleFormat {
+  "SubRip Text"
+  SRT
+
+  "WebVTT"
+  VTT
+
+  "Advanced SubStation Alpha"
+  ASS
+
+  "SubStation Alpha"
+  SSA
+
+  "Presentation Graphic Stream (image-based)"
+  PGS
+
+  "VobSub (image-based)"
+  VOBSUB
+
+  "Unknown format"
+  UNKNOWN
+}
+
+"""
+The `DateTime` scalar type represents a date and time in the UTC
+timezone. The DateTime appears in a JSON response as an ISO8601 formatted
+string, including UTC timezone ("Z"). The parsed date and time string will
+be converted to UTC if there is an offset.
+"""
+scalar DateTime
+
+"""
+The `Date` scalar type represents a date. The Date appears in a JSON
+response as an ISO8601 formatted string, without a time component.
+"""
+scalar Date

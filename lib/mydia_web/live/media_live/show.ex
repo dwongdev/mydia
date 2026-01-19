@@ -4,6 +4,7 @@ defmodule MydiaWeb.MediaLive.Show do
   alias Mydia.Settings
   alias Mydia.Library
   alias Mydia.Downloads
+  alias Mydia.Collections
   alias Mydia.Indexers.SearchResult
   alias MydiaWeb.Live.Authorization
   alias MydiaWeb.MediaLive.Show.Modals
@@ -121,6 +122,8 @@ defmodule MydiaWeb.MediaLive.Show do
      |> assign(:available_categories, available_categories_for(media_item.type))
      # Trailer modal state
      |> assign(:show_trailer_modal, false)
+     # Collection state
+     |> load_collection_data(media_item)
      |> stream_configure(:search_results, dom_id: &generate_result_id/1)
      |> stream(:search_results, [])}
   end
@@ -1262,6 +1265,94 @@ defmodule MydiaWeb.MediaLive.Show do
     end
   end
 
+  # Collection event handlers
+
+  def handle_event("toggle_favorite", _params, socket) do
+    user = socket.assigns.current_scope.user
+    media_item = socket.assigns.media_item
+
+    case Collections.toggle_favorite(user, media_item.id) do
+      {:ok, :added} ->
+        {:noreply,
+         socket
+         |> assign(:is_favorite, true)
+         |> load_collection_data(media_item)
+         |> put_flash(:info, "Added to Favorites")}
+
+      {:ok, :removed} ->
+        {:noreply,
+         socket
+         |> assign(:is_favorite, false)
+         |> load_collection_data(media_item)
+         |> put_flash(:info, "Removed from Favorites")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to update favorites")}
+    end
+  end
+
+  def handle_event("open_add_to_collection_modal", _params, socket) do
+    {:noreply, assign(socket, :show_add_to_collection_modal, true)}
+  end
+
+  def handle_event("close_add_to_collection_modal", _params, socket) do
+    {:noreply, assign(socket, :show_add_to_collection_modal, false)}
+  end
+
+  def handle_event("add_to_collection", %{"collection-id" => collection_id}, socket) do
+    user = socket.assigns.current_scope.user
+    media_item = socket.assigns.media_item
+
+    case Collections.get_collection(user, collection_id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Collection not found")}
+
+      collection ->
+        case Collections.add_item(collection, media_item.id) do
+          {:ok, _item} ->
+            {:noreply,
+             socket
+             |> load_collection_data(media_item)
+             |> assign(:show_add_to_collection_modal, false)
+             |> put_flash(:info, "Added to #{collection.name}")}
+
+          {:error, :smart_collection} ->
+            {:noreply, put_flash(socket, :error, "Cannot add items to smart collections")}
+
+          {:error, _reason} ->
+            {:noreply, put_flash(socket, :error, "Failed to add to collection")}
+        end
+    end
+  end
+
+  def handle_event("remove_from_collection", %{"collection-id" => collection_id}, socket) do
+    user = socket.assigns.current_scope.user
+    media_item = socket.assigns.media_item
+
+    case Collections.get_collection(user, collection_id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Collection not found")}
+
+      collection ->
+        case Collections.remove_item(collection, media_item.id) do
+          {:ok, _item} ->
+            {:noreply,
+             socket
+             |> load_collection_data(media_item)
+             |> put_flash(:info, "Removed from #{collection.name}")}
+
+          {:error, :smart_collection} ->
+            {:noreply, put_flash(socket, :error, "Cannot remove items from smart collections")}
+
+          {:error, :not_found} ->
+            {:noreply, put_flash(socket, :error, "Item not in collection")}
+
+          {:error, _reason} ->
+            {:noreply, put_flash(socket, :error, "Failed to remove from collection")}
+        end
+    end
+  end
+
   # Private helpers for monitoring presets
   defp monitoring_preset_label(:all), do: "All Episodes"
   defp monitoring_preset_label(:future), do: "Future Episodes"
@@ -1424,16 +1515,23 @@ defmodule MydiaWeb.MediaLive.Show do
     media_item = socket.assigns.media_item
     quality_profile = media_item.quality_profile
     media_type = get_media_type(media_item)
+    search_query = socket.assigns.manual_search_query
 
     filtered_results = filter_search_results(results, socket.assigns)
 
     sorted_results =
-      sort_search_results(filtered_results, socket.assigns.sort_by, quality_profile, media_type)
+      sort_search_results(
+        filtered_results,
+        socket.assigns.sort_by,
+        quality_profile,
+        media_type,
+        search_query
+      )
 
     duration = System.monotonic_time(:millisecond) - start_time
 
     Logger.info(
-      "Search completed: query=\"#{socket.assigns.manual_search_query}\", " <>
+      "Search completed: query=\"#{search_query}\", " <>
         "results=#{length(results)}, filtered=#{length(filtered_results)}, " <>
         "processing_time=#{duration}ms"
     )
@@ -1857,4 +1955,19 @@ defmodule MydiaWeb.MediaLive.Show do
   defp category_display_name(:anime_series), do: "Anime Series"
   defp category_display_name(:cartoon_series), do: "Cartoon Series"
   defp category_display_name(cat), do: to_string(cat)
+
+  # Collection helpers
+
+  defp load_collection_data(socket, media_item) do
+    user = socket.assigns.current_scope.user
+    is_favorite = Collections.is_favorite?(user, media_item.id)
+    item_collections = Collections.collections_for_item(user, media_item.id)
+    user_collections = Collections.list_collections(user, type: "manual", include_shared: false)
+
+    socket
+    |> assign(:is_favorite, is_favorite)
+    |> assign(:item_collections, item_collections)
+    |> assign(:user_collections, user_collections)
+    |> assign(:show_add_to_collection_modal, false)
+  end
 end

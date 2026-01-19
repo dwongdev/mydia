@@ -1,0 +1,8 @@
+# App Store Connect App Identifier
+app_identifier("dev.mydia.player")
+
+# Apple Developer Portal Team ID
+# team_id("XXXXXXXXXX")
+
+# App Store Connect Team ID (if different from Developer Portal)
+# itc_team_id("XXXXXXXXXX")

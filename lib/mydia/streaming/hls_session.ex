@@ -3,9 +3,9 @@ defmodule Mydia.Streaming.HlsSession do
   GenServer managing individual HLS transcoding sessions.
 
   Each session represents a single user streaming a specific media file.
-  The session starts an FFmpeg transcoding backend to transcode
-  the file on-demand, manages temporary storage for HLS segments, and
-  automatically terminates after a period of inactivity.
+  The session starts FFmpeg to transcode the file on-demand, manages
+  temporary storage for HLS segments, and automatically terminates after
+  a period of inactivity.
 
   ## Lifecycle
 
@@ -33,6 +33,8 @@ defmodule Mydia.Streaming.HlsSession do
 
   alias Mydia.Library
   alias Mydia.Streaming.FfmpegHlsTranscoder
+  alias Mydia.Repo
+  alias Mydia.Downloads.TranscodeJob
 
   # Get session timeout and temp dir from config or use defaults
   # Default timeout is 10 minutes - sessions are kept alive via heartbeats during active playback
@@ -50,12 +52,16 @@ defmodule Mydia.Streaming.HlsSession do
       :media_file,
       :media_file_id,
       :user_id,
+      :mode,
       :backend,
       :backend_pid,
       :temp_dir,
       :last_activity,
       :timeout_ref,
-      :playlist_path
+      :playlist_path,
+      :db_job_id,
+      ready: false,
+      ready_waiters: []
     ]
 
     @type t :: %__MODULE__{
@@ -63,12 +69,16 @@ defmodule Mydia.Streaming.HlsSession do
             media_file: Mydia.Library.MediaFile.t(),
             media_file_id: integer(),
             user_id: integer(),
+            mode: :copy | :transcode,
             backend: :ffmpeg,
             backend_pid: pid() | nil,
             temp_dir: String.t(),
             last_activity: DateTime.t(),
             timeout_ref: reference() | nil,
-            playlist_path: String.t() | nil
+            playlist_path: String.t() | nil,
+            db_job_id: binary() | nil,
+            ready: boolean(),
+            ready_waiters: list()
           }
   end
 
@@ -135,6 +145,29 @@ defmodule Mydia.Streaming.HlsSession do
     GenServer.stop(pid, :normal)
   end
 
+  @doc """
+  Waits for the session to be ready (FFmpeg has written the first playlist).
+
+  Returns `:ok` when ready, or `{:error, :timeout}` if the timeout is reached.
+  Default timeout is 30 seconds.
+  """
+  @spec await_ready(pid(), timeout()) :: :ok | {:error, :timeout}
+  def await_ready(pid, timeout \\ 30_000) do
+    GenServer.call(pid, :await_ready, timeout)
+  catch
+    :exit, {:timeout, _} -> {:error, :timeout}
+  end
+
+  @doc """
+  Notifies the session that FFmpeg has written the first playlist.
+
+  This is called by the FFmpeg transcoder when it detects the playlist file.
+  """
+  @spec notify_ready(pid()) :: :ok
+  def notify_ready(pid) do
+    GenServer.cast(pid, :notify_ready)
+  end
+
   ## Server Callbacks
 
   @impl true
@@ -142,6 +175,7 @@ defmodule Mydia.Streaming.HlsSession do
     media_file_id = Keyword.fetch!(opts, :media_file_id)
     user_id = Keyword.fetch!(opts, :user_id)
     registry_key = Keyword.fetch!(opts, :registry_key)
+    mode = Keyword.get(opts, :mode, :transcode)
 
     # Load media file with metadata
     try do
@@ -155,6 +189,7 @@ defmodule Mydia.Streaming.HlsSession do
         %{
           media_file_id: media_file_id,
           user_id: user_id,
+          mode: mode,
           started_at: DateTime.utc_now()
         }
       )
@@ -180,11 +215,32 @@ defmodule Mydia.Streaming.HlsSession do
             "Starting HLS session #{session_id} for media file #{media_file_id}, user #{user_id}"
           )
 
+          # Create DB record for the unified queue
+          {:ok, job} =
+            %TranscodeJob{}
+            |> TranscodeJob.changeset(%{
+              media_file_id: media_file_id,
+              user_id: user_id,
+              type: "stream",
+              status: "transcoding",
+              # Informational only
+              resolution:
+                if(media_file.resolution in ["1080p", "720p", "480p"],
+                  do: media_file.resolution,
+                  else: "original"
+                ),
+              progress: 0.0,
+              started_at: DateTime.utc_now()
+            })
+            |> Repo.insert()
+
+          Mydia.Downloads.broadcast_job_update(job.id)
+
           Logger.info("Temp directory: #{temp_dir}")
           Logger.info("Starting HLS transcoding with FFmpeg backend")
 
           # Start FFmpeg backend
-          case start_backend(:ffmpeg, media_file, temp_dir) do
+          case start_backend(:ffmpeg, media_file, temp_dir, job.id) do
             {:ok, backend_pid} ->
               # Link to backend process so we terminate if it crashes
               Process.link(backend_pid)
@@ -194,14 +250,18 @@ defmodule Mydia.Streaming.HlsSession do
                 media_file: media_file,
                 media_file_id: media_file_id,
                 user_id: user_id,
+                mode: mode,
                 backend: :ffmpeg,
                 backend_pid: backend_pid,
                 temp_dir: temp_dir,
-                last_activity: DateTime.utc_now()
+                last_activity: DateTime.utc_now(),
+                db_job_id: job.id
               }
 
               # Schedule initial timeout check
               state = schedule_timeout_check(state)
+
+              Phoenix.PubSub.broadcast(Mydia.PubSub, "hls_sessions", :session_started)
 
               {:ok, state}
 
@@ -233,6 +293,7 @@ defmodule Mydia.Streaming.HlsSession do
     info = %{
       session_id: state.session_id,
       media_file_id: state.media_file_id,
+      mode: state.mode,
       backend: state.backend,
       temp_dir: state.temp_dir,
       last_activity: state.last_activity,
@@ -246,6 +307,16 @@ defmodule Mydia.Streaming.HlsSession do
     {:reply, {:ok, state.playlist_path}, state}
   end
 
+  def handle_call(:await_ready, _from, %{ready: true} = state) do
+    # Already ready, reply immediately
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:await_ready, from, state) do
+    # Not ready yet, add to waiters list (we'll reply when ready)
+    {:noreply, %{state | ready_waiters: [from | state.ready_waiters]}}
+  end
+
   @impl true
   def handle_cast(:heartbeat, state) do
     state = update_activity(state)
@@ -254,6 +325,28 @@ defmodule Mydia.Streaming.HlsSession do
 
   def handle_cast({:cache_playlist_path, path}, state) do
     {:noreply, %{state | playlist_path: path}}
+  end
+
+  def handle_cast(:notify_ready, %{ready: true} = state) do
+    # Already notified, ignore duplicate
+    {:noreply, state}
+  end
+
+  def handle_cast(:notify_ready, state) do
+    Logger.info("Session #{state.session_id} is ready (playlist available)")
+
+    # Reply to all waiters, catching failures if waiter processes have terminated
+    Enum.each(state.ready_waiters, fn from ->
+      try do
+        GenServer.reply(from, :ok)
+      catch
+        :exit, _ ->
+          # Waiter process has terminated, ignore
+          :ok
+      end
+    end)
+
+    {:noreply, %{state | ready: true, ready_waiters: []}}
   end
 
   @impl true
@@ -287,6 +380,20 @@ defmodule Mydia.Streaming.HlsSession do
   def terminate(reason, state) do
     Logger.info("Terminating HLS session #{state.session_id}, reason: #{inspect(reason)}")
 
+    Phoenix.PubSub.broadcast(Mydia.PubSub, "hls_sessions", :session_ended)
+
+    # Remove the job from the database
+    if state.db_job_id do
+      case Repo.get(TranscodeJob, state.db_job_id) do
+        nil ->
+          :ok
+
+        job ->
+          Repo.delete(job)
+          Mydia.Downloads.broadcast_job_update(job.id)
+      end
+    end
+
     # Stop the backend if it's still running
     if state.backend_pid && Process.alive?(state.backend_pid) do
       stop_backend(state.backend, state.backend_pid)
@@ -307,15 +414,47 @@ defmodule Mydia.Streaming.HlsSession do
   ## Private Functions
 
   # Start FFmpeg backend
-  defp start_backend(:ffmpeg, media_file, temp_dir) do
+  defp start_backend(:ffmpeg, media_file, temp_dir, job_id) do
     # Resolve absolute path for FFmpeg input
     absolute_path = Mydia.Library.MediaFile.absolute_path(media_file)
     Logger.info("Starting FFmpeg backend for #{absolute_path}")
+
+    # Capture self() to notify when FFmpeg is ready
+    session_pid = self()
 
     case FfmpegHlsTranscoder.start_transcoding(
            input_path: absolute_path,
            output_dir: temp_dir,
            media_file: media_file,
+           on_ready: fn ->
+             __MODULE__.notify_ready(session_pid)
+           end,
+           on_progress: fn progress ->
+             # Update DB job progress
+             # We spin up a separate task or just cast to self to avoid blocking the transcoder loop?
+             # Actually, FfmpegHlsTranscoder runs in its own process, so this callback runs in that process context.
+             # Updating Repo directly here is fine, but cleaner to cast to session if we want to centralize.
+             # But direct DB update is simpler for now.
+             if progress[:percentage] do
+               # Convert percentage 0-100 to float 0.0-1.0
+               normalized_progress = progress.percentage / 100.0
+               # Clamp to 0.99 for streaming (it's never fully "done" until stream ends)
+               normalized_progress = min(normalized_progress, 0.99)
+
+               # Fire and forget update to avoid bottleneck
+               Task.start(fn ->
+                 Mydia.Downloads.TranscodeJob
+                 |> Repo.get(job_id)
+                 |> case do
+                   nil ->
+                     :ok
+
+                   job ->
+                     Mydia.Downloads.update_job_progress(job, normalized_progress)
+                 end
+               end)
+             end
+           end,
            on_complete: fn ->
              Logger.info("FFmpeg transcoding completed for #{absolute_path}")
            end,
@@ -331,10 +470,20 @@ defmodule Mydia.Streaming.HlsSession do
     end
   end
 
+  defp start_backend(backend, _media_file, _temp_dir, _job_id) do
+    Logger.error("Unknown backend: #{backend}")
+    {:error, :unknown_backend}
+  end
+
   # Stop the backend process
   defp stop_backend(:ffmpeg, backend_pid) do
     Logger.info("Stopping FFmpeg backend")
     FfmpegHlsTranscoder.stop_transcoding(backend_pid)
+  end
+
+  defp stop_backend(backend, _backend_pid) do
+    Logger.warning("Unknown backend to stop: #{backend}")
+    :ok
   end
 
   defp generate_session_id do

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: metadata-relay-data
+  namespace: metadata-relay
+  labels:
+    app.kubernetes.io/name: metadata-relay
+    app.kubernetes.io/component: relay-service
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi

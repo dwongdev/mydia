@@ -12,6 +12,22 @@ Mydia is a self-hosted media management application for organizing and tracking 
 
 The application is designed to be deployed on personal servers or home lab environments, giving users complete control over their media collection data.
 
+## Remote Access Architecture (Libp2p)
+
+Mydia uses a decentralized **libp2p** architecture for remote access.
+
+### Key Components
+
+- **Core (Rust)**: The shared networking logic (Host, Swarm, DHT, mDNS) is implemented in a pure Rust crate (`native/mydia_p2p_core`). This ensures protocol parity between client and server.
+- **Backend (Elixir)**: The Phoenix app wraps the core crate using a Rustler NIF (`Mydia.Libp2p`). It acts as a permanent node in the mesh.
+- **Frontend (Flutter)**: The player app wraps the same core crate using `flutter_rust_bridge`. It connects to the backend via the p2p mesh for discovery and control.
+
+### Connectivity
+
+- **Discovery**: Nodes find each other via mDNS (local network) and Kademlia DHT (internet).
+- **Transport**: Connections are established over TCP or QUIC, secured with Noise encryption.
+- **Media**: Media streams (HLS) are served over the libp2p connection (via a local proxy in the client).
+
 ## Metadata Relay Service
 
 Mydia uses a companion service called **metadata-relay**, which is a developer-owned service that:
@@ -34,6 +50,30 @@ Mydia uses a companion service called **metadata-relay**, which is a developer-o
 - **Never** embed TVDB or TMDB API keys directly in the mydia application
 - Configure the metadata-relay base URL via application configuration
 - Handle metadata-relay service failures gracefully with appropriate error messages
+
+## Player (Flutter)
+
+The Flutter player has additional workflow guidance in `player/CLAUDE.md`.
+
+### Player Android Builds
+
+Android builds use the player's Nix flake (`player/flake.nix`) which provides Flutter, Android SDK, NDK, and Rust cross-compilation toolchains.
+
+**Commands:**
+
+- `./dev player android build` - Build release APK
+- `./dev player android run` - Build and run on connected Android device
+- `./dev player android shell` - Open nix develop shell for manual commands
+
+**Output:** `player/build/app/outputs/flutter-apk/app-release.apk`
+
+**Requirements:** Nix must be installed on the host system (not Docker).
+
+**What the flake provides:**
+- Flutter SDK
+- Android SDK with NDK 27.0.12077973
+- Rust toolchain with Android targets (aarch64, armv7, x86_64, i686)
+- All necessary environment variables for Rust cross-compilation
 
 ## Project guidelines
 
@@ -582,33 +622,3 @@ And **never** do this:
 <!-- phoenix:liveview-end -->
 
 <!-- usage-rules-end -->
-
-<!-- BACKLOG.MD MCP GUIDELINES START -->
-
-<CRITICAL_INSTRUCTION>
-
-## BACKLOG WORKFLOW INSTRUCTIONS
-
-This project uses Backlog.md MCP for all task and project management activities.
-
-**CRITICAL GUIDANCE**
-
-- If your client supports MCP resources, read `backlog://workflow/overview` to understand when and how to use Backlog for this project.
-- If your client only supports tools or the above request fails, call `backlog.get_workflow_overview()` tool to load the tool-oriented overview (it lists the matching guide tools).
-
-- **First time working here?** Read the overview resource IMMEDIATELY to learn the workflow
-- **Already familiar?** You should have the overview cached ("## Backlog.md Overview (MCP)")
-- **When to read it**: BEFORE creating tasks, or when you're unsure whether to track work
-
-These guides cover:
-
-- Decision framework for when to create tasks
-- Search-first workflow to avoid duplicates
-- Links to detailed guides for task creation, execution, and completion
-- MCP tools reference
-
-You MUST read the overview resource to understand the complete workflow. The information is NOT summarized here.
-
-</CRITICAL_INSTRUCTION>
-
-<!-- BACKLOG.MD MCP GUIDELINES END -->

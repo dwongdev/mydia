@@ -42,8 +42,9 @@ defmodule Mydia.Config.Schema do
     end
 
     embeds_one :media, Media, on_replace: :update, primary_key: false do
-      field :movies_path, :string, default: "/media/movies"
-      field :tv_path, :string, default: "/media/tv"
+      # Legacy paths - prefer LIBRARY_PATH_* env vars instead
+      field :movies_path, :string
+      field :tv_path, :string
       field :movies_auto_organize, :boolean, default: false
       field :tv_auto_organize, :boolean, default: false
       field :scan_interval_hours, :integer, default: 1
@@ -220,7 +221,7 @@ defmodule Mydia.Config.Schema do
       :season_refresh_threshold_hours,
       :completed_show_refresh_threshold_hours
     ])
-    |> validate_required([:movies_path, :tv_path])
+    # movies_path and tv_path are optional legacy fields
     |> validate_number(:scan_interval_hours, greater_than: 0)
     |> validate_number(:season_refresh_threshold_hours, greater_than: 0)
     |> validate_number(:completed_show_refresh_threshold_hours, greater_than: 0)

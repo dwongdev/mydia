@@ -14,6 +14,20 @@ defmodule MydiaWeb.Router do
   pipeline :api do
     plug :accepts, ["json"]
     plug :fetch_session
+    plug MydiaWeb.Plugs.RelayDeviceAuth
+  end
+
+  # Base graphql pipeline - authentication handled separately
+  pipeline :graphql do
+    plug :accepts, ["json"]
+    plug :fetch_session
+    plug MydiaWeb.Plugs.RelayDeviceAuth
+  end
+
+  # Builds Absinthe context after authentication
+  # Must run AFTER api_auth so Guardian has the current_user
+  pipeline :graphql_context do
+    plug MydiaWeb.Plugs.AbsintheContext
   end
 
   # Authentication pipeline - verifies JWT tokens from session or header
@@ -35,6 +49,16 @@ defmodule MydiaWeb.Router do
   pipeline :api_auth do
     plug MydiaWeb.Plugs.AuthPipeline
     plug MydiaWeb.Plugs.ApiAuth
+    # Also accept media tokens from remote devices for direct GraphQL requests
+    plug MydiaWeb.Plugs.MediaAuth
+  end
+
+  # Media API authentication pipeline - supports JWT, API keys, and media tokens
+  # Used for streaming endpoints that need to accept media tokens from remote devices
+  pipeline :media_api_auth do
+    plug MydiaWeb.Plugs.AuthPipeline
+    plug MydiaWeb.Plugs.ApiAuth
+    plug MydiaWeb.Plugs.MediaAuth, permissions: ["stream"]
   end
 
   # Health check endpoint (no authentication required)
@@ -72,6 +96,14 @@ defmodule MydiaWeb.Router do
     get "/logout", AuthController, :logout
   end
 
+  # Flutter player web app (authenticated)
+  scope "/", MydiaWeb do
+    pipe_through [:browser, :auth, :require_authenticated]
+
+    get "/player", PlayerController, :index
+    get "/player/*path", PlayerController, :index
+  end
+
   # Authenticated LiveView routes
   scope "/", MydiaWeb do
     pipe_through [:browser, :auth, :require_authenticated]
@@ -106,6 +138,10 @@ defmodule MydiaWeb.Router do
       live "/calendar", CalendarLive.Index, :index
       live "/activity", ActivityLive.Index, :index
 
+      # Collections
+      live "/collections", CollectionLive.Index, :index
+      live "/collections/:id", CollectionLive.Show, :show
+
       # Playback routes
       live "/play/:type/:id", PlaybackLive.Show, :show
       get "/covers/:id", CoverController, :show
@@ -139,8 +175,10 @@ defmodule MydiaWeb.Router do
       live "/config", AdminConfigLive.Index, :index
       live "/import-lists", AdminImportListsLive.Index, :index
       live "/jobs", JobsLive.Index, :index
+      live "/transcodes", TranscodesLive.Index, :index
       live "/requests", AdminRequestsLive.Index, :index
       live "/users", AdminUsersLive.Index, :index
+      live "/devices", AdminDevicesLive.Index, :index
     end
   end
 
@@ -171,13 +209,6 @@ defmodule MydiaWeb.Router do
     get "/media/:id", MediaController, :show
     post "/media/:id/match", MediaController, :match
 
-    # Streaming
-    get "/stream/movie/:id", StreamController, :stream_movie
-    get "/stream/episode/:id", StreamController, :stream_episode
-    get "/stream/file/:id", StreamController, :stream
-    get "/stream/:id", StreamController, :stream
-    get "/stream/:content_type/:id/candidates", StreamController, :candidates
-
     # Playback progress
     get "/playback/movie/:id", PlaybackController, :show_movie
     get "/playback/episode/:id", PlaybackController, :show_episode
@@ -185,6 +216,30 @@ defmodule MydiaWeb.Router do
     post "/playback/movie/:id", PlaybackController, :update_movie
     post "/playback/episode/:id", PlaybackController, :update_episode
     post "/playback/file/:id", PlaybackController, :update_file
+
+    # Thumbnails
+    get "/media/:id/thumbnails.vtt", ThumbnailController, :show_vtt
+    get "/media/:id/thumbnails.jpg", ThumbnailController, :show_sprite
+
+    # Media downloads
+    get "/download/:content_type/:id/options", DownloadController, :options
+    post "/download/:content_type/:id/prepare", DownloadController, :prepare
+    get "/download/job/:job_id/status", DownloadController, :job_status
+    delete "/download/job/:job_id", DownloadController, :cancel_job
+    get "/download/job/:job_id/file", DownloadController, :download_file
+  end
+
+  # Streaming routes - supports JWT, API keys, and media tokens (for remote devices)
+  # Media tokens allow remote devices to stream content via direct HTTP requests
+  scope "/api/v1", MydiaWeb.Api do
+    pipe_through [:api, :media_api_auth, :require_authenticated]
+
+    # Streaming
+    get "/stream/movie/:id", StreamController, :stream_movie
+    get "/stream/episode/:id", StreamController, :stream_episode
+    get "/stream/file/:id", StreamController, :stream
+    get "/stream/:id", StreamController, :stream
+    get "/stream/:content_type/:id/candidates", StreamController, :candidates
 
     # HLS streaming
     post "/hls/start", HlsController, :start_session
@@ -206,6 +261,40 @@ defmodule MydiaWeb.Router do
     put "/config/:key", ConfigController, :update
     delete "/config/:key", ConfigController, :delete
     post "/config/test-connection", ConfigController, :test_connection
+  end
+
+  # GraphQL API - authentication handled at resolver level
+  # The :api_auth pipeline populates current_user if a valid JWT/API key is provided
+  # Individual resolvers check for authentication and return :unauthorized if needed
+  scope "/api/graphql" do
+    pipe_through [:graphql, :api_auth, :graphql_context]
+
+    forward "/", Absinthe.Plug,
+      schema: MydiaWeb.Schema,
+      analyze_complexity: true,
+      max_complexity: 200
+  end
+
+  # GraphiQL interface for development
+  if Application.compile_env(:mydia, :dev_routes) do
+    scope "/api" do
+      pipe_through [:graphql, :api_auth, :graphql_context]
+
+      forward "/graphiql", Absinthe.Plug.GraphiQL,
+        schema: MydiaWeb.Schema,
+        interface: :playground
+    end
+  end
+
+  # Player API routes - authenticated with JWT or API key
+  # Note: Browse, discover, and search endpoints have been migrated to GraphQL.
+  # Only subtitle streaming endpoints remain here (serving actual subtitle files).
+  scope "/api/player/v1", MydiaWeb.Api.Player.V1 do
+    pipe_through [:api, :api_auth, :require_authenticated]
+
+    # Subtitles - serves actual subtitle files (URLs provided by GraphQL)
+    get "/subtitles/:type/:id", SubtitleController, :index
+    get "/subtitles/:type/:id/:track", SubtitleController, :show
   end
 
   # Enable LiveDashboard in development

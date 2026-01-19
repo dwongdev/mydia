@@ -32,9 +32,16 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpers do
     media_item = socket.assigns.media_item
     quality_profile = media_item.quality_profile
     media_type = get_media_type(media_item)
+    search_query = Map.get(socket.assigns, :manual_search_query)
 
     sorted_results =
-      sort_search_results(filtered_results, socket.assigns.sort_by, quality_profile, media_type)
+      sort_search_results(
+        filtered_results,
+        socket.assigns.sort_by,
+        quality_profile,
+        media_type,
+        search_query
+      )
 
     socket
     |> Phoenix.Component.assign(:results_empty?, sorted_results == [])
@@ -48,9 +55,16 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpers do
     media_item = socket.assigns.media_item
     quality_profile = media_item.quality_profile
     media_type = get_media_type(media_item)
+    search_query = Map.get(socket.assigns, :manual_search_query)
 
     sorted_results =
-      sort_search_results(filtered_results, socket.assigns.sort_by, quality_profile, media_type)
+      sort_search_results(
+        filtered_results,
+        socket.assigns.sort_by,
+        quality_profile,
+        media_type,
+        search_query
+      )
 
     socket
     |> Phoenix.LiveView.stream(:search_results, sorted_results, reset: true)
@@ -89,28 +103,47 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpers do
   defp normalize_resolution("4k"), do: "4k"
   defp normalize_resolution(res), do: String.downcase(res)
 
-  def sort_search_results(results, sort_by, quality_profile \\ nil, media_type \\ :movie)
+  @doc """
+  Sort search results by the specified criteria.
 
-  def sort_search_results(results, :quality, quality_profile, media_type) do
-    # Sort by profile-based quality score if profile exists, then by seeders
+  ## Options
+
+  - `sort_by` - The sorting criteria (`:quality`, `:seeders`, `:size`, `:date`)
+  - `quality_profile` - The quality profile to use for scoring (optional)
+  - `media_type` - The media type for profile scoring (`:movie` or `:episode`)
+  - `search_query` - The original search query for title relevance scoring (optional)
+  """
+  def sort_search_results(
+        results,
+        sort_by,
+        quality_profile \\ nil,
+        media_type \\ :movie,
+        search_query \\ nil
+      )
+
+  def sort_search_results(results, :quality, quality_profile, media_type, search_query) do
+    # Sort by profile-based quality score + title relevance, then by seeders
     results
     |> Enum.sort_by(
       fn result ->
-        {profile_score(result, quality_profile, media_type), result.seeders}
+        base_score = profile_score(result, quality_profile, media_type)
+        title_bonus = title_relevance_bonus(result.title, search_query)
+        # Title bonus contributes up to 20 points on top of the 0-100 profile score
+        {base_score + title_bonus, result.seeders}
       end,
       :desc
     )
   end
 
-  def sort_search_results(results, :seeders, _quality_profile, _media_type) do
+  def sort_search_results(results, :seeders, _quality_profile, _media_type, _search_query) do
     Enum.sort_by(results, & &1.seeders, :desc)
   end
 
-  def sort_search_results(results, :size, _quality_profile, _media_type) do
+  def sort_search_results(results, :size, _quality_profile, _media_type, _search_query) do
     Enum.sort_by(results, & &1.size, :desc)
   end
 
-  def sort_search_results(results, :date, _quality_profile, _media_type) do
+  def sort_search_results(results, :date, _quality_profile, _media_type, _search_query) do
     Enum.sort_by(
       results,
       fn result ->
@@ -121,6 +154,88 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpers do
       end,
       {:desc, DateTime}
     )
+  end
+
+  # Calculate title relevance bonus (0-20 points)
+  # Penalizes results with extra unrelated words in the title
+  defp title_relevance_bonus(_title, nil), do: 0
+  defp title_relevance_bonus(_title, ""), do: 0
+
+  defp title_relevance_bonus(title, search_query) do
+    query_words = normalize_to_words(search_query)
+    title_words = normalize_to_words(title)
+
+    if query_words == [] do
+      0
+    else
+      # Count matched words
+      matched_words =
+        Enum.count(query_words, fn query_word ->
+          Enum.any?(title_words, fn title_word ->
+            title_word == query_word or
+              String.starts_with?(title_word, query_word) or
+              String.starts_with?(query_word, title_word)
+          end)
+        end)
+
+      match_ratio = matched_words / length(query_words)
+
+      # Check if title starts with the query (significant word match)
+      significant_query = filter_common_words(query_words)
+      significant_title = filter_common_words(title_words)
+
+      starts_with_bonus =
+        case {significant_query, significant_title} do
+          {[first_q | _], [first_t | _]} when first_q == first_t -> 5
+          _ -> 0
+        end
+
+      # Penalty for extra unrelated words (not in query, not quality/episode markers)
+      extra_words =
+        title_words
+        |> Enum.reject(&Enum.member?(query_words, &1))
+        |> Enum.reject(&quality_or_episode_word?/1)
+        |> length()
+
+      # More extra words = bigger penalty (max -10 points)
+      extra_penalty = min(extra_words * 2, 10)
+
+      # Base bonus (up to 15 points based on match ratio) + starts_with - penalty
+      base_bonus = round(match_ratio * 15)
+      max(0, base_bonus + starts_with_bonus - extra_penalty)
+    end
+  end
+
+  defp normalize_to_words(text) do
+    text
+    |> String.downcase()
+    |> String.replace(~r/[._\-]/, " ")
+    |> String.split(~r/\s+/, trim: true)
+    |> Enum.filter(&(&1 != ""))
+  end
+
+  defp filter_common_words(words) do
+    common = ~w(the a an of and or in on at to for)
+    Enum.reject(words, &Enum.member?(common, &1))
+  end
+
+  defp quality_or_episode_word?(word) do
+    quality_words = ~w(
+      2160p 1080p 720p 480p 4k uhd hd sd
+      x264 x265 h264 h265 hevc avc av1
+      bluray bdrip brrip webrip webdl web hdtv hdrip dvdrip
+      remux proper repack
+      dts atmos truehd dolby aac ac3 flac ddp ddp5
+      hdr hdr10 dolbyvision dv
+      nf amzn atvp
+    )
+
+    episode_pattern = ~r/^(s\d+e?\d*|e\d+|\d{3,4}p)$/i
+    year_pattern = ~r/^(19|20)\d{2}$/
+
+    Enum.member?(quality_words, word) or
+      String.match?(word, episode_pattern) or
+      String.match?(word, year_pattern)
   end
 
   defp quality_score(%SearchResult{quality: nil}), do: 0

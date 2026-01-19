@@ -1,0 +1,1091 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "rich>=13.0",
+#     "httpx>=0.27",
+#     "ovh>=1.2",
+#     "pyyaml>=6.0",
+# ]
+# ///
+"""
+Idempotent deployment script for metadata-relay infrastructure on OVHcloud.
+
+Usage:
+    ./infra/deploy                      # Full deployment
+    ./infra/deploy --phase vps          # Only VPS provisioning
+    ./infra/deploy --phase kubernetes   # Only kubernetes setup
+    ./infra/deploy --skip vps           # Skip VPS (already exists)
+    ./infra/deploy --dry-run            # Show what would happen
+    ./infra/deploy --status             # Show current VPS status
+
+Prerequisites:
+    1. Create OVH API credentials at: https://api.us.ovhcloud.com/createToken/
+       - Required permissions: GET/POST/PUT on /vps/*, /order/*, /me/*
+    2. Create config file at ~/.config/ovh.conf or ./ovh.conf
+    3. Create Cloudflare API token with Zone:DNS:Edit permission
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import subprocess
+import sys
+import time
+import secrets
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Any
+
+import httpx
+import ovh
+import yaml
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
+
+# Constants
+INFRA_DIR = Path(__file__).parent
+KUBERNETES_DIR = INFRA_DIR / "kubernetes"
+CONFIG_FILE = INFRA_DIR / "config.yaml"
+
+CERT_MANAGER_VERSION = "v1.14.4"
+ARGOCD_VERSION = "7.3.11"
+EXTERNAL_DNS_VERSION = "1.14.4"
+
+# OVH VPS Configuration
+VPS_PLAN = "vps-le-1"  # VPS LE 1: 4 vCPU, 8GB RAM, $4.20/mo
+VPS_DATACENTER = "SBG"  # Strasbourg, France
+VPS_OS = "ubuntu2404-server_64"  # Ubuntu 24.04 LTS
+
+console = Console()
+
+
+class Phase(Enum):
+    VPS = "vps"
+    KUBECONFIG = "kubeconfig"
+    KUBERNETES = "kubernetes"
+    APP = "app"
+    VERIFY = "verify"
+
+
+@dataclass
+class Config:
+    """Deployment configuration."""
+
+    # Cloudflare
+    cloudflare_api_token: str
+    cloudflare_zone_id: str
+
+    # Domain
+    domain_name: str = "mydia.dev"
+    relay_subdomain: str = "relay"
+    argocd_subdomain: str = "argocd"
+
+    # Application secrets
+    relay_secret_key_base: str = ""
+    relay_tvdb_api_key: str = ""
+    relay_tmdb_api_key: str = ""
+    turn_secret: str = ""  # For integrated TURN server
+
+    # VPS
+    vps_name: str = ""  # Populated after VPS is ordered/found
+    vps_ip: str = ""  # Populated after VPS is ordered/found
+    ssh_public_key_path: str = "~/.ssh/id_ed25519.pub"
+
+    @property
+    def relay_fqdn(self) -> str:
+        return f"{self.relay_subdomain}.{self.domain_name}"
+
+    @property
+    def argocd_fqdn(self) -> str:
+        return f"{self.argocd_subdomain}.{self.domain_name}"
+
+    @property
+    def ssh_public_key(self) -> str:
+        path = Path(self.ssh_public_key_path).expanduser()
+        if path.exists():
+            return path.read_text().strip()
+        return ""
+
+    @classmethod
+    def load(cls, path: Path) -> Config:
+        """Load configuration from YAML file."""
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Config file not found at {path}\n"
+                f"Create it from config.yaml.example"
+            )
+
+        with open(path) as f:
+            data = yaml.safe_load(f)
+
+        return cls(**data)
+
+    def save(self, path: Path) -> None:
+        """Save configuration to YAML file."""
+        data = {
+            "cloudflare_api_token": self.cloudflare_api_token,
+            "cloudflare_zone_id": self.cloudflare_zone_id,
+            "domain_name": self.domain_name,
+            "relay_subdomain": self.relay_subdomain,
+            "argocd_subdomain": self.argocd_subdomain,
+            "relay_secret_key_base": self.relay_secret_key_base,
+            "relay_tvdb_api_key": self.relay_tvdb_api_key,
+            "relay_tmdb_api_key": self.relay_tmdb_api_key,
+            "turn_secret": self.turn_secret,
+            "vps_name": self.vps_name,
+            "vps_ip": self.vps_ip,
+            "ssh_public_key_path": self.ssh_public_key_path,
+        }
+        with open(path, "w") as f:
+            yaml.dump(data, f, default_flow_style=False)
+
+
+def run(
+    cmd: list[str],
+    check: bool = True,
+    capture: bool = False,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    input: str | None = None,
+) -> subprocess.CompletedProcess:
+    """Run a command with proper error handling."""
+    full_env = os.environ.copy()
+    if env:
+        full_env.update(env)
+
+    result = subprocess.run(
+        cmd,
+        cwd=cwd,
+        capture_output=capture,
+        text=True,
+        input=input,
+        env=full_env,
+    )
+
+    if check and result.returncode != 0:
+        if capture:
+            console.print(f"[red]STDOUT:[/red] {result.stdout}")
+            console.print(f"[red]STDERR:[/red] {result.stderr}")
+        raise subprocess.CalledProcessError(result.returncode, cmd)
+
+    return result
+
+
+def check_prerequisites() -> bool:
+    """Check that all required tools are installed."""
+    tools = {
+        "kubectl": ["kubectl", "version", "--client"],
+        # "helm": ["helm", "version"],
+        "ssh": ["ssh", "-V"],
+    }
+
+    missing = []
+    for name, cmd in tools.items():
+        try:
+            run(cmd, capture=True)
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            # console.print(f"Debug: {name} failed with {e}")
+            missing.append(name)
+
+    if missing:
+        console.print(f"[red]Missing required tools:[/red] {', '.join(missing)}")
+        return False
+
+    return True
+
+
+# =============================================================================
+# OVH VPS Management
+# =============================================================================
+
+
+def get_ovh_client() -> ovh.Client:
+    """Create OVH API client."""
+    # Try multiple config locations
+    for config_path in [
+        INFRA_DIR / "ovh.conf",
+        Path("./ovh.conf"),
+        Path.home() / ".config" / "ovh.conf",
+        Path.home() / ".ovh.conf",
+    ]:
+        if config_path.exists():
+            return ovh.Client(config_file=str(config_path))
+
+    # Fall back to environment variables
+    return ovh.Client()
+
+
+def list_vps(client: ovh.Client) -> list[str]:
+    """List all VPS services."""
+    return client.get("/vps")
+
+
+def get_vps_info(client: ovh.Client, vps_name: str) -> dict[str, Any]:
+    """Get VPS details."""
+    return client.get(f"/vps/{vps_name}")
+
+
+def get_vps_ips(client: ovh.Client, vps_name: str) -> list[str]:
+    """Get VPS IP addresses."""
+    return client.get(f"/vps/{vps_name}/ips")
+
+
+def find_existing_vps(client: ovh.Client) -> tuple[str, str] | None:
+    """Find an existing VPS that looks like our metadata-relay server."""
+    vps_list = list_vps(client)
+
+    for vps_name in vps_list:
+        try:
+            info = get_vps_info(client, vps_name)
+            # Check if it's a suitable VPS (running, has display name we recognize)
+            if info.get("state") == "running":
+                display_name = info.get("displayName", "")
+                if "metadata-relay" in display_name.lower() or "mydia" in display_name.lower():
+                    ips = get_vps_ips(client, vps_name)
+                    ipv4 = next((ip for ip in ips if "." in ip), None)
+                    if ipv4:
+                        return vps_name, ipv4
+        except Exception:
+            continue
+
+    # Return the first running VPS if no specific one found
+    for vps_name in vps_list:
+        try:
+            info = get_vps_info(client, vps_name)
+            if info.get("state") == "running":
+                ips = get_vps_ips(client, vps_name)
+                ipv4 = next((ip for ip in ips if "." in ip), None)
+                if ipv4:
+                    return vps_name, ipv4
+        except Exception:
+            continue
+
+    return None
+
+
+def order_vps(client: ovh.Client, config: Config) -> tuple[str, str]:
+    """Order a new VPS using the cart API."""
+    console.print("  [dim]Creating order cart...[/dim]")
+
+    # Get subsidiary
+    me = client.get("/me")
+    subsidiary = me.get("ovhSubsidiary", "US")
+
+    # Create cart
+    cart = client.post("/order/cart", ovhSubsidiary=subsidiary)
+    cart_id = cart["cartId"]
+
+    try:
+        # Get available VPS offers
+        console.print("  [dim]Finding VPS offers...[/dim]")
+        offers = client.get(f"/order/cart/{cart_id}/vps")
+
+        # Find VPS LE 1 or similar cheap option
+        plan_code = None
+        for offer in offers:
+            code = offer.get("planCode", "")
+            if "vps-le-1" in code or "vps-value-1" in code or "vps-starter" in code:
+                plan_code = code
+                break
+
+        if not plan_code and offers:
+            # Use first available
+            plan_code = offers[0]["planCode"]
+
+        if not plan_code:
+            raise RuntimeError("No VPS offers available")
+
+        console.print(f"  [dim]Selected plan: {plan_code}[/dim]")
+
+        # Add VPS to cart
+        item = client.post(
+            f"/order/cart/{cart_id}/vps",
+            duration="P1M",  # 1 month
+            planCode=plan_code,
+            pricingMode="default",
+            quantity=1,
+        )
+        item_id = item["itemId"]
+
+        # Get required configurations
+        configs = client.get(f"/order/cart/{cart_id}/item/{item_id}/requiredConfiguration")
+
+        for cfg in configs:
+            label = cfg["label"]
+            allowed = cfg.get("allowedValues", [])
+
+            if "datacenter" in label.lower():
+                # Prefer SBG (Strasbourg) or first available
+                value = VPS_DATACENTER if VPS_DATACENTER in allowed else allowed[0] if allowed else VPS_DATACENTER
+                client.post(
+                    f"/order/cart/{cart_id}/item/{item_id}/configuration",
+                    label=label,
+                    value=value,
+                )
+            elif "os" in label.lower() or "image" in label.lower():
+                # Prefer Ubuntu 24.04
+                value = None
+                for v in allowed:
+                    if "ubuntu" in v.lower() and "24" in v:
+                        value = v
+                        break
+                if not value:
+                    value = allowed[0] if allowed else VPS_OS
+                client.post(
+                    f"/order/cart/{cart_id}/item/{item_id}/configuration",
+                    label=label,
+                    value=value,
+                )
+
+        # Assign cart to account
+        client.post(f"/order/cart/{cart_id}/assign")
+
+        # Validate order (dry run)
+        console.print("  [dim]Validating order...[/dim]")
+        summary = client.get(f"/order/cart/{cart_id}/checkout")
+        price = summary.get("prices", {}).get("withTax", {}).get("text", "unknown")
+        console.print(f"  [dim]Order total: {price}[/dim]")
+
+        # Checkout (create order)
+        console.print("  [dim]Creating order...[/dim]")
+        order = client.post(f"/order/cart/{cart_id}/checkout", autoPayWithPreferredPaymentMethod=True)
+        order_id = order.get("orderId")
+
+        console.print(f"  [green]✓[/green] Order created: {order_id}")
+        console.print(f"  [yellow]![/yellow] VPS provisioning may take 5-15 minutes")
+        console.print(f"  [dim]Check status at: https://us.ovhcloud.com/manager/[/dim]")
+
+        # Wait for VPS to be provisioned
+        console.print("  [dim]Waiting for VPS to be ready...[/dim]")
+        for attempt in range(60):  # Wait up to 30 minutes
+            time.sleep(30)
+            result = find_existing_vps(client)
+            if result:
+                return result
+
+        raise RuntimeError("Timeout waiting for VPS to be provisioned")
+
+    finally:
+        # Clean up cart
+        try:
+            client.delete(f"/order/cart/{cart_id}")
+        except Exception:
+            pass
+
+
+def reinstall_vps(client: ovh.Client, vps_name: str, ssh_key: str) -> None:
+    """Reinstall VPS with Ubuntu and SSH key."""
+    console.print("  [dim]Reinstalling VPS with Ubuntu 24.04...[/dim]")
+
+    # Get available images
+    images = client.get(f"/vps/{vps_name}/images/available")
+    ubuntu_image = None
+    for img in images:
+        img_info = client.get(f"/vps/{vps_name}/images/available/{img}")
+        if "ubuntu" in img_info.get("name", "").lower() and "24" in img_info.get("name", ""):
+            ubuntu_image = img
+            break
+
+    if not ubuntu_image and images:
+        ubuntu_image = images[0]
+
+    if not ubuntu_image:
+        raise RuntimeError("No suitable OS image found")
+
+    # Start reinstallation
+    client.post(
+        f"/vps/{vps_name}/rebuild",
+        imageId=ubuntu_image,
+        sshKey=[ssh_key] if ssh_key else None,
+    )
+
+    console.print("  [dim]Waiting for reinstallation to complete...[/dim]")
+
+    # Wait for VPS to be running again
+    for attempt in range(60):
+        time.sleep(30)
+        info = get_vps_info(client, vps_name)
+        if info.get("state") == "running":
+            # Wait a bit more for SSH to be ready
+            time.sleep(60)
+            return
+
+    raise RuntimeError("Timeout waiting for VPS reinstallation")
+
+
+# =============================================================================
+# State Checking Functions (for idempotency)
+# =============================================================================
+
+
+def kubeconfig_configured() -> bool:
+    """Check if kubectl can connect to the cluster."""
+    try:
+        result = run(
+            ["kubectl", "get", "nodes", "--request-timeout=5s"],
+            capture=True,
+            check=False,
+        )
+        return result.returncode == 0
+    except FileNotFoundError:
+        return False
+
+
+def helm_release_exists(name: str, namespace: str) -> bool:
+    """Check if a Helm release exists."""
+    result = run(
+        ["helm", "list", "-n", namespace, "-o", "json"],
+        capture=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return False
+
+    try:
+        releases = json.loads(result.stdout)
+        return any(r["name"] == name for r in releases)
+    except json.JSONDecodeError:
+        return False
+
+
+def k8s_resource_exists(kind: str, name: str, namespace: str | None = None) -> bool:
+    """Check if a Kubernetes resource exists."""
+    cmd = ["kubectl", "get", kind, name]
+    if namespace:
+        cmd.extend(["-n", namespace])
+    cmd.append("--ignore-not-found")
+
+    result = run(cmd, capture=True, check=False)
+    return bool(result.stdout.strip())
+
+
+def k8s_namespace_exists(name: str) -> bool:
+    """Check if a Kubernetes namespace exists."""
+    return k8s_resource_exists("namespace", name)
+
+
+def k8s_secret_exists(name: str, namespace: str) -> bool:
+    """Check if a Kubernetes secret exists."""
+    return k8s_resource_exists("secret", name, namespace)
+
+
+# =============================================================================
+# Deployment Phases
+# =============================================================================
+
+
+def phase_vps(config: Config, dry_run: bool = False) -> bool:
+    """Provision or find OVH VPS."""
+    console.print("\n[bold blue]Phase: OVH VPS[/bold blue]")
+
+    try:
+        client = get_ovh_client()
+    except Exception as e:
+        console.print(f"  [red]✗[/red] Failed to create OVH client: {e}")
+        console.print("  [dim]Create ovh.conf with API credentials[/dim]")
+        return False
+
+    # Check if we already have a VPS configured
+    if config.vps_name and config.vps_ip:
+        try:
+            info = get_vps_info(client, config.vps_name)
+            if info.get("state") == "running":
+                console.print(f"  [green]✓[/green] VPS exists: {config.vps_name} ({config.vps_ip})")
+                return True
+        except Exception:
+            pass  # VPS not found, continue
+
+    # Try to find existing VPS
+    console.print("  [dim]Looking for existing VPS...[/dim]")
+    result = find_existing_vps(client)
+
+    if result:
+        vps_name, vps_ip = result
+        config.vps_name = vps_name
+        config.vps_ip = vps_ip
+        config.save(CONFIG_FILE)
+        console.print(f"  [green]✓[/green] Found VPS: {vps_name} ({vps_ip})")
+        return True
+
+    if dry_run:
+        console.print("  [yellow]Would order:[/yellow] New OVH VPS (VPS LE 1, ~$4.20/mo)")
+        return True
+
+    # Order new VPS
+    console.print("  [dim]No existing VPS found, ordering new one...[/dim]")
+
+    try:
+        vps_name, vps_ip = order_vps(client, config)
+        config.vps_name = vps_name
+        config.vps_ip = vps_ip
+        config.save(CONFIG_FILE)
+        console.print(f"  [green]✓[/green] VPS ordered: {vps_name} ({vps_ip})")
+        return True
+    except Exception as e:
+        console.print(f"  [red]✗[/red] Failed to order VPS: {e}")
+        console.print("  [dim]You may need to order manually at https://us.ovhcloud.com/vps/[/dim]")
+        return False
+
+
+def phase_kubeconfig(config: Config, dry_run: bool = False) -> bool:
+    """Install k3s and fetch kubeconfig."""
+    console.print("\n[bold blue]Phase: Kubeconfig (k3s installation)[/bold blue]")
+
+    if not config.vps_ip:
+        console.print("  [red]✗[/red] No VPS IP available. Run vps phase first.")
+        return False
+
+    # Check if already configured
+    if kubeconfig_configured():
+        console.print("  [green]✓[/green] kubectl already configured and connected")
+        return True
+
+    if dry_run:
+        console.print(f"  [yellow]Would install:[/yellow] k3s on {config.vps_ip}")
+        return True
+
+    server_ip = config.vps_ip
+
+    # Wait for SSH to be available
+    console.print(f"  [dim]Waiting for SSH on {server_ip}...[/dim]")
+    for attempt in range(30):
+        result = run(
+            [
+                "ssh",
+                "-o", "ConnectTimeout=5",
+                "-o", "StrictHostKeyChecking=accept-new",
+                "-o", "BatchMode=yes",
+                f"root@{server_ip}",
+                "echo ok",
+            ],
+            check=False,
+            capture=True,
+        )
+        if result.returncode == 0:
+            break
+        time.sleep(10)
+    else:
+        console.print("  [red]✗[/red] Timeout waiting for SSH")
+        return False
+
+    # Check if k3s is already installed
+    result = run(
+        [
+            "ssh",
+            "-o", "StrictHostKeyChecking=accept-new",
+            f"root@{server_ip}",
+            "test -f /etc/rancher/k3s/k3s.yaml && echo exists",
+        ],
+        check=False,
+        capture=True,
+    )
+
+    if "exists" not in result.stdout:
+        # Install k3s
+        console.print("  [dim]Installing k3s...[/dim]")
+        run(
+            [
+                "ssh",
+                "-o", "StrictHostKeyChecking=accept-new",
+                f"root@{server_ip}",
+                "curl -sfL https://get.k3s.io | sh -s - --disable=traefik",
+            ]
+        )
+
+        # Wait for k3s to be ready
+        console.print("  [dim]Waiting for k3s to be ready...[/dim]")
+        for attempt in range(30):
+            result = run(
+                [
+                    "ssh",
+                    f"root@{server_ip}",
+                    "kubectl get nodes --request-timeout=5s",
+                ],
+                check=False,
+                capture=True,
+            )
+            if result.returncode == 0 and "Ready" in result.stdout:
+                break
+            time.sleep(10)
+        else:
+            console.print("  [red]✗[/red] Timeout waiting for k3s")
+            return False
+
+    # Fetch kubeconfig
+    console.print("  [dim]Fetching kubeconfig...[/dim]")
+    kubeconfig_path = Path.home() / ".kube" / "config-metadata-relay"
+    kubeconfig_path.parent.mkdir(parents=True, exist_ok=True)
+
+    run(
+        [
+            "scp",
+            f"root@{server_ip}:/etc/rancher/k3s/k3s.yaml",
+            str(kubeconfig_path),
+        ]
+    )
+
+    # Update server address in kubeconfig
+    content = kubeconfig_path.read_text()
+    content = content.replace("127.0.0.1", server_ip)
+    content = content.replace("default", "metadata-relay")
+    kubeconfig_path.write_text(content)
+
+    # Merge into main kubeconfig
+    main_kubeconfig = Path.home() / ".kube" / "config"
+    if main_kubeconfig.exists():
+        env = {"KUBECONFIG": f"{main_kubeconfig}:{kubeconfig_path}"}
+        result = run(
+            ["kubectl", "config", "view", "--flatten"],
+            capture=True,
+            env=env,
+        )
+        main_kubeconfig.write_text(result.stdout)
+        kubeconfig_path.unlink()
+    else:
+        kubeconfig_path.rename(main_kubeconfig)
+
+    # Switch context
+    run(["kubectl", "config", "use-context", "metadata-relay"], capture=True)
+
+    if not kubeconfig_configured():
+        console.print("  [red]✗[/red] Failed to connect to cluster")
+        return False
+
+    console.print("  [green]✓[/green] k3s installed and kubeconfig configured")
+    return True
+
+
+def phase_kubernetes(config: Config, dry_run: bool = False) -> bool:
+    """Install cert-manager, external-dns, and ArgoCD."""
+    console.print("\n[bold blue]Phase: Kubernetes (cert-manager + external-dns + ArgoCD)[/bold blue]")
+
+    # --- Traefik (install if we disabled it during k3s install) ---
+    if not helm_release_exists("traefik", "kube-system"):
+        if dry_run:
+            console.print("  [yellow]Would install:[/yellow] Traefik ingress controller")
+        else:
+            console.print("  [dim]Installing Traefik...[/dim]")
+            run(["helm", "repo", "add", "traefik", "https://traefik.github.io/charts"], check=False, capture=True)
+            run(["helm", "repo", "update"], capture=True)
+            run([
+                "helm", "install", "traefik", "traefik/traefik",
+                "--namespace", "kube-system",
+                "--set", "ports.web.redirectTo.port=websecure",
+                "--set", "ports.websecure.tls.enabled=true",
+                "--wait", "--timeout", "5m",
+            ])
+            console.print("  [green]✓[/green] Traefik installed")
+    else:
+        console.print("  [green]✓[/green] Traefik already installed")
+
+    # --- cert-manager ---
+    if helm_release_exists("cert-manager", "cert-manager"):
+        console.print("  [green]✓[/green] cert-manager already installed")
+    elif dry_run:
+        console.print("  [yellow]Would install:[/yellow] cert-manager")
+    else:
+        console.print("  [dim]Installing cert-manager...[/dim]")
+        run(["helm", "repo", "add", "jetstack", "https://charts.jetstack.io"], check=False, capture=True)
+        run(["helm", "repo", "update"], capture=True)
+
+        values_file = KUBERNETES_DIR / "cert-manager" / "values.yaml"
+        cmd = [
+            "helm", "install", "cert-manager", "jetstack/cert-manager",
+            "--namespace", "cert-manager",
+            "--create-namespace",
+            "--version", CERT_MANAGER_VERSION,
+            "--set", "crds.enabled=true",
+            "--wait", "--timeout", "5m",
+        ]
+        if values_file.exists():
+            cmd.extend(["-f", str(values_file)])
+        run(cmd)
+        console.print("  [green]✓[/green] cert-manager installed")
+
+    # --- ClusterIssuers ---
+    if not dry_run:
+        if k8s_resource_exists("clusterissuer", "letsencrypt-prod"):
+            console.print("  [green]✓[/green] ClusterIssuers already exist")
+        else:
+            console.print("  [dim]Applying ClusterIssuers...[/dim]")
+            time.sleep(10)  # Wait for cert-manager webhook
+            issuer_file = KUBERNETES_DIR / "cert-manager" / "cluster-issuer.yaml"
+            if issuer_file.exists():
+                run(["kubectl", "apply", "-f", str(issuer_file)])
+            console.print("  [green]✓[/green] ClusterIssuers applied")
+
+    # --- external-dns ---
+    if helm_release_exists("external-dns", "external-dns"):
+        console.print("  [green]✓[/green] external-dns already installed")
+    elif dry_run:
+        console.print("  [yellow]Would install:[/yellow] external-dns for Cloudflare")
+    else:
+        console.print("  [dim]Installing external-dns...[/dim]")
+        run(["helm", "repo", "add", "external-dns", "https://kubernetes-sigs.github.io/external-dns/"], check=False, capture=True)
+        run(["helm", "repo", "update"], capture=True)
+
+        # Create namespace and secret for Cloudflare API token
+        run(["kubectl", "create", "namespace", "external-dns"], check=False, capture=True)
+
+        if not k8s_secret_exists("cloudflare-api-token", "external-dns"):
+            run([
+                "kubectl", "create", "secret", "generic", "cloudflare-api-token",
+                "-n", "external-dns",
+                f"--from-literal=cloudflare_api_token={config.cloudflare_api_token}",
+            ])
+
+        run([
+            "helm", "install", "external-dns", "external-dns/external-dns",
+            "--namespace", "external-dns",
+            "--set", "provider.name=cloudflare",
+            "--set", "env[0].name=CF_API_TOKEN",
+            "--set", "env[0].valueFrom.secretKeyRef.name=cloudflare-api-token",
+            "--set", "env[0].valueFrom.secretKeyRef.key=cloudflare_api_token",
+            "--set", f"domainFilters[0]={config.domain_name}",
+            "--set", "policy=sync",
+            "--set", "sources[0]=ingress",
+            "--set", "sources[1]=service",
+            "--wait", "--timeout", "5m",
+        ])
+        console.print("  [green]✓[/green] external-dns installed")
+
+    # --- ArgoCD ---
+    if helm_release_exists("argocd", "argocd"):
+        console.print("  [green]✓[/green] ArgoCD already installed")
+    elif dry_run:
+        console.print("  [yellow]Would install:[/yellow] ArgoCD")
+    else:
+        console.print("  [dim]Installing ArgoCD...[/dim]")
+        run(["helm", "repo", "add", "argo", "https://argoproj.github.io/argo-helm"], check=False, capture=True)
+        run(["helm", "repo", "update"], capture=True)
+
+        values_file = KUBERNETES_DIR / "argocd" / "values.yaml"
+        cmd = [
+            "helm", "install", "argocd", "argo/argo-cd",
+            "--namespace", "argocd",
+            "--create-namespace",
+            "--version", ARGOCD_VERSION,
+            "--wait", "--timeout", "10m",
+        ]
+        if values_file.exists():
+            cmd.extend(["-f", str(values_file)])
+        run(cmd)
+        console.print("  [green]✓[/green] ArgoCD installed")
+
+    return True
+
+
+def phase_app(config: Config, dry_run: bool = False) -> bool:
+    """Deploy metadata-relay application."""
+    console.print("\n[bold blue]Phase: Application (metadata-relay)[/bold blue]")
+
+    namespace = "metadata-relay"
+    metadata_relay_dir = KUBERNETES_DIR / "apps" / "metadata-relay"
+
+    # --- Namespace ---
+    if k8s_namespace_exists(namespace):
+        console.print(f"  [green]✓[/green] Namespace '{namespace}' exists")
+    elif dry_run:
+        console.print(f"  [yellow]Would create:[/yellow] Namespace '{namespace}'")
+    else:
+        console.print("  [dim]Creating namespace...[/dim]")
+        ns_file = metadata_relay_dir / "namespace.yaml"
+        if ns_file.exists():
+            run(["kubectl", "apply", "-f", str(ns_file)])
+        else:
+            run(["kubectl", "create", "namespace", namespace])
+        console.print("  [green]✓[/green] Namespace created")
+
+    # --- Generate TURN secret if not set ---
+    if not config.turn_secret:
+        if dry_run:
+            console.print("  [yellow]Would generate:[/yellow] Random TURN auth secret")
+            config.turn_secret = "dry-run-secret"
+        else:
+            console.print("  [dim]Generating new TURN auth secret...[/dim]")
+            config.turn_secret = secrets.token_hex(32)
+            config.save(CONFIG_FILE)
+
+    # --- Secret ---
+    if k8s_secret_exists("metadata-relay-secrets", namespace):
+        console.print("  [green]✓[/green] Secret 'metadata-relay-secrets' exists")
+        # Update secret if not in dry run
+        if not dry_run:
+             console.print("  [dim]Updating secret...[/dim]")
+             # Generate yaml and pipe to apply
+             proc = subprocess.Popen(
+                ["kubectl", "create", "secret", "generic", "metadata-relay-secrets",
+                "-n", namespace,
+                "--dry-run=client", "-o", "yaml",
+                f"--from-literal=RELAY_TOKEN_SECRET={config.relay_secret_key_base}",
+                f"--from-literal=TMDB_API_KEY={config.relay_tmdb_api_key}",
+                f"--from-literal=TVDB_API_KEY={config.relay_tvdb_api_key}",
+                f"--from-literal=TURN_SECRET={config.turn_secret}"],
+                stdout=subprocess.PIPE
+             )
+             subprocess.run(["kubectl", "apply", "-f", "-"], stdin=proc.stdout)
+             console.print("  [green]✓[/green] Secret updated")
+
+    elif dry_run:
+        console.print("  [yellow]Would create:[/yellow] Secret with API keys and TURN secret")
+    else:
+        console.print("  [dim]Creating secret...[/dim]")
+        run([
+            "kubectl", "create", "secret", "generic", "metadata-relay-secrets",
+            "-n", namespace,
+            f"--from-literal=RELAY_TOKEN_SECRET={config.relay_secret_key_base}",
+            f"--from-literal=TMDB_API_KEY={config.relay_tmdb_api_key}",
+            f"--from-literal=TVDB_API_KEY={config.relay_tvdb_api_key}",
+            f"--from-literal=TURN_SECRET={config.turn_secret}",
+        ])
+        console.print("  [green]✓[/green] Secret created")
+
+    # --- Apply manifests ---
+    if dry_run:
+        console.print("  [yellow]Would apply:[/yellow] All metadata-relay manifests")
+    else:
+        console.print("  [dim]Applying manifests...[/dim]")
+        for manifest in ["configmap.yaml", "pvc.yaml", "deployment.yaml", "service.yaml", "ingress.yaml"]:
+            manifest_path = metadata_relay_dir / manifest
+            if manifest_path.exists():
+                run(["kubectl", "apply", "-f", str(manifest_path)])
+        console.print("  [green]✓[/green] Application deployed")
+
+    return True
+
+
+def phase_verify(config: Config, dry_run: bool = False) -> bool:
+    """Verify deployment health."""
+    console.print("\n[bold blue]Phase: Verification[/bold blue]")
+
+    if dry_run:
+        console.print(f"  [yellow]Would check:[/yellow] https://{config.relay_fqdn}/health")
+        return True
+
+    # Wait for deployment to be ready
+    console.print("  [dim]Waiting for deployment to be ready...[/dim]")
+    result = run(
+        [
+            "kubectl", "rollout", "status",
+            "deployment/metadata-relay",
+            "-n", "metadata-relay",
+            "--timeout=5m",
+        ],
+        check=False,
+        capture=True,
+    )
+
+    if result.returncode != 0:
+        console.print("  [yellow]![/yellow] Deployment not ready yet")
+
+    # Check health endpoint
+    health_url = f"https://{config.relay_fqdn}/health"
+    console.print(f"  [dim]Checking {health_url}...[/dim]")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=True,
+    ) as progress:
+        progress.add_task("Waiting for health check...", total=None)
+
+        for attempt in range(60):
+            try:
+                response = httpx.get(health_url, timeout=10, verify=False)
+                if response.status_code == 200:
+                    console.print("  [green]✓[/green] Health check passed")
+                    return True
+            except httpx.RequestError:
+                pass
+            time.sleep(5)
+
+    console.print("  [yellow]![/yellow] Health check not passing yet")
+    console.print("      This may be due to DNS propagation or certificate issuance.")
+    console.print(f"      Check manually: curl -k {health_url}")
+
+    return True
+
+
+def deploy(
+    phases: list[Phase],
+    skip: list[Phase],
+    dry_run: bool,
+    config: Config,
+) -> bool:
+    """Run deployment phases."""
+
+    phase_funcs = {
+        Phase.VPS: phase_vps,
+        Phase.KUBECONFIG: phase_kubeconfig,
+        Phase.KUBERNETES: phase_kubernetes,
+        Phase.APP: phase_app,
+        Phase.VERIFY: phase_verify,
+    }
+
+    for phase in phases:
+        if phase in skip:
+            console.print(f"\n[dim]Skipping {phase.value}[/dim]")
+            continue
+
+        func = phase_funcs[phase]
+        if not func(config, dry_run):
+            console.print(f"\n[red]Phase {phase.value} failed[/red]")
+            return False
+
+    return True
+
+
+def show_status(config: Config) -> None:
+    """Show current VPS and deployment status."""
+    console.print("\n[bold]Current Status[/bold]\n")
+
+    # OVH VPS
+    try:
+        client = get_ovh_client()
+        vps_list = list_vps(client)
+
+        table = Table(title="OVH VPS Instances")
+        table.add_column("Name", style="cyan")
+        table.add_column("State", style="green")
+        table.add_column("IP", style="yellow")
+
+        for vps_name in vps_list:
+            try:
+                info = get_vps_info(client, vps_name)
+                ips = get_vps_ips(client, vps_name)
+                ipv4 = next((ip for ip in ips if "." in ip), "N/A")
+                table.add_row(vps_name, info.get("state", "unknown"), ipv4)
+            except Exception:
+                table.add_row(vps_name, "error", "N/A")
+
+        console.print(table)
+    except Exception as e:
+        console.print(f"[red]Failed to get VPS status:[/red] {e}")
+
+    # Kubernetes
+    if kubeconfig_configured():
+        console.print("\n[green]✓[/green] Kubernetes cluster connected")
+        run(["kubectl", "get", "nodes"], check=False)
+    else:
+        console.print("\n[yellow]![/yellow] Kubernetes not configured")
+
+
+def print_summary(config: Config) -> None:
+    """Print deployment summary."""
+    table = Table(title="Deployment Summary", show_header=False)
+    table.add_column("Key", style="cyan")
+    table.add_column("Value", style="green")
+
+    table.add_row("VPS", f"{config.vps_name} ({config.vps_ip})")
+    table.add_row("Relay URL", f"https://{config.relay_fqdn}")
+    table.add_row("TURN Server", f"turn:{config.vps_ip}:3478 (integrated)")
+    table.add_row("ArgoCD URL", f"https://{config.argocd_fqdn}")
+    table.add_row("Health Check", f"https://{config.relay_fqdn}/health")
+
+    console.print("\n")
+    console.print(table)
+
+    console.print("\n[bold]ArgoCD Login:[/bold]")
+    console.print("  Username: admin")
+    console.print("  Password: kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Deploy metadata-relay infrastructure on OVHcloud",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+
+    parser.add_argument(
+        "--phase",
+        type=str,
+        choices=[p.value for p in Phase],
+        help="Run only a specific phase",
+    )
+    parser.add_argument(
+        "--skip",
+        type=str,
+        action="append",
+        default=[],
+        choices=[p.value for p in Phase],
+        help="Skip specific phases (can be repeated)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would happen without making changes",
+    )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="Show current VPS and deployment status",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=CONFIG_FILE,
+        help="Path to config.yaml file",
+    )
+
+    args = parser.parse_args()
+
+    # Banner
+    console.print(
+        Panel.fit(
+            "[bold blue]Metadata Relay Infrastructure Deployment[/bold blue]\n"
+            "[dim]OVHcloud VPS + k3s + external-dns + ArgoCD[/dim]",
+            border_style="blue",
+        )
+    )
+
+    # Status mode
+    if args.status:
+        try:
+            config = Config.load(args.config)
+        except FileNotFoundError:
+            config = Config(cloudflare_api_token="", cloudflare_zone_id="")
+        show_status(config)
+        sys.exit(0)
+
+    if args.dry_run:
+        console.print("[yellow]DRY RUN MODE - No changes will be made[/yellow]\n")
+
+    # Check prerequisites
+    if not check_prerequisites():
+        sys.exit(1)
+
+    # Load config
+    try:
+        config = Config.load(args.config)
+    except FileNotFoundError as e:
+        console.print(f"[red]Configuration error:[/red] {e}")
+        sys.exit(1)
+
+    # Determine phases to run
+    if args.phase:
+        phases = [Phase(args.phase)]
+    else:
+        phases = list(Phase)
+
+    skip = [Phase(s) for s in args.skip]
+
+    # Run deployment
+    success = deploy(phases, skip, args.dry_run, config)
+
+    if success and not args.dry_run:
+        print_summary(config)
+
+    sys.exit(0 if success else 1)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,20 @@
+fragment MediaFileFragment on MediaFile {
+  id
+  resolution
+  codec
+  audioCodec
+  hdrFormat
+  size
+  bitrate
+  directPlaySupported
+  streamUrl
+  directPlayUrl
+  subtitles {
+    trackId
+    language
+    title
+    format
+    embedded
+    url(format: VTT)
+  }
+}

@@ -1,0 +1,6 @@
+mutation ToggleFavorite($mediaItemId: ID!) {
+  toggleFavorite(mediaItemId: $mediaItemId) {
+    isFavorite
+    mediaItemId
+  }
+}

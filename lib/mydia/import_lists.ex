@@ -501,12 +501,38 @@ defmodule Mydia.ImportLists do
     case Mydia.Media.create_media_item(attrs) do
       {:ok, media_item} ->
         mark_item_added(item, media_item.id)
+        maybe_add_to_target_collection(import_list, media_item)
         {:ok, media_item}
 
       {:error, changeset} ->
         error_msg = format_changeset_error(changeset)
         mark_item_failed(item, error_msg)
         {:error, error_msg}
+    end
+  end
+
+  # Adds media item to target collection if configured
+  defp maybe_add_to_target_collection(%ImportList{target_collection_id: nil}, _media_item),
+    do: :ok
+
+  defp maybe_add_to_target_collection(
+         %ImportList{target_collection_id: collection_id},
+         media_item
+       ) do
+    alias Mydia.Collections
+
+    case Collections.get_collection_by_id(collection_id) do
+      nil ->
+        # Collection was deleted, ignore
+        :ok
+
+      collection ->
+        # Only add to manual collections
+        if collection.type == "manual" do
+          Collections.add_item(collection, media_item.id)
+        end
+
+        :ok
     end
   end
 

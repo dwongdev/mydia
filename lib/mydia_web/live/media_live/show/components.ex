@@ -17,6 +17,9 @@ defmodule MydiaWeb.MediaLive.Show.Components do
   attr :downloads_with_status, :list, required: true
   attr :quality_profiles, :list, required: true
   attr :applying_monitoring_preset, :boolean, default: false
+  attr :is_favorite, :boolean, default: false
+  attr :item_collections, :list, default: []
+  attr :user_collections, :list, default: []
 
   @monitoring_presets [
     {:all, "All Episodes", "Monitor all episodes"},
@@ -83,8 +86,85 @@ defmodule MydiaWeb.MediaLive.Show.Components do
           <.icon name="hero-magnifying-glass" class="w-5 h-5" /> Manual Search
         </button>
 
+        <%!-- Favorite and Collection actions --%>
+        <div class="flex gap-2 mt-2">
+          <button
+            type="button"
+            phx-click="toggle_favorite"
+            class={[
+              "btn flex-1",
+              @is_favorite && "btn-error",
+              !@is_favorite && "btn-outline"
+            ]}
+            title={if @is_favorite, do: "Remove from Favorites", else: "Add to Favorites"}
+          >
+            <.icon
+              name={if @is_favorite, do: "hero-heart-solid", else: "hero-heart"}
+              class="w-5 h-5"
+            />
+            <span class="hidden sm:inline">{if @is_favorite, do: "Favorited", else: "Favorite"}</span>
+          </button>
+
+          <div class="dropdown dropdown-end flex-1">
+            <div tabindex="0" role="button" class="btn btn-outline w-full">
+              <.icon name="hero-folder-plus" class="w-5 h-5" />
+              <span class="hidden sm:inline">Collection</span>
+              <.icon name="hero-chevron-down" class="w-3 h-3 opacity-70" />
+            </div>
+            <ul
+              tabindex="0"
+              class="dropdown-content z-[1] menu p-2 shadow-lg bg-base-100 rounded-box w-56 border border-base-300"
+            >
+              <%= if Enum.empty?(@user_collections) do %>
+                <li class="menu-title px-2 py-1 text-base-content/50 text-sm">
+                  No collections yet
+                </li>
+                <li>
+                  <.link navigate={~p"/collections"} class="justify-start">
+                    <.icon name="hero-plus" class="w-4 h-4" /> Create Collection
+                  </.link>
+                </li>
+              <% else %>
+                <li class="menu-title px-2 py-1 text-base-content/50 text-xs uppercase">
+                  Your Collections
+                </li>
+                <%= for collection <- @user_collections do %>
+                  <% is_in_collection = Enum.any?(@item_collections, &(&1.id == collection.id)) %>
+                  <li>
+                    <button
+                      type="button"
+                      phx-click={
+                        if is_in_collection, do: "remove_from_collection", else: "add_to_collection"
+                      }
+                      phx-value-collection-id={collection.id}
+                      class="justify-between"
+                    >
+                      <span class="flex items-center gap-2">
+                        <.icon
+                          name={if collection.is_system, do: "hero-star", else: "hero-folder"}
+                          class="w-4 h-4"
+                        />
+                        {collection.name}
+                      </span>
+                      <%= if is_in_collection do %>
+                        <.icon name="hero-check" class="w-4 h-4 text-success" />
+                      <% end %>
+                    </button>
+                  </li>
+                <% end %>
+                <div class="divider my-1"></div>
+                <li>
+                  <.link navigate={~p"/collections"} class="justify-start">
+                    <.icon name="hero-folder-open" class="w-4 h-4" /> Manage Collections
+                  </.link>
+                </li>
+              <% end %>
+            </ul>
+          </div>
+        </div>
+
         <%!-- Secondary actions: stacked on mobile --%>
-        <div class="flex flex-col gap-2">
+        <div class="flex flex-col gap-2 mt-2">
           <%= if @media_item.type == "tv_show" do %>
             <%!-- Monitoring Preset Dropdown (TV shows only) --%>
             <div class="dropdown dropdown-end w-full">

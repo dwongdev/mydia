@@ -34,7 +34,9 @@ defmodule MydiaWeb.Live.UserAuth do
     socket = mount_current_user(socket, session)
 
     case socket.assigns do
-      %{current_user: %Mydia.Accounts.User{}} ->
+      %{current_user: %Mydia.Accounts.User{} = user} ->
+        # Set current_scope for compatibility with relay device auth
+        socket = assign(socket, :current_scope, %{user: user})
         {:cont, socket}
 
       _ ->
@@ -57,6 +59,8 @@ defmodule MydiaWeb.Live.UserAuth do
     case socket.assigns do
       %{current_user: %Mydia.Accounts.User{} = user} ->
         if has_role?(user, required_role) do
+          # Set current_scope for compatibility with relay device auth
+          socket = assign(socket, :current_scope, %{user: user})
           {:cont, socket}
         else
           socket =

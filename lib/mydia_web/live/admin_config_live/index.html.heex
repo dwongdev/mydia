@@ -6,8 +6,8 @@
         System status, application settings, and configuration management
       </p>
     </div>
-    <%!-- Tabs Navigation with tab-content pattern --%>
-    <div role="tablist" class="tabs tabs-lift">
+    <%!-- Tabs Navigation --%>
+    <div role="tablist" class="tabs tabs-border mb-6">
       <button
         role="tab"
         class={["tab gap-2", @active_tab == "status" && "tab-active"]}
@@ -64,77 +64,99 @@
       >
         <.icon name="hero-server-stack" class="w-4 h-4" /> Media Servers
       </button>
-      <div class="tab-content block bg-base-100 border-base-300">
-        <%!-- System Status Tab --%>
-        <%= if @active_tab == "status" do %>
-          <Components.status_tab
-            system_info={@system_info}
-            database_info={@database_info}
-            library_paths={@library_paths}
-            download_clients={@download_clients}
-            indexers={@indexers}
-          />
-          <%!-- FlareSolverr Status (External Services) --%>
-          <div class="px-4 sm:px-6 pb-6">
-            <div class="divider">External Services</div>
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
-              <MydiaWeb.AdminConfigLive.FlareSolverrStatusComponent.flaresolverr_status_card flaresolverr_status={
-                @flaresolverr_status
-              } />
-            </div>
+      <%= if @remote_access_enabled do %>
+        <button
+          role="tab"
+          class={["tab gap-2", @active_tab == "remote_access" && "tab-active"]}
+          phx-click="change_tab"
+          phx-value-tab="remote_access"
+        >
+          <.icon name="hero-signal" class="w-4 h-4" /> Remote Access
+        </button>
+      <% end %>
+    </div>
+    <%!-- Tab Content --%>
+    <div class="bg-base-100">
+      <%!-- System Status Tab --%>
+      <%= if @active_tab == "status" do %>
+        <Components.status_tab
+          system_info={@system_info}
+          database_info={@database_info}
+          library_paths={@library_paths}
+          download_clients={@download_clients}
+          indexers={@indexers}
+          active_sessions={@active_sessions}
+          transcode_jobs={@transcode_jobs}
+          watch_history={@watch_history}
+        />
+        <%!-- FlareSolverr Status (External Services) --%>
+        <div class="px-4 sm:px-6 pb-6">
+          <div class="divider">External Services</div>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
+            <MydiaWeb.AdminConfigLive.FlareSolverrStatusComponent.flaresolverr_status_card flaresolverr_status={
+              @flaresolverr_status
+            } />
           </div>
-        <% end %>
-        <%!-- General Settings Tab --%>
-        <%= if @active_tab == "general" do %>
-          <Components.general_settings_tab
-            config_settings_with_sources={@config_settings_with_sources}
-            crash_report_stats={@crash_report_stats}
-          />
-        <% end %>
-        <%!-- Quality Profiles Tab --%>
-        <%= if @active_tab == "quality" do %>
-          <Components.quality_profiles_tab
-            quality_profiles={@quality_profiles}
-            default_quality_profile_id={@default_quality_profile_id}
-          />
-        <% end %>
-        <%!-- Download Clients Tab --%>
-        <%= if @active_tab == "clients" do %>
-          <Components.download_clients_tab
-            download_clients={@download_clients}
-            client_health={@client_health}
-          />
-        <% end %>
-        <%!-- Indexers Tab --%>
-        <%= if @active_tab == "indexers" do %>
-          <Components.indexers_tab
-            indexers={@indexers}
-            indexer_health={@indexer_health}
-            library_indexers={@library_indexers}
-            library_indexer_stats={@library_indexer_stats}
-            cardigann_enabled={@cardigann_enabled}
-            recently_disabled_indexer={@recently_disabled_indexer}
-            flaresolverr_available={
-              @flaresolverr_status.configured and @flaresolverr_status.status != :disabled
-            }
-          />
-        <% end %>
-        <%!-- Library Paths Tab --%>
-        <%= if @active_tab == "library" do %>
-          <Components.library_paths_tab
-            library_paths={@library_paths}
-            reorganizing_library_ids={@reorganizing_library_ids}
-            reclassifying_library_ids={@reclassifying_library_ids}
-          />
-        <% end %>
-        <%!-- Media Servers Tab --%>
-        <%= if @active_tab == "media_servers" do %>
-          <Components.media_servers_tab
-            media_servers={@media_servers}
-            media_server_health={@media_server_health}
-          />
-        <% end %>
-      </div>
+        </div>
+      <% end %>
+      <%!-- General Settings Tab --%>
+      <%= if @active_tab == "general" do %>
+        <Components.general_settings_tab
+          config_settings_with_sources={@config_settings_with_sources}
+          crash_report_stats={@crash_report_stats}
+        />
+      <% end %>
+      <%!-- Quality Profiles Tab --%>
+      <%= if @active_tab == "quality" do %>
+        <Components.quality_profiles_tab
+          quality_profiles={@quality_profiles}
+          default_quality_profile_id={@default_quality_profile_id}
+        />
+      <% end %>
+      <%!-- Download Clients Tab --%>
+      <%= if @active_tab == "clients" do %>
+        <Components.download_clients_tab
+          download_clients={@download_clients}
+          client_health={@client_health}
+        />
+      <% end %>
+      <%!-- Indexers Tab --%>
+      <%= if @active_tab == "indexers" do %>
+        <Components.indexers_tab
+          indexers={@indexers}
+          indexer_health={@indexer_health}
+          library_indexers={@library_indexers}
+          library_indexer_stats={@library_indexer_stats}
+          cardigann_enabled={@cardigann_enabled}
+          recently_disabled_indexer={@recently_disabled_indexer}
+          flaresolverr_available={
+            @flaresolverr_status.configured and @flaresolverr_status.status != :disabled
+          }
+        />
+      <% end %>
+      <%!-- Library Paths Tab --%>
+      <%= if @active_tab == "library" do %>
+        <Components.library_paths_tab
+          library_paths={@library_paths}
+          reorganizing_library_ids={@reorganizing_library_ids}
+          reclassifying_library_ids={@reclassifying_library_ids}
+        />
+      <% end %>
+      <%!-- Media Servers Tab --%>
+      <%= if @active_tab == "media_servers" do %>
+        <Components.media_servers_tab
+          media_servers={@media_servers}
+          media_server_health={@media_server_health}
+        />
+      <% end %>
+      <%!-- Remote Access Tab --%>
+      <%= if @remote_access_enabled and @active_tab == "remote_access" do %>
+        <.live_component
+          module={MydiaWeb.AdminConfigLive.RemoteAccessComponent}
+          id="remote-access"
+          current_user={@current_user}
+        />
+      <% end %>
     </div>
     <%!-- Quality Profile Modal --%>
     <%= if assigns[:show_quality_profile_modal] do %>

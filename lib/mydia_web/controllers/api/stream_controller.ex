@@ -10,7 +10,8 @@ defmodule MydiaWeb.Api.StreamController do
     Compatibility,
     FfmpegRemuxer,
     HlsSession,
-    HlsSessionSupervisor
+    HlsSessionSupervisor,
+    DirectPlaySession
   }
 
   alias MydiaWeb.Api.RangeHelper
@@ -496,9 +497,11 @@ defmodule MydiaWeb.Api.StreamController do
   defp start_hls_session(conn, media_file, reason, hls_mode) do
     case get_user_id(conn) do
       {:ok, user_id} ->
-        Logger.info("Starting HLS session for media_file_id=#{media_file.id}, user_id=#{user_id}")
+        Logger.info(
+          "Starting HLS session for media_file_id=#{media_file.id}, user_id=#{user_id}, mode=#{hls_mode}"
+        )
 
-        case HlsSessionSupervisor.start_session(media_file.id, user_id) do
+        case HlsSessionSupervisor.start_session(media_file.id, user_id, hls_mode) do
           {:ok, _pid} ->
             # Get session info to retrieve session_id
             case HlsSessionSupervisor.get_session(media_file.id, user_id) do
@@ -511,13 +514,20 @@ defmodule MydiaWeb.Api.StreamController do
                       ~p"/api/v1/hls/#{session_info.session_id}/index.m3u8?mode=#{hls_mode}"
 
                     Logger.info(
-                      "HLS session started (#{hls_mode}), redirecting to master playlist: #{master_playlist_path}"
+                      "HLS session started (#{hls_mode}), master playlist: #{master_playlist_path}"
                     )
 
-                    # Redirect to master playlist
-                    conn
-                    |> put_resp_header("location", master_playlist_path)
-                    |> send_resp(302, "")
+                    # Check if client wants JSON response instead of redirect
+                    # Web browsers can't reliably follow redirects with fetch API
+                    if conn.query_params["resolve"] == "json" do
+                      # Return the HLS URL as JSON for web clients
+                      json(conn, %{hls_url: master_playlist_path})
+                    else
+                      # Redirect to master playlist (native clients)
+                      conn
+                      |> put_resp_header("location", master_playlist_path)
+                      |> send_resp(302, "")
+                    end
 
                   {:error, error} ->
                     Logger.error("Failed to get session info: #{inspect(error)}")
@@ -585,7 +595,22 @@ defmodule MydiaWeb.Api.StreamController do
     end
   end
 
-  defp stream_file_direct(conn, _media_file, file_path) do
+  defp stream_file_direct(conn, media_file, file_path) when conn.method != "HEAD" do
+    # Start tracking direct play session if user is authenticated
+    case get_user_id(conn) do
+      {:ok, user_id} ->
+        case HlsSessionSupervisor.start_direct_session(media_file.id, user_id) do
+          {:ok, pid} ->
+            DirectPlaySession.heartbeat(pid)
+
+          error ->
+            Logger.warning("Failed to start direct play session tracker: #{inspect(error)}")
+        end
+
+      _ ->
+        :ok
+    end
+
     file_stat = File.stat!(file_path)
     file_size = file_stat.size
 

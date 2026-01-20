@@ -31,7 +31,7 @@ defmodule Mydia.Indexers.ReleaseRanker do
 
   ## Options
 
-  - `:min_seeders` - Minimum seeder count (default: 5)
+  - `:min_seeders` - Minimum seeder count (default: 0 for Usenet compatibility)
   - `:min_ratio` - Minimum seeder ratio as percentage (default: nil)
   - `:size_range` - `{min_mb, max_mb}` tuple (default: `{100, 20_000}`)
   - `:preferred_qualities` - List of resolutions in preference order (for sorting)
@@ -61,7 +61,7 @@ defmodule Mydia.Indexers.ReleaseRanker do
           media_type: :movie | :episode
         ]
 
-  @default_min_seeders 5
+  @default_min_seeders 0
   @default_size_range {100, 20_000}
 
   @doc """

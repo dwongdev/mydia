@@ -1122,15 +1122,45 @@ defmodule Mydia.Downloads do
     end
   end
 
+  # Encodes a URL to ensure special characters in the path are properly escaped.
+  # This handles URLs with spaces, brackets, and other characters that would
+  # otherwise cause Req to fail with :invalid_request_target.
+  # Example: "http://host/path/Movie Title (2008).nzb" becomes
+  #          "http://host/path/Movie%20Title%20%282008%29.nzb"
+  defp encode_url(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{path: nil} = uri ->
+        # No path to encode
+        URI.to_string(uri)
+
+      %URI{path: path} = uri ->
+        # Encode only the path portion, preserving the rest
+        # Split path into segments and encode each one
+        encoded_path =
+          path
+          |> String.split("/")
+          |> Enum.map(fn segment ->
+            # URI.encode/2 encodes special characters but preserves already-encoded ones
+            URI.encode(segment, &URI.char_unreserved?/1)
+          end)
+          |> Enum.join("/")
+
+        URI.to_string(%{uri | path: encoded_path})
+    end
+  end
+
   # Download directly with cookies
   defp download_direct(url, cookie_header) do
     if cookie_header != "" do
       Logger.debug("Using auth cookies for download")
     end
 
+    # Encode the URL to handle special characters (spaces, brackets, etc.)
+    encoded_url = encode_url(url)
+
     # First check if the URL redirects to a magnet link
     # by manually following redirects (Req can't handle magnet: scheme)
-    case follow_to_final_url(url, cookie_header) do
+    case follow_to_final_url(encoded_url, cookie_header) do
       {:ok, {:magnet, magnet_url}} ->
         Logger.debug("URL redirected to magnet link")
         {:ok, {:magnet, magnet_url}}
@@ -1328,8 +1358,8 @@ defmodule Mydia.Downloads do
             if String.starts_with?(location, "magnet:") do
               {:ok, {:magnet, location}}
             else
-              # Follow the redirect, passing cookies along
-              follow_to_final_url(location, cookie_header, redirects_remaining - 1)
+              # Follow the redirect, encoding the location URL to handle special characters
+              follow_to_final_url(encode_url(location), cookie_header, redirects_remaining - 1)
             end
         end
 
@@ -1383,8 +1413,8 @@ defmodule Mydia.Downloads do
             if String.starts_with?(location, "magnet:") do
               {:ok, {:magnet, location}}
             else
-              # Follow the redirect, passing cookies along
-              follow_to_final_url(location, cookie_header, redirects_remaining - 1)
+              # Follow the redirect, encoding the location URL to handle special characters
+              follow_to_final_url(encode_url(location), cookie_header, redirects_remaining - 1)
             end
         end
 

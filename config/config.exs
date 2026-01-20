@@ -329,6 +329,15 @@ config :mydia, :episode_monitor,
   # Set to 0 to disable delays, 250-500ms recommended for respectful API usage
   search_delay_ms: 250
 
+# Auto-search seeder requirements
+# Controls the minimum seeder count for automatic searches
+config :mydia, :auto_search,
+  # Minimum seeders required for auto-search results (movies and TV shows)
+  # Set to 0 for Usenet compatibility (Usenet indexers report 0 seeders)
+  # Set to 3-5 for torrent-only setups to filter out dead torrents
+  # This setting only affects automatic background searches, not manual searches
+  min_seeders: 0
+
 # Feature flags
 config :mydia, :features,
   # Enable/disable media playback feature (Play Movie, Play Episode buttons)

@@ -38,6 +38,11 @@ defmodule Mydia.Jobs.MovieSearch do
   alias Mydia.Media.MediaItem
   alias Phoenix.PubSub
 
+  # Get min_seeders from config (defaults to 0 for Usenet compatibility)
+  defp get_min_seeders do
+    Application.get_env(:mydia, :auto_search, [])[:min_seeders] || 0
+  end
+
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"mode" => "all_monitored"} = args}) do
     start_time = System.monotonic_time(:millisecond)
@@ -169,7 +174,9 @@ defmodule Mydia.Jobs.MovieSearch do
       indexers_count: indexers_count
     )
 
-    case Indexers.search_all(query, min_seeders: 5) do
+    min_seeders = get_min_seeders()
+
+    case Indexers.search_all(query, min_seeders: min_seeders) do
       {:ok, []} ->
         Logger.warning("No results found for movie",
           media_item_id: movie.id,
@@ -321,7 +328,9 @@ defmodule Mydia.Jobs.MovieSearch do
       query: query
     )
 
-    case Indexers.search_all(query, min_seeders: 5) do
+    min_seeders = get_min_seeders()
+
+    case Indexers.search_all(query, min_seeders: min_seeders) do
       {:ok, []} ->
         Logger.warning("No results found for movie",
           media_item_id: movie.id,
@@ -423,7 +432,7 @@ defmodule Mydia.Jobs.MovieSearch do
     # Start with base options
     # Include search_query for title relevance scoring and media_type for unified scoring
     base_opts = [
-      min_seeders: Map.get(args, "min_seeders", 5),
+      min_seeders: Map.get(args, "min_seeders", get_min_seeders()),
       size_range: Map.get(args, "size_range", {500, 20_000}),
       search_query: build_search_query(movie),
       media_type: :movie
@@ -557,7 +566,7 @@ defmodule Mydia.Jobs.MovieSearch do
 
   # Build a map of filter statistics for rejected results
   defp build_filter_stats(results, ranking_opts) do
-    min_seeders = Keyword.get(ranking_opts, :min_seeders, 5)
+    min_seeders = Keyword.get(ranking_opts, :min_seeders, get_min_seeders())
 
     low_seeders = Enum.count(results, fn r -> (r[:seeders] || 0) < min_seeders end)
 

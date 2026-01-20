@@ -58,6 +58,11 @@ defmodule Mydia.Jobs.TVShowSearch do
   alias Mydia.Media.{MediaItem, Episode}
   alias Phoenix.PubSub
 
+  # Get min_seeders from config (defaults to 0 for Usenet compatibility)
+  defp get_min_seeders do
+    Application.get_env(:mydia, :auto_search, [])[:min_seeders] || 0
+  end
+
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"mode" => "specific", "episode_id" => episode_id} = args}) do
     start_time = System.monotonic_time(:millisecond)
@@ -580,7 +585,7 @@ defmodule Mydia.Jobs.TVShowSearch do
     # Increment counter for the season pack search
     new_count = search_count + 1
 
-    case Indexers.search_all(query, min_seeders: 3) do
+    case Indexers.search_all(query, min_seeders: get_min_seeders()) do
       {:ok, []} ->
         Logger.warning("No season pack results found, falling back to individual episodes",
           media_item_id: media_item.id,
@@ -911,7 +916,7 @@ defmodule Mydia.Jobs.TVShowSearch do
       query: query
     )
 
-    case Indexers.search_all(query, min_seeders: 3) do
+    case Indexers.search_all(query, min_seeders: get_min_seeders()) do
       {:ok, []} ->
         Logger.warning("No results found for episode",
           episode_id: episode.id,
@@ -1031,7 +1036,7 @@ defmodule Mydia.Jobs.TVShowSearch do
     # Oban job args use string keys (JSON storage)
     # Include search_query for title relevance scoring and media_type for unified scoring
     base_opts = [
-      min_seeders: args["min_seeders"] || 3,
+      min_seeders: args["min_seeders"] || get_min_seeders(),
       size_range: args["size_range"] || {100, 5_000},
       search_query: build_episode_query(episode),
       media_type: :episode
@@ -1061,7 +1066,7 @@ defmodule Mydia.Jobs.TVShowSearch do
     # Oban job args use string keys (JSON storage)
     # Include search_query for title relevance scoring and media_type for unified scoring
     base_opts = [
-      min_seeders: args["min_seeders"] || 3,
+      min_seeders: args["min_seeders"] || get_min_seeders(),
       size_range: args["size_range"] || {2_000, 100_000},
       search_query: build_season_query(media_item, season_number),
       media_type: :episode
@@ -1547,7 +1552,7 @@ defmodule Mydia.Jobs.TVShowSearch do
     # Increment counter for the season pack search
     new_count = search_count + 1
 
-    case Indexers.search_all(query, min_seeders: 3) do
+    case Indexers.search_all(query, min_seeders: get_min_seeders()) do
       {:ok, []} ->
         Logger.warning("No season pack results found, falling back to individual episodes",
           media_item_id: media_item.id,
@@ -1729,7 +1734,7 @@ defmodule Mydia.Jobs.TVShowSearch do
       query: query
     )
 
-    case Indexers.search_all(query, min_seeders: 3) do
+    case Indexers.search_all(query, min_seeders: get_min_seeders()) do
       {:ok, []} ->
         Logger.warning("No results found for episode",
           episode_id: episode.id,

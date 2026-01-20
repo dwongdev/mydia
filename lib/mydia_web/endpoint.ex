@@ -9,7 +9,9 @@ defmodule MydiaWeb.Endpoint do
     store: :cookie,
     key: "_mydia_key",
     signing_salt: "aGjwFmlL",
-    same_site: "Lax"
+    same_site: "Lax",
+    # 30 days in seconds - matches Guardian JWT TTL
+    max_age: 30 * 24 * 60 * 60
   ]
 
   # Enable SQL sandbox for browser-based feature tests (Wallaby)

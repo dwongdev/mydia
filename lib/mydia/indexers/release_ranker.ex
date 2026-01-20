@@ -33,7 +33,7 @@ defmodule Mydia.Indexers.ReleaseRanker do
 
   - `:min_seeders` - Minimum seeder count (default: 0 for Usenet compatibility)
   - `:min_ratio` - Minimum seeder ratio as percentage (default: nil)
-  - `:size_range` - `{min_mb, max_mb}` tuple (default: `{100, 20_000}`)
+  - `:size_range` - `{min_mb, max_mb}` tuple where either can be nil (default: `nil` = no filtering)
   - `:preferred_qualities` - List of resolutions in preference order (for sorting)
   - `:blocked_tags` - List of strings to filter out from titles
   - `:search_query` - Original search query to score title relevance
@@ -62,7 +62,6 @@ defmodule Mydia.Indexers.ReleaseRanker do
         ]
 
   @default_min_seeders 0
-  @default_size_range {100, 20_000}
 
   @doc """
   Selects the best result from a list based on ranking criteria.
@@ -156,7 +155,7 @@ defmodule Mydia.Indexers.ReleaseRanker do
   def filter_acceptable(results, opts \\ []) do
     min_seeders = Keyword.get(opts, :min_seeders, @default_min_seeders)
     min_ratio = Keyword.get(opts, :min_ratio)
-    size_range = Keyword.get(opts, :size_range, @default_size_range)
+    size_range = Keyword.get(opts, :size_range)
     blocked_tags = Keyword.get(opts, :blocked_tags, [])
 
     Enum.filter(results, fn result ->
@@ -181,9 +180,10 @@ defmodule Mydia.Indexers.ReleaseRanker do
         size_range != nil and not within_size_range?(result, size_range) ->
           {min_mb, max_mb} = size_range
           size_mb = Float.round(bytes_to_mb(result.size), 1)
+          range_str = format_size_range(min_mb, max_mb)
 
           Logger.info(
-            "[ReleaseRanker] Filtered out (size #{size_mb} MB not in #{min_mb}-#{max_mb} MB): #{result.title}"
+            "[ReleaseRanker] Filtered out (size #{size_mb} MB not in #{range_str}): #{result.title}"
           )
 
           false
@@ -221,10 +221,20 @@ defmodule Mydia.Indexers.ReleaseRanker do
   # nil size_range disables size filtering
   defp within_size_range?(_result, nil), do: true
 
+  # Handle partial ranges where min or max might be nil
   defp within_size_range?(%SearchResult{size: size_bytes}, {min_mb, max_mb}) do
     size_mb = bytes_to_mb(size_bytes)
-    size_mb >= min_mb && size_mb <= max_mb
+
+    above_min = min_mb == nil or size_mb >= min_mb
+    below_max = max_mb == nil or size_mb <= max_mb
+
+    above_min and below_max
   end
+
+  defp format_size_range(nil, nil), do: "any"
+  defp format_size_range(min, nil), do: "#{min}+ MB"
+  defp format_size_range(nil, max), do: "0-#{max} MB"
+  defp format_size_range(min, max), do: "#{min}-#{max} MB"
 
   defp not_blocked?(%SearchResult{title: title}, blocked_tags) do
     title_lower = String.downcase(title)
@@ -375,7 +385,7 @@ defmodule Mydia.Indexers.ReleaseRanker do
   def score_all_with_reasons(results, opts \\ []) do
     min_seeders = Keyword.get(opts, :min_seeders, @default_min_seeders)
     min_ratio = Keyword.get(opts, :min_ratio)
-    size_range = Keyword.get(opts, :size_range, @default_size_range)
+    size_range = Keyword.get(opts, :size_range)
     blocked_tags = Keyword.get(opts, :blocked_tags, [])
 
     results

@@ -1035,9 +1035,10 @@ defmodule Mydia.Jobs.TVShowSearch do
     # Start with base options - TV shows typically have smaller file sizes than movies
     # Oban job args use string keys (JSON storage)
     # Include search_query for title relevance scoring and media_type for unified scoring
+    # Note: size_range is nil by default (no filtering) unless specified in args or quality profile
     base_opts = [
       min_seeders: args["min_seeders"] || get_min_seeders(),
-      size_range: args["size_range"] || {100, 5_000},
+      size_range: args["size_range"],
       search_query: build_episode_query(episode),
       media_type: :episode
     ]
@@ -1051,7 +1052,7 @@ defmodule Mydia.Jobs.TVShowSearch do
         quality_profile ->
           base_opts
           |> Keyword.put(:quality_profile, quality_profile)
-          |> Keyword.merge(build_quality_options(quality_profile))
+          |> Keyword.merge(build_quality_options(quality_profile, :episode))
       end
 
     # Add any custom blocked/preferred tags from args
@@ -1065,9 +1066,10 @@ defmodule Mydia.Jobs.TVShowSearch do
     # A full season in HD can be 10-50GB depending on episode count and quality
     # Oban job args use string keys (JSON storage)
     # Include search_query for title relevance scoring and media_type for unified scoring
+    # Note: size_range is nil by default (no filtering) unless specified in args or quality profile
     base_opts = [
       min_seeders: args["min_seeders"] || get_min_seeders(),
-      size_range: args["size_range"] || {2_000, 100_000},
+      size_range: args["size_range"],
       search_query: build_season_query(media_item, season_number),
       media_type: :episode
     ]
@@ -1091,7 +1093,7 @@ defmodule Mydia.Jobs.TVShowSearch do
             qp ->
               base_opts
               |> Keyword.put(:quality_profile, qp)
-              |> Keyword.merge(build_quality_options(qp))
+              |> Keyword.merge(build_quality_options(qp, :episode))
           end
       end
 
@@ -1113,7 +1115,7 @@ defmodule Mydia.Jobs.TVShowSearch do
     end
   end
 
-  defp build_quality_options(quality_profile) do
+  defp build_quality_options(quality_profile, media_type) do
     # Extract preferred qualities from quality profile
     # The :qualities field contains the list of allowed resolutions in preference order
     quality_opts =
@@ -1137,8 +1139,34 @@ defmodule Mydia.Jobs.TVShowSearch do
           []
       end
 
-    Keyword.merge(quality_opts, rules_opts)
+    # Extract size constraints from quality_standards based on media type
+    size_opts = extract_size_range(quality_profile, media_type)
+
+    quality_opts
+    |> Keyword.merge(rules_opts)
+    |> Keyword.merge(size_opts)
   end
+
+  defp extract_size_range(%{quality_standards: standards}, media_type) when is_map(standards) do
+    {min_key, max_key} =
+      case media_type do
+        :movie -> {:movie_min_size_mb, :movie_max_size_mb}
+        :episode -> {:episode_min_size_mb, :episode_max_size_mb}
+      end
+
+    min_size = Map.get(standards, min_key)
+    max_size = Map.get(standards, max_key)
+
+    case {min_size, max_size} do
+      {nil, nil} -> []
+      {min, nil} when is_number(min) -> [size_range: {min, nil}]
+      {nil, max} when is_number(max) -> [size_range: {nil, max}]
+      {min, max} when is_number(min) and is_number(max) -> [size_range: {min, max}]
+      _ -> []
+    end
+  end
+
+  defp extract_size_range(_, _), do: []
 
   defp maybe_add_option(opts, _key, nil), do: opts
   defp maybe_add_option(opts, _key, []), do: opts

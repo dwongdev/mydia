@@ -7,4 +7,11 @@ defmodule MydiaWeb.RedirectController do
   def admin_config(conn, _params) do
     redirect(conn, to: ~p"/admin/config")
   end
+
+  @doc """
+  Redirects /preferences to /profile (preferences are now merged into profile).
+  """
+  def profile(conn, _params) do
+    redirect(conn, to: ~p"/profile")
+  end
 end

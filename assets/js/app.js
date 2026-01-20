@@ -462,6 +462,22 @@ topbar.config({ barColors: { 0: "#29d" }, shadowColor: "rgba(0, 0, 0, .3)" });
 window.addEventListener("phx:page-loading-start", (_info) => topbar.show(300));
 window.addEventListener("phx:page-loading-stop", (_info) => topbar.hide());
 
+// Handle theme changes from preferences page
+window.addEventListener("phx:theme_changed", (e) => {
+  if (!window.mydiaTheme) return;
+
+  const theme = e.detail.theme;
+  // Map preferences values to theme system values
+  const themeMap = {
+    system: window.mydiaTheme.THEMES.SYSTEM,
+    light: window.mydiaTheme.THEMES.LIGHT,
+    dark: window.mydiaTheme.THEMES.DARK,
+  };
+
+  const mappedTheme = themeMap[theme] || window.mydiaTheme.THEMES.SYSTEM;
+  window.mydiaTheme.setTheme(mappedTheme);
+});
+
 // Handle download exports
 window.addEventListener("phx:download_export", (e) => {
   const { filename, content, mime_type } = e.detail;

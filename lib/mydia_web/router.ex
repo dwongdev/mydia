@@ -104,6 +104,14 @@ defmodule MydiaWeb.Router do
     get "/player/*path", PlayerController, :index
   end
 
+  # Authenticated redirect routes
+  scope "/", MydiaWeb do
+    pipe_through [:browser, :auth, :require_authenticated]
+
+    # Redirect /preferences to /profile (merged pages)
+    get "/preferences", RedirectController, :profile
+  end
+
   # Authenticated LiveView routes
   scope "/", MydiaWeb do
     pipe_through [:browser, :auth, :require_authenticated]
@@ -150,6 +158,9 @@ defmodule MydiaWeb.Router do
       live "/request/movie", RequestMediaLive.Index, :request_movie
       live "/request/series", RequestMediaLive.Index, :request_series
       live "/requests", MyRequestsLive.Index, :index
+
+      # User profile and preferences (merged into one page)
+      live "/profile", ProfileLive.Index, :index
     end
   end
 

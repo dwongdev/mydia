@@ -23,6 +23,7 @@ defmodule Mydia.Accounts.User do
     field :avatar_url, :string
     field :last_login_at, :utc_datetime
 
+    has_one :preference, Mydia.Accounts.UserPreference
     has_many :api_keys, Mydia.Accounts.ApiKey
     has_many :media_requests, Mydia.Media.MediaRequest, foreign_key: :requester_id
     has_many :approved_requests, Mydia.Media.MediaRequest, foreign_key: :approved_by_id
@@ -89,6 +90,16 @@ defmodule Mydia.Accounts.User do
   Returns the list of valid role values.
   """
   def valid_roles, do: @role_values
+
+  @doc """
+  Changeset for updating a user's profile (display_name and avatar_url only).
+  """
+  def profile_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:display_name, :avatar_url])
+    |> validate_length(:display_name, max: 100)
+    |> validate_format(:avatar_url, ~r/^https?:\/\//, message: "must be a valid URL")
+  end
 
   # Validate password requirements
   defp validate_password(changeset) do

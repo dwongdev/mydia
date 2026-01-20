@@ -301,12 +301,7 @@ defmodule MydiaWeb.Layouts do
               >
                 <li>
                   <a href="/profile">
-                    <.icon name="hero-user" class="w-4 h-4" /> Profile
-                  </a>
-                </li>
-                <li>
-                  <a href="/preferences">
-                    <.icon name="hero-adjustments-horizontal" class="w-4 h-4" /> Preferences
+                    <.icon name="hero-cog-6-tooth" class="w-4 h-4" /> Settings
                   </a>
                 </li>
                 <li class="mt-2 border-t border-base-300 pt-2">

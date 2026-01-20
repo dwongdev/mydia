@@ -5,7 +5,7 @@ defmodule Mydia.Accounts do
 
   import Ecto.Query, warn: false
   alias Mydia.Repo
-  alias Mydia.Accounts.{User, ApiKey}
+  alias Mydia.Accounts.{User, ApiKey, UserPreference}
 
   ## Users
 
@@ -185,6 +185,93 @@ defmodule Mydia.Accounts do
   end
 
   def verify_password(_user, _password), do: false
+
+  ## Profile Management
+
+  @doc """
+  Checks if a user authenticated via OIDC (has an oidc_sub set).
+  """
+  def oidc_user?(%User{oidc_sub: nil}), do: false
+  def oidc_user?(%User{oidc_sub: _}), do: true
+
+  @doc """
+  Updates a user's profile (display_name and avatar_url only).
+  """
+  def update_profile(%User{} = user, attrs) do
+    user
+    |> User.profile_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for tracking profile changes.
+  """
+  def change_profile(%User{} = user, attrs \\ %{}) do
+    User.profile_changeset(user, attrs)
+  end
+
+  @doc """
+  Changes a user's password with current password verification.
+
+  Returns `{:error, :invalid_password}` if the current password is incorrect.
+  Returns `{:error, changeset}` if the new password is invalid.
+  """
+  def change_password(%User{} = user, current_password, new_password, new_password_confirmation) do
+    if verify_password(user, current_password) do
+      user
+      |> User.password_changeset(%{
+        password: new_password,
+        password_confirmation: new_password_confirmation
+      })
+      |> Repo.update()
+    else
+      {:error, :invalid_password}
+    end
+  end
+
+  ## User Preferences
+
+  @doc """
+  Gets a user's preferences, creating default preferences if they don't exist.
+  """
+  def get_user_preference!(%User{id: user_id}) do
+    get_user_preference!(user_id)
+  end
+
+  def get_user_preference!(user_id) when is_binary(user_id) do
+    case Repo.get_by(UserPreference, user_id: user_id) do
+      nil ->
+        # Create default preferences
+        {:ok, pref} =
+          %UserPreference{}
+          |> UserPreference.changeset(%{preferences: UserPreference.defaults()})
+          |> Ecto.Changeset.put_change(:user_id, user_id)
+          |> Repo.insert()
+
+        pref
+
+      pref ->
+        pref
+    end
+  end
+
+  @doc """
+  Updates a user's preferences.
+
+  The attrs should be a map with string keys matching preference names.
+  """
+  def update_preference(%UserPreference{} = preference, attrs) do
+    preference
+    |> UserPreference.update_preferences_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for tracking preference changes.
+  """
+  def change_preference(%UserPreference{} = preference, attrs \\ %{}) do
+    UserPreference.changeset(preference, attrs)
+  end
 
   ## API Keys
 

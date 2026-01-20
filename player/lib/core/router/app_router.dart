@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+// Conditional import for web URL handling
+import 'web_url_stub.dart' if (dart.library.html) 'web_url.dart' as web_url;
 import '../../presentation/screens/home_screen.dart';
 import '../../presentation/screens/login_screen.dart';
 import '../../presentation/screens/movie/movie_detail_screen.dart';
@@ -11,6 +13,7 @@ import '../../presentation/screens/library/library_controller.dart';
 import '../../presentation/screens/settings_screen.dart';
 import '../../presentation/screens/settings/devices_screen.dart';
 import '../../presentation/screens/player/player_screen.dart';
+import '../../presentation/screens/player/queue_player_screen.dart';
 import '../../presentation/screens/downloads/downloads_screen.dart';
 import '../../presentation/screens/search/search_screen.dart';
 import '../../presentation/widgets/app_shell.dart';
@@ -51,9 +54,14 @@ GoRouter appRouter(Ref ref) {
     refreshNotifier.dispose();
   });
 
+  // On web, read the initial route from the browser URL hash.
+  // On native platforms, default to home.
+  final initialLocation = web_url.getInitialRoute();
+  debugPrint('[AppRouter] Initial location: $initialLocation');
+
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
-    initialLocation: '/',
+    initialLocation: initialLocation,
     debugLogDiagnostics: true,
     refreshListenable: refreshNotifier,
     redirect: (context, state) {
@@ -188,6 +196,43 @@ GoRouter appRouter(Ref ref) {
         builder: (context, state) {
           final id = state.pathParameters['id']!;
           return EpisodeDetailScreen(id: id);
+        },
+      ),
+      // Queue player route for collection playback (must be before /player/:type/:id)
+      GoRoute(
+        path: '/player/queue',
+        name: 'queue_player',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) {
+          final itemsParam = state.uri.queryParameters['items'];
+
+          if (itemsParam == null || itemsParam.isEmpty) {
+            return Scaffold(
+              body: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                    const SizedBox(height: 16),
+                    const Text('No items in queue'),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      onPressed: () {
+                        if (context.canPop()) {
+                          context.pop();
+                        } else {
+                          context.go('/');
+                        }
+                      },
+                      child: const Text('Go Back'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          return QueuePlayerScreen(itemsParam: itemsParam);
         },
       ),
       // Player route

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../../../core/player/duration_override.dart';
 import '../../../core/player/platform_features.dart';
 import 'bottom_controls_bar.dart';
 import 'center_play_button.dart';
@@ -273,7 +274,8 @@ class _GlassmorphicVideoControlsState extends State<_GlassmorphicVideoControls>
 
   void _seekForward(Player player) {
     final currentPosition = player.state.position;
-    final duration = player.state.duration;
+    // Use duration override if available (for HLS live playlists)
+    final duration = DurationOverride.getDuration(player.state.duration);
     final newPosition = currentPosition + const Duration(seconds: 10);
     final targetPosition = newPosition > duration ? duration : newPosition;
     player.seek(targetPosition);

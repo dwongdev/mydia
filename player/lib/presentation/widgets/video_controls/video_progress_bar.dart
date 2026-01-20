@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 
+import '../../../core/player/duration_override.dart';
 import '../../../core/theme/colors.dart';
 
 /// A thin, seekable progress bar for video playback.
@@ -67,7 +68,9 @@ class _VideoProgressBarState extends State<VideoProgressBar> {
               initialData: widget.player.state.buffer,
               builder: (context, bufferSnapshot) {
                 final position = positionSnapshot.data ?? Duration.zero;
-                final duration = durationSnapshot.data ?? Duration.zero;
+                // Use duration override if available (for HLS live playlists)
+                final playerDuration = durationSnapshot.data ?? Duration.zero;
+                final duration = DurationOverride.getDuration(playerDuration);
                 final buffer = bufferSnapshot.data ?? Duration.zero;
 
                 final durationMs = duration.inMilliseconds.toDouble();

@@ -114,6 +114,13 @@ defmodule MydiaWeb.PlayerController do
       // Mydia auth configuration injected by Phoenix
       // Flutter web app reads this to auto-authenticate
       window.mydiaConfig = #{config_json};
+
+      // Capture the initial URL hash before Flutter loads
+      // This is needed because Flutter's dart:html window.location may not have
+      // the hash available by the time the router initializes
+      window.mydiaInitialHash = window.location.hash || '';
+      console.log('[Phoenix] Captured initial hash:', window.mydiaInitialHash);
+      console.log('[Phoenix] Full href:', window.location.href);
     </script>
     """
 

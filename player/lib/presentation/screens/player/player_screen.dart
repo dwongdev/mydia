@@ -16,7 +16,9 @@ import '../../../core/connection/connection_provider.dart';
 import '../../../core/graphql/graphql_provider.dart';
 import '../../../core/player/progress_service.dart';
 import '../../../core/utils/file_utils.dart' as file_utils;
+import '../../../core/utils/web_lifecycle.dart' as web_lifecycle;
 import '../../../core/player/platform_features.dart';
+import '../../../core/player/duration_override.dart';
 import '../../../core/player/streaming_strategy.dart';
 // WebRTC connection manager removed - using libp2p
 import '../../../core/cast/cast_providers.dart';
@@ -29,6 +31,7 @@ import '../../widgets/gesture_controls.dart';
 import '../../widgets/cast_device_picker.dart';
 import '../../widgets/airplay_button.dart';
 import '../../widgets/video_controls/glassmorphic_video_controls.dart';
+import '../../widgets/up_next_overlay.dart';
 import '../../../domain/models/subtitle_track.dart' as app_models;
 import '../../../domain/models/cast_device.dart';
 import '../../../graphql/fragments/media_file_fragment.graphql.dart';
@@ -81,14 +84,34 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   // HLS quality selection (web only)
   HlsQualityLevel _selectedQuality = HlsQualityLevel.auto;
 
+  // HLS session tracking for cleanup
+  String? _hlsSessionId;
+  String? _serverUrl;
+  String? _authToken;
+
+  // Total duration from server (for HLS streams where playlist duration is incomplete)
+  Duration? _totalDuration;
+
   // Desktop feature state
   final FocusNode _focusNode = FocusNode();
   DateTime? _lastClickTime;
+
+  // Auto-play next episode state
+  bool _showUpNext = false;
+  int _autoPlayCountdown = 10;
+  bool _autoPlayCancelled = false;
+  Timer? _upNextTimer;
+  static const _autoPlayCountdownDuration = 10;
 
   @override
   void initState() {
     super.initState();
     _initializePlayer();
+
+    // Register beforeunload handler for web to terminate HLS session on tab close
+    if (kIsWeb) {
+      web_lifecycle.registerBeforeUnload(_terminateHlsSession);
+    }
   }
 
   Future<void> _initializePlayer() async {
@@ -149,6 +172,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         }
         return;
       }
+
+      // Store for session cleanup
+      _serverUrl = serverUrl;
+      _authToken = token;
 
       // Get media token service for media access
       final mediaTokenService = await ref.read(asyncMediaTokenServiceProvider.future);
@@ -216,6 +243,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
           if (hlsUrl != null && hlsUrl.contains('.m3u8')) {
             debugPrint('HLS playlist URL: $hlsUrl');
+
+            // Extract session ID for cleanup (URL format: /api/v1/hls/{session_id}/index.m3u8)
+            _hlsSessionId = _extractSessionIdFromHlsUrl(hlsUrl);
+            if (_hlsSessionId != null) {
+              debugPrint('HLS session ID: $_hlsSessionId');
+            }
 
             // Wait for playlist to be ready with enough segments
             await _waitForPlaylist(hlsUrl, token);
@@ -467,10 +500,120 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     if (player == null || !mounted) return;
 
     // Check if video is near completion (90%)
-    if (_progressService?.isWatched(player) == true) {
-      // Could trigger mark as watched here if desired
+    final isWatched = _progressService?.isWatched(player) == true;
+    if (isWatched) {
       debugPrint('Content is considered watched (90% complete)');
+      // Trigger "Up Next" overlay for episodes with a next episode available
+      _maybeShowUpNext();
     }
+  }
+
+  /// Show the "Up Next" overlay if conditions are met.
+  void _maybeShowUpNext() {
+    // Don't show if already showing, cancelled, or not an episode
+    if (_showUpNext || _autoPlayCancelled || widget.mediaType != 'episode') {
+      return;
+    }
+
+    // Check if there's a next episode
+    if (_seasonEpisodes == null || _currentEpisodeIndex == null) {
+      return;
+    }
+
+    final hasNext = _currentEpisodeIndex! < _seasonEpisodes!.length - 1;
+    if (!hasNext) {
+      return;
+    }
+
+    // Show the overlay and start countdown
+    setState(() {
+      _showUpNext = true;
+      _autoPlayCountdown = _autoPlayCountdownDuration;
+    });
+
+    _startAutoPlayCountdown();
+  }
+
+  /// Start the auto-play countdown timer.
+  void _startAutoPlayCountdown() {
+    _upNextTimer?.cancel();
+    _upNextTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      // Check if player is paused - pause the countdown
+      if (_player != null && !_player!.state.playing) {
+        return;
+      }
+
+      setState(() {
+        _autoPlayCountdown--;
+      });
+
+      if (_autoPlayCountdown <= 0) {
+        timer.cancel();
+        _playNextEpisode();
+      }
+    });
+  }
+
+  /// Cancel the auto-play overlay and countdown.
+  void _cancelAutoPlay() {
+    _upNextTimer?.cancel();
+    _upNextTimer = null;
+    if (mounted) {
+      setState(() {
+        _showUpNext = false;
+        _autoPlayCancelled = true;
+      });
+    }
+  }
+
+  /// Play the next episode immediately.
+  void _playNextEpisode() {
+    _upNextTimer?.cancel();
+    _upNextTimer = null;
+
+    if (_seasonEpisodes == null || _currentEpisodeIndex == null) {
+      return;
+    }
+
+    final nextIndex = _currentEpisodeIndex! + 1;
+    if (nextIndex >= _seasonEpisodes!.length) {
+      return;
+    }
+
+    final nextEpisode = _seasonEpisodes![nextIndex];
+    final files = nextEpisode.files;
+    if (files == null || files.isEmpty) {
+      return;
+    }
+
+    final firstFile = files.first;
+    if (firstFile == null) {
+      return;
+    }
+
+    final title =
+        'S${nextEpisode.seasonNumber}E${nextEpisode.episodeNumber}${nextEpisode.title != null ? ' - ${nextEpisode.title}' : ''}';
+    _navigateToEpisode(nextEpisode.id, firstFile.id, title);
+  }
+
+  /// Get the title for the next episode (for display in Up Next overlay).
+  String? _getNextEpisodeTitle() {
+    if (_seasonEpisodes == null || _currentEpisodeIndex == null) {
+      return null;
+    }
+
+    final nextIndex = _currentEpisodeIndex! + 1;
+    if (nextIndex >= _seasonEpisodes!.length) {
+      return null;
+    }
+
+    final nextEpisode = _seasonEpisodes![nextIndex];
+    return 'S${nextEpisode.seasonNumber}E${nextEpisode.episodeNumber}${nextEpisode.title != null ? ' - ${nextEpisode.title}' : ''}';
   }
 
   /// Get the HLS playlist URL from the stream endpoint.
@@ -493,6 +636,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           if (response.statusCode == 200) {
             final json = jsonDecode(response.body) as Map<String, dynamic>;
             final hlsPath = json['hls_url'] as String?;
+
+            // Extract total duration from server (HLS live playlists don't include it)
+            final durationSeconds = json['duration'] as num?;
+            if (durationSeconds != null) {
+              _totalDuration = Duration(milliseconds: (durationSeconds * 1000).round());
+              DurationOverride.value = _totalDuration;
+              debugPrint('Total duration from server: $_totalDuration');
+            }
+
             if (hlsPath != null) {
               // Convert relative path to absolute URL
               if (hlsPath.startsWith('/')) {
@@ -577,10 +729,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             return;
           }
 
-          debugPrint('Playlist has $segmentCount/$minSegments segments, waiting for more...');
+          final percentage = (segmentCount / minSegments * 100).round();
+          debugPrint('Playlist has $segmentCount/$minSegments segments ($percentage%), waiting for more...');
           if (mounted) {
             setState(() {
-              _loadingMessage = 'Preparing stream... ($segmentCount/$minSegments segments)';
+              _loadingMessage = 'Preparing stream... $percentage%';
             });
           }
         } else {
@@ -640,6 +793,52 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       await _progressService!.saveMovieProgress(_player!, widget.mediaId);
     } else if (widget.mediaType == 'episode') {
       await _progressService!.saveEpisodeProgress(_player!, widget.mediaId);
+    }
+  }
+
+  /// Extract session ID from HLS URL.
+  /// URL format: /api/v1/hls/{session_id}/index.m3u8
+  String? _extractSessionIdFromHlsUrl(String hlsUrl) {
+    try {
+      final uri = Uri.parse(hlsUrl);
+      final segments = uri.pathSegments;
+      // Find 'hls' in path and get the next segment (session_id)
+      final hlsIndex = segments.indexOf('hls');
+      if (hlsIndex != -1 && hlsIndex + 1 < segments.length) {
+        return segments[hlsIndex + 1];
+      }
+    } catch (e) {
+      debugPrint('Error extracting session ID from HLS URL: $e');
+    }
+    return null;
+  }
+
+  /// Terminate the HLS session on the server.
+  /// This stops FFmpeg and cleans up server-side resources.
+  Future<void> _terminateHlsSession() async {
+    final sessionId = _hlsSessionId;
+    final serverUrl = _serverUrl;
+    final token = _authToken;
+
+    if (sessionId == null || serverUrl == null || token == null) {
+      return;
+    }
+
+    debugPrint('Terminating HLS session: $sessionId');
+
+    try {
+      final response = await http.delete(
+        Uri.parse('$serverUrl/api/v1/hls/$sessionId'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (response.statusCode == 200) {
+        debugPrint('HLS session terminated successfully');
+      } else {
+        debugPrint('Failed to terminate HLS session: ${response.statusCode}');
+      }
+    } catch (e) {
+      debugPrint('Error terminating HLS session: $e');
     }
   }
 
@@ -820,8 +1019,22 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     // Save progress before disposing (fire and forget - can't await in dispose)
     _saveProgress();
 
+    // Terminate HLS session on server to stop FFmpeg (fire and forget)
+    _terminateHlsSession();
+
+    // Clear duration override
+    DurationOverride.clear();
+
+    // Unregister beforeunload handler on web
+    if (kIsWeb) {
+      web_lifecycle.unregisterBeforeUnload();
+    }
+
     // Cancel stream subscription to prevent memory leak
     _positionSubscription?.cancel();
+
+    // Cancel auto-play timer
+    _upNextTimer?.cancel();
 
     // Stop progress tracking
     _progressService?.stopSync();
@@ -980,6 +1193,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         // Episode navigation buttons
         if (_seasonEpisodes != null && _currentEpisodeIndex != null)
           _buildEpisodeNavigation(),
+        // Up Next overlay for auto-play
+        if (_showUpNext && _getNextEpisodeTitle() != null)
+          UpNextOverlay(
+            nextEpisodeTitle: _getNextEpisodeTitle()!,
+            countdownSeconds: _autoPlayCountdown,
+            onPlayNow: _playNextEpisode,
+            onCancel: _cancelAutoPlay,
+          ),
       ],
     );
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../../../core/player/duration_override.dart';
 import '../../../core/player/platform_features.dart';
 import '../../../core/theme/colors.dart';
 import 'glass_container.dart';
@@ -71,7 +72,9 @@ class _BottomControlsBarState extends State<BottomControlsBar> {
           initialData: widget.player.state.duration,
           builder: (context, durationSnapshot) {
             final position = positionSnapshot.data ?? Duration.zero;
-            final duration = durationSnapshot.data ?? Duration.zero;
+            // Use duration override if available (for HLS live playlists)
+            final playerDuration = durationSnapshot.data ?? Duration.zero;
+            final duration = DurationOverride.getDuration(playerDuration);
 
             return Text(
               '${_formatDuration(position)} / ${_formatDuration(duration)}',

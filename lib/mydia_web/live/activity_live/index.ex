@@ -177,6 +177,22 @@ defmodule MydiaWeb.ActivityLive.Index do
         error = event.metadata["error_message"] || "Unknown error"
         format_search_description("Search failed for", title, event.metadata) <> " (#{error})"
 
+      "search.backoff_applied" ->
+        title = event.metadata["title"] || "Unknown"
+        failure_count = event.metadata["failure_count"] || 1
+        reason = format_backoff_reason(event.metadata["reason"])
+        next_eligible = format_next_eligible(event.metadata["next_eligible_at"])
+        resource_type = determine_backoff_resource_type(event.metadata)
+
+        "#{title}#{format_episode_part(event.metadata)} (#{resource_type}) - #{reason}, attempt ##{failure_count}, next search #{next_eligible}"
+
+      "search.backoff_reset" ->
+        title = event.metadata["title"] || "Unknown"
+        previous_count = event.metadata["previous_failure_count"] || 0
+        resource_type = determine_backoff_resource_type(event.metadata)
+
+        "#{title}#{format_episode_part(event.metadata)} (#{resource_type}) - backoff cleared after #{previous_count} failed attempts"
+
       _ ->
         event.type
     end
@@ -263,6 +279,8 @@ defmodule MydiaWeb.ActivityLive.Index do
       "search.no_results" -> "hero-magnifying-glass"
       "search.filtered_out" -> "hero-funnel"
       "search.error" -> "hero-magnifying-glass"
+      "search.backoff_applied" -> "hero-clock"
+      "search.backoff_reset" -> "hero-arrow-path"
       _ -> "hero-information-circle"
     end
   end
@@ -281,6 +299,12 @@ defmodule MydiaWeb.ActivityLive.Index do
       "low_seeders" -> "Low seeders"
       "below_quality_threshold" -> "Below quality"
       "no_valid_season_packs" -> "No season packs"
+      # New detailed rejection reasons
+      "individual_episode" -> "Episode"
+      "missing_season_marker" -> "No season"
+      "low_ratio" -> "Low ratio"
+      "size_out_of_range" -> "Size"
+      "blocked_tag" -> "Blocked"
       _ -> String.replace(key, "_", " ") |> String.capitalize()
     end
   end
@@ -302,4 +326,61 @@ defmodule MydiaWeb.ActivityLive.Index do
   end
 
   defp format_breakdown_value(value), do: to_string(value)
+
+  # Backoff formatting helpers
+
+  defp format_episode_part(metadata) do
+    case {metadata["season_number"], metadata["episode_number"]} do
+      {nil, _} ->
+        ""
+
+      {s, nil} ->
+        " S#{String.pad_leading(to_string(s), 2, "0")}"
+
+      {s, e} ->
+        " S#{String.pad_leading(to_string(s), 2, "0")}E#{String.pad_leading(to_string(e), 2, "0")}"
+    end
+  end
+
+  defp format_backoff_reason("no_results"), do: "no results found"
+  defp format_backoff_reason("all_filtered"), do: "all results filtered out"
+  defp format_backoff_reason(reason) when is_binary(reason), do: reason
+  defp format_backoff_reason(_), do: "search failed"
+
+  defp format_next_eligible(nil), do: "unknown"
+
+  defp format_next_eligible(iso_string) when is_binary(iso_string) do
+    case DateTime.from_iso8601(iso_string) do
+      {:ok, dt, _offset} -> format_relative_future_time(dt)
+      _ -> iso_string
+    end
+  end
+
+  defp format_next_eligible(_), do: "unknown"
+
+  defp format_relative_future_time(dt) do
+    now = DateTime.utc_now()
+    diff_seconds = DateTime.diff(dt, now)
+
+    cond do
+      diff_seconds <= 0 -> "now"
+      diff_seconds < 60 -> "in #{diff_seconds}s"
+      diff_seconds < 3600 -> "in #{div(diff_seconds, 60)}m"
+      diff_seconds < 86_400 -> "in #{Float.round(diff_seconds / 3600, 1)}h"
+      true -> "in #{div(diff_seconds, 86_400)}d"
+    end
+  end
+
+  defp determine_backoff_resource_type(metadata) do
+    cond do
+      metadata["episode_id"] ->
+        "episode"
+
+      metadata["season_number"] && !metadata["episode_number"] ->
+        "season #{metadata["season_number"]}"
+
+      true ->
+        "show"
+    end
+  end
 end

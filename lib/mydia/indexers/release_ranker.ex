@@ -346,6 +346,114 @@ defmodule Mydia.Indexers.ReleaseRanker do
     end
   end
 
+  @doc """
+  Scores all results and returns detailed information about each, including rejection reasons.
+
+  Unlike `rank_all/2`, this function includes ALL results (even those filtered out)
+  and provides the reason why each was rejected (if applicable).
+
+  Returns a list of maps containing:
+  - `:title` - The release title
+  - `:score` - The calculated score (0 if rejected before scoring)
+  - `:seeders` - Seeder count
+  - `:size_mb` - Size in megabytes
+  - `:resolution` - Detected resolution (if available)
+  - `:status` - Either `:accepted` or `:rejected`
+  - `:rejection_reason` - Why it was rejected (nil if accepted)
+
+  Results are sorted by score descending.
+
+  ## Examples
+
+      iex> ReleaseRanker.score_all_with_reasons(results, min_seeders: 10)
+      [
+        %{title: "Movie.2024.1080p", score: 75.5, status: :accepted, ...},
+        %{title: "Movie.2024.CAM", score: 0, status: :rejected, rejection_reason: "blocked_tag: CAM", ...}
+      ]
+  """
+  @spec score_all_with_reasons([SearchResult.t()], ranking_options()) :: [map()]
+  def score_all_with_reasons(results, opts \\ []) do
+    min_seeders = Keyword.get(opts, :min_seeders, @default_min_seeders)
+    min_ratio = Keyword.get(opts, :min_ratio)
+    size_range = Keyword.get(opts, :size_range, @default_size_range)
+    blocked_tags = Keyword.get(opts, :blocked_tags, [])
+
+    results
+    |> Enum.map(fn result ->
+      size_mb = bytes_to_mb(result.size)
+      resolution = if result.quality, do: result.quality.resolution, else: nil
+
+      base_info = %{
+        title: result.title,
+        seeders: result.seeders,
+        size_mb: Float.round(size_mb, 1),
+        resolution: resolution
+      }
+
+      # Check rejection reasons in order
+      rejection = get_rejection_reason(result, min_seeders, min_ratio, size_range, blocked_tags)
+
+      case rejection do
+        nil ->
+          # Not rejected, calculate score
+          breakdown = calculate_score_breakdown(result, opts)
+
+          Map.merge(base_info, %{
+            score: breakdown.total,
+            status: :accepted,
+            rejection_reason: nil,
+            breakdown: %{
+              quality: breakdown.quality,
+              seeders: breakdown.seeders,
+              title_match: breakdown.title_match
+            }
+          })
+
+        reason ->
+          Map.merge(base_info, %{
+            score: 0.0,
+            status: :rejected,
+            rejection_reason: reason,
+            breakdown: nil
+          })
+      end
+    end)
+    |> Enum.sort_by(& &1.score, :desc)
+  end
+
+  # Returns rejection reason string or nil if acceptable
+  defp get_rejection_reason(result, min_seeders, min_ratio, size_range, blocked_tags) do
+    cond do
+      not meets_seeder_minimum?(result, min_seeders) ->
+        "low_seeders: #{result.seeders} < #{min_seeders}"
+
+      min_ratio != nil and not meets_ratio_minimum?(result, min_ratio) ->
+        total = result.seeders + result.leechers
+        ratio = if total > 0, do: Float.round(result.seeders / total * 100, 1), else: 0.0
+        "low_ratio: #{ratio}% < #{Float.round(min_ratio * 100, 1)}%"
+
+      size_range != nil and not within_size_range?(result, size_range) ->
+        {min_mb, max_mb} = size_range
+        size_mb = Float.round(bytes_to_mb(result.size), 1)
+        "size_out_of_range: #{size_mb} MB not in #{min_mb}-#{max_mb} MB"
+
+      blocked_tag = find_blocked_tag(result, blocked_tags) ->
+        "blocked_tag: #{blocked_tag}"
+
+      true ->
+        nil
+    end
+  end
+
+  # Find which blocked tag matched (if any)
+  defp find_blocked_tag(%SearchResult{title: title}, blocked_tags) do
+    title_lower = String.downcase(title)
+
+    Enum.find(blocked_tags, fn tag ->
+      String.contains?(title_lower, String.downcase(tag))
+    end)
+  end
+
   ## Private Functions - Helpers
 
   defp bytes_to_mb(bytes) when is_integer(bytes) do

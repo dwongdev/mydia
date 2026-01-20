@@ -178,13 +178,71 @@
                       <span class="font-medium text-base-content/70 block mb-1">
                         Filter breakdown:
                       </span>
-                      <div class="flex flex-wrap gap-2">
-                        <%= for {key, value} <- event.metadata["filter_stats"] do %>
-                          <span class="badge badge-sm badge-ghost">
-                            {format_filter_stat_label(key)}: {value}
-                          </span>
+                      <%= if event.metadata["filter_stats"]["rejection_counts"] do %>
+                        <%!-- New format with rejection_counts --%>
+                        <div class="flex flex-wrap gap-2 mb-2">
+                          <%= for {reason, count} <- event.metadata["filter_stats"]["rejection_counts"] do %>
+                            <span class="badge badge-sm badge-warning">
+                              {format_filter_stat_label(reason)}: {count}
+                            </span>
+                          <% end %>
+                        </div>
+                        <%!-- Results list --%>
+                        <%= if event.metadata["filter_stats"]["results"] && event.metadata["filter_stats"]["results"] != [] do %>
+                          <div class="mt-2 max-h-48 overflow-y-auto">
+                            <table class="table table-xs w-full">
+                              <thead>
+                                <tr class="text-base-content/50">
+                                  <th>Release</th>
+                                  <th class="text-right">Score</th>
+                                  <th class="text-right">Seeds</th>
+                                  <th>Status</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <%= for result <- event.metadata["filter_stats"]["results"] do %>
+                                  <tr class="hover">
+                                    <td class="max-w-xs truncate" title={result["title"]}>
+                                      <span class="text-xs">{result["title"]}</span>
+                                    </td>
+                                    <td class="text-right font-mono text-xs">
+                                      {Float.round((result["score"] || 0) * 1.0, 1)}
+                                    </td>
+                                    <td class="text-right font-mono text-xs">
+                                      {result["seeders"]}
+                                    </td>
+                                    <td>
+                                      <%= if result["status"] == "rejected" do %>
+                                        <span
+                                          class="badge badge-xs badge-error"
+                                          title={result["rejection_reason"]}
+                                        >
+                                          {format_filter_stat_label(
+                                            result["rejection_reason"]
+                                            |> String.split(":")
+                                            |> List.first()
+                                          )}
+                                        </span>
+                                      <% else %>
+                                        <span class="badge badge-xs badge-success">OK</span>
+                                      <% end %>
+                                    </td>
+                                  </tr>
+                                <% end %>
+                              </tbody>
+                            </table>
+                          </div>
                         <% end %>
-                      </div>
+                      <% else %>
+                        <%!-- Legacy flat format --%>
+                        <div class="flex flex-wrap gap-2">
+                          <%= for {key, value} <- event.metadata["filter_stats"] do %>
+                            <span class="badge badge-sm badge-ghost">
+                              {format_filter_stat_label(key)}: {value}
+                            </span>
+                          <% end %>
+                        </div>
+                      <% end %>
                     </div>
                   <% end %>
                   
@@ -218,6 +276,72 @@
                         <span class="font-medium text-success">Selected:</span>
                       </div>
                       <p class="mt-1 text-sm break-all">{event.metadata["selected_release"]}</p>
+                    </div>
+                  <% end %>
+                  
+<!-- All results with scores -->
+                  <%= if event.metadata["all_results"] && event.metadata["all_results"]["results"] do %>
+                    <div class="mt-2">
+                      <span class="font-medium text-base-content/70 block mb-1">
+                        All results:
+                      </span>
+                      <div class="max-h-48 overflow-y-auto">
+                        <table class="table table-xs w-full">
+                          <thead>
+                            <tr class="text-base-content/50">
+                              <th>Release</th>
+                              <th class="text-right">Score</th>
+                              <th class="text-right">Seeds</th>
+                              <th>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <%= for result <- event.metadata["all_results"]["results"] do %>
+                              <tr class={[
+                                "hover",
+                                if(result["title"] == event.metadata["selected_release"],
+                                  do: "bg-success/10",
+                                  else: ""
+                                )
+                              ]}>
+                                <td class="max-w-xs truncate" title={result["title"]}>
+                                  <span class="text-xs">
+                                    <%= if result["title"] == event.metadata["selected_release"] do %>
+                                      <.icon
+                                        name="hero-check"
+                                        class="w-3 h-3 inline text-success mr-1"
+                                      />
+                                    <% end %>
+                                    {result["title"]}
+                                  </span>
+                                </td>
+                                <td class="text-right font-mono text-xs">
+                                  {Float.round((result["score"] || 0) * 1.0, 1)}
+                                </td>
+                                <td class="text-right font-mono text-xs">
+                                  {result["seeders"]}
+                                </td>
+                                <td>
+                                  <%= if result["status"] == "rejected" do %>
+                                    <span
+                                      class="badge badge-xs badge-error"
+                                      title={result["rejection_reason"]}
+                                    >
+                                      {format_filter_stat_label(
+                                        result["rejection_reason"]
+                                        |> String.split(":")
+                                        |> List.first()
+                                      )}
+                                    </span>
+                                  <% else %>
+                                    <span class="badge badge-xs badge-success">OK</span>
+                                  <% end %>
+                                </td>
+                              </tr>
+                            <% end %>
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   <% end %>
                 </div>

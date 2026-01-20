@@ -362,8 +362,20 @@ defmodule MydiaWeb.ActivityLive.Index do
   defp format_job_name("library_scan"), do: "Library Scan"
 
   defp format_job_name(job_id) do
-    job_id
+    # Handle full module names like "Mydia.Jobs.TvShowSearch"
+    name =
+      if String.contains?(job_id, ".") do
+        job_id
+        |> String.split(".")
+        |> List.last()
+      else
+        job_id
+      end
+
+    # Convert CamelCase or snake_case to readable format
+    name
     |> String.replace("_", " ")
+    |> String.replace(~r/([a-z])([A-Z])/, "\\1 \\2")
     |> String.split()
     |> Enum.map(&String.capitalize/1)
     |> Enum.join(" ")
@@ -437,6 +449,13 @@ defmodule MydiaWeb.ActivityLive.Index do
     event.type == "media_item.updated" &&
       event.metadata["changes"] != nil &&
       event.metadata["changes"] != %{}
+  end
+
+  defp has_job_failure_details?(event) do
+    event.type == "job.failed" &&
+      (event.metadata["stacktrace"] != nil ||
+         event.metadata["queue"] != nil ||
+         event.metadata["attempt"] != nil)
   end
 
   # Formats a short summary of changes for the main event description

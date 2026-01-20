@@ -515,13 +515,17 @@ defmodule Mydia.Streaming.FfmpegHlsTranscoder do
       end
 
     # HLS output parameters
+    # Use live-style playlist (no -hls_playlist_type) so playlist updates incrementally
+    # as segments are written. This allows playback to start quickly without waiting
+    # for the entire file to be processed.
+    # -hls_list_size 0 keeps all segments in playlist for full seeking capability
     hls_args = [
       "-f",
       "hls",
       "-hls_time",
-      "6",
-      "-hls_playlist_type",
-      "event",
+      "4",
+      "-hls_list_size",
+      "0",
       "-hls_segment_filename",
       segment_pattern,
       # Progress reporting

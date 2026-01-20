@@ -52,21 +52,41 @@ defmodule MydiaWeb.MediaLive.Show.Components do
       <div class="flex flex-col gap-2">
         <%!-- Play Button (for content with media files) --%>
         <%= if @playback_enabled && @media_item.type == "movie" && length(@media_item.media_files) > 0 do %>
-          <.link navigate={~p"/play/movie/#{@media_item.id}"} class="btn btn-primary btn-block">
+          <% best_file = get_best_media_file(@media_item.media_files) %>
+          <a
+            href={
+              flutter_player_url("movie", @media_item.id,
+                file_id: best_file.id,
+                title: @media_item.title
+              )
+            }
+            class="btn btn-primary btn-block"
+          >
             <.icon name="hero-play-circle-solid" class="w-5 h-5" /> Play Movie
-          </.link>
+          </a>
 
           <div class="divider my-1"></div>
         <% end %>
 
         <%!-- Play Next Button (for TV shows with next episode) --%>
         <%= if @playback_enabled && @media_item.type == "tv_show" && @next_episode do %>
-          <.link navigate={~p"/play/episode/#{@next_episode.id}"} class="btn btn-primary btn-block">
-            <.icon name="hero-play-circle-solid" class="w-5 h-5" />
-            {next_episode_button_text(@next_episode_state)}
-          </.link>
+          <% next_best_file = get_best_media_file(@next_episode.media_files) %>
+          <%= if next_best_file do %>
+            <a
+              href={
+                flutter_player_url("episode", @next_episode.id,
+                  file_id: next_best_file.id,
+                  title: @next_episode.title
+                )
+              }
+              class="btn btn-primary btn-block"
+            >
+              <.icon name="hero-play-circle-solid" class="w-5 h-5" />
+              {next_episode_button_text(@next_episode_state)}
+            </a>
 
-          <div class="divider my-1"></div>
+            <div class="divider my-1"></div>
+          <% end %>
         <% end %>
 
         <button
@@ -687,13 +707,19 @@ defmodule MydiaWeb.MediaLive.Show.Components do
                             </span>
                           </div>
                           <%= if @playback_enabled && has_files do %>
-                            <.link
-                              navigate={~p"/play/episode/#{episode.id}"}
+                            <% episode_best_file = get_best_media_file(episode.media_files) %>
+                            <a
+                              href={
+                                flutter_player_url("episode", episode.id,
+                                  file_id: episode_best_file.id,
+                                  title: episode.title
+                                )
+                              }
                               class="btn btn-success btn-sm btn-square"
                               title="Play"
                             >
                               <.icon name="hero-play-solid" class="w-4 h-4" />
-                            </.link>
+                            </a>
                           <% end %>
                           <button
                             type="button"
@@ -805,13 +831,15 @@ defmodule MydiaWeb.MediaLive.Show.Components do
       <%!-- File actions --%>
       <div class="flex items-center gap-1 flex-shrink-0">
         <%= if @playback_enabled do %>
-          <.link
-            navigate={~p"/play/episode/#{@episode.id}?file_id=#{@file.id}"}
+          <a
+            href={
+              flutter_player_url("episode", @episode.id, file_id: @file.id, title: @episode.title)
+            }
             class="btn btn-ghost btn-xs btn-square"
             title="Play this file"
           >
             <.icon name="hero-play-solid" class="w-4 h-4" />
-          </.link>
+          </a>
         <% end %>
         <button
           type="button"

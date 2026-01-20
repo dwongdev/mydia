@@ -101,12 +101,15 @@ defmodule MydiaWeb.CollectionComponents do
     * `:collection` - Required. The collection to display.
     * `:href` - Required. The link to the collection's detail page.
     * `:item_count` - The number of items in the collection. Defaults to 0.
-    * `:poster_url` - Optional poster URL for the collection.
+    * `:poster_paths` - List of TMDB poster paths for creating a collage. Defaults to empty list.
+    * `:on_play` - Optional. Event name to trigger when Play All is clicked.
   """
   attr :collection, :map, required: true
   attr :href, :string, required: true
   attr :item_count, :integer, default: 0
-  attr :poster_url, :string, default: nil
+  attr :poster_paths, :list, default: []
+  attr :on_play, :string, default: nil
+  attr :can_edit, :boolean, default: false
 
   def collection_card(assigns) do
     ~H"""
@@ -114,22 +117,7 @@ defmodule MydiaWeb.CollectionComponents do
       <div class="card bg-base-100 shadow-lg hover:shadow-xl transition-shadow duration-200">
         <.link navigate={@href}>
           <figure class="relative aspect-[2/3] overflow-hidden bg-base-300">
-            <%= if @poster_url do %>
-              <img
-                src={@poster_url}
-                alt={@collection.name}
-                class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                loading="lazy"
-              />
-            <% else %>
-              <%!-- Placeholder for collections without poster --%>
-              <div class="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-base-200 to-base-300">
-                <.icon
-                  name={if @collection.type == "smart", do: "hero-sparkles", else: "hero-folder"}
-                  class="w-16 h-16 text-base-content/20"
-                />
-              </div>
-            <% end %>
+            <.poster_collage poster_paths={@poster_paths} collection_type={@collection.type} />
             <%!-- Type badge --%>
             <div class={[
               "badge badge-sm absolute top-2 right-2 z-10 shadow-md gap-1",
@@ -146,6 +134,31 @@ defmodule MydiaWeb.CollectionComponents do
             <% end %>
           </figure>
         </.link>
+        <%!-- Action buttons (appear on hover) --%>
+        <div class="absolute bottom-14 right-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20">
+          <%!-- Play button --%>
+          <%= if @on_play && @item_count > 0 do %>
+            <button
+              type="button"
+              phx-click={@on_play}
+              phx-value-id={@collection.id}
+              class="btn btn-circle btn-sm btn-primary shadow-lg"
+              title="Play All"
+            >
+              <.icon name="hero-play-solid" class="w-4 h-4" />
+            </button>
+          <% end %>
+          <%!-- Edit button (non-system collections only) --%>
+          <%= if @can_edit and not @collection.is_system do %>
+            <.link
+              navigate={~p"/collections/#{@collection.id}?edit=true"}
+              class="btn btn-circle btn-sm btn-ghost bg-base-100/90 shadow-lg"
+              title="Edit Collection"
+            >
+              <.icon name="hero-pencil" class="w-4 h-4" />
+            </.link>
+          <% end %>
+        </div>
         <div class="card-body p-3">
           <h3 class="card-title text-sm line-clamp-2" title={@collection.name}>
             {@collection.name}
@@ -166,6 +179,135 @@ defmodule MydiaWeb.CollectionComponents do
     """
   end
 
+  # Renders a poster collage from multiple poster paths.
+  # Displays:
+  # - 4 posters: 2x2 grid
+  # - 3 posters: 1 large + 2 small on right
+  # - 2 posters: side by side
+  # - 1 poster: full size
+  # - 0 posters: placeholder icon
+  attr :poster_paths, :list, required: true
+  attr :collection_type, :string, default: "manual"
+
+  defp poster_collage(%{poster_paths: []} = assigns) do
+    ~H"""
+    <div class="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-base-200 to-base-300">
+      <.icon
+        name={if @collection_type == "smart", do: "hero-sparkles", else: "hero-folder"}
+        class="w-16 h-16 text-base-content/20"
+      />
+    </div>
+    """
+  end
+
+  defp poster_collage(%{poster_paths: [path]} = assigns) do
+    assigns = assign(assigns, :url, tmdb_poster_url(path))
+
+    ~H"""
+    <img
+      src={@url}
+      alt="Collection poster"
+      class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+      loading="lazy"
+    />
+    """
+  end
+
+  defp poster_collage(%{poster_paths: [path1, path2]} = assigns) do
+    assigns =
+      assigns
+      |> assign(:url1, tmdb_poster_url(path1))
+      |> assign(:url2, tmdb_poster_url(path2))
+
+    ~H"""
+    <div class="grid grid-cols-2 w-full h-full">
+      <img src={@url1} alt="" class="w-full h-full object-cover" loading="lazy" />
+      <img src={@url2} alt="" class="w-full h-full object-cover" loading="lazy" />
+    </div>
+    """
+  end
+
+  defp poster_collage(%{poster_paths: [path1, path2, path3]} = assigns) do
+    assigns =
+      assigns
+      |> assign(:url1, tmdb_poster_url(path1))
+      |> assign(:url2, tmdb_poster_url(path2))
+      |> assign(:url3, tmdb_poster_url(path3))
+
+    ~H"""
+    <div class="grid grid-cols-2 w-full h-full">
+      <img src={@url1} alt="" class="w-full h-full object-cover row-span-2" loading="lazy" />
+      <div class="flex flex-col">
+        <img src={@url2} alt="" class="w-full h-1/2 object-cover" loading="lazy" />
+        <img src={@url3} alt="" class="w-full h-1/2 object-cover" loading="lazy" />
+      </div>
+    </div>
+    """
+  end
+
+  defp poster_collage(%{poster_paths: paths} = assigns) when length(paths) >= 4 do
+    [path1, path2, path3, path4 | _] = paths
+
+    assigns =
+      assigns
+      |> assign(:url1, tmdb_poster_url(path1))
+      |> assign(:url2, tmdb_poster_url(path2))
+      |> assign(:url3, tmdb_poster_url(path3))
+      |> assign(:url4, tmdb_poster_url(path4))
+
+    ~H"""
+    <div class="grid grid-cols-2 grid-rows-2 w-full h-full">
+      <img src={@url1} alt="" class="w-full h-full object-cover" loading="lazy" />
+      <img src={@url2} alt="" class="w-full h-full object-cover" loading="lazy" />
+      <img src={@url3} alt="" class="w-full h-full object-cover" loading="lazy" />
+      <img src={@url4} alt="" class="w-full h-full object-cover" loading="lazy" />
+    </div>
+    """
+  end
+
+  @tmdb_image_base "https://image.tmdb.org/t/p/w342"
+  defp tmdb_poster_url(path), do: @tmdb_image_base <> path
+
+  # Small poster collage for list view rows (2x2 grid in a small thumbnail)
+  attr :poster_paths, :list, required: true
+  attr :collection_type, :string, default: "manual"
+
+  defp row_poster_collage(%{poster_paths: []} = assigns) do
+    ~H"""
+    <div class="w-10 h-14 rounded shadow-sm bg-base-300 flex items-center justify-center">
+      <.icon
+        name={if @collection_type == "smart", do: "hero-sparkles", else: "hero-folder"}
+        class="w-5 h-5 text-base-content/30"
+      />
+    </div>
+    """
+  end
+
+  defp row_poster_collage(%{poster_paths: [path]} = assigns) do
+    assigns = assign(assigns, :url, tmdb_poster_url(path))
+
+    ~H"""
+    <img
+      src={@url}
+      alt=""
+      loading="lazy"
+      class="w-10 h-14 rounded shadow-sm object-cover bg-base-300"
+    />
+    """
+  end
+
+  defp row_poster_collage(%{poster_paths: paths} = assigns) do
+    # Take up to 4 posters for a 2x2 mini grid
+    urls = Enum.take(paths, 4) |> Enum.map(&tmdb_poster_url/1)
+    assigns = assign(assigns, :urls, urls)
+
+    ~H"""
+    <div class="w-10 h-14 rounded shadow-sm overflow-hidden bg-base-300 grid grid-cols-2 grid-rows-2">
+      <img :for={url <- @urls} src={url} alt="" loading="lazy" class="w-full h-full object-cover" />
+    </div>
+    """
+  end
+
   @doc """
   Renders a row for a collection in list view.
 
@@ -174,12 +316,15 @@ defmodule MydiaWeb.CollectionComponents do
     * `:collection` - Required. The collection to display.
     * `:href` - Required. The link to the collection's detail page.
     * `:item_count` - The number of items in the collection. Defaults to 0.
-    * `:poster_url` - Optional poster URL for the collection.
+    * `:poster_paths` - List of TMDB poster paths for creating a collage. Defaults to empty list.
+    * `:on_play` - Optional. Event name to trigger when Play All is clicked.
   """
   attr :collection, :map, required: true
   attr :href, :string, required: true
   attr :item_count, :integer, default: 0
-  attr :poster_url, :string, default: nil
+  attr :poster_paths, :list, default: []
+  attr :on_play, :string, default: nil
+  attr :can_edit, :boolean, default: false
 
   def collection_row(assigns) do
     ~H"""
@@ -187,21 +332,7 @@ defmodule MydiaWeb.CollectionComponents do
       <%!-- Icon/Poster column --%>
       <div class="w-14 flex-shrink-0">
         <.link navigate={@href} class="block w-10">
-          <%= if @poster_url do %>
-            <img
-              src={@poster_url}
-              alt={@collection.name}
-              loading="lazy"
-              class="w-10 h-14 rounded shadow-sm object-cover bg-base-300"
-            />
-          <% else %>
-            <div class="w-10 h-14 rounded shadow-sm bg-base-300 flex items-center justify-center">
-              <.icon
-                name={if @collection.type == "smart", do: "hero-sparkles", else: "hero-folder"}
-                class="w-5 h-5 text-base-content/30"
-              />
-            </div>
-          <% end %>
+          <.row_poster_collage poster_paths={@poster_paths} collection_type={@collection.type} />
         </.link>
       </div>
       <%!-- Name column --%>
@@ -246,6 +377,31 @@ defmodule MydiaWeb.CollectionComponents do
           <span class="badge badge-sm badge-ghost gap-1">
             <.icon name="hero-lock-closed" class="w-3 h-3" /> Private
           </span>
+        <% end %>
+      </div>
+      <%!-- Actions column --%>
+      <div class="w-20 flex justify-end gap-1 flex-shrink-0">
+        <%!-- Play button --%>
+        <%= if @on_play && @item_count > 0 do %>
+          <button
+            type="button"
+            phx-click={@on_play}
+            phx-value-id={@collection.id}
+            class="btn btn-circle btn-sm btn-ghost"
+            title="Play All"
+          >
+            <.icon name="hero-play-solid" class="w-4 h-4" />
+          </button>
+        <% end %>
+        <%!-- Edit button (non-system collections only) --%>
+        <%= if @can_edit and not @collection.is_system do %>
+          <.link
+            navigate={~p"/collections/#{@collection.id}?edit=true"}
+            class="btn btn-circle btn-sm btn-ghost"
+            title="Edit Collection"
+          >
+            <.icon name="hero-pencil" class="w-4 h-4" />
+          </.link>
         <% end %>
       </div>
     </div>

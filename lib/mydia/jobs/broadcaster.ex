@@ -66,7 +66,60 @@ defmodule Mydia.Jobs.Broadcaster do
     broadcast_status()
   end
 
-  def handle_event([:oban, :job, :exception], _measurements, _metadata, _config) do
+  def handle_event([:oban, :job, :exception], _measurements, metadata, _config) do
     broadcast_status()
+    record_job_failure(metadata)
   end
+
+  defp record_job_failure(%{job: job} = metadata) do
+    worker_name = job.worker
+    error = format_error(metadata)
+    job_args = job.args || %{}
+
+    # Build metadata with job context
+    event_metadata =
+      %{
+        "queue" => to_string(job.queue),
+        "attempt" => job.attempt,
+        "max_attempts" => job.max_attempts,
+        "args" => job_args
+      }
+      |> maybe_add_stacktrace(metadata)
+
+    Mydia.Events.job_failed(worker_name, error, event_metadata)
+  end
+
+  defp format_error(%{kind: kind, reason: reason}) do
+    case kind do
+      :error ->
+        Exception.format_banner(:error, reason, [])
+
+      _ ->
+        "#{kind}: #{inspect(reason)}"
+    end
+  end
+
+  defp format_error(%{kind: kind, error: error}) do
+    case kind do
+      :error ->
+        Exception.format_banner(:error, error, [])
+
+      _ ->
+        "#{kind}: #{inspect(error)}"
+    end
+  end
+
+  defp format_error(_), do: "Unknown error"
+
+  defp maybe_add_stacktrace(meta, %{stacktrace: stacktrace}) when is_list(stacktrace) do
+    # Only include first few frames to keep it readable
+    formatted =
+      stacktrace
+      |> Enum.take(5)
+      |> Exception.format_stacktrace()
+
+    Map.put(meta, "stacktrace", formatted)
+  end
+
+  defp maybe_add_stacktrace(meta, _), do: meta
 end

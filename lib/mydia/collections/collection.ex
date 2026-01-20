@@ -93,26 +93,55 @@ defmodule Mydia.Collections.Collection do
   """
   def valid_sort_orders, do: @sort_order_values
 
-  # Validates that smart_rules is valid JSON when type is "smart"
+  # Validates that smart_rules is valid JSON with at least one condition when type is "smart"
   defp validate_smart_rules(changeset) do
     type = get_field(changeset, :type)
     smart_rules = get_change(changeset, :smart_rules)
+    existing_rules = get_field(changeset, :smart_rules)
+    is_new_record = get_field(changeset, :id) == nil
 
     cond do
-      type == "smart" && is_nil(smart_rules) && is_nil(get_field(changeset, :smart_rules)) ->
-        add_error(changeset, :smart_rules, "is required for smart collections")
-
+      # Smart collections require rules with at least one condition
       type == "smart" && is_binary(smart_rules) ->
-        case Jason.decode(smart_rules) do
-          {:ok, _decoded} -> changeset
-          {:error, _} -> add_error(changeset, :smart_rules, "must be valid JSON")
-        end
+        validate_smart_rules_json(changeset, smart_rules)
+
+      # New smart collections must have rules defined
+      type == "smart" && is_new_record && is_nil(smart_rules) ->
+        add_error(
+          changeset,
+          :smart_rules,
+          "smart collections require at least one rule condition"
+        )
+
+      # Existing smart collections can keep their current rules
+      type == "smart" && !is_new_record && is_nil(smart_rules) && is_binary(existing_rules) ->
+        changeset
 
       type == "manual" && not is_nil(smart_rules) ->
         add_error(changeset, :smart_rules, "should not be set for manual collections")
 
       true ->
         changeset
+    end
+  end
+
+  defp validate_smart_rules_json(changeset, smart_rules) do
+    case Jason.decode(smart_rules) do
+      {:ok, decoded} ->
+        conditions = Map.get(decoded, "conditions", [])
+
+        if is_list(conditions) && length(conditions) > 0 do
+          changeset
+        else
+          add_error(
+            changeset,
+            :smart_rules,
+            "smart collections require at least one rule condition"
+          )
+        end
+
+      {:error, _} ->
+        add_error(changeset, :smart_rules, "must be valid JSON")
     end
   end
 end

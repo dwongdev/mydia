@@ -276,7 +276,7 @@ defmodule Mydia.Collections do
   end
 
   def list_collection_items(%Collection{type: "smart"} = collection, opts) do
-    SmartRules.execute_query(collection.smart_rules || "{}", opts)
+    SmartRules.execute_query!(collection.smart_rules || "{}", opts)
   end
 
   @doc """
@@ -291,6 +291,25 @@ defmodule Mydia.Collections do
 
   def item_count(%Collection{type: "smart"} = collection) do
     SmartRules.execute_count(collection.smart_rules || "{}")
+  end
+
+  @doc """
+  Returns up to `count` poster paths from a collection's items.
+
+  Useful for displaying a poster collage on collection cards.
+  Returns a list of TMDB poster paths (strings) from the first N items.
+  """
+  def poster_paths(%Collection{} = collection, count \\ 4) do
+    items = list_collection_items(collection, limit: count)
+
+    items
+    |> Enum.map(fn item ->
+      case item.metadata do
+        %{poster_path: path} when is_binary(path) -> path
+        _ -> nil
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
   end
 
   @doc """
@@ -424,6 +443,101 @@ defmodule Mydia.Collections do
       :ok
     end)
   end
+
+  @doc """
+  Returns playable items from a collection with their best media files.
+
+  This is used for "Play All" functionality - returns a list of maps with:
+  - :type - "movie" or "episode"
+  - :id - media item or episode ID
+  - :file_id - the best quality file ID
+  - :title - display title
+
+  For movies: returns the movie with its best file.
+  For TV shows: returns all episodes with files, ordered by season/episode.
+
+  ## Options
+    - `:limit` - Maximum number of items to return (default: 100)
+  """
+  def get_playable_items(%Collection{} = collection, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 100)
+
+    # Get collection items
+    items = list_collection_items(collection, limit: limit)
+
+    # For each item, get playable content
+    items
+    |> Enum.flat_map(&get_playable_content/1)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp get_playable_content(%MediaItem{type: "movie"} = item) do
+    # Preload media files if not already loaded
+    item = Repo.preload(item, :media_files)
+
+    case get_best_file(item.media_files) do
+      nil ->
+        []
+
+      file ->
+        [
+          %{
+            type: "movie",
+            id: item.id,
+            file_id: file.id,
+            title: item.title
+          }
+        ]
+    end
+  end
+
+  defp get_playable_content(%MediaItem{type: "tv_show"} = item) do
+    # Preload episodes with their media files
+    item = Repo.preload(item, episodes: :media_files)
+
+    item.episodes
+    |> Enum.sort_by(&{&1.season_number, &1.episode_number})
+    |> Enum.flat_map(fn episode ->
+      case get_best_file(episode.media_files) do
+        nil ->
+          []
+
+        file ->
+          title =
+            "#{item.title} - S#{String.pad_leading(to_string(episode.season_number), 2, "0")}E#{String.pad_leading(to_string(episode.episode_number), 2, "0")}"
+
+          title = if episode.title, do: "#{title} - #{episode.title}", else: title
+
+          [
+            %{
+              type: "episode",
+              id: episode.id,
+              file_id: file.id,
+              title: title
+            }
+          ]
+      end
+    end)
+  end
+
+  defp get_playable_content(_item), do: []
+
+  defp get_best_file(nil), do: nil
+  defp get_best_file([]), do: nil
+
+  defp get_best_file(files) do
+    files
+    |> Enum.sort_by(&resolution_priority(&1.resolution), :desc)
+    |> List.first()
+  end
+
+  defp resolution_priority(nil), do: 0
+  defp resolution_priority("480p"), do: 1
+  defp resolution_priority("720p"), do: 2
+  defp resolution_priority("1080p"), do: 3
+  defp resolution_priority("2160p"), do: 4
+  defp resolution_priority("4K"), do: 4
+  defp resolution_priority(_), do: 0
 
   @doc """
   Returns all collections that contain a specific media item.

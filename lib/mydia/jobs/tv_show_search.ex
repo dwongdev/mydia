@@ -1118,9 +1118,13 @@ defmodule Mydia.Jobs.TVShowSearch do
         _ -> []
       end
 
-    # Extract min_ratio from rules if present
+    # Extract min_ratio from quality_standards if present
+    # Note: The QualityProfile schema uses quality_standards, not rules
     rules_opts =
-      case quality_profile.rules do
+      case quality_profile.quality_standards do
+        %{min_ratio: min_ratio} when is_number(min_ratio) ->
+          [min_ratio: min_ratio]
+
         %{"min_ratio" => min_ratio} when is_number(min_ratio) ->
           [min_ratio: min_ratio]
 

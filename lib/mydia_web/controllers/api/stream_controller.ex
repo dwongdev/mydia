@@ -521,7 +521,10 @@ defmodule MydiaWeb.Api.StreamController do
                     # Web browsers can't reliably follow redirects with fetch API
                     if conn.query_params["resolve"] == "json" do
                       # Return the HLS URL as JSON for web clients
-                      json(conn, %{hls_url: master_playlist_path})
+                      # Include duration so player can show correct total time
+                      # (HLS live playlists don't include total duration)
+                      duration = get_in(media_file.metadata || %{}, ["duration"])
+                      json(conn, %{hls_url: master_playlist_path, duration: duration})
                     else
                       # Redirect to master playlist (native clients)
                       conn

@@ -59,6 +59,18 @@ defmodule Mydia.Collections.SmartRules do
   @valid_sort_fields ~w(title year rating added_date position)
   @valid_sort_directions ~w(asc desc)
 
+  # Fields that require string values
+  @string_fields ~w(category type title metadata.original_language metadata.status)
+
+  # Fields that require numeric values
+  @numeric_fields ~w(year metadata.vote_average)
+
+  # Fields that require boolean values
+  @boolean_fields ~w(monitored)
+
+  # Valid type values
+  @valid_type_values ~w(movie tv_show)
+
   @doc """
   Validates a smart rules definition.
 
@@ -143,34 +155,79 @@ defmodule Mydia.Collections.SmartRules do
     - `:preload` - List of associations to preload
     - `:limit` - Override the limit in rules
     - `:offset` - Number of items to skip
+
+  Returns `{:ok, items}` on success or `{:error, reason}` on failure.
+  For backwards compatibility, you can also use `execute_query!/2` which
+  returns items directly or an empty list on error.
   """
   def execute_query(rules, opts \\ [])
 
   def execute_query(rules, opts) when is_map(rules) do
-    rules
-    |> build_query()
-    |> apply_sort(rules)
-    |> apply_limit(rules, opts)
-    |> apply_offset(opts)
-    |> maybe_preload(opts[:preload])
-    |> Repo.all()
+    # First validate the rules
+    case validate(rules) do
+      {:ok, _} ->
+        try do
+          items =
+            rules
+            |> build_query()
+            |> apply_sort(rules)
+            |> apply_limit(rules, opts)
+            |> apply_offset(opts)
+            |> maybe_preload(opts[:preload])
+            |> Repo.all()
+
+          {:ok, items}
+        rescue
+          e in Ecto.Query.CastError ->
+            {:error, "Query failed: #{Exception.message(e)}"}
+
+          e in Ecto.QueryError ->
+            {:error, "Query failed: #{Exception.message(e)}"}
+        end
+
+      {:error, errors} ->
+        {:error, "Invalid rules: #{Enum.join(errors, ", ")}"}
+    end
   end
 
   def execute_query(rules, opts) when is_binary(rules) do
     case Jason.decode(rules) do
       {:ok, decoded} -> execute_query(decoded, opts)
+      {:error, _} -> {:error, "Invalid JSON"}
+    end
+  end
+
+  @doc """
+  Executes a smart rules query and returns items directly.
+  Returns an empty list on any error.
+  """
+  def execute_query!(rules, opts \\ []) do
+    case execute_query(rules, opts) do
+      {:ok, items} -> items
       {:error, _} -> []
     end
   end
 
   @doc """
   Returns the count of items matching the smart rules.
+  Returns 0 on any error.
   """
   def execute_count(rules) when is_map(rules) do
-    rules
-    |> build_query()
-    |> apply_limit(rules, [])
-    |> Repo.aggregate(:count)
+    case validate(rules) do
+      {:ok, _} ->
+        try do
+          rules
+          |> build_query()
+          |> apply_limit(rules, [])
+          |> Repo.aggregate(:count)
+        rescue
+          Ecto.Query.CastError -> 0
+          Ecto.QueryError -> 0
+        end
+
+      {:error, _} ->
+        0
+    end
   end
 
   def execute_count(rules) when is_binary(rules) do
@@ -185,7 +242,7 @@ defmodule Mydia.Collections.SmartRules do
   Useful for showing users what a smart collection will contain.
   """
   def preview(rules, limit \\ 10) do
-    execute_query(rules, limit: limit)
+    execute_query!(rules, limit: limit)
   end
 
   @doc """
@@ -239,12 +296,121 @@ defmodule Mydia.Collections.SmartRules do
           errors
       end
 
+    # Validate value type matches field type
+    errors = validate_field_value_type(field, value, operator, prefix, errors)
+
     errors
   end
 
   defp validate_condition(_, idx) do
     ["conditions[#{idx}]: must be an object"]
   end
+
+  # Validates that the value type is compatible with the field
+  defp validate_field_value_type(field, value, _operator, _prefix, errors)
+       when is_nil(field) or is_nil(value) do
+    errors
+  end
+
+  defp validate_field_value_type("type", value, operator, prefix, errors)
+       when operator in ["in", "not_in"] do
+    invalid_values =
+      value
+      |> List.wrap()
+      |> Enum.reject(&(&1 in @valid_type_values))
+
+    if invalid_values == [] do
+      errors
+    else
+      [
+        "#{prefix}: invalid type value(s): #{Enum.join(invalid_values, ", ")}. Valid values: #{Enum.join(@valid_type_values, ", ")}"
+        | errors
+      ]
+    end
+  end
+
+  defp validate_field_value_type("type", value, _operator, prefix, errors) do
+    if value in @valid_type_values do
+      errors
+    else
+      [
+        "#{prefix}: invalid type value '#{value}'. Valid values: #{Enum.join(@valid_type_values, ", ")}"
+        | errors
+      ]
+    end
+  end
+
+  defp validate_field_value_type(field, value, operator, prefix, errors)
+       when field in @string_fields and operator in ["in", "not_in"] do
+    # For list operators, check all values are strings - operator used in guard, prefix used in error
+    _ = operator
+
+    invalid_values =
+      value
+      |> List.wrap()
+      |> Enum.reject(&is_binary/1)
+
+    if invalid_values == [] do
+      errors
+    else
+      ["#{prefix}: #{field} requires text values, got: #{inspect(invalid_values)}" | errors]
+    end
+  end
+
+  defp validate_field_value_type(field, value, _operator, prefix, errors)
+       when field in @string_fields do
+    if is_binary(value) do
+      errors
+    else
+      ["#{prefix}: #{field} requires a text value, got: #{inspect(value)}" | errors]
+    end
+  end
+
+  defp validate_field_value_type(field, value, "between", prefix, errors)
+       when field in @numeric_fields do
+    case value do
+      [min, max] when is_number(min) and is_number(max) ->
+        errors
+
+      _ ->
+        ["#{prefix}: #{field} between requires two numeric values" | errors]
+    end
+  end
+
+  defp validate_field_value_type(field, value, operator, prefix, errors)
+       when field in @numeric_fields and operator in ["in", "not_in"] do
+    invalid_values =
+      value
+      |> List.wrap()
+      |> Enum.reject(&is_number/1)
+
+    if invalid_values == [] do
+      errors
+    else
+      ["#{prefix}: #{field} requires numeric values, got: #{inspect(invalid_values)}" | errors]
+    end
+  end
+
+  defp validate_field_value_type(field, value, _operator, prefix, errors)
+       when field in @numeric_fields do
+    if is_number(value) do
+      errors
+    else
+      ["#{prefix}: #{field} requires a numeric value, got: #{inspect(value)}" | errors]
+    end
+  end
+
+  defp validate_field_value_type(field, value, _operator, prefix, errors)
+       when field in @boolean_fields do
+    if is_boolean(value) do
+      errors
+    else
+      ["#{prefix}: #{field} requires true or false, got: #{inspect(value)}" | errors]
+    end
+  end
+
+  # Default: no additional validation for other fields
+  defp validate_field_value_type(_field, _value, _operator, _prefix, errors), do: errors
 
   defp validate_sort(sort) do
     errors = []

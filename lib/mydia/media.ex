@@ -22,6 +22,8 @@ defmodule Mydia.Media do
     - `:library_path_type` - Filter by library path type (:adult, :music, :books, etc.)
     - `:search` - Search by title (case-insensitive substring match)
     - `:added_since` - Filter to items inserted after this DateTime
+    - `:limit` - Maximum number of items to return
+    - `:order_by` - Field to order by (:title, :year, or :inserted_at)
     - `:preload` - List of associations to preload
   """
   def list_media_items(opts \\ []) do
@@ -1351,11 +1353,17 @@ defmodule Mydia.Media do
         filter_by_library_path_type(query, library_type)
 
       {:search, search_term}, query when is_binary(search_term) ->
-        search_pattern = "%#{search_term}%"
-        where(query, [m], ilike(m.title, ^search_pattern))
+        search_pattern = "%#{String.downcase(search_term)}%"
+        where(query, [m], like(fragment("lower(?)", m.title), ^search_pattern))
 
       {:added_since, datetime}, query ->
         where(query, [m], m.inserted_at >= ^datetime)
+
+      {:limit, limit}, query when is_integer(limit) and limit > 0 ->
+        limit(query, ^limit)
+
+      {:order_by, field}, query when field in [:title, :year, :inserted_at] ->
+        order_by(query, [m], asc: ^field)
 
       _other, query ->
         query

@@ -74,8 +74,6 @@ jobs:
 
   docker-build-postgres:
     name: Build PostgreSQL Image
-    # Run after SQLite build to benefit from shared cached layers (Flutter stage, etc.)
-    needs: docker-build-sqlite
     runs-on: ubuntu-latest
     permissions:
       contents: read

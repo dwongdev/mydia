@@ -705,27 +705,27 @@ defmodule Mydia.Jobs.TVShowSearch do
           episodes_count: length(episodes)
         )
 
+        # Log search completed event - search found and selected a result
+        Events.search_completed(
+          media_item,
+          %{
+            "query" => query,
+            "results_count" => length(results),
+            "selected_release" => best_result.title,
+            "score" => score,
+            "breakdown" => stringify_keys(breakdown),
+            "season_number" => season_number,
+            "search_type" => "season_pack",
+            "episodes_included" => length(episodes)
+          }
+        )
+
         case initiate_season_pack_download(media_item, season_number, episodes, best_result) do
           :ok ->
-            # Log search completed event only on successful download
-            Events.search_completed(
-              media_item,
-              %{
-                "query" => query,
-                "results_count" => length(results),
-                "selected_release" => best_result.title,
-                "score" => score,
-                "breakdown" => stringify_keys(breakdown),
-                "season_number" => season_number,
-                "search_type" => "season_pack",
-                "episodes_included" => length(episodes)
-              }
-            )
-
             :ok
 
           {:error, reason} ->
-            # Log download failure event
+            # Also log download failure event
             Events.download_initiation_failed(
               media_item,
               reason,
@@ -910,25 +910,25 @@ defmodule Mydia.Jobs.TVShowSearch do
           breakdown: breakdown
         )
 
+        # Log search completed event - search found and selected a result
+        Events.search_completed(
+          episode.media_item,
+          %{
+            "query" => query,
+            "results_count" => length(results),
+            "selected_release" => best_result.title,
+            "score" => score,
+            "breakdown" => stringify_keys(breakdown)
+          },
+          episode: episode
+        )
+
         case initiate_episode_download(episode, best_result) do
           :ok ->
-            # Log search completed event only on successful download
-            Events.search_completed(
-              episode.media_item,
-              %{
-                "query" => query,
-                "results_count" => length(results),
-                "selected_release" => best_result.title,
-                "score" => score,
-                "breakdown" => stringify_keys(breakdown)
-              },
-              episode: episode
-            )
-
             :ok
 
           {:error, reason} ->
-            # Log download failure event
+            # Also log download failure event
             Events.download_initiation_failed(
               episode.media_item,
               reason,
@@ -951,21 +951,24 @@ defmodule Mydia.Jobs.TVShowSearch do
   defp build_ranking_options(episode, args) do
     # Start with base options - TV shows typically have smaller file sizes than movies
     # Oban job args use string keys (JSON storage)
-    # Include search_query for title relevance scoring
+    # Include search_query for title relevance scoring and media_type for unified scoring
     base_opts = [
       min_seeders: args["min_seeders"] || 3,
       size_range: args["size_range"] || {100, 5_000},
-      search_query: build_episode_query(episode)
+      search_query: build_episode_query(episode),
+      media_type: :episode
     ]
 
-    # Add quality profile preferences if available
+    # Add quality profile for unified scoring via SearchScorer
     opts_with_quality =
       case load_quality_profile(episode) do
         nil ->
           base_opts
 
         quality_profile ->
-          Keyword.merge(base_opts, build_quality_options(quality_profile))
+          base_opts
+          |> Keyword.put(:quality_profile, quality_profile)
+          |> Keyword.merge(build_quality_options(quality_profile))
       end
 
     # Add any custom blocked/preferred tags from args
@@ -978,14 +981,15 @@ defmodule Mydia.Jobs.TVShowSearch do
     # Season packs are typically much larger than individual episodes
     # A full season in HD can be 10-50GB depending on episode count and quality
     # Oban job args use string keys (JSON storage)
-    # Include search_query for title relevance scoring
+    # Include search_query for title relevance scoring and media_type for unified scoring
     base_opts = [
       min_seeders: args["min_seeders"] || 3,
       size_range: args["size_range"] || {2_000, 100_000},
-      search_query: build_season_query(media_item, season_number)
+      search_query: build_season_query(media_item, season_number),
+      media_type: :episode
     ]
 
-    # Load quality profile from media_item
+    # Load quality profile from media_item for unified scoring via SearchScorer
     opts_with_quality =
       case media_item.quality_profile_id do
         nil ->
@@ -998,8 +1002,13 @@ defmodule Mydia.Jobs.TVShowSearch do
             |> then(& &1.quality_profile)
 
           case quality_profile do
-            nil -> base_opts
-            qp -> Keyword.merge(base_opts, build_quality_options(qp))
+            nil ->
+              base_opts
+
+            qp ->
+              base_opts
+              |> Keyword.put(:quality_profile, qp)
+              |> Keyword.merge(build_quality_options(qp))
           end
       end
 

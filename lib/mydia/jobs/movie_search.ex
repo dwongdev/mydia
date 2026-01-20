@@ -241,21 +241,21 @@ defmodule Mydia.Jobs.MovieSearch do
           breakdown: breakdown
         )
 
+        # Log search completed event - search found and selected a result
+        Events.search_completed(movie, %{
+          "query" => query,
+          "results_count" => length(results),
+          "selected_release" => best_result.title,
+          "score" => score,
+          "breakdown" => stringify_keys(breakdown)
+        })
+
         case initiate_download(movie, best_result) do
           :ok ->
-            # Log search completed event only on successful download
-            Events.search_completed(movie, %{
-              "query" => query,
-              "results_count" => length(results),
-              "selected_release" => best_result.title,
-              "score" => score,
-              "breakdown" => stringify_keys(breakdown)
-            })
-
             {:ok, 1}
 
           {:error, reason} ->
-            # Log download failure event
+            # Also log download failure event
             Events.download_initiation_failed(movie, reason, %{
               "query" => query,
               "results_count" => length(results),
@@ -368,21 +368,21 @@ defmodule Mydia.Jobs.MovieSearch do
           breakdown: breakdown
         )
 
+        # Log search completed event - search found and selected a result
+        Events.search_completed(movie, %{
+          "query" => query,
+          "results_count" => length(results),
+          "selected_release" => best_result.title,
+          "score" => score,
+          "breakdown" => stringify_keys(breakdown)
+        })
+
         case initiate_download(movie, best_result) do
           :ok ->
-            # Log search completed event only on successful download
-            Events.search_completed(movie, %{
-              "query" => query,
-              "results_count" => length(results),
-              "selected_release" => best_result.title,
-              "score" => score,
-              "breakdown" => stringify_keys(breakdown)
-            })
-
             :ok
 
           {:error, reason} ->
-            # Log download failure event
+            # Also log download failure event
             Events.download_initiation_failed(movie, reason, %{
               "query" => query,
               "results_count" => length(results),
@@ -397,21 +397,24 @@ defmodule Mydia.Jobs.MovieSearch do
 
   defp build_ranking_options(movie, args) do
     # Start with base options
-    # Include search_query for title relevance scoring
+    # Include search_query for title relevance scoring and media_type for unified scoring
     base_opts = [
       min_seeders: Map.get(args, "min_seeders", 5),
       size_range: Map.get(args, "size_range", {500, 20_000}),
-      search_query: build_search_query(movie)
+      search_query: build_search_query(movie),
+      media_type: :movie
     ]
 
-    # Add quality profile preferences if available
+    # Add quality profile for unified scoring via SearchScorer
     opts_with_quality =
       case load_quality_profile(movie) do
         nil ->
           base_opts
 
         quality_profile ->
-          Keyword.merge(base_opts, build_quality_options(quality_profile))
+          base_opts
+          |> Keyword.put(:quality_profile, quality_profile)
+          |> Keyword.merge(build_quality_options(quality_profile))
       end
 
     # Add any custom blocked/preferred tags from args

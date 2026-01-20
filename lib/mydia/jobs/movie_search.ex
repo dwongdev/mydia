@@ -33,7 +33,7 @@ defmodule Mydia.Jobs.MovieSearch do
 
   import Ecto.Query, warn: false
 
-  alias Mydia.{Repo, Media, Indexers, Downloads, Events}
+  alias Mydia.{Repo, Media, Indexers, Downloads, Events, Search}
   alias Mydia.Indexers.ReleaseRanker
   alias Mydia.Media.MediaItem
   alias Phoenix.PubSub
@@ -286,13 +286,29 @@ defmodule Mydia.Jobs.MovieSearch do
   end
 
   defp load_monitored_movies_without_files do
-    MediaItem
-    |> where([m], m.type == "movie")
-    |> where([m], m.monitored == true)
-    |> join(:left, [m], mf in assoc(m, :media_files))
-    |> group_by([m], m.id)
-    |> having([m, mf], count(mf.id) == 0)
-    |> Repo.all()
+    movies =
+      MediaItem
+      |> where([m], m.type == "movie")
+      |> where([m], m.monitored == true)
+      |> join(:left, [m], mf in assoc(m, :media_files))
+      |> group_by([m], m.id)
+      |> having([m, mf], count(mf.id) == 0)
+      |> Repo.all()
+
+    filter_movies_in_backoff(movies)
+  end
+
+  defp filter_movies_in_backoff(movies) do
+    {eligible, in_backoff} =
+      Enum.split_with(movies, fn movie ->
+        Search.eligible?("movie", movie.id)
+      end)
+
+    if in_backoff != [] do
+      Logger.info("Skipping #{length(in_backoff)} movies in backoff")
+    end
+
+    eligible
   end
 
   defp search_movie(%MediaItem{} = movie, args) do
@@ -312,6 +328,9 @@ defmodule Mydia.Jobs.MovieSearch do
           title: movie.title,
           query: query
         )
+
+        # Record backoff for no results
+        record_movie_backoff(movie, "no_results")
 
         # Log search event for no results
         Events.search_no_results(movie, %{
@@ -350,6 +369,9 @@ defmodule Mydia.Jobs.MovieSearch do
           total_results: length(results)
         )
 
+        # Record backoff for all results filtered out
+        record_movie_backoff(movie, "all_filtered")
+
         # Log search event for all results filtered out
         Events.search_filtered_out(movie, %{
           "query" => query,
@@ -379,6 +401,8 @@ defmodule Mydia.Jobs.MovieSearch do
 
         case initiate_download(movie, best_result) do
           :ok ->
+            # Reset backoff on successful download initiation
+            reset_movie_backoff(movie)
             :ok
 
           {:error, reason} ->
@@ -478,6 +502,54 @@ defmodule Mydia.Jobs.MovieSearch do
         )
 
         {:error, reason}
+    end
+  end
+
+  ## Private Functions - Backoff Helpers
+
+  defp record_movie_backoff(%MediaItem{} = movie, reason) do
+    case Search.record_failure("movie", movie.id, reason) do
+      {:ok, backoff} ->
+        Logger.info("Applied search backoff for movie",
+          media_item_id: movie.id,
+          title: movie.title,
+          failure_count: backoff.failure_count,
+          next_eligible_at: backoff.next_eligible_at,
+          reason: reason
+        )
+
+        # Emit backoff event
+        Events.search_backoff_applied(
+          movie,
+          reason,
+          Search.get_backoff_info("movie", movie.id)
+        )
+
+      {:error, changeset} ->
+        Logger.error("Failed to record search backoff for movie",
+          media_item_id: movie.id,
+          errors: inspect(changeset.errors)
+        )
+    end
+  end
+
+  defp reset_movie_backoff(%MediaItem{} = movie) do
+    case Search.get_backoff("movie", movie.id) do
+      nil ->
+        :ok
+
+      backoff ->
+        previous_count = backoff.failure_count
+        Search.reset_backoff("movie", movie.id)
+
+        Logger.info("Reset search backoff for movie",
+          media_item_id: movie.id,
+          title: movie.title,
+          previous_failure_count: previous_count
+        )
+
+        # Emit backoff reset event
+        Events.search_backoff_reset(movie, previous_count)
     end
   end
 

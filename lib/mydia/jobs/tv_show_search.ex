@@ -53,7 +53,7 @@ defmodule Mydia.Jobs.TVShowSearch do
 
   import Ecto.Query, warn: false
 
-  alias Mydia.{Repo, Media, Indexers, Downloads, Events}
+  alias Mydia.{Repo, Media, Indexers, Downloads, Events, Search}
   alias Mydia.Indexers.ReleaseRanker
   alias Mydia.Media.{MediaItem, Episode}
   alias Phoenix.PubSub
@@ -374,7 +374,9 @@ defmodule Mydia.Jobs.TVShowSearch do
       |> Repo.all()
 
     # Filter out special episodes (S00) unless configured to monitor them
-    filter_special_episodes(episodes)
+    episodes
+    |> filter_special_episodes()
+    |> filter_episodes_in_backoff()
   end
 
   defp load_episodes_for_show(media_item_id) do
@@ -586,6 +588,9 @@ defmodule Mydia.Jobs.TVShowSearch do
           season_number: season_number
         )
 
+        # Record backoff for season pack no results
+        record_season_backoff(media_item, season_number, "no_results")
+
         # Log no results event for season pack search
         Events.search_no_results(
           media_item,
@@ -619,7 +624,7 @@ defmodule Mydia.Jobs.TVShowSearch do
             total_results: length(results)
           )
 
-          # Log filtered out event
+          # Log filtered out event with detailed results
           Events.search_filtered_out(
             media_item,
             %{
@@ -627,7 +632,7 @@ defmodule Mydia.Jobs.TVShowSearch do
               "results_count" => length(results),
               "season_number" => season_number,
               "search_type" => "season_pack",
-              "filter_stats" => %{"no_valid_season_packs" => length(results)}
+              "filter_stats" => build_season_pack_filter_stats(results, season_number)
             }
           )
 
@@ -665,6 +670,64 @@ defmodule Mydia.Jobs.TVShowSearch do
     end)
   end
 
+  # Build filter stats for season pack filtering (results rejected because they're individual episodes)
+  defp build_season_pack_filter_stats(results, season_number) do
+    season_marker = "S#{String.pad_leading("#{season_number}", 2, "0")}"
+    episode_marker_regex = ~r/E\d{2}/i
+
+    # Categorize each result
+    results_details =
+      results
+      |> Enum.take(10)
+      |> Enum.map(fn result ->
+        title_upper = String.upcase(result.title)
+        has_season = String.contains?(title_upper, season_marker)
+        has_episode = Regex.match?(episode_marker_regex, title_upper)
+
+        size_mb =
+          if result.size, do: Float.round(result.size / (1024 * 1024), 1), else: 0.0
+
+        resolution = if result.quality, do: result.quality.resolution, else: nil
+
+        rejection_reason =
+          cond do
+            has_episode -> "individual_episode"
+            not has_season -> "missing_season_marker"
+            true -> nil
+          end
+
+        %{
+          "title" => result.title,
+          "score" => 0.0,
+          "seeders" => result.seeders,
+          "size_mb" => size_mb,
+          "resolution" => resolution,
+          "status" => if(rejection_reason, do: "rejected", else: "accepted"),
+          "rejection_reason" => rejection_reason
+        }
+      end)
+
+    # Count rejections by type
+    individual_episodes =
+      Enum.count(results, fn result ->
+        Regex.match?(episode_marker_regex, String.upcase(result.title))
+      end)
+
+    missing_season =
+      Enum.count(results, fn result ->
+        not String.contains?(String.upcase(result.title), season_marker)
+      end)
+
+    %{
+      "total_results" => length(results),
+      "rejection_counts" => %{
+        "individual_episode" => individual_episodes,
+        "missing_season_marker" => missing_season
+      },
+      "results" => results_details
+    }
+  end
+
   defp process_season_pack_results(media_item, season_number, episodes, results, args, query) do
     # Build ranking options from the first episode (they all share the same show)
     ranking_opts = build_ranking_options_for_season(media_item, season_number, episodes, args)
@@ -678,6 +741,9 @@ defmodule Mydia.Jobs.TVShowSearch do
           season_number: season_number,
           total_results: length(results)
         )
+
+        # Record backoff for season pack filtered out
+        record_season_backoff(media_item, season_number, "all_filtered")
 
         # Log filtered out event
         Events.search_filtered_out(
@@ -716,12 +782,15 @@ defmodule Mydia.Jobs.TVShowSearch do
             "breakdown" => stringify_keys(breakdown),
             "season_number" => season_number,
             "search_type" => "season_pack",
-            "episodes_included" => length(episodes)
+            "episodes_included" => length(episodes),
+            "all_results" => build_filter_stats(results, ranking_opts)
           }
         )
 
         case initiate_season_pack_download(media_item, season_number, episodes, best_result) do
           :ok ->
+            # Reset season backoff on successful download initiation
+            reset_season_backoff(media_item, season_number)
             :ok
 
           {:error, reason} ->
@@ -852,6 +921,9 @@ defmodule Mydia.Jobs.TVShowSearch do
           query: query
         )
 
+        # Record backoff for no results
+        record_episode_backoff(episode, "no_results")
+
         # Log search event for no results
         Events.search_no_results(
           episode.media_item,
@@ -886,6 +958,9 @@ defmodule Mydia.Jobs.TVShowSearch do
           total_results: length(results)
         )
 
+        # Record backoff for all results filtered out
+        record_episode_backoff(episode, "all_filtered")
+
         # Log search event for all results filtered out
         Events.search_filtered_out(
           episode.media_item,
@@ -918,13 +993,16 @@ defmodule Mydia.Jobs.TVShowSearch do
             "results_count" => length(results),
             "selected_release" => best_result.title,
             "score" => score,
-            "breakdown" => stringify_keys(breakdown)
+            "breakdown" => stringify_keys(breakdown),
+            "all_results" => build_filter_stats(results, ranking_opts)
           },
           episode: episode
         )
 
         case initiate_episode_download(episode, best_result) do
           :ok ->
+            # Reset backoff on successful download initiation
+            reset_episode_backoff(episode)
             :ok
 
           {:error, reason} ->
@@ -1204,6 +1282,130 @@ defmodule Mydia.Jobs.TVShowSearch do
     end
   end
 
+  defp filter_episodes_in_backoff(episodes) do
+    {eligible, in_backoff} =
+      Enum.split_with(episodes, fn episode ->
+        Search.eligible?("episode", episode.id)
+      end)
+
+    if in_backoff != [] do
+      Logger.info("Skipping #{length(in_backoff)} episodes in backoff")
+    end
+
+    eligible
+  end
+
+  ## Private Functions - Backoff Helpers
+
+  defp record_episode_backoff(%Episode{} = episode, reason) do
+    case Search.record_failure("episode", episode.id, reason) do
+      {:ok, backoff} ->
+        Logger.info("Applied search backoff for episode",
+          episode_id: episode.id,
+          show: episode.media_item.title,
+          season: episode.season_number,
+          episode: episode.episode_number,
+          failure_count: backoff.failure_count,
+          next_eligible_at: backoff.next_eligible_at,
+          reason: reason
+        )
+
+        # Emit backoff event
+        Events.search_backoff_applied(
+          episode.media_item,
+          reason,
+          Search.get_backoff_info("episode", episode.id),
+          episode: episode
+        )
+
+      {:error, changeset} ->
+        Logger.error("Failed to record search backoff for episode",
+          episode_id: episode.id,
+          errors: inspect(changeset.errors)
+        )
+    end
+  end
+
+  defp reset_episode_backoff(%Episode{} = episode) do
+    case Search.get_backoff("episode", episode.id) do
+      nil ->
+        :ok
+
+      backoff ->
+        previous_count = backoff.failure_count
+        Search.reset_backoff("episode", episode.id)
+
+        Logger.info("Reset search backoff for episode",
+          episode_id: episode.id,
+          show: episode.media_item.title,
+          season: episode.season_number,
+          episode: episode.episode_number,
+          previous_failure_count: previous_count
+        )
+
+        # Emit backoff reset event
+        Events.search_backoff_reset(
+          episode.media_item,
+          previous_count,
+          episode: episode
+        )
+    end
+  end
+
+  defp record_season_backoff(%MediaItem{} = media_item, season_number, reason) do
+    case Search.record_failure("season", media_item.id, reason, season_number: season_number) do
+      {:ok, backoff} ->
+        Logger.info("Applied search backoff for season",
+          media_item_id: media_item.id,
+          title: media_item.title,
+          season_number: season_number,
+          failure_count: backoff.failure_count,
+          next_eligible_at: backoff.next_eligible_at,
+          reason: reason
+        )
+
+        # Emit backoff event
+        Events.search_backoff_applied(
+          media_item,
+          reason,
+          Search.get_backoff_info("season", media_item.id, season_number: season_number),
+          season_number: season_number
+        )
+
+      {:error, changeset} ->
+        Logger.error("Failed to record search backoff for season",
+          media_item_id: media_item.id,
+          season_number: season_number,
+          errors: inspect(changeset.errors)
+        )
+    end
+  end
+
+  defp reset_season_backoff(%MediaItem{} = media_item, season_number) do
+    case Search.get_backoff("season", media_item.id, season_number: season_number) do
+      nil ->
+        :ok
+
+      backoff ->
+        previous_count = backoff.failure_count
+        Search.reset_backoff("season", media_item.id, season_number: season_number)
+
+        Logger.info("Reset search backoff for season",
+          media_item_id: media_item.id,
+          title: media_item.title,
+          season_number: season_number,
+          previous_failure_count: previous_count
+        )
+
+        # Emit backoff reset event
+        Events.search_backoff_reset(
+          media_item,
+          previous_count,
+          season_number: season_number
+        )
+    end
+  end
+
   ## Private Functions - Stats Tracking
 
   defp broadcast_search_completed(media_item_id, stats) do
@@ -1382,7 +1584,7 @@ defmodule Mydia.Jobs.TVShowSearch do
             total_results: length(results)
           )
 
-          # Log filtered out event
+          # Log filtered out event with detailed results
           Events.search_filtered_out(
             media_item,
             %{
@@ -1390,7 +1592,7 @@ defmodule Mydia.Jobs.TVShowSearch do
               "results_count" => length(results),
               "season_number" => season_number,
               "search_type" => "season_pack",
-              "filter_stats" => %{"no_valid_season_packs" => length(results)}
+              "filter_stats" => build_season_pack_filter_stats(results, season_number)
             }
           )
 
@@ -1559,16 +1761,50 @@ defmodule Mydia.Jobs.TVShowSearch do
 
   ## Private Functions - Event Helpers
 
-  # Build a map of filter statistics for rejected results
+  # Build a map of filter statistics for rejected results, including detailed results with scores
   defp build_filter_stats(results, ranking_opts) do
-    min_seeders = Keyword.get(ranking_opts, :min_seeders, 3)
+    # Get detailed scoring for all results
+    scored_results = ReleaseRanker.score_all_with_reasons(results, ranking_opts)
 
-    low_seeders = Enum.count(results, fn r -> (r[:seeders] || 0) < min_seeders end)
+    # Count by rejection reason
+    rejection_counts =
+      scored_results
+      |> Enum.filter(&(&1.status == :rejected))
+      |> Enum.group_by(fn result ->
+        # Extract the rejection type (before the colon)
+        case result.rejection_reason do
+          nil -> "unknown"
+          reason -> reason |> String.split(":") |> List.first()
+        end
+      end)
+      |> Enum.map(fn {reason, items} -> {reason, length(items)} end)
+      |> Map.new()
+
+    # Build the results list for the event (limit to top 10 to avoid huge events)
+    results_details =
+      scored_results
+      |> Enum.take(10)
+      |> Enum.map(fn r ->
+        base = %{
+          "title" => r.title,
+          "score" => r.score,
+          "seeders" => r.seeders,
+          "size_mb" => r.size_mb,
+          "resolution" => r.resolution,
+          "status" => to_string(r.status)
+        }
+
+        if r.rejection_reason do
+          Map.put(base, "rejection_reason", r.rejection_reason)
+        else
+          base
+        end
+      end)
 
     %{
       "total_results" => length(results),
-      "low_seeders" => low_seeders,
-      "below_quality_threshold" => length(results) - low_seeders
+      "rejection_counts" => rejection_counts,
+      "results" => results_details
     }
   end
 

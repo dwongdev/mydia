@@ -870,6 +870,12 @@ defmodule Mydia.Events do
       "search.error" ->
         {"hero-magnifying-glass", "text-error", "Search Error"}
 
+      "search.backoff_applied" ->
+        {"hero-clock", "text-warning", "Search Backoff Applied"}
+
+      "search.backoff_reset" ->
+        {"hero-arrow-path", "text-success", "Search Backoff Reset"}
+
       _ ->
         # Default based on severity
         case severity do
@@ -980,6 +986,27 @@ defmodule Mydia.Events do
     error = metadata["error_message"] || "Unknown error"
     episode_part = format_episode_part(metadata)
     "Search failed for #{title}#{episode_part}: #{error}"
+  end
+
+  defp build_event_description(%Event{type: "search.backoff_applied", metadata: metadata}) do
+    title = metadata["title"] || "Unknown"
+    failure_count = metadata["failure_count"] || 1
+    reason = format_backoff_reason(metadata["reason"])
+    next_eligible = format_next_eligible(metadata["next_eligible_at"])
+    episode_part = format_episode_part(metadata)
+
+    resource_type = determine_backoff_resource_type(metadata)
+
+    "#{title}#{episode_part} (#{resource_type}) - #{reason}, attempt ##{failure_count}, next search #{next_eligible}"
+  end
+
+  defp build_event_description(%Event{type: "search.backoff_reset", metadata: metadata}) do
+    title = metadata["title"] || "Unknown"
+    previous_count = metadata["previous_failure_count"] || 0
+    episode_part = format_episode_part(metadata)
+    resource_type = determine_backoff_resource_type(metadata)
+
+    "#{title}#{episode_part} (#{resource_type}) - backoff cleared after #{previous_count} failed attempts"
   end
 
   defp build_event_description(%Event{metadata: metadata}) do
@@ -1241,7 +1268,7 @@ defmodule Mydia.Events do
       |> maybe_add_episode_context(episode)
 
     create_event_async(%{
-      category: "download",
+      category: "downloads",
       type: "download.failed",
       actor_type: :job,
       actor_id: search_actor_id(media_item),
@@ -1320,5 +1347,160 @@ defmodule Mydia.Events do
       "season_number" => episode.season_number,
       "episode_number" => episode.episode_number
     })
+  end
+
+  ## Search Backoff Event Helpers
+
+  @doc """
+  Records a search.backoff_applied event when exponential backoff is applied to a resource.
+
+  ## Parameters
+    - `media_item` - The MediaItem being searched for
+    - `reason` - The reason for backoff (e.g., "no_results", "all_filtered")
+    - `backoff_info` - Map with backoff details from Search.get_backoff_info/3
+    - `opts` - Optional parameters:
+      - `:episode` - The Episode if this is an episode-level backoff
+      - `:season_number` - The season number if this is a season-level backoff
+
+  ## Examples
+
+      iex> search_backoff_applied(media_item, "no_results", %{failure_count: 1, next_eligible_at: ~U[...]})
+      :ok
+  """
+  def search_backoff_applied(media_item, reason, backoff_info, opts \\ []) do
+    episode = opts[:episode]
+    season_number = opts[:season_number]
+
+    base_metadata =
+      %{
+        "title" => media_item.title,
+        "media_type" => media_item.type,
+        "reason" => reason,
+        "failure_count" => backoff_info[:failure_count],
+        "next_eligible_at" => format_datetime(backoff_info[:next_eligible_at]),
+        "backoff_duration_seconds" => backoff_info[:backoff_duration_seconds]
+      }
+      |> maybe_add_episode_context(episode)
+      |> maybe_add_season_context(season_number)
+
+    create_event_async(%{
+      category: "search",
+      type: "search.backoff_applied",
+      actor_type: :job,
+      actor_id: search_actor_id(media_item),
+      resource_type: resource_type_for_backoff(episode, season_number),
+      resource_id: resource_id_for_backoff(media_item, episode),
+      severity: :info,
+      metadata: base_metadata
+    })
+  end
+
+  @doc """
+  Records a search.backoff_reset event when backoff is cleared after a successful download.
+
+  ## Parameters
+    - `media_item` - The MediaItem being searched for
+    - `previous_count` - The failure count before reset
+    - `opts` - Optional parameters:
+      - `:episode` - The Episode if this is an episode-level reset
+      - `:season_number` - The season number if this is a season-level reset
+
+  ## Examples
+
+      iex> search_backoff_reset(media_item, 3)
+      :ok
+  """
+  def search_backoff_reset(media_item, previous_count, opts \\ []) do
+    episode = opts[:episode]
+    season_number = opts[:season_number]
+
+    base_metadata =
+      %{
+        "title" => media_item.title,
+        "media_type" => media_item.type,
+        "previous_failure_count" => previous_count
+      }
+      |> maybe_add_episode_context(episode)
+      |> maybe_add_season_context(season_number)
+
+    create_event_async(%{
+      category: "search",
+      type: "search.backoff_reset",
+      actor_type: :job,
+      actor_id: search_actor_id(media_item),
+      resource_type: resource_type_for_backoff(episode, season_number),
+      resource_id: resource_id_for_backoff(media_item, episode),
+      severity: :info,
+      metadata: base_metadata
+    })
+  end
+
+  # Helper to add season context to metadata
+  defp maybe_add_season_context(metadata, nil), do: metadata
+
+  defp maybe_add_season_context(metadata, season_number) do
+    Map.put(metadata, "season_number", season_number)
+  end
+
+  # Helper to determine resource type for backoff events
+  defp resource_type_for_backoff(episode, _season_number) when not is_nil(episode), do: "episode"
+
+  defp resource_type_for_backoff(_episode, season_number) when not is_nil(season_number),
+    do: "season"
+
+  defp resource_type_for_backoff(_episode, _season_number), do: "media_item"
+
+  # Helper to determine resource id for backoff events
+  defp resource_id_for_backoff(_media_item, episode) when not is_nil(episode), do: episode.id
+  defp resource_id_for_backoff(media_item, _episode), do: media_item.id
+
+  # Helper to format datetime for metadata
+  defp format_datetime(nil), do: nil
+  defp format_datetime(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+
+  # Helper to format backoff reason for display
+  defp format_backoff_reason("no_results"), do: "no results found"
+  defp format_backoff_reason("all_filtered"), do: "all results filtered out"
+  defp format_backoff_reason(reason) when is_binary(reason), do: reason
+  defp format_backoff_reason(_), do: "search failed"
+
+  # Helper to format next eligible time for display
+  defp format_next_eligible(nil), do: "unknown"
+
+  defp format_next_eligible(iso_string) when is_binary(iso_string) do
+    case DateTime.from_iso8601(iso_string) do
+      {:ok, dt, _offset} -> format_relative_time(dt)
+      _ -> iso_string
+    end
+  end
+
+  defp format_next_eligible(_), do: "unknown"
+
+  # Format datetime as relative time (e.g., "in 15 minutes", "at 4:30 PM")
+  defp format_relative_time(dt) do
+    now = DateTime.utc_now()
+    diff_seconds = DateTime.diff(dt, now)
+
+    cond do
+      diff_seconds <= 0 -> "now"
+      diff_seconds < 60 -> "in #{diff_seconds} seconds"
+      diff_seconds < 3600 -> "in #{div(diff_seconds, 60)} minutes"
+      diff_seconds < 86_400 -> "in #{Float.round(diff_seconds / 3600, 1)} hours"
+      true -> "in #{div(diff_seconds, 86_400)} days"
+    end
+  end
+
+  # Determine resource type from metadata for display
+  defp determine_backoff_resource_type(metadata) do
+    cond do
+      metadata["episode_id"] ->
+        "episode"
+
+      metadata["season_number"] && !metadata["episode_number"] ->
+        "season #{metadata["season_number"]}"
+
+      true ->
+        "show"
+    end
   end
 end

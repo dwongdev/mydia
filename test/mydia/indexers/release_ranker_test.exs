@@ -154,8 +154,8 @@ defmodule Mydia.Indexers.ReleaseRankerTest do
 
       ranked = ReleaseRanker.rank_all(results)
 
-      # Should filter out the low-seeder result by default (min_seeders: 5)
-      assert length(ranked) == 4
+      # Default min_seeders is 0, so all results should be returned
+      assert length(ranked) == 5
 
       # Scores should be in descending order
       scores = Enum.map(ranked, & &1.score)
@@ -298,14 +298,13 @@ defmodule Mydia.Indexers.ReleaseRankerTest do
       assert length(filtered) == 3
     end
 
-    test "uses default min_seeders of 5" do
+    test "uses default min_seeders of 0" do
       results = build_results()
 
       filtered = ReleaseRanker.filter_acceptable(results)
 
-      # Default should filter out the 2-seeder result
-      assert Enum.all?(filtered, fn r -> r.seeders >= 5 end)
-      assert length(filtered) == 4
+      # Default min_seeders is 0, so all results should be returned
+      assert length(filtered) == 5
     end
 
     test "filters by size range" do

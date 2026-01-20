@@ -24,7 +24,7 @@ defmodule Mydia.Indexers.SearchScorer do
       SearchScorer.score_result_with_breakdown(result, quality_profile: profile, media_type: :movie, search_query: "...")
   """
 
-  alias Mydia.Indexers.SearchResult
+  alias Mydia.Indexers.{QualityParser, SearchResult}
   alias Mydia.Settings.QualityProfile
 
   @type score_opts :: [
@@ -120,8 +120,20 @@ defmodule Mydia.Indexers.SearchScorer do
   @spec score_quality(SearchResult.t(), QualityProfile.t() | nil, :movie | :episode) ::
           {float(), map(), [String.t()]}
   def score_quality(%SearchResult{} = result, nil, _media_type) do
-    # No profile set - return seeder count as score (for backwards compatibility)
-    {result.seeders * 1.0, %{seeders: result.seeders}, []}
+    # No profile set - use QualityParser.quality_score for proper ranking
+    # This ensures REMUX > BluRay > WEB-DL, TrueHD Atmos > DTS-HD MA, DV > HDR10, etc.
+    quality_score =
+      if result.quality do
+        # Scale quality_score (0-2000+) to 0-100 range for scoring algorithm
+        raw_score = QualityParser.quality_score(result.quality)
+        # Max expected score: ~2000 (2160p REMUX with TrueHD Atmos, DV, x265, PROPER+REPACK)
+        min(raw_score / 20.0, 100.0)
+      else
+        # No quality info, fallback to seeders as a proxy for quality
+        min(result.seeders * 1.0, 100.0)
+      end
+
+    {quality_score, %{raw_quality_score: quality_score}, []}
   end
 
   def score_quality(%SearchResult{} = result, %QualityProfile{} = profile, media_type) do

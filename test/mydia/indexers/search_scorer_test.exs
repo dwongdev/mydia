@@ -116,12 +116,25 @@ defmodule Mydia.Indexers.SearchScorerTest do
   end
 
   describe "score_quality/3" do
-    test "without quality profile, returns seeders as score" do
+    test "without quality profile, uses QualityParser quality_score when quality info available" do
+      # Result has quality info from title "Test.Release.1080p.BluRay.x264"
+      # QualityParser.quality_score returns: 1080p(800) + BluRay(450) + x264(100) = 1350
+      # Scaled to 0-100: 1350 / 20.0 = 67.5
       result = build_result(%{seeders: 100})
       {score, breakdown, violations} = SearchScorer.score_quality(result, nil, :movie)
 
-      assert score == 100.0
-      assert breakdown.seeders == 100
+      assert score == 67.5
+      assert Map.has_key?(breakdown, :raw_quality_score)
+      assert violations == []
+    end
+
+    test "without quality profile or quality info, falls back to seeders" do
+      result = build_result(%{seeders: 50, quality: nil})
+      {score, breakdown, violations} = SearchScorer.score_quality(result, nil, :movie)
+
+      # When no quality info, uses min(seeders, 100)
+      assert score == 50.0
+      assert Map.has_key?(breakdown, :raw_quality_score)
       assert violations == []
     end
 

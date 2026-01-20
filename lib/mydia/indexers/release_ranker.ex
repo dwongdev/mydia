@@ -55,6 +55,7 @@ defmodule Mydia.Indexers.ReleaseRanker do
           min_ratio: float() | nil,
           size_range: {non_neg_integer(), non_neg_integer()},
           preferred_qualities: [String.t()],
+          preferred_tags: [String.t()],
           blocked_tags: [String.t()],
           search_query: String.t() | nil,
           quality_profile: QualityProfile.t() | nil,
@@ -268,6 +269,7 @@ defmodule Mydia.Indexers.ReleaseRanker do
     quality_profile = Keyword.get(opts, :quality_profile)
     media_type = Keyword.get(opts, :media_type, :movie)
     search_query = Keyword.get(opts, :search_query)
+    preferred_tags = Keyword.get(opts, :preferred_tags, [])
 
     scorer_opts = [
       quality_profile: quality_profile,
@@ -283,9 +285,15 @@ defmodule Mydia.Indexers.ReleaseRanker do
     seeder_score = Map.get(breakdown, :seeder_score, 0.0)
     title_bonus = Map.get(breakdown, :title_bonus, 0.0)
 
+    # Calculate tag bonus from preferred_tags
+    tag_bonus = calculate_tag_bonus(result.title, preferred_tags)
+
     size_mb = bytes_to_mb(result.size)
     total_peers = result.seeders + result.leechers
     seeder_ratio = if total_peers > 0, do: result.seeders / total_peers, else: 0.0
+
+    # Add tag_bonus to total score
+    total_score = score_result.score + tag_bonus
 
     Logger.info("""
     [ReleaseRanker] Score breakdown for: #{result.title}
@@ -298,8 +306,9 @@ defmodule Mydia.Indexers.ReleaseRanker do
         - Quality:  #{Float.round(quality_score, 2)} (60% weight in combined score)
         - Seeders:  #{Float.round(seeder_score, 2)} (30% weight in combined score)
         - Title:    #{Float.round(title_bonus, 2)} (10% weight in combined score)
+        - Tag bonus: #{Float.round(tag_bonus, 2)}
         - Zero-seeder penalty: #{Map.get(breakdown, :zero_seeder_penalty, 1.0)}
-      TOTAL: #{Float.round(score_result.score, 2)}
+      TOTAL: #{Float.round(total_score, 2)}
     """)
 
     # Map to ScoreBreakdown struct
@@ -309,8 +318,8 @@ defmodule Mydia.Indexers.ReleaseRanker do
       size: 0.0,
       age: 0.0,
       title_match: round_score(title_bonus * 100),
-      tag_bonus: 0.0,
-      total: round_score(score_result.score)
+      tag_bonus: round_score(tag_bonus),
+      total: round_score(total_score)
     })
   end
 
@@ -465,6 +474,22 @@ defmodule Mydia.Indexers.ReleaseRanker do
   end
 
   ## Private Functions - Helpers
+
+  # Calculate bonus points for matching preferred_tags in the title
+  # Each matching tag adds 10 points to help preferred releases rank higher
+  defp calculate_tag_bonus(_title, []), do: 0.0
+
+  defp calculate_tag_bonus(title, preferred_tags) do
+    title_upper = String.upcase(title)
+
+    matching_tags =
+      Enum.count(preferred_tags, fn tag ->
+        String.contains?(title_upper, String.upcase(tag))
+      end)
+
+    # 10 points per matching tag
+    matching_tags * 10.0
+  end
 
   defp bytes_to_mb(bytes) when is_integer(bytes) do
     bytes / (1024 * 1024)

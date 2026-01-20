@@ -686,6 +686,8 @@ defmodule Mydia.Downloads do
   end
 
   defp check_for_existing_media_files(search_result, media_item_id, episode_id) do
+    alias Mydia.Media.MediaItem
+
     cond do
       # For episodes, check if media files already exist for this episode
       episode_id ->
@@ -739,18 +741,42 @@ defmodule Mydia.Downloads do
           :ok
         end
 
-      # For movies, check if media files already exist for this media_item
+      # For media items (movies or TV shows)
       media_item_id ->
-        query = from(f in MediaFile, where: f.media_item_id == ^media_item_id)
+        # Get the media item to check its type
+        case Repo.get(MediaItem, media_item_id) do
+          %MediaItem{type: "tv_show"} ->
+            # TV shows can have multiple downloads for different seasons/episodes
+            # Don't block based on existing media files - the user may be downloading
+            # additional seasons or complete series packs
+            Logger.debug(
+              "Allowing download for TV show - TV shows can have multiple season downloads",
+              media_item_id: media_item_id
+            )
 
-        if Repo.exists?(query) do
-          Logger.info("Skipping download - media files already exist for media item",
-            media_item_id: media_item_id
-          )
+            :ok
 
-          {:error, :duplicate_download}
-        else
-          :ok
+          %MediaItem{type: "movie"} ->
+            # For movies, check if media files already exist
+            query = from(f in MediaFile, where: f.media_item_id == ^media_item_id)
+
+            if Repo.exists?(query) do
+              Logger.info("Skipping download - media files already exist for movie",
+                media_item_id: media_item_id
+              )
+
+              {:error, :duplicate_download}
+            else
+              :ok
+            end
+
+          nil ->
+            # Media item not found, allow download (shouldn't happen normally)
+            Logger.warning("Media item not found during duplicate check",
+              media_item_id: media_item_id
+            )
+
+            :ok
         end
 
       # No media association, can't check for existing files

@@ -96,7 +96,13 @@
     <div class="flex flex-col md:flex-row gap-3 md:gap-4 mb-4 md:mb-6">
       <%!-- Search input --%>
       <div class="flex-1">
-        <.form for={%{}} phx-change="search" id="library-search-form" class="w-full">
+        <.form
+          for={%{}}
+          phx-change="search"
+          phx-submit="search"
+          id="library-search-form"
+          class="w-full"
+        >
           <input
             type="text"
             name="search"
@@ -281,7 +287,8 @@
       class={[
         @view_mode == :grid &&
           "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-4 pb-6 md:pb-8",
-        @view_mode == :list && "card bg-base-100 shadow-lg overflow-hidden -mt-px"
+        @view_mode == :list && "card bg-base-100 shadow-lg overflow-hidden -mt-px",
+        @selection_mode && "selection-mode"
       ]}
     >
       <div
@@ -291,44 +298,51 @@
       >
         <%= if @view_mode == :grid do %>
           <%!-- Grid Card View --%>
-          <div class="relative group">
-            <%!-- Selection checkbox --%>
-            <%= if @selection_mode do %>
-              <div class="absolute top-2 left-2 z-10">
+          <div
+            id={"grid-item-#{item.id}"}
+            class="relative group media-grid-item"
+            data-selected={to_string(MapSet.member?(@selected_ids, item.id))}
+            phx-click="toggle_select"
+            phx-value-id={item.id}
+          >
+            <%!-- Selection indicator (always rendered, shown/hidden via CSS based on selection-mode) --%>
+            <div class="absolute top-2 left-2 z-20 pointer-events-none selection-indicator hidden">
+              <div class="swap swap-flip pointer-events-none">
                 <input
                   type="checkbox"
-                  class="checkbox checkbox-primary checkbox-sm"
-                  checked={item_selected?(@selected_ids, item.id)}
-                  phx-click="toggle_select"
-                  phx-value-id={item.id}
-                  onclick="event.stopPropagation()"
+                  class="select-checkbox"
+                  checked={MapSet.member?(@selected_ids, item.id)}
                 />
+                <div class="swap-on btn btn-circle btn-sm btn-primary shadow-lg">
+                  <.icon name="hero-check" class="w-4 h-4" />
+                </div>
+                <div class="swap-off btn btn-circle btn-sm bg-base-100/90 shadow-lg border-2 border-base-300">
+                  <.icon name="hero-plus" class="w-4 h-4 opacity-40" />
+                </div>
               </div>
-            <% end %>
+            </div>
 
             <%!-- Monitored toggle button (outside link, hidden in selection mode) --%>
-            <%= if not @selection_mode do %>
-              <button
-                type="button"
-                phx-click="toggle_item_monitored"
-                phx-value-id={item.id}
-                class={[
-                  "absolute top-2 left-2 p-1 rounded-lg transition-all duration-200",
-                  "hover:bg-base-200 hover:scale-110 active:scale-95",
-                  "z-10"
-                ]}
-                title={if item.monitored, do: "Unmonitor", else: "Monitor"}
-              >
-                <.icon
-                  name={if item.monitored, do: "hero-bookmark-solid", else: "hero-bookmark"}
-                  class={
-                    if item.monitored,
-                      do: "w-5 h-5 transition-colors duration-200 text-primary",
-                      else: "w-5 h-5 transition-colors duration-200 text-base-content opacity-60"
-                  }
-                />
-              </button>
-            <% end %>
+            <button
+              type="button"
+              phx-click="toggle_item_monitored"
+              phx-value-id={item.id}
+              class={[
+                "absolute top-2 left-2 p-1 rounded-lg transition-all duration-200",
+                "hover:bg-base-200 hover:scale-110 active:scale-95",
+                "z-10 hide-on-select"
+              ]}
+              title={if item.monitored, do: "Unmonitor", else: "Monitor"}
+            >
+              <.icon
+                name={if item.monitored, do: "hero-bookmark-solid", else: "hero-bookmark"}
+                class={
+                  if item.monitored,
+                    do: "w-5 h-5 transition-colors duration-200 text-primary",
+                    else: "w-5 h-5 transition-colors duration-200 text-base-content opacity-60"
+                }
+              />
+            </button>
 
             <div class="card bg-base-100 shadow-lg hover:shadow-xl transition-shadow duration-200">
               <.link navigate={~p"/media/#{item.id}"}>
@@ -341,11 +355,11 @@
                   />
                   <%!-- Progress indicators --%>
                   <% progress = get_progress(item) %>
-                  <.progress_bar :if={progress} progress={progress} />
-                  <.progress_badge :if={progress} progress={progress} />
+                  <.progress_bar :if={progress} progress={progress} class="hide-on-select" />
+                  <.progress_badge :if={progress} progress={progress} class="hide-on-select" />
                   <%!-- Quality badge --%>
                   <%= if quality = get_quality_badge(item) do %>
-                    <div class="badge badge-primary badge-sm absolute top-2 right-2 z-10 shadow-md">
+                    <div class="badge badge-primary badge-sm absolute top-2 right-2 z-10 shadow-md hide-on-select">
                       {quality}
                     </div>
                   <% end %>
@@ -398,35 +412,46 @@
           </div>
         <% else %>
           <%!-- List Row View --%>
-          <div class="flex items-center px-4 py-3 hover:bg-base-200/50 border-b border-base-200 last:border-b-0 odd:bg-base-100 even:bg-base-200/30 transition-colors">
+          <div
+            id={"list-item-#{item.id}"}
+            class="flex items-center px-4 py-3 hover:bg-base-200/50 border-b border-base-200 last:border-b-0 transition-colors cursor-pointer media-list-item"
+            data-selected={to_string(MapSet.member?(@selected_ids, item.id))}
+            phx-click="toggle_select"
+            phx-value-id={item.id}
+          >
             <%!-- Checkbox/Bookmark column --%>
             <div class="w-10 flex-shrink-0">
-              <%= if @selection_mode do %>
+              <%!-- Selection checkbox (always rendered, shown via CSS in selection-mode) --%>
+              <div class="swap pointer-events-none selection-indicator hidden">
                 <input
                   type="checkbox"
-                  class="checkbox checkbox-primary checkbox-sm"
-                  checked={item_selected?(@selected_ids, item.id)}
-                  phx-click="toggle_select"
-                  phx-value-id={item.id}
+                  class="select-checkbox"
+                  checked={MapSet.member?(@selected_ids, item.id)}
                 />
-              <% else %>
-                <button
-                  type="button"
-                  phx-click="toggle_item_monitored"
-                  phx-value-id={item.id}
-                  class="btn btn-ghost btn-xs btn-circle"
-                  title={if item.monitored, do: "Unmonitor", else: "Monitor"}
-                >
-                  <.icon
-                    name={if item.monitored, do: "hero-bookmark-solid", else: "hero-bookmark"}
-                    class={
-                      if item.monitored,
-                        do: "w-4 h-4 text-primary",
-                        else: "w-4 h-4 text-base-content/40"
-                    }
-                  />
-                </button>
-              <% end %>
+                <div class="swap-on text-primary">
+                  <.icon name="hero-check-circle-solid" class="w-6 h-6" />
+                </div>
+                <div class="swap-off text-base-content/30">
+                  <.icon name="hero-check-circle" class="w-6 h-6" />
+                </div>
+              </div>
+              <%!-- Bookmark button (hidden in selection-mode via CSS) --%>
+              <button
+                type="button"
+                phx-click="toggle_item_monitored"
+                phx-value-id={item.id}
+                class="btn btn-ghost btn-xs btn-circle hide-on-select"
+                title={if item.monitored, do: "Unmonitor", else: "Monitor"}
+              >
+                <.icon
+                  name={if item.monitored, do: "hero-bookmark-solid", else: "hero-bookmark"}
+                  class={
+                    if item.monitored,
+                      do: "w-4 h-4 text-primary",
+                      else: "w-4 h-4 text-base-content/40"
+                  }
+                />
+              </button>
             </div>
             <%!-- Poster column --%>
             <div class="w-14 flex-shrink-0">
@@ -534,106 +559,129 @@
       </div>
     <% end %>
 
-    <%!-- Floating Action Toolbar (shown when items selected) --%>
-    <%= if MapSet.size(@selected_ids) > 0 do %>
+    <%!-- Floating Action Toolbar (shown in selection mode) --%>
+    <%= if @selection_mode do %>
+      <% selected_count = MapSet.size(@selected_ids) %>
+      <% has_selection = selected_count > 0 %>
+      <% all_selected =
+        MapSet.equal?(@selected_ids, @all_visible_ids) and MapSet.size(@all_visible_ids) > 0 %>
       <div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom duration-300">
-        <div class="bg-base-100 shadow-2xl rounded-box border border-base-300 p-4">
-          <div class="flex flex-col sm:flex-row items-center gap-4">
-            <%!-- Selection count --%>
-            <div class="flex items-center gap-2">
-              <span class="font-semibold text-lg">
-                {MapSet.size(@selected_ids)}
-              </span>
-              <span class="text-sm text-base-content/70">
-                {if MapSet.size(@selected_ids) == 1, do: "item selected", else: "items selected"}
-              </span>
+        <div class="bg-base-100 shadow-2xl rounded-box border border-base-300 px-2 py-2">
+          <div class="flex items-center gap-1">
+            <%!-- Select All checkbox with count --%>
+            <label
+              class="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-base-200 cursor-pointer transition-colors"
+              title={if all_selected, do: "Deselect all", else: "Select all"}
+            >
+              <input
+                type="checkbox"
+                class="checkbox checkbox-sm checkbox-primary"
+                checked={all_selected}
+                phx-click={
+                  JS.push("toggle_select_all")
+                  |> JS.dispatch("mydia:toggle-select-all", to: "#media-items")
+                }
+              />
+              <%= if selected_count == 0 do %>
+                <span class="text-sm">Select All</span>
+              <% else %>
+                <span class="font-medium tabular-nums">{selected_count}</span>
+                <span class="text-sm text-base-content/60 hidden sm:inline">selected</span>
+              <% end %>
+            </label>
+
+            <div class="w-px h-6 bg-base-300 mx-1"></div>
+
+            <%!-- Primary action buttons (icon only with tooltips) --%>
+            <div class="flex items-center">
+              <div class="tooltip tooltip-top" data-tip="Monitor">
+                <button
+                  type="button"
+                  class={["btn btn-sm btn-ghost btn-square", !has_selection && "btn-disabled"]}
+                  phx-click="batch_monitor"
+                  disabled={!has_selection}
+                >
+                  <.icon name="hero-bookmark" class="w-4 h-4" />
+                </button>
+              </div>
+
+              <div class="tooltip tooltip-top" data-tip="Unmonitor">
+                <button
+                  type="button"
+                  class={["btn btn-sm btn-ghost btn-square", !has_selection && "btn-disabled"]}
+                  phx-click="batch_unmonitor"
+                  disabled={!has_selection}
+                >
+                  <.icon name="hero-bookmark-slash" class="w-4 h-4" />
+                </button>
+              </div>
+
+              <div class="tooltip tooltip-top" data-tip="Edit">
+                <button
+                  type="button"
+                  class={["btn btn-sm btn-ghost btn-square", !has_selection && "btn-disabled"]}
+                  phx-click="show_batch_edit"
+                  disabled={!has_selection}
+                >
+                  <.icon name="hero-pencil-square" class="w-4 h-4" />
+                </button>
+              </div>
+
+              <div class="tooltip tooltip-top" data-tip="Add to Collection">
+                <button
+                  type="button"
+                  class={["btn btn-sm btn-ghost btn-square", !has_selection && "btn-disabled"]}
+                  phx-click="show_add_to_collection"
+                  disabled={!has_selection}
+                >
+                  <.icon name="hero-folder-plus" class="w-4 h-4" />
+                </button>
+              </div>
+
+              <%!-- More dropdown for less common actions --%>
+              <div class={[
+                "dropdown dropdown-top dropdown-end",
+                !has_selection && "pointer-events-none"
+              ]}>
+                <div
+                  tabindex="0"
+                  role="button"
+                  class={["btn btn-sm btn-ghost btn-square", !has_selection && "btn-disabled"]}
+                >
+                  <.icon name="hero-ellipsis-horizontal" class="w-4 h-4" />
+                </div>
+                <ul
+                  tabindex="0"
+                  class="dropdown-content menu bg-base-100 rounded-box z-[1] w-48 p-2 shadow-lg border border-base-300 mb-2"
+                >
+                  <li>
+                    <button type="button" phx-click="batch_reclassify" class="gap-2">
+                      <.icon name="hero-tag" class="w-4 h-4" /> Re-classify
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      type="button"
+                      phx-click="show_delete_confirmation"
+                      class="gap-2 text-error"
+                    >
+                      <.icon name="hero-trash" class="w-4 h-4" /> Delete
+                    </button>
+                  </li>
+                </ul>
+              </div>
             </div>
 
-            <div class="divider divider-horizontal hidden sm:flex mx-0"></div>
+            <div class="w-px h-6 bg-base-300 mx-1"></div>
 
-            <%!-- Action buttons --%>
-            <div class="flex flex-wrap items-center gap-2 justify-center">
-              <button
-                type="button"
-                class="btn btn-sm btn-ghost gap-2"
-                phx-click="batch_monitor"
-                title="Monitor selected items"
-              >
-                <.icon name="hero-bookmark" class="w-4 h-4" />
-                <span>Monitor</span>
-              </button>
-
-              <button
-                type="button"
-                class="btn btn-sm btn-ghost gap-2"
-                phx-click="batch_unmonitor"
-                title="Unmonitor selected items"
-              >
-                <.icon name="hero-bookmark-slash" class="w-4 h-4" />
-                <span>Unmonitor</span>
-              </button>
-
-              <button
-                type="button"
-                class="btn btn-sm btn-ghost gap-2"
-                phx-click="batch_download"
-                title="Download selected items"
-              >
-                <.icon name="hero-arrow-down-tray" class="w-4 h-4" />
-                <span>Download</span>
-              </button>
-
-              <button
-                type="button"
-                class="btn btn-sm btn-ghost gap-2"
-                phx-click="batch_reclassify"
-                title="Re-classify selected items (update categories based on metadata)"
-              >
-                <.icon name="hero-tag" class="w-4 h-4" />
-                <span>Re-classify</span>
-              </button>
-
-              <button
-                type="button"
-                class="btn btn-sm btn-primary gap-2"
-                phx-click="show_batch_edit"
-                title="Batch edit selected items"
-              >
-                <.icon name="hero-pencil-square" class="w-4 h-4" />
-                <span>Batch Edit</span>
-              </button>
-
-              <button
-                type="button"
-                class="btn btn-sm btn-secondary gap-2"
-                phx-click="show_add_to_collection"
-                title="Add selected items to collection"
-              >
-                <.icon name="hero-folder-plus" class="w-4 h-4" />
-                <span>Add to Collection</span>
-              </button>
-
-              <button
-                type="button"
-                class="btn btn-sm btn-error gap-2"
-                phx-click="show_delete_confirmation"
-                title="Delete selected items"
-              >
-                <.icon name="hero-trash" class="w-4 h-4" />
-                <span>Delete</span>
-              </button>
-            </div>
-
-            <div class="divider divider-horizontal hidden sm:flex mx-0"></div>
-
-            <%!-- Close button --%>
+            <%!-- Done button --%>
             <button
               type="button"
-              class="btn btn-sm btn-circle btn-ghost"
-              phx-click="clear_selection"
-              title="Clear selection (Esc)"
+              class="btn btn-sm btn-primary"
+              phx-click="toggle_selection_mode"
+              title="Done (Esc)"
             >
-              <.icon name="hero-x-mark" class="w-5 h-5" />
+              Done
             </button>
           </div>
         </div>
@@ -716,60 +764,102 @@
       show={@show_add_to_collection_modal}
       on_cancel={JS.push("cancel_add_to_collection")}
     >
-      <:title>Add to Collection</:title>
-
-      <div class="space-y-4">
-        <div class="alert alert-info">
-          <.icon name="hero-information-circle" class="w-5 h-5" />
-          <span>
-            Adding <strong>{MapSet.size(@selected_ids)}</strong>
-            {if MapSet.size(@selected_ids) == 1, do: "item", else: "items"} to a collection.
-          </span>
+      <:title>
+        <div class="flex items-center gap-3">
+          <div class="bg-primary/10 p-2 rounded-lg">
+            <.icon name="hero-folder-plus" class="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <span>Add to Collection</span>
+            <div class="text-sm font-normal text-base-content/60">
+              {MapSet.size(@selected_ids)} {if MapSet.size(@selected_ids) == 1,
+                do: "item",
+                else: "items"} selected
+            </div>
+          </div>
         </div>
+      </:title>
 
-        <%= if Enum.empty?(@user_collections) do %>
-          <div class="text-center py-8">
-            <.icon name="hero-folder-open" class="w-12 h-12 mx-auto text-base-content/30 mb-4" />
-            <p class="text-base-content/70 mb-4">You don't have any collections yet.</p>
-            <.link navigate={~p"/collections"} class="btn btn-primary">
-              <.icon name="hero-plus" class="w-4 h-4" /> Create Your First Collection
-            </.link>
+      <%= if Enum.empty?(@user_collections) do %>
+        <%!-- Empty State --%>
+        <div class="flex flex-col items-center justify-center py-10">
+          <div class="bg-base-200 rounded-full p-6 mb-4">
+            <.icon name="hero-folder-open" class="w-12 h-12 text-base-content/40" />
           </div>
-        <% else %>
-          <div class="space-y-2">
-            <p class="text-sm text-base-content/70">Select a collection:</p>
-            <ul class="menu bg-base-200 rounded-box">
-              <%= for collection <- @user_collections do %>
-                <li>
-                  <button
-                    type="button"
-                    phx-click="batch_add_to_collection"
-                    phx-value-collection-id={collection.id}
-                    class="justify-start"
-                  >
-                    <.icon
-                      name={if collection.is_system, do: "hero-star", else: "hero-folder"}
-                      class="w-5 h-5"
-                    />
-                    <span>{collection.name}</span>
-                    <%= if collection.is_system do %>
-                      <span class="badge badge-ghost badge-sm">System</span>
-                    <% end %>
-                  </button>
-                </li>
-              <% end %>
-            </ul>
-          </div>
-        <% end %>
-      </div>
+          <h3 class="text-lg font-semibold mb-2">No collections yet</h3>
+          <p class="text-base-content/60 text-center mb-6 max-w-xs">
+            Create your first collection to organize your media
+          </p>
+          <.link navigate={~p"/collections/new"} class="btn btn-primary gap-2">
+            <.icon name="hero-plus" class="w-4 h-4" /> Create Collection
+          </.link>
+        </div>
+      <% else %>
+        <%!-- Collection Grid --%>
+        <div class="space-y-3">
+          <%= for collection <- @user_collections do %>
+            <button
+              type="button"
+              phx-click="batch_add_to_collection"
+              phx-value-collection-id={collection.id}
+              class="w-full group flex items-center gap-4 p-4 rounded-xl bg-base-200/50 hover:bg-base-200 border border-transparent hover:border-primary/20 transition-all duration-200 text-left"
+            >
+              <%!-- Collection Icon --%>
+              <div class={[
+                "flex-shrink-0 w-12 h-12 rounded-xl flex items-center justify-center transition-colors",
+                if(collection.is_system,
+                  do: "bg-warning/10 text-warning",
+                  else: "bg-primary/10 text-primary group-hover:bg-primary/20"
+                )
+              ]}>
+                <.icon
+                  name={if collection.is_system, do: "hero-star-solid", else: "hero-folder"}
+                  class="w-6 h-6"
+                />
+              </div>
+
+              <%!-- Collection Info --%>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="font-medium truncate">{collection.name}</span>
+                  <%= if collection.is_system do %>
+                    <span class="badge badge-warning badge-xs">Favorites</span>
+                  <% end %>
+                </div>
+                <div class="text-sm text-base-content/50">
+                  {Map.get(collection, :item_count, 0)} {if Map.get(collection, :item_count, 0) ==
+                                                              1,
+                                                            do: "item",
+                                                            else: "items"}
+                </div>
+              </div>
+
+              <%!-- Hover Arrow --%>
+              <div class="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                <.icon name="hero-plus-circle" class="w-6 h-6 text-primary" />
+              </div>
+            </button>
+          <% end %>
+
+          <%!-- Create New Collection Link --%>
+          <.link
+            navigate={~p"/collections/new"}
+            class="w-full flex items-center gap-4 p-4 rounded-xl border-2 border-dashed border-base-300 hover:border-primary/40 hover:bg-primary/5 transition-all duration-200"
+          >
+            <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-base-200 flex items-center justify-center">
+              <.icon name="hero-plus" class="w-6 h-6 text-base-content/40" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <span class="font-medium text-base-content/70">Create new collection</span>
+            </div>
+          </.link>
+        </div>
+      <% end %>
 
       <:actions>
         <button type="button" class="btn btn-ghost" phx-click="cancel_add_to_collection">
           Cancel
         </button>
-        <.link navigate={~p"/collections"} class="btn btn-outline">
-          <.icon name="hero-folder-open" class="w-4 h-4" /> Manage Collections
-        </.link>
       </:actions>
     </.modal>
   </div>

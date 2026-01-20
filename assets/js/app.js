@@ -385,6 +385,47 @@ Alpine.start();
 const csrfToken = document
   .querySelector("meta[name='csrf-token']")
   .getAttribute("content");
+
+// Selection sync - listen for custom DOM events dispatched via JS.dispatch
+// Select all items
+document.addEventListener("mydia:select-all", (e) => {
+  const container = e.target.closest("#media-items") || document.getElementById("media-items");
+  if (!container) return;
+
+  container.querySelectorAll(".media-grid-item, .media-list-item").forEach((item) => {
+    item.dataset.selected = "true";
+    const checkbox = item.querySelector("input.select-checkbox");
+    if (checkbox) checkbox.checked = true;
+  });
+});
+
+// Clear all selections
+document.addEventListener("mydia:clear-selection", (e) => {
+  const container = e.target.closest("#media-items") || document.getElementById("media-items");
+  if (!container) return;
+
+  container.querySelectorAll(".media-grid-item, .media-list-item").forEach((item) => {
+    item.dataset.selected = "false";
+    const checkbox = item.querySelector("input.select-checkbox");
+    if (checkbox) checkbox.checked = false;
+  });
+});
+
+// Toggle select all - check current state and toggle
+document.addEventListener("mydia:toggle-select-all", (e) => {
+  const container = e.target.closest("#media-items") || document.getElementById("media-items");
+  if (!container) return;
+
+  const items = container.querySelectorAll(".media-grid-item, .media-list-item");
+  const allSelected = Array.from(items).every((item) => item.dataset.selected === "true");
+
+  items.forEach((item) => {
+    item.dataset.selected = allSelected ? "false" : "true";
+    const checkbox = item.querySelector("input.select-checkbox");
+    if (checkbox) checkbox.checked = !allSelected;
+  });
+});
+
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: { _csrf_token: csrfToken },
@@ -401,11 +442,16 @@ const liveSocket = new LiveSocket("/live", Socket, {
     PlexOAuth,
     AddDirectUrl,
   },
-  // Preserve Alpine.js state across LiveView DOM patches
+  // Preserve Alpine.js state and selection across LiveView DOM patches
   dom: {
     onBeforeElUpdated(from, to) {
+      // Preserve Alpine.js state
       if (from._x_dataStack) {
         window.Alpine.clone(from, to);
+      }
+      // Preserve data-selected attribute for media item selection
+      if (from.dataset && from.dataset.selected === "true") {
+        to.dataset.selected = "true";
       }
     },
   },
@@ -444,6 +490,35 @@ const AddDirectUrl = {
 
 // connect if there are any LiveViews on the page
 liveSocket.connect();
+
+// Media selection - using document-level event delegation since streams replace DOM elements
+document.addEventListener("click", (e) => {
+  const container = document.getElementById("media-items");
+  if (!container || !container.classList.contains("selection-mode")) {
+    return;
+  }
+
+  const gridItem = e.target.closest(".media-grid-item");
+  const listItem = e.target.closest(".media-list-item");
+  const item = gridItem || listItem;
+
+  if (!item) return;
+
+  // Don't handle clicks on buttons (like bookmark)
+  if (e.target.closest("button")) {
+    return;
+  }
+
+  // Toggle selection using data attribute
+  const wasSelected = item.dataset.selected === "true";
+  item.dataset.selected = wasSelected ? "false" : "true";
+
+  // Also toggle the checkbox if present
+  const checkbox = item.querySelector("input.select-checkbox");
+  if (checkbox) {
+    checkbox.checked = item.dataset.selected === "true";
+  }
+});
 
 // expose liveSocket on window for web console debug logs and latency simulation:
 // >> liveSocket.enableDebug()

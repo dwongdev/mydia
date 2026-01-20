@@ -39,6 +39,7 @@ defmodule MydiaWeb.MediaLive.Index do
      |> assign(:specialized_library_type, nil)
      |> assign(:show_add_to_collection_modal, false)
      |> assign(:user_collections, [])
+     |> assign(:all_visible_ids, MapSet.new())
      |> stream(:media_items, [])}
   end
 
@@ -152,16 +153,21 @@ defmodule MydiaWeb.MediaLive.Index do
   end
 
   def handle_event("toggle_select", %{"id" => id}, socket) do
-    selected_ids = socket.assigns.selected_ids
+    if socket.assigns.selection_mode do
+      selected_ids = socket.assigns.selected_ids
 
-    updated_ids =
-      if MapSet.member?(selected_ids, id) do
-        MapSet.delete(selected_ids, id)
-      else
-        MapSet.put(selected_ids, id)
-      end
+      updated_ids =
+        if MapSet.member?(selected_ids, id) do
+          MapSet.delete(selected_ids, id)
+        else
+          MapSet.put(selected_ids, id)
+        end
 
-    {:noreply, assign(socket, :selected_ids, updated_ids)}
+      {:noreply, assign(socket, :selected_ids, updated_ids)}
+    else
+      # Not in selection mode, navigate to the item
+      {:noreply, push_navigate(socket, to: ~p"/media/#{id}")}
+    end
   end
 
   def handle_event("select_all", _params, socket) do
@@ -179,6 +185,23 @@ defmodule MydiaWeb.MediaLive.Index do
 
   def handle_event("clear_selection", _params, socket) do
     {:noreply, assign(socket, :selected_ids, MapSet.new())}
+  end
+
+  def handle_event("toggle_select_all", _params, socket) do
+    # Toggle between selecting all visible items and clearing selection
+    all_visible_ids = socket.assigns.all_visible_ids
+    selected_ids = socket.assigns.selected_ids
+
+    new_selected_ids =
+      if MapSet.equal?(selected_ids, all_visible_ids) and MapSet.size(all_visible_ids) > 0 do
+        # All are selected, so clear
+        MapSet.new()
+      else
+        # Not all selected, so select all
+        all_visible_ids
+      end
+
+    {:noreply, assign(socket, :selected_ids, new_selected_ids)}
   end
 
   def handle_event("toggle_selection_mode", _params, socket) do
@@ -203,7 +226,7 @@ defmodule MydiaWeb.MediaLive.Index do
   end
 
   def handle_event("keydown", %{"key" => "a", "ctrlKey" => true}, socket) do
-    # Ctrl+A - select all
+    # Ctrl+A - select all (note: UI sync happens via JS.dispatch from button, not from keyboard)
     query_opts = build_query_opts(socket.assigns)
     items = Media.list_media_items(query_opts)
     items = apply_search_filter(items, socket.assigns.search_query)
@@ -413,9 +436,15 @@ defmodule MydiaWeb.MediaLive.Index do
     user = socket.assigns.current_scope.user
     user_collections = Collections.list_collections(user, type: "manual", include_shared: false)
 
+    # Add item counts for each collection
+    user_collections_with_counts =
+      Enum.map(user_collections, fn collection ->
+        Map.put(collection, :item_count, Collections.item_count(collection))
+      end)
+
     {:noreply,
      socket
-     |> assign(:user_collections, user_collections)
+     |> assign(:user_collections, user_collections_with_counts)
      |> assign(:show_add_to_collection_modal, true)}
   end
 
@@ -603,10 +632,14 @@ defmodule MydiaWeb.MediaLive.Index do
       "load_media_items: paginated=#{length(paginated_items)}, reset=#{reset?}, titles=#{inspect(Enum.map(paginated_items, & &1.title))}, ids=#{inspect(Enum.map(paginated_items, & &1.id))}"
     )
 
+    # Track all visible item IDs for "Select All" functionality
+    all_visible_ids = MapSet.new(items, & &1.id)
+
     socket =
       socket
       |> assign(:has_more, has_more)
       |> assign(:media_items_empty?, reset? and items == [])
+      |> assign(:all_visible_ids, all_visible_ids)
 
     # Use reset: true when filtering/searching to properly clear and repopulate the stream
     socket =
@@ -858,10 +891,6 @@ defmodule MydiaWeb.MediaLive.Index do
     |> Enum.map(& &1.size)
     |> Enum.reject(&is_nil/1)
     |> Enum.sum()
-  end
-
-  defp item_selected?(selected_ids, item_id) do
-    MapSet.member?(selected_ids, item_id)
   end
 
   defp pluralize_items(1), do: "item"

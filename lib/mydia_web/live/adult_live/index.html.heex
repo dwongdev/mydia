@@ -295,18 +295,28 @@
     <%!-- Loading indicator for infinite scroll --%>
     <.loading_indicator visible={@has_more} />
 
-    <%!-- Floating Action Toolbar (shown when items selected) --%>
-    <.batch_action_toolbar selected_count={MapSet.size(@selected_ids)}>
-      <:actions>
-        <button
-          type="button"
-          class="btn btn-sm btn-error gap-2"
-          phx-click="show_delete_confirmation"
-          title="Delete selected files"
-        >
-          <.icon name="hero-trash" class="w-4 h-4" />
-          <span>Delete</span>
-        </button>
+    <%!-- Floating Action Toolbar (shown in selection mode) --%>
+    <% all_selected =
+      MapSet.equal?(@selected_ids, @all_visible_ids) and MapSet.size(@all_visible_ids) > 0 %>
+    <.batch_action_toolbar
+      selected_count={MapSet.size(@selected_ids)}
+      selection_mode={@selection_mode}
+      all_selected={all_selected}
+    >
+      <:actions :let={has_selection}>
+        <div class="tooltip tooltip-top" data-tip="Delete">
+          <button
+            type="button"
+            class={[
+              "btn btn-sm btn-ghost btn-square text-error",
+              !has_selection && "btn-disabled"
+            ]}
+            phx-click="show_delete_confirmation"
+            disabled={!has_selection}
+          >
+            <.icon name="hero-trash" class="w-4 h-4" />
+          </button>
+        </div>
       </:actions>
     </.batch_action_toolbar>
 

@@ -33,6 +33,7 @@ defmodule MydiaWeb.AdultLive.Index do
      |> assign(:scanning, false)
      |> assign(:selection_mode, false)
      |> assign(:selected_ids, MapSet.new())
+     |> assign(:all_visible_ids, MapSet.new())
      |> assign(:show_delete_modal, false)
      |> assign(:delete_files, false)
      |> stream(:files, [])}
@@ -150,6 +151,23 @@ defmodule MydiaWeb.AdultLive.Index do
 
   def handle_event("clear_selection", _params, socket) do
     {:noreply, assign(socket, :selected_ids, MapSet.new())}
+  end
+
+  def handle_event("toggle_select_all", _params, socket) do
+    # Toggle between selecting all visible items and clearing selection
+    all_visible_ids = socket.assigns.all_visible_ids
+    selected_ids = socket.assigns.selected_ids
+
+    new_selected_ids =
+      if MapSet.equal?(selected_ids, all_visible_ids) and MapSet.size(all_visible_ids) > 0 do
+        # All are selected, so clear
+        MapSet.new()
+      else
+        # Not all selected, so select all
+        all_visible_ids
+      end
+
+    {:noreply, assign(socket, :selected_ids, new_selected_ids)}
   end
 
   def handle_event("keydown", %{"key" => "Escape"}, socket) do
@@ -340,10 +358,14 @@ defmodule MydiaWeb.AdultLive.Index do
     paginated_files = files |> Enum.drop(offset) |> Enum.take(limit)
     has_more = length(files) > offset + limit
 
+    # Track all visible file IDs for "Select All" functionality
+    all_visible_ids = MapSet.new(files, & &1.id)
+
     socket =
       socket
       |> assign(:has_more, has_more)
       |> assign(:files_empty?, reset? and files == [])
+      |> assign(:all_visible_ids, all_visible_ids)
 
     if reset? do
       stream(socket, :files, paginated_files, reset: true)

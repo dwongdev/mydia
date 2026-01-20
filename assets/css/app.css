@@ -38,3 +38,40 @@
 }
 
 /* This file is for your main application CSS */
+
+/* Hide badges when selection mode is active */
+.selection-mode .hide-on-select {
+  display: none !important;
+}
+
+/* Show selection indicators when in selection mode */
+.selection-mode .selection-indicator {
+  display: block !important;
+}
+
+/* Disable navigation links when in selection mode */
+.selection-mode a {
+  pointer-events: none;
+}
+
+/* Selection indicator for grid items - using data attribute for LiveView compatibility */
+.media-grid-item[data-selected="true"] {
+  outline: 4px solid oklch(var(--p));
+  outline-offset: 2px;
+  border-radius: 1rem;
+}
+
+/* Selection indicator for list items */
+.media-list-item[data-selected="true"] {
+  background-color: oklch(var(--p) / 0.15) !important;
+  border-left: 4px solid oklch(var(--p)) !important;
+}
+
+/* Non-selected list items get alternating backgrounds */
+.media-list-item:not([data-selected="true"]):nth-child(odd) {
+  background-color: oklch(var(--b1));
+}
+
+.media-list-item:not([data-selected="true"]):nth-child(even) {
+  background-color: oklch(var(--b2) / 0.3);
+}

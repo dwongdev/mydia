@@ -13,6 +13,7 @@ services:
       - postgres
 
   app:
+    image: mydia-app:latest
     build:
       context: .
       dockerfile: Dockerfile.dev

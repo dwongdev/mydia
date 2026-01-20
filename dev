@@ -151,11 +151,35 @@ run_in_container() {
     fi
 }
 
+# Get the app service image name
+# Returns the image name from compose config, or builds it if not available
+get_app_image() {
+    local image_name
+    # Get image name from compose config (now explicitly defined as mydia-app:latest)
+    image_name=$(docker compose config --format json 2>/dev/null | jq -r '.services.app.image // empty')
+
+    if [ -z "$image_name" ]; then
+        # Fallback for older docker compose versions
+        image_name="mydia-app:latest"
+    fi
+
+    # Check if image exists locally
+    if ! docker image inspect "$image_name" &>/dev/null; then
+        echo -e "${YELLOW}App image not found. Building...${NC}" >&2
+        docker compose build app >&2
+    fi
+
+    echo "$image_name"
+}
+
 # Run command in an isolated container (separate volumes from dev)
 # Usage: run_isolated <command>
 # Example: run_isolated "mix test"
 run_isolated() {
     local cmd="$1"
+    local app_image
+    app_image=$(get_app_image)
+
     # Use dedicated isolated volumes (separate from dev, but cached between runs)
     docker run --rm \
         -e MIX_ENV=test \
@@ -173,7 +197,7 @@ run_isolated() {
         -v mydia_isolated_hex:/app/.hex \
         -w /app \
         --entrypoint "" \
-        "$(docker compose config --images | head -1)" \
+        "$app_image" \
         sh -c "mix deps.get && $cmd"
 }
 

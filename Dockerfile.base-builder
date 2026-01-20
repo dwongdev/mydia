@@ -31,4 +31,15 @@ RUN mix local.hex --force && \
 # Pre-warm hex package index
 RUN mix hex.info
 
+# Pre-compile Rust dependencies for faster CI builds
+WORKDIR /rust-deps
+COPY native/mydia_p2p_core/Cargo.toml native/mydia_p2p_core/Cargo.lock ./mydia_p2p_core/
+COPY native/mydia_libp2p/Cargo.toml ./mydia_libp2p/
+
+RUN mkdir -p mydia_p2p_core/src mydia_libp2p/src && \
+    echo "pub fn dummy() {}" > mydia_p2p_core/src/lib.rs && \
+    echo "pub fn dummy() {}" > mydia_libp2p/src/lib.rs && \
+    cd mydia_libp2p && cargo build --release && \
+    rm -rf target/release/.fingerprint/mydia_* target/release/deps/libmydia_*
+
 WORKDIR /app

@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1.43", features = ["full"] }
-libp2p = { version = "0.56.0", features = ["tokio", "gossipsub", "mdns", "noise", "macros", "tcp", "yamux", "quic", "dns", "kad", "ping", "identify", "request-response", "cbor", "relay", "dcutr", "rsa", "rendezvous"] }
+tokio = { version = "1.43", features = ["rt-multi-thread", "sync", "macros", "time"] }
+libp2p = { version = "0.56.0", features = ["tokio", "mdns", "noise", "macros", "tcp", "yamux", "dns", "kad", "ping", "identify", "request-response", "cbor", "relay", "dcutr", "rendezvous"] }
 env_logger = "0.11"
 log = "0.4"
 anyhow = "1.0"
@@ -16,3 +16,10 @@ sha2 = "0.10"
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.14"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = "z"
+strip = true
+panic = "abort"

@@ -682,6 +682,13 @@ defmodule MydiaWeb.MediaLive.Show.Modals do
                             score={score_data.breakdown[:hdr]}
                             weight={5}
                           />
+                          <div class="divider my-1 text-xs opacity-50">Availability</div>
+                          <.score_row
+                            label="Seeders"
+                            value={"#{result.seeders} peers"}
+                            score={score_data.breakdown[:seeders]}
+                            weight={30}
+                          />
                         </div>
                         <%= if score_data.violations != [] do %>
                           <div class="divider my-1"></div>

@@ -3,8 +3,8 @@ defmodule Mydia.Indexers.ReleaseRanker do
   Ranks and filters torrent search results based on configurable criteria.
 
   This module provides a pluggable ranking system for selecting the best
-  torrent releases from search results. It scores releases based on multiple
-  factors including quality, seeders, file size, and age.
+  torrent releases from search results. It uses the unified `SearchScorer`
+  algorithm to ensure consistent scoring between automatic and manual searches.
 
   ## Usage
 
@@ -17,36 +17,35 @@ defmodule Mydia.Indexers.ReleaseRanker do
       # Filter by criteria
       ReleaseRanker.filter_acceptable(results, size_range: {500, 10_000})
 
-  ## Scoring Factors
+  ## Scoring Algorithm
 
-  - **Quality** (50% weight): Resolution, source, codec via `QualityParser`
-  - **Seeders** (20% weight): Logarithmic scale with ratio multiplier
-  - **Size** (10% weight): Bell curve favoring reasonable sizes
-  - **Age** (5% weight): Slight preference for newer releases
-  - **Title Match** (15% weight): How well the result title matches the search query
+  Scoring is handled by `SearchScorer` with the following formula:
 
-  The seeder scoring now incorporates seeder/leecher ratio to favor healthy swarms:
-  - Ratio < 15%: 0.1x multiplier (oversaturated)
-  - Ratio 30%: 0.5x multiplier (poor)
-  - Ratio 50%: 0.8x multiplier (decent)
-  - Ratio 67%: 1.0x multiplier (healthy)
-  - Ratio ≥ 80%: 1.3x multiplier (excellent)
+      Combined Score = (quality_score * 0.6 + seeder_score + title_bonus) * zero_seeder_penalty
+
+  Where:
+  - `quality_score`: 0-100 based on QualityProfile scoring
+  - `seeder_score`: log10(seeders + 1) * 10 (max ~30 pts)
+  - `title_bonus`: title relevance bonus / 2 (0-10 pts)
+  - `zero_seeder_penalty`: 0.7 if seeders == 0, else 1.0
 
   ## Options
 
   - `:min_seeders` - Minimum seeder count (default: 5)
   - `:min_ratio` - Minimum seeder ratio as percentage (default: nil)
   - `:size_range` - `{min_mb, max_mb}` tuple (default: `{100, 20_000}`)
-  - `:preferred_qualities` - List of resolutions in preference order
+  - `:preferred_qualities` - List of resolutions in preference order (for sorting)
   - `:blocked_tags` - List of strings to filter out from titles
-  - `:preferred_tags` - List of strings that boost scores
-  - `:search_query` - Original search query to score title relevance (default: nil)
+  - `:search_query` - Original search query to score title relevance
+  - `:quality_profile` - QualityProfile struct for scoring (recommended)
+  - `:media_type` - Either `:movie` or `:episode` (default: `:movie`)
   """
 
   require Logger
 
-  alias Mydia.Indexers.{QualityParser, SearchResult}
+  alias Mydia.Indexers.{SearchResult, SearchScorer}
   alias Mydia.Indexers.Structs.{RankedResult, ScoreBreakdown}
+  alias Mydia.Settings.QualityProfile
 
   @type ranked_result :: RankedResult.t()
   @type score_breakdown :: ScoreBreakdown.t()
@@ -57,8 +56,9 @@ defmodule Mydia.Indexers.ReleaseRanker do
           size_range: {non_neg_integer(), non_neg_integer()},
           preferred_qualities: [String.t()],
           blocked_tags: [String.t()],
-          preferred_tags: [String.t()],
-          search_query: String.t() | nil
+          search_query: String.t() | nil,
+          quality_profile: QualityProfile.t() | nil,
+          media_type: :movie | :episode
         ]
 
   @default_min_seeders 5
@@ -178,7 +178,7 @@ defmodule Mydia.Indexers.ReleaseRanker do
 
           false
 
-        not within_size_range?(result, size_range) ->
+        size_range != nil and not within_size_range?(result, size_range) ->
           {min_mb, max_mb} = size_range
           size_mb = Float.round(bytes_to_mb(result.size), 1)
 
@@ -218,6 +218,9 @@ defmodule Mydia.Indexers.ReleaseRanker do
     end
   end
 
+  # nil size_range disables size filtering
+  defp within_size_range?(_result, nil), do: true
+
   defp within_size_range?(%SearchResult{size: size_bytes}, {min_mb, max_mb}) do
     size_mb = bytes_to_mb(size_bytes)
     size_mb >= min_mb && size_mb <= max_mb
@@ -231,27 +234,44 @@ defmodule Mydia.Indexers.ReleaseRanker do
     end)
   end
 
-  ## Private Functions - Scoring
+  ## Scoring Functions
 
-  defp calculate_score_breakdown(%SearchResult{} = result, opts) do
-    quality_score = score_quality(result, opts)
-    seeder_score = score_seeders_and_peers(result)
-    size_score = score_size(result.size)
-    age_score = score_age(result.published_at)
-    title_match_score = score_title_match(result.title, opts)
-    tag_bonus = score_tags(result.title, opts)
+  @doc """
+  Calculates the full score breakdown for a single search result.
 
-    # Weighted scoring
-    # Quality: 50%, Seeders: 20%, Title Match: 15%, Size: 10%, Age: 5%
-    weighted_quality = quality_score * 0.5
-    weighted_seeders = seeder_score * 0.2
-    weighted_title = title_match_score * 0.15
-    weighted_size = size_score * 0.1
-    weighted_age = age_score * 0.05
+  Used by both automatic searches and manual UI searches for consistent scoring.
+  Returns a `ScoreBreakdown` struct with individual component scores and total.
 
-    total =
-      weighted_quality + weighted_seeders + weighted_title + weighted_size + weighted_age +
-        tag_bonus
+  This function always uses the unified SearchScorer algorithm to ensure
+  consistent scoring between manual and automatic searches.
+
+  ## Options
+
+  Same as `rank_all/2`:
+  - `:quality_profile` - QualityProfile struct for scoring (optional, but recommended)
+  - `:media_type` - Either `:movie` or `:episode` (default: `:movie`)
+  - `:search_query` - Original search query to score title relevance
+  - `:preferred_qualities` - List of resolutions in preference order (used for sorting)
+  """
+  @spec calculate_score_breakdown(SearchResult.t(), ranking_options()) :: ScoreBreakdown.t()
+  def calculate_score_breakdown(%SearchResult{} = result, opts) do
+    quality_profile = Keyword.get(opts, :quality_profile)
+    media_type = Keyword.get(opts, :media_type, :movie)
+    search_query = Keyword.get(opts, :search_query)
+
+    scorer_opts = [
+      quality_profile: quality_profile,
+      media_type: media_type,
+      search_query: search_query
+    ]
+
+    score_result = SearchScorer.score_result_with_breakdown(result, scorer_opts)
+
+    # Extract individual components for the breakdown struct
+    breakdown = score_result.breakdown
+    quality_score = Map.get(breakdown, :quality_score, 0.0)
+    seeder_score = Map.get(breakdown, :seeder_score, 0.0)
+    title_bonus = Map.get(breakdown, :title_bonus, 0.0)
 
     size_mb = bytes_to_mb(result.size)
     total_peers = result.seeders + result.leechers
@@ -264,282 +284,24 @@ defmodule Mydia.Indexers.ReleaseRanker do
         - Seeders: #{result.seeders}, Leechers: #{result.leechers}
         - Seeder ratio: #{Float.round(seeder_ratio * 100, 1)}%
         - Quality: #{inspect(result.quality)}
-      Component scores (raw -> weighted):
-        - Quality:  #{Float.round(quality_score, 2)} -> #{Float.round(weighted_quality, 2)} (50%)
-        - Seeders:  #{Float.round(seeder_score, 2)} -> #{Float.round(weighted_seeders, 2)} (20%)
-        - Title:    #{Float.round(title_match_score, 2)} -> #{Float.round(weighted_title, 2)} (15%)
-        - Size:     #{Float.round(size_score, 2)} -> #{Float.round(weighted_size, 2)} (10%)
-        - Age:      #{Float.round(age_score, 2)} -> #{Float.round(weighted_age, 2)} (5%)
-        - Tag bonus: #{Float.round(tag_bonus, 2)}
-      TOTAL: #{Float.round(total, 2)}
+      Component scores:
+        - Quality:  #{Float.round(quality_score, 2)} (60% weight in combined score)
+        - Seeders:  #{Float.round(seeder_score, 2)} (30% weight in combined score)
+        - Title:    #{Float.round(title_bonus, 2)} (10% weight in combined score)
+        - Zero-seeder penalty: #{Map.get(breakdown, :zero_seeder_penalty, 1.0)}
+      TOTAL: #{Float.round(score_result.score, 2)}
     """)
 
+    # Map to ScoreBreakdown struct
     ScoreBreakdown.new(%{
       quality: round_score(quality_score),
       seeders: round_score(seeder_score),
-      size: round_score(size_score),
-      age: round_score(age_score),
-      title_match: round_score(title_match_score),
-      tag_bonus: round_score(tag_bonus),
-      total: round_score(total)
+      size: 0.0,
+      age: 0.0,
+      title_match: round_score(title_bonus * 100),
+      tag_bonus: 0.0,
+      total: round_score(score_result.score)
     })
-  end
-
-  defp score_quality(%SearchResult{quality: nil}, _opts), do: 0.0
-
-  defp score_quality(%SearchResult{quality: quality}, opts) do
-    base_score = QualityParser.quality_score(quality) |> min(2000) |> max(0) |> to_float()
-
-    # Apply preferred quality boost if specified
-    case Keyword.get(opts, :preferred_qualities) do
-      nil ->
-        base_score
-
-      preferred_qualities ->
-        apply_quality_preference_boost(quality, preferred_qualities, base_score)
-    end
-  end
-
-  defp apply_quality_preference_boost(quality, preferred_qualities, base_score) do
-    case quality.resolution do
-      nil ->
-        base_score
-
-      resolution ->
-        # Find the index of this resolution in the preference list
-        case Enum.find_index(preferred_qualities, &(&1 == resolution)) do
-          nil ->
-            # Not in preferred list, apply small penalty
-            base_score * 0.9
-
-          index ->
-            # In preferred list, boost based on position
-            # First preference gets highest boost
-            boost = 1.0 + (length(preferred_qualities) - index) * 0.05
-            base_score * boost
-        end
-    end
-  end
-
-  defp score_seeders_and_peers(%SearchResult{seeders: seeders}) when seeders <= 0, do: 0.0
-
-  defp score_seeders_and_peers(%SearchResult{seeders: seeders, leechers: leechers}) do
-    # Logarithmic scale with diminishing returns for base seeder count
-    # 1 seeder ≈ 0, 10 seeders ≈ 100, 100 seeders ≈ 200, 1000 seeders ≈ 300
-    base = :math.log10(seeders) * 100
-
-    # Cap at 500 to prevent seeder count from dominating
-    base_capped = min(base, 500.0)
-
-    # Calculate seeder percentage (ratio)
-    total_peers = seeders + leechers
-    seeder_percentage = if total_peers > 0, do: seeders / total_peers, else: 0.0
-
-    # Apply ratio multiplier based on seeder percentage
-    # This penalizes oversaturated swarms and rewards healthy ones
-    ratio_multiplier =
-      cond do
-        seeder_percentage < 0.15 -> 0.1
-        seeder_percentage < 0.30 -> 0.5
-        seeder_percentage < 0.50 -> 0.8
-        seeder_percentage < 0.67 -> 1.0
-        seeder_percentage >= 0.80 -> 1.3
-        true -> 1.0
-      end
-
-    base_capped * ratio_multiplier
-  end
-
-  defp score_size(size_bytes) do
-    size_mb = bytes_to_mb(size_bytes)
-
-    # Bell curve favoring 2-15 GB range for movies/episodes
-    # Peak score around 5 GB
-    cond do
-      size_mb < 100 ->
-        # Very small files - likely low quality or fake
-        0.0
-
-      size_mb < 1000 ->
-        # Under 1 GB - could be episodes or low quality
-        size_mb / 10.0
-
-      size_mb < 5000 ->
-        # 1-5 GB - good quality range
-        100.0
-
-      size_mb < 15_000 ->
-        # 5-15 GB - excellent quality but larger
-        100.0 - (size_mb - 5000) / 200.0
-
-      size_mb < 25_000 ->
-        # 15-25 GB - very large but acceptable for 4K
-        50.0 - (size_mb - 15_000) / 500.0
-
-      true ->
-        # Over 25 GB - penalize heavily
-        10.0
-    end
-  end
-
-  defp score_age(nil), do: 50.0
-
-  defp score_age(%DateTime{} = published_at) do
-    now = DateTime.utc_now()
-    age_days = DateTime.diff(now, published_at, :day)
-
-    cond do
-      age_days < 0 ->
-        # Future date (shouldn't happen) - neutral score
-        50.0
-
-      age_days <= 7 ->
-        # Very recent - highest age score
-        100.0
-
-      age_days <= 30 ->
-        # Within a month - good
-        90.0
-
-      age_days <= 90 ->
-        # Within 3 months - decent
-        80.0
-
-      age_days <= 365 ->
-        # Within a year - neutral
-        50.0
-
-      true ->
-        # Older than a year - slight penalty
-        30.0
-    end
-  end
-
-  defp score_tags(title, opts) do
-    preferred_tags = Keyword.get(opts, :preferred_tags, [])
-
-    if preferred_tags == [] do
-      0.0
-    else
-      title_lower = String.downcase(title)
-
-      preferred_tags
-      |> Enum.count(fn tag ->
-        String.contains?(title_lower, String.downcase(tag))
-      end)
-      |> Kernel.*(25.0)
-    end
-  end
-
-  # Title matching scoring - how well does the result title match the search query?
-  # Returns 0-1000 score (scaled like other components)
-  defp score_title_match(result_title, opts) do
-    case Keyword.get(opts, :search_query) do
-      nil ->
-        # No search query provided, return neutral score
-        500.0
-
-      "" ->
-        500.0
-
-      search_query ->
-        calculate_title_match_score(search_query, result_title)
-    end
-  end
-
-  defp calculate_title_match_score(search_query, result_title) do
-    # Normalize both strings for comparison
-    query_words = normalize_to_words(search_query)
-    title_words = normalize_to_words(result_title)
-
-    if query_words == [] do
-      500.0
-    else
-      # Calculate word match ratio (how many query words appear in the title)
-      matched_words =
-        Enum.count(query_words, fn query_word ->
-          Enum.any?(title_words, fn title_word ->
-            # Exact match or singular/plural match (studio vs studios)
-            title_word == query_word or
-              String.starts_with?(title_word, query_word) or
-              String.starts_with?(query_word, title_word)
-          end)
-        end)
-
-      match_ratio = matched_words / length(query_words)
-
-      # Bonus for title starting with the show name (first significant word match)
-      # Filter out common words like "the" for this check
-      significant_query_words = filter_common_words(query_words)
-      significant_title_words = filter_common_words(title_words)
-
-      starts_with_bonus =
-        case {significant_query_words, significant_title_words} do
-          {[first_query | _], [first_title | _]} when first_query == first_title -> 100.0
-          _ -> 0.0
-        end
-
-      # Penalty for extra unrelated words in title (reduces false matches)
-      # Don't penalize quality indicators, years, or episode markers
-      extra_words =
-        Enum.reject(title_words, fn word ->
-          Enum.member?(query_words, word) or
-            is_quality_indicator?(word) or
-            is_year?(word) or
-            is_episode_marker?(word)
-        end)
-
-      extra_penalty = min(length(extra_words) * 20.0, 200.0)
-
-      # Base score: 0-800 based on match ratio, plus bonuses/penalties
-      base_score = match_ratio * 800.0
-      final_score = base_score + starts_with_bonus - extra_penalty
-
-      # Clamp to 0-1000 range
-      max(0.0, min(1000.0, final_score))
-    end
-  end
-
-  # Extract words from a title/query, normalizing for comparison
-  defp normalize_to_words(text) do
-    text
-    |> String.downcase()
-    # Replace common separators with spaces
-    |> String.replace(~r/[._\-]/, " ")
-    # Remove quality indicators and other noise for word extraction
-    |> String.split(~r/\s+/, trim: true)
-    # Filter out empty strings
-    |> Enum.filter(&(&1 != ""))
-  end
-
-  defp filter_common_words(words) do
-    common = ~w(the a an of and or in on at to for)
-    Enum.reject(words, &Enum.member?(common, &1))
-  end
-
-  defp is_quality_indicator?(word) do
-    quality_words = ~w(
-      2160p 1080p 720p 480p 4k uhd hd sd
-      x264 x265 h264 h265 hevc avc av1
-      bluray bdrip brrip webrip webdl web hdtv hdrip dvdrip
-      remux proper repack
-      dts atmos truehd dolby aac ac3 flac
-      hdr hdr10 hdr10+ dolbyvision dv
-    )
-
-    Enum.member?(quality_words, word)
-  end
-
-  defp is_year?(word) do
-    case Integer.parse(word) do
-      {year, ""} when year >= 1900 and year <= 2100 -> true
-      _ -> false
-    end
-  end
-
-  defp is_episode_marker?(word) do
-    # Match patterns like s01, e01, s01e01, etc.
-    String.match?(word, ~r/^(s\d+e?\d*|e\d+)$/i)
   end
 
   ## Private Functions - Sorting
@@ -589,9 +351,6 @@ defmodule Mydia.Indexers.ReleaseRanker do
   defp bytes_to_mb(bytes) when is_integer(bytes) do
     bytes / (1024 * 1024)
   end
-
-  defp to_float(value) when is_float(value), do: value
-  defp to_float(value) when is_integer(value), do: value * 1.0
 
   defp round_score(value) when is_float(value), do: Float.round(value, 2)
   defp round_score(value) when is_integer(value), do: value * 1.0

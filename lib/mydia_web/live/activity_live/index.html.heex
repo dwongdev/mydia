@@ -6,82 +6,169 @@
       <p class="text-base-content/70">Recent events and system activity</p>
     </div>
     
-<!-- Category filter tabs -->
-    <div class="mb-6">
-      <div class="tabs tabs-boxed bg-base-300">
-        <button
-          class={["tab", @category_filter == "all" && "tab-active"]}
-          phx-click="filter_category"
-          phx-value-category="all"
-        >
-          All
-        </button>
-        <button
-          class={["tab", @category_filter == "media" && "tab-active"]}
-          phx-click="filter_category"
-          phx-value-category="media"
-        >
-          Media
-        </button>
-        <button
-          class={["tab", @category_filter == "downloads" && "tab-active"]}
-          phx-click="filter_category"
-          phx-value-category="downloads"
-        >
-          Downloads
-        </button>
-        <button
-          class={["tab", @category_filter == "library" && "tab-active"]}
-          phx-click="filter_category"
-          phx-value-category="library"
-        >
-          Library
-        </button>
-        <button
-          class={["tab", @category_filter == "system" && "tab-active"]}
-          phx-click="filter_category"
-          phx-value-category="system"
-        >
-          System
-        </button>
-        <button
-          class={["tab", @category_filter == "auth" && "tab-active"]}
-          phx-click="filter_category"
-          phx-value-category="auth"
-        >
-          Auth
-        </button>
-        <button
-          class={["tab", @category_filter == "search" && "tab-active"]}
-          phx-click="filter_category"
-          phx-value-category="search"
-        >
-          Search
-        </button>
-        <button
-          class={["tab", @category_filter == "errors" && "tab-active text-error"]}
-          phx-click="filter_category"
-          phx-value-category="errors"
-        >
-          <.icon name="hero-exclamation-triangle" class="w-4 h-4 mr-1" /> Errors
-        </button>
+<!-- Filters -->
+    <div class="card bg-base-200 shadow-sm mb-6">
+      <div class="card-body p-4">
+        <div class="flex flex-col lg:flex-row lg:items-center gap-4">
+          <!-- Category filter -->
+          <div class="flex-1">
+            <div class="flex items-center gap-2 mb-2 lg:mb-0 lg:hidden">
+              <.icon name="hero-funnel" class="w-4 h-4 text-base-content/50" />
+              <span class="text-xs font-medium text-base-content/50 uppercase tracking-wide">
+                Category
+              </span>
+            </div>
+            <div class="flex flex-wrap gap-1">
+              <button
+                class={[
+                  "btn btn-sm gap-1",
+                  if(@category_filter == "all", do: "btn-primary", else: "btn-ghost")
+                ]}
+                phx-click="filter_category"
+                phx-value-category="all"
+              >
+                <.icon name="hero-squares-2x2" class="w-4 h-4" /> All
+              </button>
+              <button
+                class={[
+                  "btn btn-sm gap-1",
+                  if(@category_filter == "media", do: "btn-primary", else: "btn-ghost")
+                ]}
+                phx-click="filter_category"
+                phx-value-category="media"
+              >
+                <.icon name="hero-film" class="w-4 h-4" /> Media
+              </button>
+              <button
+                class={[
+                  "btn btn-sm gap-1",
+                  if(@category_filter == "downloads", do: "btn-primary", else: "btn-ghost")
+                ]}
+                phx-click="filter_category"
+                phx-value-category="downloads"
+              >
+                <.icon name="hero-arrow-down-tray" class="w-4 h-4" /> Downloads
+              </button>
+              <button
+                class={[
+                  "btn btn-sm gap-1",
+                  if(@category_filter == "search", do: "btn-primary", else: "btn-ghost")
+                ]}
+                phx-click="filter_category"
+                phx-value-category="search"
+              >
+                <.icon name="hero-magnifying-glass" class="w-4 h-4" /> Search
+              </button>
+              <button
+                class={[
+                  "btn btn-sm gap-1",
+                  if(@category_filter == "system", do: "btn-primary", else: "btn-ghost")
+                ]}
+                phx-click="filter_category"
+                phx-value-category="system"
+              >
+                <.icon name="hero-cog-6-tooth" class="w-4 h-4" /> System
+              </button>
+              <button
+                class={[
+                  "btn btn-sm gap-1",
+                  if(@category_filter == "errors",
+                    do: "btn-error",
+                    else: "btn-ghost text-error/70 hover:text-error"
+                  )
+                ]}
+                phx-click="filter_category"
+                phx-value-category="errors"
+              >
+                <.icon name="hero-exclamation-triangle" class="w-4 h-4" /> Errors
+              </button>
+            </div>
+          </div>
+          
+<!-- Divider -->
+          <div class="divider divider-horizontal hidden lg:flex mx-0"></div>
+          
+<!-- Date filter -->
+          <div class="flex-shrink-0">
+            <div class="flex items-center gap-2 mb-2 lg:mb-0 lg:hidden">
+              <.icon name="hero-calendar" class="w-4 h-4 text-base-content/50" />
+              <span class="text-xs font-medium text-base-content/50 uppercase tracking-wide">
+                Time Period
+              </span>
+            </div>
+            <div class="join">
+              <button
+                class={[
+                  "join-item btn btn-sm",
+                  if(@date_filter == "all", do: "btn-active", else: "")
+                ]}
+                phx-click="filter_date"
+                phx-value-date="all"
+              >
+                All
+              </button>
+              <button
+                class={[
+                  "join-item btn btn-sm",
+                  if(@date_filter == "today", do: "btn-active", else: "")
+                ]}
+                phx-click="filter_date"
+                phx-value-date="today"
+              >
+                Today
+              </button>
+              <button
+                class={[
+                  "join-item btn btn-sm",
+                  if(@date_filter == "yesterday", do: "btn-active", else: "")
+                ]}
+                phx-click="filter_date"
+                phx-value-date="yesterday"
+              >
+                Yesterday
+              </button>
+              <button
+                class={[
+                  "join-item btn btn-sm",
+                  if(@date_filter == "week", do: "btn-active", else: "")
+                ]}
+                phx-click="filter_date"
+                phx-value-date="week"
+              >
+                7 Days
+              </button>
+              <button
+                class={[
+                  "join-item btn btn-sm",
+                  if(@date_filter == "month", do: "btn-active", else: "")
+                ]}
+                phx-click="filter_date"
+                phx-value-date="month"
+              >
+                30 Days
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     
 <!-- Events list -->
-    <div id="events" phx-update="stream" class="space-y-3">
+    <div id="events" phx-update="stream" class="space-y-2">
       <!-- Empty state -->
       <div id="events-empty-state" class="hidden only:block">
         <div class="card bg-base-100 shadow-sm">
           <div class="card-body text-center py-12">
-            <.icon name="hero-inbox" class="w-16 h-16 mx-auto mb-4 text-base-content/30" />
-            <h3 class="text-lg font-semibold mb-2">No events yet</h3>
-            <p class="text-base-content/70">
+            <.icon name="hero-inbox" class="w-12 h-12 mx-auto mb-3 text-base-content/20" />
+            <p class="font-medium text-base-content/70">No events found</p>
+            <p class="text-sm text-base-content/50 mt-1">
               <%= cond do %>
-                <% @category_filter == "all" -> %>
-                  Events will appear here as activity happens in your system.
+                <% @category_filter == "all" && @date_filter == "all" -> %>
+                  Events will appear here as activity happens.
+                <% @date_filter != "all" -> %>
+                  Try a different time period.
                 <% true -> %>
-                  No {category_name(@category_filter)} events found. Try selecting a different category.
+                  Try selecting a different category.
               <% end %>
             </p>
           </div>
@@ -92,203 +179,147 @@
       <div
         :for={{id, event} <- @streams.events}
         id={id}
-        class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow"
+        class={[
+          "card bg-base-100 shadow-sm hover:shadow transition-shadow border-l-4",
+          event.severity == :error && "border-l-error",
+          event.severity == :warning && "border-l-warning",
+          event.severity == :info && "border-l-base-300"
+        ]}
       >
         <div class="card-body p-4">
-          <div class="flex items-start gap-4">
+          <div class="flex items-start gap-3">
             <!-- Icon -->
             <div class={[
-              "flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center",
+              "flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center",
               event.severity == :error && "bg-error/10 text-error",
               event.severity == :warning && "bg-warning/10 text-warning",
-              event.severity == :info && "bg-info/10 text-info"
+              event.severity == :info && "bg-base-200 text-base-content/60"
             ]}>
-              <.icon name={event_icon(event)} class="w-5 h-5" />
+              <.icon name={event_icon(event)} class="w-4 h-4" />
             </div>
             
 <!-- Content -->
             <div class="flex-1 min-w-0">
-              <p class="font-medium text-base-content">
-                {format_event_description(event)}
-              </p>
-
-              <div class="flex items-center gap-3 mt-1 text-sm text-base-content/60">
-                <span>{format_actor(event)}</span>
-                <span>•</span>
-                <span>{relative_time(event.inserted_at)}</span>
-                <span>•</span>
-                <span class="capitalize">{event.category}</span>
+              <div class="flex items-start justify-between gap-2">
+                <p class="font-medium">{format_event_description(event)}</p>
+                <%= if event.severity != :info do %>
+                  <span class={[
+                    "badge badge-sm flex-shrink-0",
+                    severity_badge_class(event.severity)
+                  ]}>
+                    {event.severity}
+                  </span>
+                <% end %>
+              </div>
+              
+<!-- Metadata -->
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-sm text-base-content/60">
+                <span class="flex items-center gap-1">
+                  <.icon name={actor_icon(event)} class="w-3.5 h-3.5" />
+                  {format_actor(event)}
+                </span>
+                <span class="flex items-center gap-1">
+                  <.icon name="hero-clock" class="w-3.5 h-3.5" />
+                  {relative_time(event.inserted_at)}
+                </span>
+                <span class="badge badge-sm badge-ghost capitalize">{event.category}</span>
               </div>
             </div>
-            
-<!-- Severity badge -->
-            <%= if event.severity != :info do %>
-              <div class="flex-shrink-0">
-                <span class={["badge", severity_badge_class(event.severity)]}>
-                  {event.severity}
-                </span>
-              </div>
-            <% end %>
           </div>
+          
+<!-- Expandable details for media update events -->
+          <%= if has_update_details?(event) do %>
+            <details class="mt-3 group">
+              <summary class="text-sm text-base-content/60 cursor-pointer hover:text-base-content flex items-center gap-1.5">
+                <.icon
+                  name="hero-chevron-right"
+                  class="w-4 h-4 transition-transform group-open:rotate-90"
+                /> View changes
+              </summary>
+              <div class="mt-3 ml-5 overflow-x-auto">
+                <table class="table table-sm">
+                  <thead>
+                    <tr class="text-base-content/50">
+                      <th>Field</th>
+                      <th>Before</th>
+                      <th>After</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <%= for change <- format_change_details(event.metadata["changes"]) do %>
+                      <tr>
+                        <td class="font-medium">{change.field}</td>
+                        <td class="text-base-content/50">
+                          <span class={[change.old == "none" && "italic"]}>{change.old}</span>
+                        </td>
+                        <td class="text-success">
+                          <span class={[change.new == "none" && "italic text-base-content/50"]}>
+                            {change.new}
+                          </span>
+                        </td>
+                      </tr>
+                    <% end %>
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          <% end %>
           
 <!-- Expandable details for search events -->
           <%= if has_search_details?(event) do %>
-            <div class="collapse collapse-arrow mt-3 bg-base-200 rounded-lg">
-              <input type="checkbox" />
-              <div class="collapse-title text-sm font-medium py-2 min-h-0">
-                View search details
-              </div>
-              <div class="collapse-content text-sm">
-                <div class="pt-2 space-y-3">
-                  <!-- Query information -->
-                  <%= if event.metadata["query"] do %>
-                    <div>
-                      <span class="font-medium text-base-content/70">Query:</span>
-                      <code class="ml-2 px-2 py-0.5 bg-base-300 rounded text-xs">
-                        {event.metadata["query"]}
-                      </code>
-                    </div>
-                  <% end %>
-                  
-<!-- Search statistics -->
-                  <%= if event.metadata["results_count"] || event.metadata["indexers_searched"] do %>
-                    <div class="flex flex-wrap gap-4">
-                      <%= if event.metadata["indexers_searched"] do %>
-                        <div class="flex items-center gap-2">
-                          <.icon name="hero-server-stack" class="w-4 h-4 text-base-content/50" />
-                          <span class="text-base-content/70">
-                            {event.metadata["indexers_searched"]} indexers searched
-                          </span>
-                        </div>
-                      <% end %>
-                      <%= if event.metadata["results_count"] do %>
-                        <div class="flex items-center gap-2">
-                          <.icon name="hero-document-text" class="w-4 h-4 text-base-content/50" />
-                          <span class="text-base-content/70">
-                            {event.metadata["results_count"]} results found
-                          </span>
-                        </div>
-                      <% end %>
-                    </div>
-                  <% end %>
-                  
-<!-- Filter statistics -->
-                  <%= if event.metadata["filter_stats"] do %>
-                    <div class="mt-2">
-                      <span class="font-medium text-base-content/70 block mb-1">
-                        Filter breakdown:
-                      </span>
-                      <%= if event.metadata["filter_stats"]["rejection_counts"] do %>
-                        <%!-- New format with rejection_counts --%>
-                        <div class="flex flex-wrap gap-2 mb-2">
-                          <%= for {reason, count} <- event.metadata["filter_stats"]["rejection_counts"] do %>
-                            <span class="badge badge-sm badge-warning">
-                              {format_filter_stat_label(reason)}: {count}
-                            </span>
-                          <% end %>
-                        </div>
-                        <%!-- Results list --%>
-                        <%= if event.metadata["filter_stats"]["results"] && event.metadata["filter_stats"]["results"] != [] do %>
-                          <div class="mt-2 max-h-48 overflow-y-auto">
-                            <table class="table table-xs w-full">
-                              <thead>
-                                <tr class="text-base-content/50">
-                                  <th>Release</th>
-                                  <th class="text-right">Score</th>
-                                  <th class="text-right">Seeds</th>
-                                  <th>Status</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                <%= for result <- event.metadata["filter_stats"]["results"] do %>
-                                  <tr class="hover">
-                                    <td class="max-w-xs truncate" title={result["title"]}>
-                                      <span class="text-xs">{result["title"]}</span>
-                                    </td>
-                                    <td class="text-right font-mono text-xs">
-                                      {Float.round((result["score"] || 0) * 1.0, 1)}
-                                    </td>
-                                    <td class="text-right font-mono text-xs">
-                                      {result["seeders"]}
-                                    </td>
-                                    <td>
-                                      <%= if result["status"] == "rejected" do %>
-                                        <span
-                                          class="badge badge-xs badge-error"
-                                          title={result["rejection_reason"]}
-                                        >
-                                          {format_filter_stat_label(
-                                            result["rejection_reason"]
-                                            |> String.split(":")
-                                            |> List.first()
-                                          )}
-                                        </span>
-                                      <% else %>
-                                        <span class="badge badge-xs badge-success">OK</span>
-                                      <% end %>
-                                    </td>
-                                  </tr>
-                                <% end %>
-                              </tbody>
-                            </table>
-                          </div>
-                        <% end %>
-                      <% else %>
-                        <%!-- Legacy flat format --%>
-                        <div class="flex flex-wrap gap-2">
-                          <%= for {key, value} <- event.metadata["filter_stats"] do %>
-                            <span class="badge badge-sm badge-ghost">
-                              {format_filter_stat_label(key)}: {value}
-                            </span>
-                          <% end %>
-                        </div>
-                      <% end %>
-                    </div>
-                  <% end %>
-                  
-<!-- Score breakdown for successful searches -->
-                  <%= if event.metadata["breakdown"] do %>
-                    <div class="mt-2">
-                      <span class="font-medium text-base-content/70 block mb-1">
-                        Score: {event.metadata["score"]}
-                      </span>
-                      <div class="flex flex-wrap gap-2">
-                        <%= for {key, value} <- event.metadata["breakdown"] do %>
-                          <span class={[
-                            "badge badge-sm",
-                            if(is_number(value) && value > 0,
-                              do: "badge-success",
-                              else: "badge-ghost"
-                            )
-                          ]}>
-                            {format_breakdown_label(key)}: {format_breakdown_value(value)}
-                          </span>
-                        <% end %>
+            <details class="mt-3 group">
+              <summary class="text-sm text-base-content/60 cursor-pointer hover:text-base-content flex items-center gap-1.5">
+                <.icon
+                  name="hero-chevron-right"
+                  class="w-4 h-4 transition-transform group-open:rotate-90"
+                /> View search details
+              </summary>
+              <div class="mt-3 ml-5 space-y-3">
+                <!-- Query -->
+                <%= if event.metadata["query"] do %>
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-base-content/60 text-sm">Query:</span>
+                    <code class="text-sm bg-base-200 px-2 py-0.5 rounded font-mono">
+                      {event.metadata["query"]}
+                    </code>
+                  </div>
+                <% end %>
+                
+<!-- Stats -->
+                <%= if event.metadata["results_count"] || event.metadata["indexers_searched"] do %>
+                  <div class="flex flex-wrap gap-3 text-sm">
+                    <%= if event.metadata["indexers_searched"] do %>
+                      <div class="flex items-center gap-1.5">
+                        <.icon name="hero-server-stack" class="w-4 h-4 text-base-content/40" />
+                        <span class="text-base-content/60">Indexers:</span>
+                        <span class="font-medium">{event.metadata["indexers_searched"]}</span>
                       </div>
-                    </div>
-                  <% end %>
-                  
-<!-- Selected release info -->
-                  <%= if event.metadata["selected_release"] do %>
-                    <div class="mt-2 p-2 bg-success/10 rounded-lg border border-success/20">
-                      <div class="flex items-center gap-2">
-                        <.icon name="hero-check-circle" class="w-4 h-4 text-success" />
-                        <span class="font-medium text-success">Selected:</span>
+                    <% end %>
+                    <%= if event.metadata["results_count"] do %>
+                      <div class="flex items-center gap-1.5">
+                        <.icon name="hero-document-text" class="w-4 h-4 text-base-content/40" />
+                        <span class="text-base-content/60">Results:</span>
+                        <span class="font-medium">{event.metadata["results_count"]}</span>
                       </div>
-                      <p class="mt-1 text-sm break-all">{event.metadata["selected_release"]}</p>
+                    <% end %>
+                  </div>
+                <% end %>
+                
+<!-- Filter stats -->
+                <%= if event.metadata["filter_stats"] do %>
+                  <%= if event.metadata["filter_stats"]["rejection_counts"] do %>
+                    <div class="flex flex-wrap gap-1.5">
+                      <%= for {reason, count} <- event.metadata["filter_stats"]["rejection_counts"] do %>
+                        <span class="badge badge-sm badge-warning badge-outline">
+                          {format_filter_stat_label(reason)}: {count}
+                        </span>
+                      <% end %>
                     </div>
-                  <% end %>
-                  
-<!-- All results with scores -->
-                  <%= if event.metadata["all_results"] && event.metadata["all_results"]["results"] do %>
-                    <div class="mt-2">
-                      <span class="font-medium text-base-content/70 block mb-1">
-                        All results:
-                      </span>
-                      <div class="max-h-48 overflow-y-auto">
-                        <table class="table table-xs w-full">
-                          <thead>
-                            <tr class="text-base-content/50">
+                    <%= if event.metadata["filter_stats"]["results"] && event.metadata["filter_stats"]["results"] != [] do %>
+                      <div class="max-h-48 overflow-y-auto rounded-lg border border-base-200">
+                        <table class="table table-sm table-zebra">
+                          <thead class="sticky top-0 bg-base-200">
+                            <tr>
                               <th>Release</th>
                               <th class="text-right">Score</th>
                               <th class="text-right">Seeds</th>
@@ -296,31 +327,15 @@
                             </tr>
                           </thead>
                           <tbody>
-                            <%= for result <- event.metadata["all_results"]["results"] do %>
-                              <tr class={[
-                                "hover",
-                                if(result["title"] == event.metadata["selected_release"],
-                                  do: "bg-success/10",
-                                  else: ""
-                                )
-                              ]}>
+                            <%= for result <- event.metadata["filter_stats"]["results"] do %>
+                              <tr>
                                 <td class="max-w-xs truncate" title={result["title"]}>
-                                  <span class="text-xs">
-                                    <%= if result["title"] == event.metadata["selected_release"] do %>
-                                      <.icon
-                                        name="hero-check"
-                                        class="w-3 h-3 inline text-success mr-1"
-                                      />
-                                    <% end %>
-                                    {result["title"]}
-                                  </span>
+                                  {result["title"]}
                                 </td>
-                                <td class="text-right font-mono text-xs">
+                                <td class="text-right font-mono text-sm">
                                   {Float.round((result["score"] || 0) * 1.0, 1)}
                                 </td>
-                                <td class="text-right font-mono text-xs">
-                                  {result["seeders"]}
-                                </td>
+                                <td class="text-right font-mono text-sm">{result["seeders"]}</td>
                                 <td>
                                   <%= if result["status"] == "rejected" do %>
                                     <span
@@ -342,14 +357,114 @@
                           </tbody>
                         </table>
                       </div>
+                    <% end %>
+                  <% else %>
+                    <div class="flex flex-wrap gap-1.5">
+                      <%= for {key, value} <- event.metadata["filter_stats"] do %>
+                        <span class="badge badge-sm badge-ghost">
+                          {format_filter_stat_label(key)}: {value}
+                        </span>
+                      <% end %>
                     </div>
                   <% end %>
-                </div>
+                <% end %>
+                
+<!-- Score breakdown -->
+                <%= if event.metadata["breakdown"] do %>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-sm text-base-content/60">Score:</span>
+                    <span class="badge badge-primary font-mono">{event.metadata["score"]}</span>
+                    <%= for {key, value} <- event.metadata["breakdown"] do %>
+                      <span class={[
+                        "badge badge-sm badge-outline",
+                        if(is_number(value) && value > 0,
+                          do: "badge-success",
+                          else: "badge-ghost"
+                        )
+                      ]}>
+                        {format_breakdown_label(key)}: {format_breakdown_value(value)}
+                      </span>
+                    <% end %>
+                  </div>
+                <% end %>
+                
+<!-- Selected release -->
+                <%= if event.metadata["selected_release"] do %>
+                  <div class="flex items-start gap-2 p-3 bg-success/10 rounded-lg border border-success/20">
+                    <.icon name="hero-check-circle" class="w-5 h-5 text-success flex-shrink-0" />
+                    <div>
+                      <div class="text-sm font-medium text-success">Selected Release</div>
+                      <div class="text-sm break-all mt-0.5">
+                        {event.metadata["selected_release"]}
+                      </div>
+                    </div>
+                  </div>
+                <% end %>
+                
+<!-- All results -->
+                <%= if event.metadata["all_results"] && event.metadata["all_results"]["results"] do %>
+                  <div class="max-h-48 overflow-y-auto rounded-lg border border-base-200">
+                    <table class="table table-sm table-zebra">
+                      <thead class="sticky top-0 bg-base-200">
+                        <tr>
+                          <th>Release</th>
+                          <th class="text-right">Score</th>
+                          <th class="text-right">Seeds</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <%= for result <- event.metadata["all_results"]["results"] do %>
+                          <tr class={[
+                            result["title"] == event.metadata["selected_release"] &&
+                              "bg-success/5"
+                          ]}>
+                            <td class="max-w-xs truncate" title={result["title"]}>
+                              <%= if result["title"] == event.metadata["selected_release"] do %>
+                                <.icon name="hero-check" class="w-4 h-4 text-success inline mr-1" />
+                              <% end %>
+                              {result["title"]}
+                            </td>
+                            <td class="text-right font-mono text-sm">
+                              {Float.round((result["score"] || 0) * 1.0, 1)}
+                            </td>
+                            <td class="text-right font-mono text-sm">{result["seeders"]}</td>
+                            <td>
+                              <%= if result["status"] == "rejected" do %>
+                                <span
+                                  class="badge badge-xs badge-error"
+                                  title={result["rejection_reason"]}
+                                >
+                                  {format_filter_stat_label(
+                                    result["rejection_reason"]
+                                    |> String.split(":")
+                                    |> List.first()
+                                  )}
+                                </span>
+                              <% else %>
+                                <span class="badge badge-xs badge-success">OK</span>
+                              <% end %>
+                            </td>
+                          </tr>
+                        <% end %>
+                      </tbody>
+                    </table>
+                  </div>
+                <% end %>
               </div>
-            </div>
+            </details>
           <% end %>
         </div>
       </div>
     </div>
+    
+<!-- Load More button -->
+    <%= if @has_more? do %>
+      <div class="flex justify-center mt-6">
+        <button class="btn btn-outline btn-sm gap-2" phx-click="load_more">
+          <.icon name="hero-arrow-down" class="w-4 h-4" /> Load more
+        </button>
+      </div>
+    <% end %>
   </div>
 </Layouts.app>

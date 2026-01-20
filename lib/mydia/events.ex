@@ -280,13 +280,25 @@ defmodule Mydia.Events do
     - `actor_type` - :user, :system, or :job
     - `actor_id` - The ID of the actor
     - `reason` - A description of what was updated (e.g., "Metadata refreshed", "Settings updated")
+    - `changes` - Optional map of changes that were made (field => %{old: x, new: y})
 
   ## Examples
 
       iex> media_item_updated(media_item, :job, "metadata_refresh", "Metadata refreshed")
       :ok
+
+      iex> media_item_updated(media_item, :system, "enricher", "Metadata enriched", %{year: %{old: nil, new: 2024}})
+      :ok
   """
-  def media_item_updated(media_item, actor_type, actor_id, reason \\ "Updated") do
+  def media_item_updated(media_item, actor_type, actor_id, reason \\ "Updated", changes \\ %{}) do
+    metadata =
+      %{
+        "title" => media_item.title,
+        "media_type" => media_item.type,
+        "reason" => reason
+      }
+      |> maybe_add_changes(changes)
+
     create_event_async(%{
       category: "media",
       type: "media_item.updated",
@@ -294,13 +306,41 @@ defmodule Mydia.Events do
       actor_id: actor_id,
       resource_type: "media_item",
       resource_id: media_item.id,
-      metadata: %{
-        "title" => media_item.title,
-        "media_type" => media_item.type,
-        "reason" => reason
-      }
+      metadata: metadata
     })
   end
+
+  defp maybe_add_changes(metadata, changes) when changes == %{}, do: metadata
+
+  defp maybe_add_changes(metadata, changes) do
+    # Convert the changes map to a JSON-serializable format with string keys
+    serialized_changes =
+      changes
+      |> Enum.map(fn {field, value} ->
+        {to_string(field), serialize_change_value(value)}
+      end)
+      |> Map.new()
+
+    Map.put(metadata, "changes", serialized_changes)
+  end
+
+  defp serialize_change_value(value) when is_map(value) do
+    value
+    |> Enum.map(fn {k, v} -> {to_string(k), v} end)
+    |> Map.new()
+  end
+
+  defp serialize_change_value(value) when is_list(value) do
+    Enum.map(value, fn
+      {label, change} when is_map(change) ->
+        %{"field" => label, "old" => change.old, "new" => change.new}
+
+      other ->
+        other
+    end)
+  end
+
+  defp serialize_change_value(value), do: value
 
   @doc """
   Records a media_item.removed event.

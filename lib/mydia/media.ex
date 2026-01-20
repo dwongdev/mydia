@@ -115,19 +115,17 @@ defmodule Mydia.Media do
     - `:reason` - Description of what was updated (e.g., "Metadata refreshed") - defaults to "Updated"
   """
   def update_media_item(%MediaItem{} = media_item, attrs, opts \\ []) do
-    result =
-      media_item
-      |> MediaItem.changeset(attrs)
-      |> Repo.update()
+    changeset = MediaItem.changeset(media_item, attrs)
 
-    case result do
+    case Repo.update(changeset) do
       {:ok, updated_media_item} ->
-        # Track event
+        # Track event with change details
         actor_type = Keyword.get(opts, :actor_type, :system)
         actor_id = Keyword.get(opts, :actor_id, "media_context")
         reason = Keyword.get(opts, :reason, "Updated")
+        changes = extract_meaningful_changes(changeset, media_item)
 
-        Events.media_item_updated(updated_media_item, actor_type, actor_id, reason)
+        Events.media_item_updated(updated_media_item, actor_type, actor_id, reason, changes)
 
         {:ok, updated_media_item}
 
@@ -135,6 +133,131 @@ defmodule Mydia.Media do
         error
     end
   end
+
+  # Extracts meaningful changes from a changeset for activity logging
+  defp extract_meaningful_changes(changeset, original) do
+    changes = changeset.changes
+
+    simple_changes =
+      changes
+      |> Map.take([:title, :original_title, :year])
+      |> Enum.map(fn {field, new_value} ->
+        old_value = Map.get(original, field)
+        {field, %{old: old_value, new: new_value}}
+      end)
+      |> Map.new()
+
+    # Extract meaningful changes from nested metadata
+    metadata_changes =
+      if Map.has_key?(changes, :metadata) do
+        extract_metadata_changes(original.metadata, changes.metadata)
+      else
+        %{}
+      end
+
+    Map.merge(simple_changes, metadata_changes)
+  end
+
+  defp extract_metadata_changes(nil, _new), do: %{metadata: %{old: nil, new: "added"}}
+  defp extract_metadata_changes(_old, nil), do: %{}
+
+  defp extract_metadata_changes(old_metadata, new_metadata) do
+    # Compare interesting metadata fields
+    fields_to_compare = [
+      {:overview, "overview"},
+      {:poster_path, "poster"},
+      {:backdrop_path, "backdrop"},
+      {:tagline, "tagline"},
+      {:vote_average, "rating"},
+      {:runtime, "runtime"},
+      {:genres, "genres"}
+    ]
+
+    changes =
+      Enum.reduce(fields_to_compare, [], fn {field, label}, acc ->
+        old_val = get_metadata_field(old_metadata, field)
+        new_val = get_metadata_field(new_metadata, field)
+
+        if values_differ?(old_val, new_val) do
+          [{label, format_metadata_change(field, old_val, new_val)} | acc]
+        else
+          acc
+        end
+      end)
+
+    # Check cast/crew count changes
+    changes = maybe_add_count_change(changes, old_metadata, new_metadata, :cast, "cast")
+    changes = maybe_add_count_change(changes, old_metadata, new_metadata, :crew, "crew")
+
+    if changes == [] do
+      %{}
+    else
+      %{metadata_fields: Enum.reverse(changes)}
+    end
+  end
+
+  defp get_metadata_field(metadata, field) when is_struct(metadata) do
+    Map.get(metadata, field)
+  end
+
+  defp get_metadata_field(metadata, field) when is_map(metadata) do
+    Map.get(metadata, field) || Map.get(metadata, to_string(field))
+  end
+
+  defp get_metadata_field(_, _), do: nil
+
+  defp values_differ?(nil, nil), do: false
+  defp values_differ?(nil, ""), do: false
+  defp values_differ?("", nil), do: false
+  defp values_differ?(old, new), do: old != new
+
+  defp format_metadata_change(:vote_average, old, new) do
+    %{old: format_rating(old), new: format_rating(new)}
+  end
+
+  defp format_metadata_change(:runtime, old, new) do
+    %{old: format_runtime(old), new: format_runtime(new)}
+  end
+
+  defp format_metadata_change(:genres, old, new) do
+    %{old: format_genres(old), new: format_genres(new)}
+  end
+
+  defp format_metadata_change(_field, old, new) do
+    %{old: present?(old), new: present?(new)}
+  end
+
+  defp format_rating(nil), do: nil
+  defp format_rating(val) when is_number(val), do: Float.round(val / 1, 1)
+  defp format_rating(val), do: val
+
+  defp format_runtime(nil), do: nil
+  defp format_runtime(minutes) when is_integer(minutes), do: "#{minutes}m"
+  defp format_runtime(val), do: val
+
+  defp format_genres(nil), do: nil
+  defp format_genres([]), do: nil
+  defp format_genres(genres) when is_list(genres), do: Enum.count(genres)
+  defp format_genres(val), do: val
+
+  defp present?(nil), do: nil
+  defp present?(""), do: nil
+  defp present?(_), do: true
+
+  defp maybe_add_count_change(changes, old_metadata, new_metadata, field, label) do
+    old_count = count_list(get_metadata_field(old_metadata, field))
+    new_count = count_list(get_metadata_field(new_metadata, field))
+
+    if old_count != new_count do
+      [{label, %{old: old_count, new: new_count}} | changes]
+    else
+      changes
+    end
+  end
+
+  defp count_list(nil), do: 0
+  defp count_list(list) when is_list(list), do: length(list)
+  defp count_list(_), do: 0
 
   @doc """
   Deletes a media item.

@@ -3,6 +3,8 @@ defmodule MydiaWeb.ActivityLive.Index do
   alias Mydia.Events
   alias Phoenix.PubSub
 
+  @page_size 50
+
   @impl true
   def mount(_params, _session, socket) do
     socket =
@@ -12,11 +14,17 @@ defmodule MydiaWeb.ActivityLive.Index do
 
         socket
         |> assign(:category_filter, "all")
+        |> assign(:date_filter, "all")
+        |> assign(:page, 0)
+        |> assign(:has_more?, false)
         |> assign(:events_empty?, false)
         |> load_events()
       else
         socket
         |> assign(:category_filter, "all")
+        |> assign(:date_filter, "all")
+        |> assign(:page, 0)
+        |> assign(:has_more?, false)
         |> assign(:events_empty?, true)
         |> stream(:events, [])
       end
@@ -36,23 +44,47 @@ defmodule MydiaWeb.ActivityLive.Index do
     {:noreply,
      socket
      |> assign(:category_filter, category)
+     |> assign(:page, 0)
      |> load_events()}
   end
 
   @impl true
-  def handle_info({:event_created, event}, socket) do
-    filter = socket.assigns.category_filter
+  def handle_event("filter_date", %{"date" => date_preset}, socket) do
+    {:noreply,
+     socket
+     |> assign(:date_filter, date_preset)
+     |> assign(:page, 0)
+     |> load_events()}
+  end
 
-    # Only add event if it matches current filter
-    should_add =
-      case filter do
+  @impl true
+  def handle_event("load_more", _params, socket) do
+    next_page = socket.assigns.page + 1
+
+    {:noreply,
+     socket
+     |> assign(:page, next_page)
+     |> load_more_events()}
+  end
+
+  @impl true
+  def handle_info({:event_created, event}, socket) do
+    category_filter = socket.assigns.category_filter
+    date_filter = socket.assigns.date_filter
+
+    # Only add event if it matches current category filter
+    matches_category =
+      case category_filter do
         "all" -> true
         "errors" -> event.severity == :error
         category -> event.category == category
       end
 
+    # Only add event if it matches current date filter
+    matches_date = event_matches_date_filter?(event.inserted_at, date_filter)
+
     socket =
-      if should_add do
+      if matches_category && matches_date do
         socket
         |> assign(:events_empty?, false)
         |> stream_insert(:events, event, at: 0)
@@ -66,21 +98,112 @@ defmodule MydiaWeb.ActivityLive.Index do
   ## Private Helpers
 
   defp load_events(socket) do
-    filter = socket.assigns.category_filter
+    category_filter = socket.assigns.category_filter
+    date_filter = socket.assigns.date_filter
 
-    filter_opts =
-      case filter do
+    filter_opts = build_filter_opts(category_filter, date_filter)
+
+    # Request one more than page_size to check if there are more results
+    events = Events.list_events(filter_opts ++ [limit: @page_size + 1, offset: 0])
+
+    has_more? = length(events) > @page_size
+    events = Enum.take(events, @page_size)
+
+    socket
+    |> assign(:events_empty?, events == [])
+    |> assign(:has_more?, has_more?)
+    |> stream(:events, events, reset: true)
+  end
+
+  defp load_more_events(socket) do
+    category_filter = socket.assigns.category_filter
+    date_filter = socket.assigns.date_filter
+    page = socket.assigns.page
+
+    filter_opts = build_filter_opts(category_filter, date_filter)
+    offset = page * @page_size
+
+    # Request one more than page_size to check if there are more results
+    events = Events.list_events(filter_opts ++ [limit: @page_size + 1, offset: offset])
+
+    has_more? = length(events) > @page_size
+    events = Enum.take(events, @page_size)
+
+    socket =
+      Enum.reduce(events, socket, fn event, acc ->
+        stream_insert(acc, :events, event)
+      end)
+
+    assign(socket, :has_more?, has_more?)
+  end
+
+  defp build_filter_opts(category_filter, date_filter) do
+    category_opts =
+      case category_filter do
         "all" -> []
         "errors" -> [severity: :error]
         category -> [category: category]
       end
 
-    events = Events.list_events(filter_opts ++ [limit: 50])
+    date_opts = date_filter_opts(date_filter)
 
-    socket
-    |> assign(:events_empty?, events == [])
-    |> stream(:events, events, reset: true)
+    category_opts ++ date_opts
   end
+
+  defp date_filter_opts("all"), do: []
+  defp date_filter_opts("today"), do: [since: start_of_day()]
+
+  defp date_filter_opts("yesterday") do
+    [since: start_of_yesterday(), until: end_of_yesterday()]
+  end
+
+  defp date_filter_opts("week"), do: [since: days_ago(7)]
+  defp date_filter_opts("month"), do: [since: days_ago(30)]
+  defp date_filter_opts(_), do: []
+
+  defp start_of_day do
+    DateTime.utc_now()
+    |> DateTime.to_date()
+    |> DateTime.new!(~T[00:00:00], "Etc/UTC")
+  end
+
+  defp start_of_yesterday do
+    DateTime.utc_now()
+    |> DateTime.add(-1, :day)
+    |> DateTime.to_date()
+    |> DateTime.new!(~T[00:00:00], "Etc/UTC")
+  end
+
+  defp end_of_yesterday do
+    DateTime.utc_now()
+    |> DateTime.to_date()
+    |> DateTime.new!(~T[00:00:00], "Etc/UTC")
+  end
+
+  defp days_ago(n) do
+    DateTime.utc_now() |> DateTime.add(-n, :day)
+  end
+
+  defp event_matches_date_filter?(_inserted_at, "all"), do: true
+
+  defp event_matches_date_filter?(inserted_at, "today") do
+    DateTime.compare(inserted_at, start_of_day()) != :lt
+  end
+
+  defp event_matches_date_filter?(inserted_at, "yesterday") do
+    DateTime.compare(inserted_at, start_of_yesterday()) != :lt &&
+      DateTime.compare(inserted_at, end_of_yesterday()) == :lt
+  end
+
+  defp event_matches_date_filter?(inserted_at, "week") do
+    DateTime.compare(inserted_at, days_ago(7)) != :lt
+  end
+
+  defp event_matches_date_filter?(inserted_at, "month") do
+    DateTime.compare(inserted_at, days_ago(30)) != :lt
+  end
+
+  defp event_matches_date_filter?(_inserted_at, _), do: true
 
   ## UI Helpers
 
@@ -95,7 +218,13 @@ defmodule MydiaWeb.ActivityLive.Index do
       "media_item.updated" ->
         title = event.metadata["title"] || "Unknown"
         reason = event.metadata["reason"] || "Updated"
-        "#{reason}: #{title}"
+        changes_summary = format_changes_summary(event.metadata["changes"])
+
+        if changes_summary do
+          "#{reason}: #{title} (#{changes_summary})"
+        else
+          "#{reason}: #{title}"
+        end
 
       "media_item.removed" ->
         title = event.metadata["title"] || "Unknown"
@@ -218,9 +347,34 @@ defmodule MydiaWeb.ActivityLive.Index do
     case event.actor_type do
       :user -> "User"
       :system -> "System"
-      :job -> event.actor_id || "Job"
+      :job -> format_job_name(event.actor_id)
       nil -> "System"
       _ -> "Unknown"
+    end
+  end
+
+  defp format_job_name(nil), do: "Job"
+  defp format_job_name("movie_search"), do: "Movie Search"
+  defp format_job_name("tv_show_search"), do: "TV Search"
+  defp format_job_name("episode_search"), do: "Episode Search"
+  defp format_job_name("season_search"), do: "Season Search"
+  defp format_job_name("metadata_sync"), do: "Metadata Sync"
+  defp format_job_name("library_scan"), do: "Library Scan"
+
+  defp format_job_name(job_id) do
+    job_id
+    |> String.replace("_", " ")
+    |> String.split()
+    |> Enum.map(&String.capitalize/1)
+    |> Enum.join(" ")
+  end
+
+  defp actor_icon(event) do
+    case event.actor_type do
+      :user -> "hero-user"
+      :job -> "hero-cog-6-tooth"
+      :system -> "hero-computer-desktop"
+      _ -> "hero-computer-desktop"
     end
   end
 
@@ -243,20 +397,6 @@ defmodule MydiaWeb.ActivityLive.Index do
       diff < 86400 -> "#{div(diff, 3600)} hours ago"
       diff < 604_800 -> "#{div(diff, 86400)} days ago"
       true -> Calendar.strftime(datetime, "%b %d, %Y")
-    end
-  end
-
-  defp category_name(category) do
-    case category do
-      "media" -> "Media"
-      "downloads" -> "Downloads"
-      "library" -> "Library"
-      "system" -> "System"
-      "auth" -> "Authentication"
-      "search" -> "Search"
-      "errors" -> "Error"
-      "all" -> "All"
-      _ -> String.capitalize(category)
     end
   end
 
@@ -292,6 +432,135 @@ defmodule MydiaWeb.ActivityLive.Index do
          event.metadata["filter_stats"] != nil ||
          event.metadata["breakdown"] != nil)
   end
+
+  defp has_update_details?(event) do
+    event.type == "media_item.updated" &&
+      event.metadata["changes"] != nil &&
+      event.metadata["changes"] != %{}
+  end
+
+  # Formats a short summary of changes for the main event description
+  defp format_changes_summary(nil), do: nil
+  defp format_changes_summary(changes) when changes == %{}, do: nil
+
+  defp format_changes_summary(changes) do
+    parts = []
+
+    # Check for metadata_fields changes (from nested metadata)
+    parts =
+      case Map.get(changes, "metadata_fields") do
+        nil ->
+          parts
+
+        fields when is_list(fields) ->
+          field_names =
+            fields
+            |> Enum.take(3)
+            |> Enum.map(&format_field_name/1)
+
+          remaining = length(fields) - 3
+
+          if remaining > 0 do
+            parts ++ ["#{Enum.join(field_names, ", ")} +#{remaining} more"]
+          else
+            parts ++ [Enum.join(field_names, ", ")]
+          end
+
+        _ ->
+          parts
+      end
+
+    # Check for simple field changes (title, year, etc.)
+    simple_fields = ["title", "original_title", "year"]
+
+    simple_changes =
+      changes
+      |> Map.take(simple_fields)
+      |> Map.keys()
+
+    parts =
+      if simple_changes != [] do
+        parts ++ simple_changes
+      else
+        parts
+      end
+
+    if parts == [] do
+      nil
+    else
+      Enum.join(parts, ", ")
+    end
+  end
+
+  defp format_field_name(%{"field" => field}), do: field
+  defp format_field_name(field) when is_binary(field), do: field
+  defp format_field_name(_), do: "field"
+
+  # Formats the detailed list of changes for the expandable view
+  defp format_change_details(changes) when is_nil(changes), do: []
+  defp format_change_details(changes) when changes == %{}, do: []
+
+  defp format_change_details(changes) do
+    simple_changes =
+      changes
+      |> Map.take(["title", "original_title", "year"])
+      |> Enum.map(fn {field, change} ->
+        %{
+          field: humanize_field_name(field),
+          old: format_change_value(field, change["old"]),
+          new: format_change_value(field, change["new"])
+        }
+      end)
+
+    metadata_changes =
+      case Map.get(changes, "metadata_fields") do
+        nil ->
+          []
+
+        fields when is_list(fields) ->
+          Enum.map(fields, fn field_change ->
+            %{
+              field: humanize_field_name(field_change["field"]),
+              old: format_metadata_change_value(field_change["field"], field_change["old"]),
+              new: format_metadata_change_value(field_change["field"], field_change["new"])
+            }
+          end)
+
+        _ ->
+          []
+      end
+
+    simple_changes ++ metadata_changes
+  end
+
+  defp humanize_field_name("overview"), do: "Description"
+  defp humanize_field_name("poster"), do: "Poster"
+  defp humanize_field_name("backdrop"), do: "Backdrop"
+  defp humanize_field_name("tagline"), do: "Tagline"
+  defp humanize_field_name("rating"), do: "Rating"
+  defp humanize_field_name("runtime"), do: "Runtime"
+  defp humanize_field_name("genres"), do: "Genres"
+  defp humanize_field_name("cast"), do: "Cast"
+  defp humanize_field_name("crew"), do: "Crew"
+  defp humanize_field_name("title"), do: "Title"
+  defp humanize_field_name("original_title"), do: "Original Title"
+  defp humanize_field_name("year"), do: "Year"
+  defp humanize_field_name(field), do: Phoenix.Naming.humanize(field)
+
+  defp format_change_value(_field, nil), do: "none"
+  defp format_change_value(_field, value), do: to_string(value)
+
+  defp format_metadata_change_value("rating", nil), do: "none"
+  defp format_metadata_change_value("rating", value) when is_number(value), do: "#{value}/10"
+  defp format_metadata_change_value("genres", nil), do: "none"
+  defp format_metadata_change_value("genres", count) when is_integer(count), do: "#{count} genres"
+  defp format_metadata_change_value("cast", 0), do: "none"
+  defp format_metadata_change_value("cast", count) when is_integer(count), do: "#{count} members"
+  defp format_metadata_change_value("crew", 0), do: "none"
+  defp format_metadata_change_value("crew", count) when is_integer(count), do: "#{count} members"
+  defp format_metadata_change_value(_field, true), do: "added"
+  defp format_metadata_change_value(_field, nil), do: "none"
+  defp format_metadata_change_value(_field, value), do: to_string(value)
 
   defp format_filter_stat_label(key) do
     case key do

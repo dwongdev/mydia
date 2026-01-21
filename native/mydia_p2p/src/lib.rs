@@ -3,7 +3,7 @@
 //! Provides Erlang/Elixir interop for the p2p networking functionality.
 
 use rustler::{Env, LocalPid, ResourceArc, Term, OwnedEnv, Encoder, NifStruct, NifTaggedEnum};
-use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingResponse, GraphQLResponse, HostConfig};
+use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingResponse, GraphQLResponse, HlsResponseHeader, HostConfig, LogLevel};
 use std::thread;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -27,12 +27,14 @@ fn load(env: Env, _info: Term) -> bool {
 /// Start the p2p host with configuration.
 /// relay_url: Custom relay URL for NAT traversal (uses default relays if None).
 /// bind_port: UDP port for direct connections (0 or None for random port).
+/// keypair_path: Path to store/load the node's keypair for persistent identity.
 /// Returns (resource, node_id_string).
 #[rustler::nif]
-fn start_host(relay_url: Option<String>, bind_port: Option<u16>) -> Result<(ResourceArc<HostResource>, String), rustler::Error> {
+fn start_host(relay_url: Option<String>, bind_port: Option<u16>, keypair_path: Option<String>) -> Result<(ResourceArc<HostResource>, String), rustler::Error> {
     let config = HostConfig {
         relay_url,
         bind_port,
+        keypair_path,
         ..Default::default()
     };
     let (host, node_id_str) = Host::new(config);
@@ -62,6 +64,7 @@ fn get_network_stats(resource: ResourceArc<HostResource>) -> ElixirNetworkStats 
     ElixirNetworkStats {
         connected_peers: stats.connected_peers,
         relay_connected: stats.relay_connected,
+        relay_url: stats.relay_url,
     }
 }
 
@@ -71,6 +74,7 @@ fn get_network_stats(resource: ResourceArc<HostResource>) -> ElixirNetworkStats 
 struct ElixirNetworkStats {
     pub connected_peers: usize,
     pub relay_connected: bool,
+    pub relay_url: Option<String>,
 }
 
 #[derive(NifStruct)]
@@ -90,6 +94,7 @@ struct ElixirPairingResponse {
     pub access_token: Option<String>,
     pub device_token: Option<String>,
     pub error: Option<String>,
+    pub direct_urls: Vec<String>,
 }
 
 #[derive(NifStruct)]
@@ -116,11 +121,31 @@ struct ElixirGraphQLResponse {
     pub errors: Option<String>,
 }
 
+#[derive(NifStruct)]
+#[module = "Mydia.P2p.HlsRequest"]
+struct ElixirHlsRequest {
+    pub session_id: String,
+    pub path: String,
+    pub range_start: Option<u64>,
+    pub range_end: Option<u64>,
+    pub auth_token: Option<String>,
+}
+
+#[derive(NifStruct)]
+#[module = "Mydia.P2p.HlsResponseHeader"]
+struct ElixirHlsResponseHeader {
+    pub status: u16,
+    pub content_type: String,
+    pub content_length: u64,
+    pub content_range: Option<String>,
+    pub cache_control: Option<String>,
+}
+
 #[derive(NifTaggedEnum)]
 enum ElixirResponse {
     Pairing(ElixirPairingResponse),
     MediaChunk(Vec<u8>),
-    GraphQL(ElixirGraphQLResponse),
+    Graphql(ElixirGraphQLResponse),
     Error(String),
 }
 
@@ -134,9 +159,10 @@ fn send_response(resource: ResourceArc<HostResource>, request_id: String, respon
             access_token: r.access_token,
             device_token: r.device_token,
             error: r.error,
+            direct_urls: r.direct_urls,
         }),
         ElixirResponse::MediaChunk(data) => MydiaResponse::MediaChunk(data),
-        ElixirResponse::GraphQL(r) => MydiaResponse::GraphQL(GraphQLResponse {
+        ElixirResponse::Graphql(r) => MydiaResponse::GraphQL(GraphQLResponse {
             data: r.data,
             errors: r.errors,
         }),
@@ -178,6 +204,44 @@ fn respond_with_file_chunk(resource: ResourceArc<HostResource>, request_id: Stri
     });
 
     Ok("ok".to_string())
+}
+
+/// Send an HLS response header for a streaming request.
+/// Must be called before any send_hls_chunk calls.
+#[rustler::nif]
+fn send_hls_header(resource: ResourceArc<HostResource>, stream_id: String, header: ElixirHlsResponseHeader) -> Result<String, rustler::Error> {
+    let core_header = HlsResponseHeader {
+        status: header.status,
+        content_type: header.content_type,
+        content_length: header.content_length,
+        content_range: header.content_range,
+        cache_control: header.cache_control,
+    };
+
+    match resource.host.send_hls_header(stream_id, core_header) {
+        Ok(_) => Ok("ok".to_string()),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
+    }
+}
+
+/// Send a chunk of HLS data.
+/// Must be called after send_hls_header and before finish_hls_stream.
+#[rustler::nif]
+fn send_hls_chunk(resource: ResourceArc<HostResource>, stream_id: String, data: Vec<u8>) -> Result<String, rustler::Error> {
+    match resource.host.send_hls_chunk(stream_id, data) {
+        Ok(_) => Ok("ok".to_string()),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
+    }
+}
+
+/// Finish an HLS stream.
+/// Must be called after all chunks have been sent.
+#[rustler::nif]
+fn finish_hls_stream(resource: ResourceArc<HostResource>, stream_id: String) -> Result<String, rustler::Error> {
+    match resource.host.finish_hls_stream(stream_id) {
+        Ok(_) => Ok("ok".to_string()),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
+    }
 }
 
 /// Start listening for events and forward them to the given Elixir process.
@@ -236,11 +300,31 @@ fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid)
                                     _ => (atoms::ok(), "unknown_request").encode(env)
                                 }
                             }
+                            Event::HlsStreamRequest { peer: _, request, stream_id } => {
+                                let elixir_req = ElixirHlsRequest {
+                                    session_id: request.session_id,
+                                    path: request.path,
+                                    range_start: request.range_start,
+                                    range_end: request.range_end,
+                                    auth_token: request.auth_token,
+                                };
+                                (atoms::ok(), "hls_stream", stream_id, elixir_req).encode(env)
+                            }
                             Event::RelayConnected => {
                                 (atoms::ok(), "relay_connected").encode(env)
                             }
                             Event::Ready { node_addr } => {
                                 (atoms::ok(), "ready", node_addr).encode(env)
+                            }
+                            Event::Log { level, target, message } => {
+                                let level_str = match level {
+                                    LogLevel::Trace => "trace",
+                                    LogLevel::Debug => "debug",
+                                    LogLevel::Info => "info",
+                                    LogLevel::Warn => "warn",
+                                    LogLevel::Error => "error",
+                                };
+                                (atoms::ok(), "log", level_str, target, message).encode(env)
                             }
                         }
                     });

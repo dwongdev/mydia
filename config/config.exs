@@ -367,6 +367,12 @@ config :mydia, :features,
 # Can be overridden via P2P_BIND_PORT environment variable
 config :mydia, :p2p_bind_port, nil
 
+# Path to store the P2P keypair for persistent node identity
+# REQUIRED: Without this, the node ID changes on restart and paired devices can't reconnect
+# Can be overridden via P2P_KEYPAIR_PATH environment variable
+# Set in dev.exs for development, runtime.exs reads from env var for production
+config :mydia, :p2p_keypair_path, nil
+
 # Configure Ueberauth with empty providers by default
 # This is overridden in dev.exs if OIDC is configured
 config :ueberauth, Ueberauth, providers: []

@@ -180,6 +180,7 @@ ENV HOME=/app \
     MIX_ENV=prod \
     PHX_SERVER=true \
     DATABASE_PATH=/config/mydia.db \
+    P2P_KEYPAIR_PATH=/config/p2p_keypair.bin \
     PORT=4000 \
     PUID=1000 \
     PGID=1000 \

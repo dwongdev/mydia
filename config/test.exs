@@ -97,6 +97,9 @@ config :mydia, Mydia.RemoteAccess.MediaToken,
 # Relay tunnel shared secret for tests
 config :mydia, :relay_tunnel_secret, "test-relay-tunnel-secret"
 
+# P2P keypair path for tests - use a temp directory
+config :mydia, :p2p_keypair_path, "/tmp/mydia_test_p2p_keypair.bin"
+
 # Wallaby configuration for browser-based feature tests
 # Uses Chrome/Chromium in headless mode
 # Chromedriver path is auto-detected, or can be set via CHROMEDRIVER_PATH

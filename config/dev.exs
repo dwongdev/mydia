@@ -111,16 +111,8 @@ log_level =
 
 config :logger, level: log_level
 
-# Do not include metadata nor timestamps in development logs (but include them in debug mode)
-log_format =
-  if log_level == :debug do
-    "$time $metadata[$level] $message\n"
-  else
-    "[$level] $message\n"
-  end
-
 config :logger, :default_formatter,
-  format: log_format,
+  format: "$time $metadata[$level] $message\n",
   metadata: [
     :request_id,
     :category,
@@ -321,6 +313,10 @@ config :mydia, Mydia.RemoteAccess.MediaToken,
 # Relay tunnel shared secret for development
 # This secret is used to sign internal relay tunnel requests with HMAC-SHA256
 config :mydia, :relay_tunnel_secret, "dev-relay-tunnel-secret-not-for-production"
+
+# P2P keypair path for persistent node identity in development
+# This ensures the node ID stays the same across restarts so paired devices can reconnect
+config :mydia, :p2p_keypair_path, "priv/p2p_keypair.bin"
 
 # Ueberauth OIDC configuration for development
 # These are read from environment variables set in Docker

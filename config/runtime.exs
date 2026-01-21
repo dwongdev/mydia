@@ -444,6 +444,19 @@ if p2p_bind_port do
   config :mydia, :p2p_bind_port, p2p_bind_port
 end
 
+# P2P keypair path configuration (all environments)
+# REQUIRED for persistent node identity - paired devices need this to reconnect
+p2p_keypair_path =
+  case System.get_env("P2P_KEYPAIR_PATH") do
+    nil -> nil
+    "" -> nil
+    value -> value
+  end
+
+if p2p_keypair_path do
+  config :mydia, :p2p_keypair_path, p2p_keypair_path
+end
+
 # Ueberauth OIDC configuration (all environments)
 # This runs at application startup, so environment variables are available
 # NOTE: This will also reconfigure OIDC for dev/test if env vars change at runtime,

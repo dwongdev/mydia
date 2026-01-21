@@ -5,12 +5,14 @@
 
 use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey,
-    endpoint::Connection,
+    endpoint::{Connection, SendStream},
 };
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, oneshot, Mutex};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
+use std::sync::OnceLock;
 
 // Protocol identifier for mydia connections
 const ALPN: &[u8] = b"/mydia/1.0.0";
@@ -22,6 +24,7 @@ pub enum MydiaRequest {
     Pairing(PairingRequest),
     ReadMedia(ReadMediaRequest),
     GraphQL(GraphQLRequest),
+    HlsStream(HlsRequest),
     Custom(Vec<u8>),
 }
 
@@ -48,6 +51,26 @@ pub struct GraphQLRequest {
     pub auth_token: Option<String>,     // Access token for authorization
 }
 
+/// HLS request for streaming manifests and segments over P2P
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct HlsRequest {
+    pub session_id: String,
+    pub path: String,                   // "index.m3u8" or "segment_001.ts"
+    pub range_start: Option<u64>,       // For HTTP Range requests
+    pub range_end: Option<u64>,
+    pub auth_token: Option<String>,
+}
+
+/// HLS response header (sent first, then raw bytes stream)
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct HlsResponseHeader {
+    pub status: u16,
+    pub content_type: String,
+    pub content_length: u64,
+    pub content_range: Option<String>,  // e.g., "bytes 0-1023/4096"
+    pub cache_control: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GraphQLResponse {
     pub data: Option<String>,   // JSON-encoded
@@ -60,6 +83,7 @@ pub enum MydiaResponse {
     Pairing(PairingResponse),
     MediaChunk(Vec<u8>),
     GraphQL(GraphQLResponse),
+    HlsHeader(HlsResponseHeader),
     Custom(Vec<u8>),
     Error(String),
 }
@@ -71,6 +95,16 @@ pub struct PairingResponse {
     pub access_token: Option<String>,
     pub device_token: Option<String>,
     pub error: Option<String>,
+    #[serde(default)]
+    pub direct_urls: Vec<String>,
+}
+
+/// Streaming response for HLS requests on client side
+pub struct HlsStreamResponse {
+    /// Response header
+    pub header: HlsResponseHeader,
+    /// Receiver for data chunks
+    pub chunk_rx: mpsc::Receiver<Vec<u8>>,
 }
 
 /// Commands that can be sent to the Host
@@ -87,6 +121,25 @@ enum Command {
     SendResponse {
         request_id: String,
         response: MydiaResponse,
+    },
+    SendHlsHeader {
+        stream_id: String,
+        header: HlsResponseHeader,
+        reply: oneshot::Sender<Result<(), String>>,
+    },
+    SendHlsChunk {
+        stream_id: String,
+        data: Vec<u8>,
+        reply: oneshot::Sender<Result<(), String>>,
+    },
+    FinishHlsStream {
+        stream_id: String,
+        reply: oneshot::Sender<Result<(), String>>,
+    },
+    SendHlsRequest {
+        node_id: String,
+        request: HlsRequest,
+        reply: oneshot::Sender<Result<HlsStreamResponse, String>>,
     },
     GetNodeAddr {
         reply: oneshot::Sender<String>,
@@ -106,10 +159,116 @@ pub enum Event {
         request: MydiaRequest,
         request_id: String,
     },
+    /// HLS streaming request - requires streaming response via send_hls_header/chunk/finish
+    HlsStreamRequest {
+        peer: String,
+        request: HlsRequest,
+        stream_id: String,
+    },
     RelayConnected,
     Ready {
         node_addr: String,
     },
+    /// Log message from Rust/iroh
+    Log {
+        level: LogLevel,
+        target: String,
+        message: String,
+    },
+}
+
+/// Log level for forwarded logs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl From<tracing::Level> for LogLevel {
+    fn from(level: tracing::Level) -> Self {
+        match level {
+            tracing::Level::TRACE => LogLevel::Trace,
+            tracing::Level::DEBUG => LogLevel::Debug,
+            tracing::Level::INFO => LogLevel::Info,
+            tracing::Level::WARN => LogLevel::Warn,
+            tracing::Level::ERROR => LogLevel::Error,
+        }
+    }
+}
+
+/// Global log channel for forwarding logs to Elixir
+static LOG_TX: OnceLock<mpsc::Sender<Event>> = OnceLock::new();
+
+/// Custom tracing layer that forwards logs to Elixir via the event channel
+struct ElixirLogLayer;
+
+impl<S> Layer<S> for ElixirLogLayer
+where
+    S: tracing::Subscriber,
+{
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        if let Some(tx) = LOG_TX.get() {
+            // Extract message from event
+            let mut message = String::new();
+            let mut visitor = MessageVisitor(&mut message);
+            event.record(&mut visitor);
+
+            let log_event = Event::Log {
+                level: (*event.metadata().level()).into(),
+                target: event.metadata().target().to_string(),
+                message,
+            };
+
+            // Non-blocking send - drop if channel is full
+            let _ = tx.try_send(log_event);
+        }
+    }
+}
+
+/// Visitor to extract the message field from a tracing event
+struct MessageVisitor<'a>(&'a mut String);
+
+impl<'a> tracing::field::Visit for MessageVisitor<'a> {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            *self.0 = format!("{:?}", value);
+        } else if self.0.is_empty() {
+            // If no message field, use the first field
+            *self.0 = format!("{}: {:?}", field.name(), value);
+        }
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        if field.name() == "message" {
+            *self.0 = value.to_string();
+        } else if self.0.is_empty() {
+            *self.0 = format!("{}: {}", field.name(), value);
+        }
+    }
+}
+
+/// Initialize tracing with the Elixir log layer
+fn init_tracing(event_tx: mpsc::Sender<Event>) {
+    // Only initialize once
+    if LOG_TX.set(event_tx).is_err() {
+        return;
+    }
+
+    // Set up tracing with env filter (default to info, but can be overridden with RUST_LOG)
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,iroh=info,quinn=warn,rustls=warn"));
+
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(ElixirLogLayer)
+        .try_init();
 }
 
 /// Network statistics
@@ -117,6 +276,8 @@ pub enum Event {
 pub struct NetworkStats {
     pub connected_peers: usize,
     pub relay_connected: bool,
+    /// The relay URL currently in use (None if using iroh defaults)
+    pub relay_url: Option<String>,
 }
 
 /// Configuration for the Host
@@ -137,7 +298,7 @@ fn load_or_generate_keypair(path: Option<&str>) -> SecretKey {
             if bytes.len() == 32 {
                 let mut arr = [0u8; 32];
                 arr.copy_from_slice(&bytes);
-                log::info!("Loaded keypair from {}", path);
+                tracing::info!("Loaded keypair from {}", path);
                 return SecretKey::from_bytes(&arr);
             }
         }
@@ -149,9 +310,9 @@ fn load_or_generate_keypair(path: Option<&str>) -> SecretKey {
     // Save if path provided
     if let Some(path) = path {
         if let Err(e) = std::fs::write(path, secret_key.to_bytes()) {
-            log::warn!("Failed to save keypair to {}: {}", path, e);
+            tracing::warn!("Failed to save keypair to {}: {}", path, e);
         } else {
-            log::info!("Generated and saved new keypair to {}", path);
+            tracing::info!("Generated and saved new keypair to {}", path);
         }
     }
 
@@ -170,7 +331,7 @@ fn endpoint_addr_from_json(json: &str) -> Result<EndpointAddr, String> {
 
 /// The core Host struct that manages the iroh Endpoint
 pub struct Host {
-    cmd_tx: mpsc::Sender<Command>,
+    pub(crate) cmd_tx: mpsc::Sender<Command>,
     pub event_rx: Arc<Mutex<mpsc::Receiver<Event>>>,
     node_id: String,
 }
@@ -277,11 +438,73 @@ impl Host {
     pub fn node_id(&self) -> &str {
         &self.node_id
     }
+
+    /// Send an HLS response header for a streaming request.
+    /// Must be called before any send_hls_chunk calls.
+    pub fn send_hls_header(&self, stream_id: String, header: HlsResponseHeader) -> Result<(), String> {
+        let (tx, rx) = oneshot::channel();
+        self.cmd_tx
+            .blocking_send(Command::SendHlsHeader {
+                stream_id,
+                header,
+                reply: tx,
+            })
+            .map_err(|_| "send_failed".to_string())?;
+        rx.blocking_recv().map_err(|_| "recv_failed".to_string())?
+    }
+
+    /// Send a chunk of HLS data.
+    /// Must be called after send_hls_header and before finish_hls_stream.
+    pub fn send_hls_chunk(&self, stream_id: String, data: Vec<u8>) -> Result<(), String> {
+        let (tx, rx) = oneshot::channel();
+        self.cmd_tx
+            .blocking_send(Command::SendHlsChunk {
+                stream_id,
+                data,
+                reply: tx,
+            })
+            .map_err(|_| "send_failed".to_string())?;
+        rx.blocking_recv().map_err(|_| "recv_failed".to_string())?
+    }
+
+    /// Finish an HLS stream.
+    /// Must be called after all chunks have been sent.
+    pub fn finish_hls_stream(&self, stream_id: String) -> Result<(), String> {
+        let (tx, rx) = oneshot::channel();
+        self.cmd_tx
+            .blocking_send(Command::FinishHlsStream {
+                stream_id,
+                reply: tx,
+            })
+            .map_err(|_| "send_failed".to_string())?;
+        rx.blocking_recv().map_err(|_| "recv_failed".to_string())?
+    }
+
+    /// Send an HLS streaming request to a peer (client-side).
+    /// Returns a streaming response with header and chunk receiver.
+    pub async fn send_hls_request(
+        &self,
+        node_id: String,
+        request: HlsRequest,
+    ) -> Result<HlsStreamResponse, String> {
+        let (tx, rx) = oneshot::channel();
+        self.cmd_tx
+            .send(Command::SendHlsRequest {
+                node_id,
+                request,
+                reply: tx,
+            })
+            .await
+            .map_err(|_| "send_failed".to_string())?;
+        rx.await.map_err(|_| "recv_failed".to_string())?
+    }
 }
 
 /// Shared state for pending responses
 struct SharedState {
     pending_responses: HashMap<String, oneshot::Sender<MydiaResponse>>,
+    /// Active HLS streaming connections - stores the send half of the stream
+    hls_streams: HashMap<String, SendStream>,
 }
 
 /// Main event loop that runs in a background thread
@@ -291,6 +514,9 @@ async fn run_event_loop(
     mut cmd_rx: mpsc::Receiver<Command>,
     event_tx: mpsc::Sender<Event>,
 ) {
+    // Initialize tracing to forward logs to Elixir
+    init_tracing(event_tx.clone());
+
     // Build the endpoint
     let mut builder = Endpoint::builder()
         .secret_key(secret_key)
@@ -321,31 +547,40 @@ async fn run_event_loop(
     let endpoint = match builder.bind().await {
         Ok(ep) => ep,
         Err(e) => {
-            log::error!("Failed to bind iroh endpoint: {}", e);
+            tracing::error!("Failed to bind iroh endpoint: {}", e);
             return;
         }
     };
 
     let endpoint_id = endpoint.id();
-    log::info!("Iroh endpoint bound, endpoint_id: {}", endpoint_id);
+    tracing::info!("Iroh endpoint bound, endpoint_id: {}", endpoint_id);
 
     // Track state
     let mut connected_peers: HashMap<String, Connection> = HashMap::new();
     let shared_state = Arc::new(Mutex::new(SharedState {
         pending_responses: HashMap::new(),
+        hls_streams: HashMap::new(),
     }));
     let mut relay_connected = false;
 
-    // Get initial endpoint address and emit Ready event
+    // Wait for endpoint to be online (relay connected + local IP available)
+    // Use a timeout to avoid blocking indefinitely if relay is unreachable
+    tracing::info!("Waiting for relay connection...");
+    match tokio::time::timeout(std::time::Duration::from_secs(30), endpoint.online()).await {
+        Ok(()) => {
+            relay_connected = true;
+            tracing::info!("Relay connection established");
+            let _ = event_tx.send(Event::RelayConnected).await;
+        }
+        Err(_) => {
+            tracing::warn!("Relay connection timed out after 30s - continuing without relay");
+        }
+    }
+
+    // Get endpoint address and emit Ready event
     let addr = endpoint.addr();
     let addr_json = endpoint_addr_to_json(&addr);
     let _ = event_tx.send(Event::Ready { node_addr: addr_json }).await;
-
-    // Check relay status - if we have relay addresses, we're connected
-    if addr.relay_urls().next().is_some() {
-        relay_connected = true;
-        let _ = event_tx.send(Event::RelayConnected).await;
-    }
 
     loop {
         tokio::select! {
@@ -355,7 +590,7 @@ async fn run_event_loop(
                 let accepting = match incoming.accept() {
                     Ok(accepting) => accepting,
                     Err(e) => {
-                        log::warn!("Failed to accept connection: {}", e);
+                        tracing::warn!("Failed to accept connection: {}", e);
                         continue;
                     }
                 };
@@ -365,13 +600,13 @@ async fn run_event_loop(
                 let alpn = match accepting.alpn().await {
                     Ok(alpn) => alpn,
                     Err(e) => {
-                        log::warn!("Failed to get ALPN: {}", e);
+                        tracing::warn!("Failed to get ALPN: {}", e);
                         continue;
                     }
                 };
 
                 if alpn.as_slice() != ALPN {
-                    log::warn!("Unknown ALPN: {:?}", alpn);
+                    tracing::warn!("Unknown ALPN: {:?}", alpn);
                     continue;
                 }
 
@@ -379,13 +614,13 @@ async fn run_event_loop(
                 let conn = match accepting.await {
                     Ok(conn) => conn,
                     Err(e) => {
-                        log::warn!("Connection failed: {}", e);
+                        tracing::warn!("Connection failed: {}", e);
                         continue;
                     }
                 };
 
                 let peer_id = conn.remote_id().to_string();
-                log::info!("Peer connected: {}", peer_id);
+                tracing::info!("Peer connected: {}", peer_id);
 
                 connected_peers.insert(peer_id.clone(), conn.clone());
                 let _ = event_tx.send(Event::Connected(peer_id.clone())).await;
@@ -422,11 +657,87 @@ async fn run_event_loop(
                         let _ = reply.send(addr_json);
                     }
                     Command::GetNetworkStats { reply } => {
+                        // Get the actual relay URL from the endpoint address
+                        let addr = endpoint.addr();
+                        let relay_url = addr.relay_urls().next().map(|u| u.to_string());
+                        tracing::debug!("GetNetworkStats: addr={:?}, relay_url={:?}", addr, relay_url);
                         let stats = NetworkStats {
                             connected_peers: connected_peers.len(),
                             relay_connected,
+                            relay_url,
                         };
                         let _ = reply.send(stats);
+                    }
+                    Command::SendHlsHeader { stream_id, header, reply } => {
+                        let result = {
+                            let mut state = shared_state.lock().await;
+                            if let Some(send) = state.hls_streams.get_mut(&stream_id) {
+                                // First write the HlsHeader response
+                                let header_response = MydiaResponse::HlsHeader(header);
+                                match serde_cbor::to_vec(&header_response) {
+                                    Ok(header_data) => {
+                                        // Write length prefix (4 bytes) then header
+                                        let len = header_data.len() as u32;
+                                        let len_bytes = len.to_be_bytes();
+                                        if let Err(e) = send.write(&len_bytes).await {
+                                            Err(format!("Failed to write header length: {}", e))
+                                        } else if let Err(e) = send.write(&header_data).await {
+                                            Err(format!("Failed to write header: {}", e))
+                                        } else {
+                                            Ok(())
+                                        }
+                                    }
+                                    Err(e) => Err(format!("Failed to encode header: {}", e)),
+                                }
+                            } else {
+                                Err(format!("HLS stream not found: {}", stream_id))
+                            }
+                        };
+                        let _ = reply.send(result);
+                    }
+                    Command::SendHlsChunk { stream_id, data, reply } => {
+                        let result = {
+                            let mut state = shared_state.lock().await;
+                            if let Some(send) = state.hls_streams.get_mut(&stream_id) {
+                                // Write chunk length (4 bytes) then data
+                                let len = data.len() as u32;
+                                let len_bytes = len.to_be_bytes();
+                                if let Err(e) = send.write(&len_bytes).await {
+                                    Err(format!("Failed to write chunk length: {}", e))
+                                } else if let Err(e) = send.write(&data).await {
+                                    Err(format!("Failed to write chunk: {}", e))
+                                } else {
+                                    Ok(())
+                                }
+                            } else {
+                                Err(format!("HLS stream not found: {}", stream_id))
+                            }
+                        };
+                        let _ = reply.send(result);
+                    }
+                    Command::FinishHlsStream { stream_id, reply } => {
+                        let result = {
+                            let mut state = shared_state.lock().await;
+                            if let Some(mut send) = state.hls_streams.remove(&stream_id) {
+                                // Write zero-length terminator
+                                let zero_bytes = [0u8; 4];
+                                if let Err(e) = send.write(&zero_bytes).await {
+                                    Err(format!("Failed to write terminator: {}", e))
+                                } else if let Err(e) = send.finish() {
+                                    Err(format!("Failed to finish stream: {}", e))
+                                } else {
+                                    tracing::debug!("HLS stream {} finished", stream_id);
+                                    Ok(())
+                                }
+                            } else {
+                                Err(format!("HLS stream not found: {}", stream_id))
+                            }
+                        };
+                        let _ = reply.send(result);
+                    }
+                    Command::SendHlsRequest { node_id, request, reply } => {
+                        let result = handle_send_hls_request(&connected_peers, &node_id, request).await;
+                        let _ = reply.send(result);
                     }
                 }
             }
@@ -435,7 +746,7 @@ async fn run_event_loop(
         }
     }
 
-    log::info!("Event loop terminated");
+    tracing::info!("Event loop terminated");
 }
 
 /// Handle dialing a peer
@@ -450,14 +761,14 @@ async fn handle_dial(
     let endpoint_id: EndpointId = endpoint_addr.id;
     let node_id = endpoint_id.to_string();
 
-    log::info!("Dialing peer: {}", node_id);
+    tracing::info!("Dialing peer: {}", node_id);
 
     let conn = endpoint
         .connect(endpoint_addr, ALPN)
         .await
         .map_err(|e| format!("Failed to connect: {}", e))?;
 
-    log::info!("Connected to peer: {}", node_id);
+    tracing::info!("Connected to peer: {}", node_id);
 
     connected_peers.insert(node_id.clone(), conn.clone());
     let _ = event_tx.send(Event::Connected(node_id.clone())).await;
@@ -481,14 +792,14 @@ async fn handle_connection(
 ) {
     loop {
         match conn.accept_bi().await {
-            Ok((mut send, mut recv)) => {
+            Ok((send, mut recv)) => {
                 let request_id = uuid::Uuid::new_v4().to_string();
 
                 // Read the request
                 let data = match recv.read_to_end(64 * 1024).await {
                     Ok(data) => data,
                     Err(e) => {
-                        log::warn!("Failed to read request from {}: {}", peer_id, e);
+                        tracing::warn!("Failed to read request from {}: {}", peer_id, e);
                         continue;
                     }
                 };
@@ -496,15 +807,16 @@ async fn handle_connection(
                 let request: MydiaRequest = match serde_cbor::from_slice(&data) {
                     Ok(req) => req,
                     Err(e) => {
-                        log::warn!("Failed to decode request from {}: {}", peer_id, e);
+                        tracing::warn!("Failed to decode request from {}: {}", peer_id, e);
                         continue;
                     }
                 };
 
-                log::debug!("Received request from {}: {:?}", peer_id, request);
+                tracing::debug!("Received request from {}: {:?}", peer_id, request);
 
                 // For Ping requests, respond immediately
                 if matches!(request, MydiaRequest::Ping) {
+                    let mut send = send;
                     let response = MydiaResponse::Pong;
                     if let Ok(response_data) = serde_cbor::to_vec(&response) {
                         let _ = send.write_all(&response_data).await;
@@ -512,6 +824,32 @@ async fn handle_connection(
                     }
                     continue;
                 }
+
+                // For HLS streaming requests, store the send stream and emit event
+                if let MydiaRequest::HlsStream(hls_request) = request {
+                    let stream_id = request_id.clone();
+                    tracing::debug!("HLS stream request: session={}, path={}", hls_request.session_id, hls_request.path);
+
+                    // Store the send stream for later use
+                    {
+                        let mut state = shared_state.lock().await;
+                        state.hls_streams.insert(stream_id.clone(), send);
+                    }
+
+                    // Emit the HLS stream event
+                    let _ = event_tx
+                        .send(Event::HlsStreamRequest {
+                            peer: peer_id.clone(),
+                            request: hls_request,
+                            stream_id,
+                        })
+                        .await;
+
+                    continue;
+                }
+
+                // For all other requests, use the standard request/response pattern
+                let mut send = send;
 
                 // Create a oneshot channel for the response
                 let (resp_tx, resp_rx) = oneshot::channel::<MydiaResponse>();
@@ -542,10 +880,10 @@ async fn handle_connection(
                             }
                         }
                         Ok(Err(_)) => {
-                            log::warn!("Response channel closed for request {}", request_id_clone);
+                            tracing::warn!("Response channel closed for request {}", request_id_clone);
                         }
                         Err(_) => {
-                            log::warn!("Response timeout for request {}", request_id_clone);
+                            tracing::warn!("Response timeout for request {}", request_id_clone);
                             let error_response = MydiaResponse::Error("Request timeout".to_string());
                             if let Ok(response_data) = serde_cbor::to_vec(&error_response) {
                                 let _ = send.write_all(&response_data).await;
@@ -556,7 +894,7 @@ async fn handle_connection(
                 });
             }
             Err(e) => {
-                log::info!("Connection closed for peer {}: {}", peer_id, e);
+                tracing::info!("Connection closed for peer {}: {}", peer_id, e);
                 let _ = event_tx.send(Event::Disconnected(peer_id)).await;
                 break;
             }
@@ -570,9 +908,23 @@ async fn handle_send_request(
     node_id: &str,
     request: MydiaRequest,
 ) -> Result<MydiaResponse, String> {
+    // The node_id parameter might be either:
+    // 1. A bare node ID string (e.g., "09ecb63dd2...")
+    // 2. A full EndpointAddr JSON (e.g., {"id":"09ecb63dd2...", ...})
+    // We need to extract the actual node ID in both cases.
+    let actual_node_id = if node_id.starts_with('{') {
+        // Try to parse as EndpointAddr JSON
+        match endpoint_addr_from_json(node_id) {
+            Ok(addr) => addr.id.to_string(),
+            Err(_) => node_id.to_string(),
+        }
+    } else {
+        node_id.to_string()
+    };
+
     let conn = connected_peers
-        .get(node_id)
-        .ok_or_else(|| format!("Not connected to peer: {}", node_id))?;
+        .get(&actual_node_id)
+        .ok_or_else(|| format!("Not connected to peer: {}", actual_node_id))?;
 
     // Open a bidirectional stream
     let (mut send, mut recv) = conn
@@ -601,6 +953,108 @@ async fn handle_send_request(
         .map_err(|e| format!("Failed to decode response: {}", e))?;
 
     Ok(response)
+}
+
+/// Send an HLS streaming request to a connected peer (client-side).
+/// Returns a streaming response with header and channel for chunks.
+async fn handle_send_hls_request(
+    connected_peers: &HashMap<String, Connection>,
+    node_id: &str,
+    request: HlsRequest,
+) -> Result<HlsStreamResponse, String> {
+    // Handle both bare node ID and full EndpointAddr JSON
+    let actual_node_id = if node_id.starts_with('{') {
+        match endpoint_addr_from_json(node_id) {
+            Ok(addr) => addr.id.to_string(),
+            Err(_) => node_id.to_string(),
+        }
+    } else {
+        node_id.to_string()
+    };
+
+    let conn = connected_peers
+        .get(&actual_node_id)
+        .ok_or_else(|| format!("Not connected to peer: {}", actual_node_id))?;
+
+    // Open a bidirectional stream
+    let (mut send, mut recv) = conn
+        .open_bi()
+        .await
+        .map_err(|e| format!("Failed to open stream: {}", e))?;
+
+    // Send the request
+    let request = MydiaRequest::HlsStream(request);
+    let request_data =
+        serde_cbor::to_vec(&request).map_err(|e| format!("Failed to encode request: {}", e))?;
+
+    send.write_all(&request_data)
+        .await
+        .map_err(|e| format!("Failed to send request: {}", e))?;
+
+    send.finish()
+        .map_err(|e| format!("Failed to finish send: {}", e))?;
+
+    // Read the header (length-prefixed)
+    let mut len_buf = [0u8; 4];
+    recv.read_exact(&mut len_buf)
+        .await
+        .map_err(|e| format!("Failed to read header length: {}", e))?;
+    let header_len = u32::from_be_bytes(len_buf) as usize;
+
+    if header_len == 0 {
+        return Err("Empty header received".to_string());
+    }
+
+    let mut header_data = vec![0u8; header_len];
+    recv.read_exact(&mut header_data)
+        .await
+        .map_err(|e| format!("Failed to read header: {}", e))?;
+
+    let header_response: MydiaResponse = serde_cbor::from_slice(&header_data)
+        .map_err(|e| format!("Failed to decode header: {}", e))?;
+
+    let header = match header_response {
+        MydiaResponse::HlsHeader(h) => h,
+        MydiaResponse::Error(e) => return Err(format!("Server error: {}", e)),
+        _ => return Err("Unexpected response type".to_string()),
+    };
+
+    // Create a channel for streaming chunks
+    let (chunk_tx, chunk_rx) = mpsc::channel::<Vec<u8>>(16);
+
+    // Spawn a task to read chunks and send them through the channel
+    tokio::spawn(async move {
+        loop {
+            // Read chunk length
+            let mut len_buf = [0u8; 4];
+            if let Err(e) = recv.read_exact(&mut len_buf).await {
+                tracing::debug!("HLS chunk read completed or error: {}", e);
+                break;
+            }
+            let chunk_len = u32::from_be_bytes(len_buf) as usize;
+
+            // Zero length indicates end of stream
+            if chunk_len == 0 {
+                tracing::debug!("HLS stream end marker received");
+                break;
+            }
+
+            // Read the chunk
+            let mut chunk_data = vec![0u8; chunk_len];
+            if let Err(e) = recv.read_exact(&mut chunk_data).await {
+                tracing::error!("Failed to read chunk data: {}", e);
+                break;
+            }
+
+            // Send chunk through channel
+            if chunk_tx.send(chunk_data).await.is_err() {
+                tracing::debug!("HLS chunk receiver dropped");
+                break;
+            }
+        }
+    });
+
+    Ok(HlsStreamResponse { header, chunk_rx })
 }
 
 #[cfg(test)]
@@ -671,6 +1125,62 @@ mod tests {
         let response = MydiaResponse::GraphQL(GraphQLResponse {
             data: None,
             errors: Some(r#"[{"message": "Not found"}]"#.to_string()),
+        });
+        let data = serde_cbor::to_vec(&response).unwrap();
+        let decoded: MydiaResponse = serde_cbor::from_slice(&data).unwrap();
+        assert_eq!(response, decoded);
+    }
+
+    #[test]
+    fn test_hls_request_serialization() {
+        let request = MydiaRequest::HlsStream(HlsRequest {
+            session_id: "session_123".to_string(),
+            path: "index.m3u8".to_string(),
+            range_start: None,
+            range_end: None,
+            auth_token: Some("token_abc".to_string()),
+        });
+        let data = serde_cbor::to_vec(&request).unwrap();
+        let decoded: MydiaRequest = serde_cbor::from_slice(&data).unwrap();
+        assert_eq!(request, decoded);
+    }
+
+    #[test]
+    fn test_hls_request_with_range() {
+        let request = MydiaRequest::HlsStream(HlsRequest {
+            session_id: "session_456".to_string(),
+            path: "segment_001.ts".to_string(),
+            range_start: Some(0),
+            range_end: Some(1023),
+            auth_token: None,
+        });
+        let data = serde_cbor::to_vec(&request).unwrap();
+        let decoded: MydiaRequest = serde_cbor::from_slice(&data).unwrap();
+        assert_eq!(request, decoded);
+    }
+
+    #[test]
+    fn test_hls_response_header_serialization() {
+        let response = MydiaResponse::HlsHeader(HlsResponseHeader {
+            status: 200,
+            content_type: "application/vnd.apple.mpegurl".to_string(),
+            content_length: 1024,
+            content_range: None,
+            cache_control: Some("max-age=3600".to_string()),
+        });
+        let data = serde_cbor::to_vec(&response).unwrap();
+        let decoded: MydiaResponse = serde_cbor::from_slice(&data).unwrap();
+        assert_eq!(response, decoded);
+    }
+
+    #[test]
+    fn test_hls_response_header_with_range() {
+        let response = MydiaResponse::HlsHeader(HlsResponseHeader {
+            status: 206,
+            content_type: "video/mp2t".to_string(),
+            content_length: 1024,
+            content_range: Some("bytes 0-1023/4096".to_string()),
+            cache_control: None,
         });
         let data = serde_cbor::to_vec(&response).unwrap();
         let decoded: MydiaResponse = serde_cbor::from_slice(&data).unwrap();

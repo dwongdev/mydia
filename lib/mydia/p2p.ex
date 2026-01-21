@@ -15,10 +15,13 @@ defmodule Mydia.P2p do
     * `:relay_url` - Custom relay URL for NAT traversal (uses iroh default relays if nil).
     * `:bind_port` - UDP port for direct connections (enables hole punching in Docker).
       If nil or 0, a random port is used.
+    * `:keypair_path` - Path to store/load the node's keypair for persistent identity.
+      If nil, a new random keypair is generated on each start.
 
   Returns `{:ok, {resource, node_id}}` on success.
   """
-  def start_host(relay_url \\ nil, bind_port \\ nil), do: :erlang.nif_error(:nif_not_loaded)
+  def start_host(_relay_url \\ nil, _bind_port \\ nil, _keypair_path \\ nil),
+    do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
   Dial a peer using their EndpointAddr JSON.
@@ -53,6 +56,24 @@ defmodule Mydia.P2p do
   Get network statistics including connected peers and relay status.
   """
   def get_network_stats(_resource), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc """
+  Send an HLS response header for a streaming request.
+  Must be called before any send_hls_chunk calls.
+  """
+  def send_hls_header(_resource, _stream_id, _header), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc """
+  Send a chunk of HLS data.
+  Must be called after send_hls_header and before finish_hls_stream.
+  """
+  def send_hls_chunk(_resource, _stream_id, _data), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc """
+  Finish an HLS stream.
+  Must be called after all chunks have been sent.
+  """
+  def finish_hls_stream(_resource, _stream_id), do: :erlang.nif_error(:nif_not_loaded)
 end
 
 defmodule Mydia.P2p.PairingRequest do
@@ -102,11 +123,12 @@ defmodule Mydia.P2p.NetworkStats do
   @moduledoc """
   Network statistics from the p2p host.
   """
-  defstruct [:connected_peers, :relay_connected]
+  defstruct [:connected_peers, :relay_connected, :relay_url]
 
   @type t :: %__MODULE__{
           connected_peers: non_neg_integer(),
-          relay_connected: boolean()
+          relay_connected: boolean(),
+          relay_url: String.t() | nil
         }
 end
 
@@ -133,5 +155,35 @@ defmodule Mydia.P2p.GraphQLResponse do
   @type t :: %__MODULE__{
           data: String.t() | nil,
           errors: String.t() | nil
+        }
+end
+
+defmodule Mydia.P2p.HlsRequest do
+  @moduledoc """
+  An HLS streaming request received from a player over P2P.
+  """
+  defstruct [:session_id, :path, :range_start, :range_end, :auth_token]
+
+  @type t :: %__MODULE__{
+          session_id: String.t(),
+          path: String.t(),
+          range_start: non_neg_integer() | nil,
+          range_end: non_neg_integer() | nil,
+          auth_token: String.t() | nil
+        }
+end
+
+defmodule Mydia.P2p.HlsResponseHeader do
+  @moduledoc """
+  An HLS response header to send back to a player over P2P.
+  """
+  defstruct [:status, :content_type, :content_length, :content_range, :cache_control]
+
+  @type t :: %__MODULE__{
+          status: non_neg_integer(),
+          content_type: String.t(),
+          content_length: non_neg_integer(),
+          content_range: String.t() | nil,
+          cache_control: String.t() | nil
         }
 end

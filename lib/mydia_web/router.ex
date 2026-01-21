@@ -22,6 +22,7 @@ defmodule MydiaWeb.Router do
     plug :accepts, ["json"]
     plug :fetch_session
     plug MydiaWeb.Plugs.RelayDeviceAuth
+    plug MydiaWeb.Plugs.GraphQLLogger
   end
 
   # Builds Absinthe context after authentication

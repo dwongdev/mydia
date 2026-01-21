@@ -10,6 +10,7 @@ defmodule Mydia.P2p.Server do
 
   alias Mydia.P2p
   alias Mydia.RemoteAccess.Pairing
+  alias MydiaWeb.Schema.Middleware.Logging, as: GraphQLLogging
 
   @doc """
   Status information about the p2p host.
@@ -20,7 +21,8 @@ defmodule Mydia.P2p.Server do
       :node_addr,
       :running,
       :connected_peers,
-      :relay_connected
+      :relay_connected,
+      :relay_url
     ]
 
     @type t :: %__MODULE__{
@@ -28,7 +30,8 @@ defmodule Mydia.P2p.Server do
             node_addr: String.t() | nil,
             running: boolean(),
             connected_peers: non_neg_integer(),
-            relay_connected: boolean()
+            relay_connected: boolean(),
+            relay_url: String.t() | nil
           }
   end
 
@@ -44,12 +47,31 @@ defmodule Mydia.P2p.Server do
     # Get bind_port from config (required for hole punching in Docker)
     bind_port = Application.get_env(:mydia, :p2p_bind_port)
 
+    # Get keypair_path from config for persistent node identity
+    # This is REQUIRED - without it, the node ID changes on restart and paired devices can't reconnect
+    keypair_path =
+      Application.get_env(:mydia, :p2p_keypair_path) ||
+        raise """
+        P2P keypair path not configured!
+
+        The p2p_keypair_path config is required for persistent node identity.
+        Without it, paired devices will not be able to reconnect after server restart.
+
+        Add to your config:
+
+            config :mydia, :p2p_keypair_path, "/path/to/p2p_keypair.bin"
+
+        Or set the P2P_KEYPAIR_PATH environment variable.
+        """
+
     # Start the host - NIF returns {resource, node_id} directly (raises on error)
-    {resource, node_id} = P2p.start_host(relay_url, bind_port)
+    {resource, node_id} = P2p.start_host(relay_url, bind_port, keypair_path)
 
     Logger.info(
       "P2P Host started with NodeID: #{node_id}, relay: #{relay_url || "(iroh defaults)"}"
     )
+
+    Logger.info("P2P Host using persistent keypair at #{keypair_path}")
 
     if bind_port do
       Logger.info("P2P Host using UDP port #{bind_port}")
@@ -130,12 +152,16 @@ defmodule Mydia.P2p.Server do
     # Get relay_connected from NIF since the event may not be reliably sent
     network_stats = P2p.get_network_stats(state.resource)
 
+    # Try to get relay_url from network_stats first, fallback to extracting from node_addr
+    relay_url = network_stats.relay_url || extract_relay_url_from_node_addr(state.node_addr)
+
     status = %Status{
       node_id: state.node_id,
       node_addr: state.node_addr,
       running: true,
       connected_peers: MapSet.size(state.connected_peers),
-      relay_connected: network_stats.relay_connected
+      relay_connected: network_stats.relay_connected,
+      relay_url: relay_url
     }
 
     {:reply, status, state}
@@ -247,12 +273,12 @@ defmodule Mydia.P2p.Server do
     # Parse variables from JSON
     variables = parse_graphql_variables(req.variables)
 
-    # Build context from auth token
-    context = build_graphql_context(req.auth_token)
+    # Build context from auth token, marking source as p2p
+    context = build_graphql_context(req.auth_token, :p2p)
 
-    # Execute the GraphQL query
+    # Execute the GraphQL query with logging
     result =
-      Absinthe.run(
+      GraphQLLogging.run(
         req.query,
         MydiaWeb.Schema,
         variables: variables,
@@ -274,6 +300,15 @@ defmodule Mydia.P2p.Server do
             errors: nil
           }
 
+        # Query validation errors (no data key, only errors)
+        {:ok, %{errors: errors}} ->
+          Logger.warning("GraphQL validation error: #{inspect(errors)}")
+
+          %P2p.GraphQLResponse{
+            data: nil,
+            errors: encode_graphql_errors(errors)
+          }
+
         {:error, reason} ->
           Logger.warning("GraphQL execution failed: #{inspect(reason)}")
 
@@ -292,9 +327,292 @@ defmodule Mydia.P2p.Server do
     {:noreply, state}
   end
 
+  def handle_info({:ok, "hls_stream", stream_id, req}, state) do
+    Logger.debug("P2P Request: HLS stream session=#{req.session_id} path=#{req.path}")
+
+    # Spawn a task to handle the streaming so we don't block the GenServer
+    Task.start(fn ->
+      handle_hls_stream(state.resource, stream_id, req)
+    end)
+
+    {:noreply, state}
+  end
+
+  # Handle Rust/iroh log messages
+  def handle_info({:ok, "log", level, target, message}, state) do
+    # Forward Rust logs to Elixir Logger with appropriate level
+    log_message = "[#{target}] #{message}"
+
+    case level do
+      "trace" -> Logger.debug(log_message, rust_target: target)
+      "debug" -> Logger.debug(log_message, rust_target: target)
+      "info" -> Logger.info(log_message, rust_target: target)
+      "warn" -> Logger.warning(log_message, rust_target: target)
+      "error" -> Logger.error(log_message, rust_target: target)
+      _ -> Logger.debug(log_message, rust_target: target)
+    end
+
+    {:noreply, state}
+  end
+
   def handle_info(msg, state) do
     Logger.warning("P2P Unhandled Event: #{inspect(msg)}")
     {:noreply, state}
+  end
+
+  # HLS streaming handler
+
+  # Chunk size for streaming (32KB)
+  @hls_chunk_size 32 * 1024
+
+  defp handle_hls_stream(resource, stream_id, req) do
+    # Verify auth token
+    case verify_hls_auth(req.auth_token) do
+      {:ok, _user} ->
+        # Look up the session by session_id
+        case lookup_hls_session(req.session_id) do
+          {:ok, session_info} ->
+            # Build the file path
+            file_path = Path.join(session_info.temp_dir, req.path)
+
+            # Security check: ensure path is within temp_dir
+            case validate_path(file_path, session_info.temp_dir) do
+              :ok ->
+                stream_hls_file(resource, stream_id, file_path, req)
+
+              {:error, reason} ->
+                Logger.warning("HLS path validation failed: #{inspect(reason)}")
+                send_hls_error(resource, stream_id, 403, "Forbidden")
+            end
+
+          {:error, :not_found} ->
+            Logger.warning("HLS session not found: #{req.session_id}")
+            send_hls_error(resource, stream_id, 404, "Session not found")
+        end
+
+      {:error, _reason} ->
+        Logger.warning("HLS auth failed")
+        send_hls_error(resource, stream_id, 401, "Unauthorized")
+    end
+  end
+
+  defp verify_hls_auth(nil), do: {:error, :no_token}
+
+  defp verify_hls_auth(auth_token) when is_binary(auth_token) do
+    Mydia.Auth.Guardian.verify_token(auth_token)
+  end
+
+  defp lookup_hls_session(session_id) do
+    case Registry.lookup(Mydia.Streaming.HlsSessionRegistry, {:session, session_id}) do
+      [{_pid, info}] ->
+        # Trigger heartbeat to keep session alive
+        case Registry.lookup(Mydia.Streaming.HlsSessionRegistry, {:session, session_id}) do
+          [{pid, _}] when is_pid(pid) ->
+            Mydia.Streaming.HlsSession.heartbeat(pid)
+
+          _ ->
+            :ok
+        end
+
+        {:ok, info}
+
+      [] ->
+        {:error, :not_found}
+    end
+  end
+
+  defp validate_path(requested_path, base_dir) do
+    # Expand both paths to handle .. and symlinks
+    expanded_requested = Path.expand(requested_path)
+    expanded_base = Path.expand(base_dir)
+
+    if String.starts_with?(expanded_requested, expanded_base) do
+      :ok
+    else
+      {:error, :path_traversal}
+    end
+  end
+
+  defp stream_hls_file(resource, stream_id, file_path, req) do
+    case File.stat(file_path) do
+      {:ok, %File.Stat{size: file_size}} ->
+        # Determine content type
+        content_type = hls_content_type(file_path)
+
+        # Handle range requests
+        case parse_range(req.range_start, req.range_end, file_size) do
+          {:full, _} ->
+            # Full file request
+            send_full_hls_file(resource, stream_id, file_path, file_size, content_type)
+
+          {:partial, range_start, range_end, content_length} ->
+            # Partial content (206)
+            send_partial_hls_file(
+              resource,
+              stream_id,
+              file_path,
+              file_size,
+              range_start,
+              range_end,
+              content_length,
+              content_type
+            )
+        end
+
+      {:error, :enoent} ->
+        Logger.debug("HLS file not found: #{file_path}")
+        send_hls_error(resource, stream_id, 404, "Not found")
+
+      {:error, reason} ->
+        Logger.warning("HLS file error: #{inspect(reason)}")
+        send_hls_error(resource, stream_id, 500, "Internal error")
+    end
+  end
+
+  defp hls_content_type(path) do
+    case Path.extname(path) do
+      ".m3u8" -> "application/vnd.apple.mpegurl"
+      ".ts" -> "video/mp2t"
+      ".mp4" -> "video/mp4"
+      ".m4s" -> "video/iso.segment"
+      ".vtt" -> "text/vtt"
+      _ -> "application/octet-stream"
+    end
+  end
+
+  defp parse_range(nil, nil, file_size), do: {:full, file_size}
+
+  defp parse_range(range_start, range_end, file_size) do
+    # Calculate actual range
+    start_byte = range_start || 0
+    end_byte = min(range_end || file_size - 1, file_size - 1)
+    content_length = end_byte - start_byte + 1
+
+    {:partial, start_byte, end_byte, content_length}
+  end
+
+  defp send_full_hls_file(resource, stream_id, file_path, file_size, content_type) do
+    # Send header
+    header = %P2p.HlsResponseHeader{
+      status: 200,
+      content_type: content_type,
+      content_length: file_size,
+      content_range: nil,
+      cache_control: hls_cache_control(file_path)
+    }
+
+    case P2p.send_hls_header(resource, stream_id, header) do
+      "ok" ->
+        # Stream the file in chunks
+        stream_file_chunks(resource, stream_id, file_path, 0, file_size)
+        P2p.finish_hls_stream(resource, stream_id)
+
+      {:error, reason} ->
+        Logger.error("Failed to send HLS header: #{inspect(reason)}")
+    end
+  end
+
+  defp send_partial_hls_file(
+         resource,
+         stream_id,
+         file_path,
+         file_size,
+         range_start,
+         range_end,
+         content_length,
+         content_type
+       ) do
+    # Send header with 206 status
+    header = %P2p.HlsResponseHeader{
+      status: 206,
+      content_type: content_type,
+      content_length: content_length,
+      content_range: "bytes #{range_start}-#{range_end}/#{file_size}",
+      cache_control: hls_cache_control(file_path)
+    }
+
+    case P2p.send_hls_header(resource, stream_id, header) do
+      "ok" ->
+        # Stream the file portion in chunks
+        stream_file_chunks(resource, stream_id, file_path, range_start, content_length)
+        P2p.finish_hls_stream(resource, stream_id)
+
+      {:error, reason} ->
+        Logger.error("Failed to send HLS header: #{inspect(reason)}")
+    end
+  end
+
+  defp stream_file_chunks(resource, stream_id, file_path, offset, remaining) do
+    case File.open(file_path, [:read, :binary]) do
+      {:ok, file} ->
+        try do
+          # Seek to offset
+          {:ok, _} = :file.position(file, offset)
+
+          # Stream chunks
+          do_stream_chunks(resource, stream_id, file, remaining)
+        after
+          File.close(file)
+        end
+
+      {:error, reason} ->
+        Logger.error("Failed to open file for streaming: #{inspect(reason)}")
+    end
+  end
+
+  defp do_stream_chunks(_resource, _stream_id, _file, remaining) when remaining <= 0 do
+    :ok
+  end
+
+  defp do_stream_chunks(resource, stream_id, file, remaining) do
+    bytes_to_read = min(@hls_chunk_size, remaining)
+
+    case IO.binread(file, bytes_to_read) do
+      data when is_binary(data) ->
+        case P2p.send_hls_chunk(resource, stream_id, data) do
+          "ok" ->
+            do_stream_chunks(resource, stream_id, file, remaining - byte_size(data))
+
+          {:error, reason} ->
+            Logger.error("Failed to send HLS chunk: #{inspect(reason)}")
+        end
+
+      :eof ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Failed to read file chunk: #{inspect(reason)}")
+    end
+  end
+
+  defp send_hls_error(resource, stream_id, status, message) do
+    # Send error as header-only response
+    header = %P2p.HlsResponseHeader{
+      status: status,
+      content_type: "text/plain",
+      content_length: byte_size(message),
+      content_range: nil,
+      cache_control: nil
+    }
+
+    case P2p.send_hls_header(resource, stream_id, header) do
+      "ok" ->
+        P2p.send_hls_chunk(resource, stream_id, message)
+        P2p.finish_hls_stream(resource, stream_id)
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp hls_cache_control(path) do
+    case Path.extname(path) do
+      # Playlists should not be cached (may update)
+      ".m3u8" -> "no-cache"
+      # Segments can be cached longer
+      ".ts" -> "max-age=86400"
+      _ -> nil
+    end
   end
 
   # Private helpers for GraphQL handling
@@ -308,17 +626,17 @@ defmodule Mydia.P2p.Server do
     end
   end
 
-  defp build_graphql_context(nil), do: %{}
+  defp build_graphql_context(nil, source), do: %{source: source}
 
-  defp build_graphql_context(auth_token) when is_binary(auth_token) do
+  defp build_graphql_context(auth_token, source) when is_binary(auth_token) do
     # Use Guardian to verify the token and get the user
     case Mydia.Auth.Guardian.verify_token(auth_token) do
       {:ok, user} ->
-        %{current_user: user}
+        %{current_user: user, source: source}
 
       {:error, _reason} ->
         Logger.debug("P2P GraphQL: Invalid auth token")
-        %{}
+        %{source: source}
     end
   end
 
@@ -348,5 +666,24 @@ defmodule Mydia.P2p.Server do
       end)
 
     encode_json(serializable_errors)
+  end
+
+  # Extract the relay URL from the node_addr JSON
+  # The node_addr is a JSON object like:
+  # {"id": "...", "addrs": [{"Relay": "https://..."}, {"Ip": "1.2.3.4:5678"}]}
+  defp extract_relay_url_from_node_addr(nil), do: nil
+
+  defp extract_relay_url_from_node_addr(node_addr_json) when is_binary(node_addr_json) do
+    case Jason.decode(node_addr_json) do
+      {:ok, %{"addrs" => addrs}} when is_list(addrs) ->
+        # Find the first Relay address
+        Enum.find_value(addrs, fn
+          %{"Relay" => relay_url} -> relay_url
+          _ -> nil
+        end)
+
+      _ ->
+        nil
+    end
   end
 end

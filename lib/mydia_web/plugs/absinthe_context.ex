@@ -17,9 +17,11 @@ defmodule MydiaWeb.Plugs.AbsintheContext do
   end
 
   defp build_context(conn) do
+    base = %{source: :http}
+
     case Guardian.Plug.current_resource(conn) do
-      nil -> %{}
-      user -> %{current_user: user}
+      nil -> base
+      user -> Map.put(base, :current_user, user)
     end
   end
 end

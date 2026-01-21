@@ -16,7 +16,7 @@ on:
       - "assets/package-lock.json"
       - "native/mydia_p2p_core/Cargo.toml"
       - "native/mydia_p2p_core/Cargo.lock"
-      - "native/mydia_libp2p/Cargo.toml"
+      - "native/mydia_p2p/Cargo.toml"
   # Allow manual trigger
   workflow_dispatch:
 

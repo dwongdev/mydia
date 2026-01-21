@@ -4,15 +4,26 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1.43", features = ["rt-multi-thread", "sync", "macros", "time"] }
-libp2p = { version = "0.56.0", features = ["tokio", "mdns", "noise", "macros", "tcp", "yamux", "dns", "kad", "ping", "identify", "request-response", "cbor", "relay", "dcutr", "rendezvous"] }
+# Iroh for p2p networking (QUIC-based, simpler than libp2p)
+iroh = "0.95"
+
+# Async runtime
+tokio = { version = "1.43", features = ["rt-multi-thread", "sync", "macros", "time", "io-util"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_cbor = "0.11"
+serde_json = "1.0"
+
+# Random number generation
+rand = "0.9"
+
+# Utilities
 env_logger = "0.11"
 log = "0.4"
 anyhow = "1.0"
 futures = "0.3"
-serde = { version = "1.0", features = ["derive"] }
 uuid = { version = "1.0", features = ["v4"] }
-sha2 = "0.10"
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.14"

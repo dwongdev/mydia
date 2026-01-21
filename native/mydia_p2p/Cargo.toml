@@ -1,11 +1,11 @@
 [package]
-name = "mydia_libp2p"
+name = "mydia_p2p"
 version = "0.1.0"
 authors = []
 edition = "2021"
 
 [lib]
-name = "mydia_libp2p"
+name = "mydia_p2p"
 path = "src/lib.rs"
 crate-type = ["cdylib"]
 

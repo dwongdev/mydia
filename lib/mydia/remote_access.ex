@@ -9,7 +9,7 @@ defmodule Mydia.RemoteAccess do
   require Logger
 
   alias Mydia.Repo
-  alias Mydia.RemoteAccess.{Config, DirectUrls, PairingClaim, RemoteDevice}
+  alias Mydia.RemoteAccess.{Config, PairingClaim, RemoteDevice}
 
   # Config management
 
@@ -428,19 +428,11 @@ defmodule Mydia.RemoteAccess do
         })
         |> Repo.insert()
 
-      # Register under a rendezvous namespace for discovery
-      # This runs async - failures don't affect claim creation
-      Task.start(fn ->
-        case Mydia.Libp2p.Server.register_namespace(namespace, 120) do
-          {:ok, _} ->
-            require Logger
-            Logger.debug("Claim code #{code} registered in rendezvous namespace #{namespace}")
-
-          {:error, reason} ->
-            require Logger
-            Logger.warning("Failed to register claim code in rendezvous: #{inspect(reason)}")
-        end
-      end)
+      # Note: With iroh, pairing coordination is handled via relay server API
+      # The relay server stores the claim code -> node_addr mapping
+      # Players fetch the node_addr via GET /pairing/claim/{code}
+      require Logger
+      Logger.debug("Claim code #{code} registered in relay namespace #{namespace}")
 
       {:ok, claim}
     end
@@ -553,16 +545,14 @@ defmodule Mydia.RemoteAccess do
 
     Logger.info("Resuming #{length(claims)} active pairing claims")
 
+    # With iroh, we don't need to re-register with rendezvous
+    # The relay server maintains the claim code -> node_addr mapping
+    # Just verify claims are still valid on the relay
     Enum.each(claims, fn claim ->
       Task.start(fn ->
         case resolve_claim_on_relay(claim.code) do
-          {:ok, %{"namespace" => namespace}} ->
-            ttl_secs = DateTime.diff(claim.expires_at, DateTime.utc_now(), :second)
-
-            if ttl_secs > 0 do
-              Mydia.Libp2p.Server.register_namespace(namespace, ttl_secs)
-              Logger.debug("Resumed registration for claim #{claim.code}")
-            end
+          {:ok, _} ->
+            Logger.debug("Verified claim #{claim.code} is still active on relay")
 
           {:error, :not_found} ->
             # Claim expired/consumed on relay but not locally?
@@ -701,126 +691,106 @@ defmodule Mydia.RemoteAccess do
     |> String.upcase()
   end
 
-  # Libp2p service management
+  # P2p service management
 
   @doc """
-  Gets the status of the libp2p host.
+  Gets the status of the iroh-based p2p host.
 
   Returns {:ok, status} with a map containing:
-  - peer_id: The libp2p peer ID
+  - node_id: The node's public key / endpoint ID
+  - node_addr: The node's EndpointAddr as JSON (for sharing)
   - running: Whether the host is running
-  - dht_bootstrapped: Whether DHT bootstrap completed
   - connected_peers: Number of connected peers
-  - discovered_peers: Number of discovered peers via mDNS
+  - relay_connected: Whether connected to a relay server
   """
-  def libp2p_status do
+  def p2p_status do
     try do
-      status = Mydia.Libp2p.Server.status()
+      status = Mydia.P2p.Server.status()
       {:ok, status}
     rescue
       _ ->
         {:ok,
-         %Mydia.Libp2p.Server.Status{
-           peer_id: nil,
+         %Mydia.P2p.Server.Status{
+           node_id: nil,
+           node_addr: nil,
            running: false,
-           dht_bootstrapped: false,
            connected_peers: 0,
-           discovered_peers: 0
+           relay_connected: false
          }}
     catch
       :exit, _ ->
         {:ok,
-         %Mydia.Libp2p.Server.Status{
-           peer_id: nil,
+         %Mydia.P2p.Server.Status{
+           node_id: nil,
+           node_addr: nil,
            running: false,
-           dht_bootstrapped: false,
            connected_peers: 0,
-           discovered_peers: 0
+           relay_connected: false
          }}
     end
   end
 
   @doc """
-  Checks if the libp2p service is available and running.
+  Checks if the iroh-based p2p service is available and running.
   """
-  def libp2p_available? do
-    case libp2p_status() do
+  def p2p_available? do
+    case p2p_status() do
       {:ok, %{running: true}} -> true
       _ -> false
     end
   end
 
   @doc """
-  Gets DHT statistics from the libp2p host.
+  Gets network statistics from the iroh-based p2p host.
 
   Returns {:ok, stats} with:
-  - routing_table_size: Number of peers in the Kademlia routing table
-  - active_registrations: Number of active rendezvous namespace registrations
-  - rendezvous_connected: Whether connected to a rendezvous point
+  - connected_peers: Number of currently connected peers
+  - relay_connected: Whether connected to a relay server
   """
   def network_stats do
     try do
-      stats = Mydia.Libp2p.Server.network_stats()
+      stats = Mydia.P2p.Server.network_stats()
       {:ok, stats}
     rescue
       _ ->
         {:ok,
-         %Mydia.Libp2p.NetworkStats{
-           routing_table_size: 0,
-           active_registrations: 0,
-           rendezvous_connected: false,
-           kademlia_enabled: false
+         %Mydia.P2p.NetworkStats{
+           connected_peers: 0,
+           relay_connected: false
          }}
     catch
       :exit, _ ->
         {:ok,
-         %Mydia.Libp2p.NetworkStats{
-           routing_table_size: 0,
-           active_registrations: 0,
-           rendezvous_connected: false,
-           kademlia_enabled: false
+         %Mydia.P2p.NetworkStats{
+           connected_peers: 0,
+           relay_connected: false
          }}
     end
   end
 
   @doc """
-  Gets the rendezvous registration status of a claim code.
-  Returns :not_found, :pending, :registered, or {:error, reason}.
-  """
-  def claim_code_rendezvous_status(claim_code) do
-    try do
-      namespace = "mydia-claim:#{claim_code}"
-      Mydia.Libp2p.Server.namespace_status(namespace)
-    rescue
-      _ -> :not_found
-    catch
-      :exit, _ -> :not_found
-    end
-  end
-
-  @doc """
-  DEPRECATED: Use libp2p_status/0 instead.
+  DEPRECATED: Use p2p_status/0 instead.
   Gets the status of the relay connection (legacy compatibility).
   """
   def relay_status do
-    case libp2p_status() do
+    case p2p_status() do
       {:ok, status} ->
-        # Map libp2p status to legacy relay status format for compatibility
+        # Map p2p status to legacy relay status format for compatibility
         {:ok,
          %{
            connected: status.running,
            registered: status.running,
-           instance_id: status.peer_id
+           instance_id: status.node_id
          }}
     end
   end
 
   @doc """
-  DEPRECATED: Use libp2p_available?/0 instead.
+  DEPRECATED: Use p2p_available?/0 instead.
   Checks if the relay service is available and connected.
   """
   def relay_available? do
-    libp2p_available?()
+    p2p_available?()
   end
 
   @doc """
@@ -867,129 +837,6 @@ defmodule Mydia.RemoteAccess do
   """
   def update_relay_urls(direct_urls) when is_list(direct_urls) do
     {:ok, direct_urls}
-  end
-
-  @doc """
-  Updates the public port used for public IP URLs.
-
-  This port is used when generating sslip.io URLs from the detected public IP.
-  Useful when your external port differs from internal port (e.g., NAT port forwarding).
-
-  Pass `nil` to clear the override and use the default external_port.
-  """
-  def update_public_port(nil) do
-    case get_config() do
-      nil ->
-        {:error, :not_configured}
-
-      config ->
-        case config
-             |> Config.update_public_port_changeset(nil)
-             |> Repo.update() do
-          {:ok, updated_config} ->
-            # Clear the public IP cache to regenerate URLs with new port
-            DirectUrls.clear_public_ip_cache()
-            {:ok, updated_config}
-
-          {:error, _} = error ->
-            error
-        end
-    end
-  end
-
-  def update_public_port(port) when is_integer(port) and port > 0 and port < 65536 do
-    case get_config() do
-      nil ->
-        {:error, :not_configured}
-
-      config ->
-        case config
-             |> Config.update_public_port_changeset(port)
-             |> Repo.update() do
-          {:ok, updated_config} ->
-            # Clear the public IP cache to regenerate URLs with new port
-            DirectUrls.clear_public_ip_cache()
-            {:ok, updated_config}
-
-          {:error, _} = error ->
-            error
-        end
-    end
-  end
-
-  def update_public_port(_), do: {:error, :invalid_port}
-
-  @doc """
-  Updates the public HTTPS port override in the remote access configuration.
-
-  This port is used when generating sslip.io HTTPS URLs from the detected public IP.
-  Useful when your external HTTPS port differs from internal port (e.g., NAT port forwarding).
-
-  Pass `nil` to clear the override and use the default https_port.
-  """
-  def update_public_https_port(nil) do
-    case get_config() do
-      nil ->
-        {:error, :not_configured}
-
-      config ->
-        case config
-             |> Config.update_public_https_port_changeset(nil)
-             |> Repo.update() do
-          {:ok, updated_config} ->
-            DirectUrls.clear_public_ip_cache()
-            {:ok, updated_config}
-
-          {:error, _} = error ->
-            error
-        end
-    end
-  end
-
-  def update_public_https_port(port) when is_integer(port) and port > 0 and port < 65536 do
-    case get_config() do
-      nil ->
-        {:error, :not_configured}
-
-      config ->
-        case config
-             |> Config.update_public_https_port_changeset(port)
-             |> Repo.update() do
-          {:ok, updated_config} ->
-            DirectUrls.clear_public_ip_cache()
-            {:ok, updated_config}
-
-          {:error, _} = error ->
-            error
-        end
-    end
-  end
-
-  def update_public_https_port(_), do: {:error, :invalid_port}
-
-  @doc """
-  Updates both public HTTP and HTTPS port overrides together.
-
-  Accepts a map with `:public_port` and/or `:public_https_port` keys.
-  Pass `nil` for either to clear that override.
-  """
-  def update_public_ports(attrs) when is_map(attrs) do
-    case get_config() do
-      nil ->
-        {:error, :not_configured}
-
-      config ->
-        case config
-             |> Config.update_public_ports_changeset(attrs)
-             |> Repo.update() do
-          {:ok, updated_config} ->
-            DirectUrls.clear_public_ip_cache()
-            {:ok, updated_config}
-
-          {:error, _} = error ->
-            error
-        end
-    end
   end
 
   @doc """

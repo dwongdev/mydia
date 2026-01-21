@@ -108,10 +108,10 @@ defmodule Mydia.Application do
   end
 
   defp remote_access_children do
-    # Only start libp2p server and related processes if remote access is enabled
+    # Only start P2P server and related processes if remote access is enabled
     if Application.get_env(:mydia, :features)[:remote_access_enabled] do
       [
-        Mydia.Libp2p.Server,
+        Mydia.P2p.Server,
         # Resume active pairing claims on startup
         Mydia.RemoteAccess.ResumeClaims
       ]
@@ -144,9 +144,9 @@ defmodule Mydia.Application do
     []
   end
 
-  # Legacy relay service startup - no longer needed with libp2p architecture.
-  # The Mydia.Libp2p.Server is now started in the supervision tree and handles
-  # all p2p connectivity for remote access.
+  # Legacy relay service startup - no longer needed with P2P architecture.
+  # The Mydia.P2p.Server is now started in the supervision tree and handles
+  # all P2P connectivity for remote access.
   defp start_relay_if_enabled do
     :ok
   end

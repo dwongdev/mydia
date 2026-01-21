@@ -1,6 +1,6 @@
-# DNS record for libp2p relay (direct access, not proxied)
+# DNS record for P2P relay (direct access, not proxied)
 # This creates p2p.mydia.dev pointing directly to the server IP
-# Required because libp2p needs direct TCP/UDP access on port 4001
+# Required because iroh needs direct QUIC/UDP access
 #
 # Uses ExternalName service with external-dns annotations to create
 # a DNS record without proxying through Cloudflare

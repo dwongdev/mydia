@@ -181,6 +181,7 @@ run_isolated() {
     app_image=$(get_app_image)
 
     # Use dedicated isolated volumes (separate from dev, but cached between runs)
+    # Note: Source must be read-write because Mix touches .ex files during compilation
     docker run --rm \
         -e MIX_ENV=test \
         -e DATABASE_PATH=/tmp/mydia_test.db \
@@ -189,8 +190,7 @@ run_isolated() {
         -e SECRET_KEY_BASE="test_secret_key_base_at_least_64_bytes_long_for_isolated_container" \
         -e MIX_HOME=/app/.mix \
         -e HEX_HOME=/app/.hex \
-        -v "$(pwd):/app:ro" \
-        -v "$(pwd)/priv:/app/priv" \
+        -v "$(pwd):/app" \
         -v mydia_isolated_build:/app/_build \
         -v mydia_isolated_deps:/app/deps \
         -v mydia_isolated_mix:/app/.mix \

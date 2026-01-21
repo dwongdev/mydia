@@ -21,6 +21,7 @@ class AuthService {
   static const _serverUrlKey = 'server_url';
   static const _userIdKey = 'user_id';
   static const _usernameKey = 'username';
+  static const _relayUrlKey = 'relay_url';
 
   /// Get the stored authentication token.
   Future<String?> getToken() async {
@@ -74,6 +75,26 @@ class AuthService {
   /// Store the username.
   Future<void> setUsername(String username) async {
     await _storage.write(_usernameKey, username);
+  }
+
+  /// Get the stored custom relay URL.
+  /// Returns null if no custom relay is configured (will use default).
+  Future<String?> getRelayUrl() async {
+    return await _storage.read(_relayUrlKey);
+  }
+
+  /// Store a custom relay URL.
+  Future<void> setRelayUrl(String url) async {
+    // Ensure URL doesn't have trailing slash
+    final normalizedUrl = url.endsWith('/')
+        ? url.substring(0, url.length - 1)
+        : url;
+    await _storage.write(_relayUrlKey, normalizedUrl);
+  }
+
+  /// Clear the stored custom relay URL (revert to default).
+  Future<void> clearRelayUrl() async {
+    await _storage.delete(_relayUrlKey);
   }
 
   /// Check if user is authenticated (has both token and server URL).

@@ -272,50 +272,6 @@ if config_env() == :prod do
     import_lists_enabled: import_lists_enabled,
     remote_access_enabled: remote_access_enabled
 
-  # Helper function for safe integer parsing
-  parse_integer = fn value, default ->
-    case value do
-      nil ->
-        default
-
-      str when is_binary(str) ->
-        case Integer.parse(str) do
-          {int, _} -> int
-          :error -> default
-        end
-    end
-  end
-
-  # HTTP port for sslip.io URL generation (primary, for reverse proxy setups)
-  # Defaults to the main application port
-  http_port = parse_integer.(System.get_env("HTTP_PORT"), port)
-
-  # HTTPS port for sslip.io URL generation (secondary, for direct secure access)
-  # Defaults to the HTTPS endpoint port; set to empty string to disable
-  https_port_for_urls =
-    case System.get_env("DIRECT_URLS_HTTPS_PORT") do
-      "" -> nil
-      nil -> https_port
-      value -> parse_integer.(value, https_port)
-    end
-
-  # Public port override (used for sslip.io URL generation for public IP)
-  # Useful when your external port differs from internal port (e.g., NAT port forwarding)
-  public_port =
-    case System.get_env("PUBLIC_PORT") do
-      nil -> nil
-      "" -> nil
-      value -> parse_integer.(value, nil)
-    end
-
-  # Public HTTPS port override (for public IP HTTPS URLs)
-  public_https_port =
-    case System.get_env("PUBLIC_HTTPS_PORT") do
-      nil -> nil
-      "" -> nil
-      value -> parse_integer.(value, nil)
-    end
-
   # Enable/disable public IP detection via external services
   # Default: true (enabled)
   public_ip_enabled =
@@ -339,11 +295,11 @@ if config_env() == :prod do
   # Data directory for certificate storage
   data_dir = System.get_env("MYDIA_DATA_DIR") || "priv/data"
 
+  # Direct URLs configuration
+  # Uses PORT and HTTPS_PORT directly for URL generation (no separate port variables needed)
   config :mydia, :direct_urls,
-    http_port: http_port,
-    https_port: https_port_for_urls,
-    public_port: public_port,
-    public_https_port: public_https_port,
+    http_port: port,
+    https_port: https_port,
     public_ip_enabled: public_ip_enabled,
     external_url: external_url,
     additional_direct_urls: additional_direct_urls,
@@ -408,28 +364,6 @@ if config_env() == :dev do
       keyfile: key_path
     ]
 
-  # Helper function for safe integer parsing
-  parse_integer = fn value, default ->
-    case value do
-      nil ->
-        default
-
-      str when is_binary(str) ->
-        case Integer.parse(str) do
-          {int, _} -> int
-          :error -> default
-        end
-    end
-  end
-
-  # Public port override for NAT port forwarding scenarios
-  public_port =
-    case System.get_env("PUBLIC_PORT") do
-      nil -> nil
-      "" -> nil
-      value -> parse_integer.(value, nil)
-    end
-
   # Disable public IP detection in dev by default (usually not needed)
   public_ip_enabled =
     case System.get_env("PUBLIC_IP_ENABLED") do
@@ -449,10 +383,11 @@ if config_env() == :dev do
       urls -> String.split(urls, ",", trim: true)
     end
 
+  # Direct URLs configuration
+  # Uses PORT and HTTPS_PORT directly for URL generation (no separate port variables needed)
   config :mydia, :direct_urls,
     http_port: http_port,
     https_port: https_port,
-    public_port: public_port,
     public_ip_enabled: public_ip_enabled,
     external_url: external_url,
     additional_direct_urls: additional_direct_urls,
@@ -494,6 +429,19 @@ if config_env() in [:dev, :test] do
     cardigann_enabled: cardigann_enabled,
     import_lists_enabled: import_lists_enabled,
     remote_access_enabled: remote_access_enabled
+end
+
+# P2P bind port configuration (all environments)
+# Required for hole punching when running in Docker
+p2p_bind_port =
+  case System.get_env("P2P_BIND_PORT") do
+    nil -> nil
+    "" -> nil
+    value -> String.to_integer(value)
+  end
+
+if p2p_bind_port do
+  config :mydia, :p2p_bind_port, p2p_bind_port
 end
 
 # Ueberauth OIDC configuration (all environments)

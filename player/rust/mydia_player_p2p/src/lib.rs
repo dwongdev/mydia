@@ -1,5 +1,5 @@
 mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be accurate, and you can change it according to your needs. */
-use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingRequest, HostConfig};
+use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingRequest, GraphQLRequest, HostConfig};
 use flutter_rust_bridge::frb;
 use crate::frb_generated::StreamSink;
 
@@ -41,76 +41,67 @@ pub struct FlutterPairingResponse {
     pub error: Option<String>,
 }
 
-/// Result of a rendezvous discovery
-pub struct FlutterDiscoverResult {
-    pub peers: Vec<FlutterDiscoveredPeer>,
-}
-
-pub struct FlutterDiscoveredPeer {
-    pub peer_id: String,
-    pub addresses: Vec<String>,
-}
-
 /// Network statistics for display in the UI
 pub struct FlutterNetworkStats {
-    pub routing_table_size: usize,
-    pub active_registrations: usize,
-    pub rendezvous_connected: bool,
+    pub connected_peers: usize,
+    pub relay_connected: bool,
+}
+
+/// GraphQL request to send over P2P
+pub struct FlutterGraphQLRequest {
+    pub query: String,
+    pub variables: Option<String>,
+    pub operation_name: Option<String>,
+    pub auth_token: Option<String>,
+}
+
+/// GraphQL response received over P2P
+pub struct FlutterGraphQLResponse {
+    pub data: Option<String>,
+    pub errors: Option<String>,
 }
 
 impl P2pHost {
+    /// Initialize a new P2P host with optional custom relay URL.
     #[frb(sync)]
-    pub fn init() -> (Self, String) {
-        log::info!("P2pHost::init() called");
+    pub fn init(relay_url: Option<String>) -> (Self, String) {
+        log::info!("P2pHost::init() called with relay_url: {:?}", relay_url);
         let config = HostConfig {
-            enable_relay_server: false,
-            // Disable Kademlia for mobile to save battery and data
-            enable_kademlia: false,
-            enable_ipfs_bootstrap: false,
-            // Enable Rendezvous Client for discovery
-            enable_rendezvous_client: true,
-            enable_rendezvous_server: false,
-            bootstrap_peers: vec![],
+            relay_url,
+            bind_port: None,
             keypair_path: None,
-            ..Default::default()
         };
-        let (host, peer_id) = Host::new(config);
-        log::info!("P2pHost created with peer_id: {}", peer_id);
-        (P2pHost { inner: host }, peer_id)
+        let (host, node_id) = Host::new(config);
+        log::info!("P2pHost created with node_id: {}", node_id);
+        (P2pHost { inner: host }, node_id)
     }
 
-    pub fn listen(&self, addr: String) -> anyhow::Result<()> {
-        log::info!("P2pHost::listen() called with addr: {}", addr);
-        match self.inner.listen(addr.clone()) {
+    /// Get this node's EndpointAddr as JSON for sharing.
+    #[frb(sync)]
+    pub fn get_node_addr(&self) -> String {
+        self.inner.get_node_addr()
+    }
+
+    /// Dial a peer using their EndpointAddr JSON.
+    pub fn dial(&self, endpoint_addr_json: String) -> anyhow::Result<()> {
+        log::info!("P2pHost::dial() called");
+        match self.inner.dial(endpoint_addr_json) {
             Ok(_) => {
-                log::info!("listen() succeeded for addr: {}", addr);
+                log::info!("dial() succeeded");
                 Ok(())
             }
             Err(e) => {
-                log::error!("listen() failed for addr {}: {}", addr, e);
-                Err(anyhow::anyhow!("listen failed: {}", e))
-            }
-        }
-    }
-
-    pub fn dial(&self, addr: String) -> anyhow::Result<()> {
-        log::info!("P2pHost::dial() called with addr: {}", addr);
-        match self.inner.dial(addr.clone()) {
-            Ok(_) => {
-                log::info!("dial() succeeded for addr: {}", addr);
-                Ok(())
-            }
-            Err(e) => {
-                log::error!("dial() failed for addr {}: {}", addr, e);
+                log::error!("dial() failed: {}", e);
                 Err(anyhow::anyhow!("dial failed: {}", e))
             }
         }
     }
 
+    /// Start streaming events to Flutter.
     pub fn event_stream(&self, sink: StreamSink<String>) -> anyhow::Result<()> {
         log::info!("P2pHost::event_stream() called");
         let rx = self.inner.event_rx.clone();
-        // Spawn a dedicated thread with its own Tokio runtime for event streaming
+
         std::thread::spawn(move || {
             log::info!("event_stream thread started");
             let rt = match tokio::runtime::Runtime::new() {
@@ -125,17 +116,14 @@ impl P2pHost {
                 log::info!("event_stream listening for events");
                 while let Some(event) = rx.recv().await {
                     let msg = match event {
-                        Event::PeerDiscovered(id) => format!("peer_discovered:{}", id),
-                        Event::PeerExpired(id) => format!("peer_expired:{}", id),
-                        Event::BootstrapCompleted => "bootstrap_completed".to_string(),
-                        Event::NewListenAddr(addr) => format!("new_listen_addr:{}", addr),
-                        Event::RelayReservationReady { relay_peer_id, relayed_addr } => {
-                            format!("relay_ready:{}:{}", relay_peer_id, relayed_addr)
+                        Event::Connected(peer_id) => format!("connected:{}", peer_id),
+                        Event::Disconnected(peer_id) => format!("disconnected:{}", peer_id),
+                        Event::RelayConnected => "relay_connected".to_string(),
+                        Event::Ready { node_addr } => format!("ready:{}", node_addr),
+                        Event::RequestReceived { .. } => {
+                            // Client doesn't handle incoming requests
+                            continue;
                         }
-                        Event::RelayReservationFailed { relay_peer_id, error } => {
-                            format!("relay_failed:{}:{}", relay_peer_id, error)
-                        }
-                        _ => "unknown".to_string(),
                     };
                     log::debug!("event_stream received: {}", msg);
                     if sink.add(msg).is_err() {
@@ -149,64 +137,9 @@ impl P2pHost {
         Ok(())
     }
 
-    /// Add a bootstrap peer and initiate DHT bootstrap.
-    /// The address should include the peer ID, e.g., "/ip4/1.2.3.4/tcp/4001/p2p/12D3..."
-    pub fn bootstrap(&self, addr: String) -> anyhow::Result<()> {
-        log::info!("P2pHost::bootstrap() called with addr: {}", addr);
-        match self.inner.bootstrap(addr.clone()) {
-            Ok(_) => {
-                log::info!("bootstrap() succeeded for addr: {}", addr);
-                Ok(())
-            }
-            Err(e) => {
-                log::error!("bootstrap() failed for addr {}: {}", addr, e);
-                Err(anyhow::anyhow!("bootstrap failed: {}", e))
-            }
-        }
-    }
-
-    /// Connect to a relay server and request a reservation.
-    /// This allows other peers to connect to us through the relay.
-    /// The address should include the relay's peer ID, e.g., "/ip4/1.2.3.4/tcp/4001/p2p/12D3..."
-    pub fn connect_relay(&self, relay_addr: String) -> anyhow::Result<()> {
-        log::info!("P2pHost::connect_relay() called with addr: {}", relay_addr);
-        match self.inner.connect_relay(relay_addr.clone()) {
-            Ok(_) => {
-                log::info!("connect_relay() succeeded for addr: {}", relay_addr);
-                Ok(())
-            }
-            Err(e) => {
-                log::error!("connect_relay() failed for addr {}: {}", relay_addr, e);
-                Err(anyhow::anyhow!("connect_relay failed: {}", e))
-            }
-        }
-    }
-
-    /// Discover peers in a rendezvous namespace.
-    /// Returns the list of discovered peers and their addresses.
-    pub async fn discover_namespace(&self, namespace: String) -> anyhow::Result<FlutterDiscoverResult> {
-        log::info!("P2pHost::discover_namespace() called with namespace: {}", namespace);
-        match self.inner.discover_namespace(namespace.clone()).await {
-            Ok(peers) => {
-                log::info!("discover_namespace() succeeded: found {} peers", peers.len());
-                let flutter_peers = peers.into_iter().map(|p| FlutterDiscoveredPeer {
-                    peer_id: p.peer_id,
-                    addresses: p.addresses,
-                }).collect();
-                
-                Ok(FlutterDiscoverResult {
-                    peers: flutter_peers,
-                })
-            }
-            Err(e) => {
-                log::error!("discover_namespace() failed for {}: {}", namespace, e);
-                Err(anyhow::anyhow!("discover_namespace failed: {}", e))
-            }
-        }
-    }
-
+    /// Send a pairing request to a specific peer.
     pub async fn send_pairing_request(&self, peer: String, req: FlutterPairingRequest) -> anyhow::Result<FlutterPairingResponse> {
-        log::info!("P2pHost::send_pairing_request() called for peer: {}, claim_code: {}", 
+        log::info!("P2pHost::send_pairing_request() called for peer: {}, claim_code: {}",
             peer, req.claim_code);
         let core_req = PairingRequest {
             claim_code: req.claim_code,
@@ -241,15 +174,47 @@ impl P2pHost {
         }
     }
 
-    /// Get network statistics (routing table size, active registrations, etc.).
+    /// Send a GraphQL request to a specific peer.
+    pub async fn send_graphql_request(&self, peer: String, req: FlutterGraphQLRequest) -> anyhow::Result<FlutterGraphQLResponse> {
+        log::info!("P2pHost::send_graphql_request() called for peer: {}", peer);
+        let core_req = GraphQLRequest {
+            query: req.query,
+            variables: req.variables,
+            operation_name: req.operation_name,
+            auth_token: req.auth_token,
+        };
+
+        match self.inner.send_request(peer.clone(), MydiaRequest::GraphQL(core_req)).await {
+            Ok(MydiaResponse::GraphQL(res)) => {
+                log::info!("send_graphql_request() succeeded");
+                Ok(FlutterGraphQLResponse {
+                    data: res.data,
+                    errors: res.errors,
+                })
+            }
+            Ok(MydiaResponse::Error(e)) => {
+                log::error!("send_graphql_request() server error: {}", e);
+                Err(anyhow::anyhow!("Server error: {}", e))
+            }
+            Ok(other) => {
+                log::error!("send_graphql_request() unexpected response type: {:?}", other);
+                Err(anyhow::anyhow!("Unexpected response type"))
+            }
+            Err(e) => {
+                log::error!("send_graphql_request() failed for peer {}: {}", peer, e);
+                Err(anyhow::anyhow!("send_graphql_request failed: {}", e))
+            }
+        }
+    }
+
+    /// Get network statistics.
     #[frb(sync)]
     pub fn get_network_stats(&self) -> FlutterNetworkStats {
         log::debug!("P2pHost::get_network_stats() called");
         let stats = self.inner.get_network_stats();
         FlutterNetworkStats {
-            routing_table_size: stats.routing_table_size,
-            active_registrations: stats.active_registrations,
-            rendezvous_connected: stats.rendezvous_connected,
+            connected_peers: stats.connected_peers,
+            relay_connected: stats.relay_connected,
         }
     }
 }

@@ -1,7 +1,7 @@
 /// Service for reconnecting to a paired Mydia instance after app restart.
 ///
 /// This service implements the reconnection flow for establishing sessions.
-/// Currently supports direct HTTP connections. P2P via libp2p is in development.
+/// Currently supports direct HTTP connections. P2P via iroh is in development.
 library;
 
 import 'dart:async';

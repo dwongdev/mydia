@@ -8,100 +8,105 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<P2pHost>>
 abstract class P2PHost implements RustOpaqueInterface {
-  /// Add a bootstrap peer and initiate DHT bootstrap.
-  /// The address should include the peer ID, e.g., "/ip4/1.2.3.4/tcp/4001/p2p/12D3..."
-  Future<void> bootstrap({required String addr});
+  /// Dial a peer using their EndpointAddr JSON.
+  Future<void> dial({required String endpointAddrJson});
 
-  /// Connect to a relay server and request a reservation.
-  /// This allows other peers to connect to us through the relay.
-  /// The address should include the relay's peer ID, e.g., "/ip4/1.2.3.4/tcp/4001/p2p/12D3..."
-  Future<void> connectRelay({required String relayAddr});
-
-  Future<void> dial({required String addr});
-
-  /// Discover peers in a rendezvous namespace.
-  /// Returns the list of discovered peers and their addresses.
-  Future<FlutterDiscoverResult> discoverNamespace({required String namespace});
-
+  /// Start streaming events to Flutter.
   Stream<String> eventStream();
 
-  /// Get network statistics (routing table size, active registrations, etc.).
+  /// Get network statistics.
   FlutterNetworkStats getNetworkStats();
 
-  static (P2PHost, String) init() => RustLib.instance.api.crateP2PHostInit();
+  /// Get this node's EndpointAddr as JSON for sharing.
+  String getNodeAddr();
 
-  Future<void> listen({required String addr});
+  /// Initialize a new P2P host with optional custom relay URL.
+  static (P2PHost, String) init({String? relayUrl}) =>
+      RustLib.instance.api.crateP2PHostInit(relayUrl: relayUrl);
 
+  /// Send a GraphQL request to a specific peer.
+  Future<FlutterGraphQLResponse> sendGraphqlRequest(
+      {required String peer, required FlutterGraphQLRequest req});
+
+  /// Send a pairing request to a specific peer.
   Future<FlutterPairingResponse> sendPairingRequest(
       {required String peer, required FlutterPairingRequest req});
 }
 
-/// Result of a rendezvous discovery
-class FlutterDiscoverResult {
-  final List<FlutterDiscoveredPeer> peers;
+/// GraphQL request to send over P2P
+class FlutterGraphQLRequest {
+  final String query;
+  final String? variables;
+  final String? operationName;
+  final String? authToken;
 
-  const FlutterDiscoverResult({
-    required this.peers,
-  });
-
-  @override
-  int get hashCode => peers.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is FlutterDiscoverResult &&
-          runtimeType == other.runtimeType &&
-          peers == other.peers;
-}
-
-class FlutterDiscoveredPeer {
-  final String peerId;
-  final List<String> addresses;
-
-  const FlutterDiscoveredPeer({
-    required this.peerId,
-    required this.addresses,
-  });
-
-  @override
-  int get hashCode => peerId.hashCode ^ addresses.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is FlutterDiscoveredPeer &&
-          runtimeType == other.runtimeType &&
-          peerId == other.peerId &&
-          addresses == other.addresses;
-}
-
-/// Network statistics for display in the UI
-class FlutterNetworkStats {
-  final BigInt routingTableSize;
-  final BigInt activeRegistrations;
-  final bool rendezvousConnected;
-
-  const FlutterNetworkStats({
-    required this.routingTableSize,
-    required this.activeRegistrations,
-    required this.rendezvousConnected,
+  const FlutterGraphQLRequest({
+    required this.query,
+    this.variables,
+    this.operationName,
+    this.authToken,
   });
 
   @override
   int get hashCode =>
-      routingTableSize.hashCode ^
-      activeRegistrations.hashCode ^
-      rendezvousConnected.hashCode;
+      query.hashCode ^
+      variables.hashCode ^
+      operationName.hashCode ^
+      authToken.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterGraphQLRequest &&
+          runtimeType == other.runtimeType &&
+          query == other.query &&
+          variables == other.variables &&
+          operationName == other.operationName &&
+          authToken == other.authToken;
+}
+
+/// GraphQL response received over P2P
+class FlutterGraphQLResponse {
+  final String? data;
+  final String? errors;
+
+  const FlutterGraphQLResponse({
+    this.data,
+    this.errors,
+  });
+
+  @override
+  int get hashCode => data.hashCode ^ errors.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterGraphQLResponse &&
+          runtimeType == other.runtimeType &&
+          data == other.data &&
+          errors == other.errors;
+}
+
+/// Network statistics for display in the UI
+class FlutterNetworkStats {
+  final BigInt connectedPeers;
+  final bool relayConnected;
+
+  const FlutterNetworkStats({
+    required this.connectedPeers,
+    required this.relayConnected,
+  });
+
+  @override
+  int get hashCode => connectedPeers.hashCode ^ relayConnected.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is FlutterNetworkStats &&
           runtimeType == other.runtimeType &&
-          routingTableSize == other.routingTableSize &&
-          activeRegistrations == other.activeRegistrations &&
-          rendezvousConnected == other.rendezvousConnected;
+          connectedPeers == other.connectedPeers &&
+          relayConnected == other.relayConnected;
 }
 
 class FlutterPairingRequest {

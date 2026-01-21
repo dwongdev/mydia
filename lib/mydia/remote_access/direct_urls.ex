@@ -205,10 +205,11 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   Detects the public IP and returns sslip.io URLs if successful.
 
   Returns a list of URLs for the detected public IP:
-  - HTTP URL on the configured HTTP port (primary)
-  - HTTPS URL on the configured HTTPS port (if configured)
+  - HTTP URL on the configured PORT (primary)
+  - HTTPS URL on the configured HTTPS_PORT (if configured)
 
-  Uses `get_public_http_port/0` and `get_public_https_port/0` for port configuration.
+  Port configuration is read directly from `:mydia, :direct_urls` config,
+  which uses PORT and HTTPS_PORT environment variables.
 
   Returns a list of URLs on success, or an empty list on failure.
 
@@ -223,8 +224,9 @@ defmodule Mydia.RemoteAccess.DirectUrls do
       {:ok, ip_string} ->
         case parse_ip_string(ip_string) do
           {:ok, ip_tuple} ->
-            http_port = get_public_http_port()
-            https_port = get_public_https_port()
+            config = Application.get_env(:mydia, :direct_urls, [])
+            http_port = Keyword.get(config, :http_port, 4000)
+            https_port = Keyword.get(config, :https_port)
 
             # Build HTTP URL (primary)
             http_url = build_sslip_url(ip_tuple, :http, http_port)
@@ -255,99 +257,6 @@ defmodule Mydia.RemoteAccess.DirectUrls do
       [url | _] -> {:ok, url}
       [] -> {:error, :detection_failed}
     end
-  end
-
-  @doc """
-  Gets the public HTTP port configuration.
-
-  Checks sources in order of precedence:
-  1. Environment variable (PUBLIC_PORT) - highest priority
-  2. Database setting (remote_access_config.public_port)
-  3. http_port from config
-  4. Fallback to 4000
-
-  Returns the port as an integer.
-  """
-  def get_public_http_port do
-    env_config = Application.get_env(:mydia, :direct_urls, [])
-
-    # Environment variable takes precedence
-    case Keyword.get(env_config, :public_port) do
-      port when is_integer(port) ->
-        port
-
-      _ ->
-        # Try database config
-        case get_db_public_port() do
-          port when is_integer(port) ->
-            port
-
-          _ ->
-            # Fall back to http_port or external_port
-            Keyword.get(env_config, :http_port) ||
-              Keyword.get(env_config, :external_port, 4000)
-        end
-    end
-  end
-
-  @doc """
-  Gets the public HTTPS port configuration.
-
-  Checks sources in order of precedence:
-  1. Environment variable (PUBLIC_HTTPS_PORT) - highest priority
-  2. Database setting (remote_access_config.public_https_port)
-  3. https_port from config
-  4. Returns nil if HTTPS is disabled
-
-  Returns the port as an integer, or nil if HTTPS is not configured.
-  """
-  def get_public_https_port do
-    env_config = Application.get_env(:mydia, :direct_urls, [])
-
-    # Environment variable takes precedence
-    case Keyword.get(env_config, :public_https_port) do
-      port when is_integer(port) ->
-        port
-
-      _ ->
-        # Try database config
-        case get_db_public_https_port() do
-          port when is_integer(port) ->
-            port
-
-          _ ->
-            # Fall back to https_port from env config
-            Keyword.get(env_config, :https_port)
-        end
-    end
-  end
-
-  # Legacy function for backwards compatibility
-  @doc false
-  def get_public_port, do: get_public_http_port()
-
-  # Gets the public_port from database config
-  # Returns nil if not set or database unavailable
-  defp get_db_public_port do
-    case Mydia.RemoteAccess.get_config() do
-      %{public_port: port} when is_integer(port) -> port
-      _ -> nil
-    end
-  rescue
-    # Database might not be available during startup
-    _ -> nil
-  end
-
-  # Gets the public_https_port from database config
-  # Returns nil if not set or database unavailable
-  defp get_db_public_https_port do
-    case Mydia.RemoteAccess.get_config() do
-      %{public_https_port: port} when is_integer(port) -> port
-      _ -> nil
-    end
-  rescue
-    # Database might not be available during startup
-    _ -> nil
   end
 
   @doc """

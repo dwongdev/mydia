@@ -11,6 +11,7 @@ defmodule MetadataRelay.Router do
   alias MetadataRelay.OpenLibrary.Handler, as: OpenLibraryHandler
   alias MetadataRelay.OpenSubtitles.Handler, as: SubtitlesHandler
   alias MetadataRelay.Relay.Handler, as: RelayHandler
+  alias MetadataRelay.Pairing.Handler, as: PairingHandler
 
   plug(Plug.Logger)
   plug(Plug.Parsers, parsers: [:urlencoded, :json], json_decoder: Jason)
@@ -55,8 +56,8 @@ defmodule MetadataRelay.Router do
     |> send_resp(200, metrics)
   end
 
-  # Libp2p relay info endpoint
-  # Returns the relay's multiaddr for client bootstrap
+  # P2P relay info endpoint
+  # Returns the relay's address for client bootstrap
   # Must not be cached as peer ID can change on restart
   get "/p2p/info" do
     case MetadataRelay.P2p.Server.get_info() do
@@ -70,7 +71,7 @@ defmodule MetadataRelay.Router do
       {:error, :not_running} ->
         error_response = %{
           error: "P2P relay not running",
-          message: "The libp2p relay server is not enabled or has not started"
+          message: "The P2P relay server is not enabled or has not started"
         }
 
         conn
@@ -407,6 +408,33 @@ defmodule MetadataRelay.Router do
     else
       {:error, :rate_limited} -> send_rate_limited(conn, 60)
     end
+  end
+
+  # ============================================================================
+  # Pairing API - Simplified iroh-based P2P pairing
+  # ============================================================================
+
+  # Create claim code for node_addr
+  post "/pairing/claim" do
+    with :ok <- check_relay_rate_limit(conn, limit: 10, window_ms: 60_000) do
+      handle_pairing_request(conn, fn -> PairingHandler.create_claim(conn.body_params) end)
+    else
+      {:error, :rate_limited} -> send_rate_limited(conn, 60)
+    end
+  end
+
+  # Get node_addr for claim code
+  get "/pairing/claim/:code" do
+    with :ok <- check_relay_rate_limit(conn, limit: 30, window_ms: 60_000) do
+      handle_pairing_request(conn, fn -> PairingHandler.get_claim(code) end)
+    else
+      {:error, :rate_limited} -> send_rate_limited(conn, 60)
+    end
+  end
+
+  # Delete claim code after successful pairing
+  delete "/pairing/claim/:code" do
+    handle_pairing_delete(conn, fn -> PairingHandler.delete_claim(code) end)
   end
 
   # 404 catch-all
@@ -894,5 +922,51 @@ defmodule MetadataRelay.Router do
     |> put_resp_header("retry-after", to_string(retry_after_seconds))
     |> put_resp_content_type("application/json")
     |> send_resp(429, Jason.encode!(error_response))
+  end
+
+  # Pairing request handler
+  defp handle_pairing_request(conn, handler_fn) do
+    case handler_fn.() do
+      {:ok, body} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(200, Jason.encode!(body))
+
+      {:error, :not_found} ->
+        error_response = %{error: "Not found", message: "Claim code not found or expired"}
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(404, Jason.encode!(error_response))
+
+      {:error, {:validation, message}} ->
+        error_response = %{error: "Validation error", message: message}
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(400, Jason.encode!(error_response))
+
+      {:error, reason} ->
+        error_response = %{error: "Internal server error", message: inspect(reason)}
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(500, Jason.encode!(error_response))
+    end
+  end
+
+  # Pairing delete handler (returns 204 No Content)
+  defp handle_pairing_delete(conn, handler_fn) do
+    case handler_fn.() do
+      {:ok, :no_content} ->
+        send_resp(conn, 204, "")
+
+      {:error, reason} ->
+        error_response = %{error: "Internal server error", message: inspect(reason)}
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(500, Jason.encode!(error_response))
+    end
   end
 end

@@ -252,16 +252,15 @@ defmodule Mydia.RemoteAccess.DirectUrlsTest do
       end
     end
 
-    test "uses public_port when configured" do
+    test "uses http_port from config" do
       Application.put_env(:mydia, :direct_urls,
         public_ip_enabled: true,
-        external_port: 4443,
-        public_port: 8443
+        http_port: 8443
       )
 
       case DirectUrls.detect_public_url() do
         {:ok, url} ->
-          # Should use public_port (8443) not external_port (4443)
+          # Should use http_port (8443)
           assert String.ends_with?(url, ":8443")
 
         {:error, :detection_failed} ->
@@ -289,38 +288,6 @@ defmodule Mydia.RemoteAccess.DirectUrlsTest do
     test "can be called multiple times" do
       assert :ok = DirectUrls.clear_public_ip_cache()
       assert :ok = DirectUrls.clear_public_ip_cache()
-    end
-  end
-
-  describe "get_public_port/0" do
-    setup do
-      original_config = Application.get_env(:mydia, :direct_urls, [])
-
-      on_exit(fn ->
-        Application.put_env(:mydia, :direct_urls, original_config)
-      end)
-
-      %{original_config: original_config}
-    end
-
-    test "returns env var public_port when set" do
-      Application.put_env(:mydia, :direct_urls, public_port: 8443, external_port: 4443)
-
-      # Environment variable takes precedence
-      assert DirectUrls.get_public_port() == 8443
-    end
-
-    test "falls back to external_port when public_port not in env" do
-      Application.put_env(:mydia, :direct_urls, external_port: 4443)
-
-      # Falls back to external_port
-      assert DirectUrls.get_public_port() == 4443
-    end
-
-    test "falls back to default 4000 when nothing configured" do
-      Application.put_env(:mydia, :direct_urls, [])
-
-      assert DirectUrls.get_public_port() == 4000
     end
   end
 end

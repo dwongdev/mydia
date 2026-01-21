@@ -7,7 +7,9 @@ import '../auth/auth_storage.dart';
 import '../auth/media_token_service.dart';
 import '../config/web_config.dart';
 import '../connection/connection_provider.dart';
+import '../p2p/p2p_service.dart';
 import 'client.dart';
+import 'p2p_link.dart';
 
 /// Provider for the server URL.
 ///
@@ -57,7 +59,27 @@ final graphqlClientProvider = Provider<GraphQLClient?>((ref) {
 
   debugPrint('[graphqlClientProvider] Building: isP2PMode=${connectionState.isP2PMode}');
 
-  // Wait for both async providers to complete (direct mode)
+  // Check if we're in P2P mode
+  if (connectionState.isP2PMode) {
+    final p2pService = ref.watch(p2pServiceProvider);
+    final instanceId = connectionState.instanceId;
+
+    if (instanceId == null || !p2pService.isInitialized) {
+      debugPrint('[graphqlClientProvider] P2P mode but service not ready');
+      return null;
+    }
+
+    debugPrint('[graphqlClientProvider] Using P2P mode with instance: $instanceId');
+
+    // Create P2P GraphQL client
+    return createP2pGraphQLClient(
+      p2pService: p2pService,
+      serverNodeId: instanceId,
+      getAuthToken: () async => await authService.getToken(),
+    );
+  }
+
+  // Direct mode - wait for both async providers to complete
   return serverUrlAsync.when(
     data: (serverUrl) {
       if (serverUrl == null) return null;

@@ -18,7 +18,7 @@ enum ConnectionType {
   /// Direct HTTP/HTTPS connection.
   direct,
 
-  /// P2P connection via libp2p.
+  /// P2P connection via iroh.
   p2p,
 }
 

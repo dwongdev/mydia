@@ -3,6 +3,7 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpersTest do
 
   alias MydiaWeb.MediaLive.Show.SearchHelpers
   alias Mydia.Indexers.{QualityParser, SearchResult}
+  alias Mydia.Settings.QualityProfile
 
   # Test Fixtures
 
@@ -20,6 +21,16 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpersTest do
 
     Map.merge(defaults, attrs)
     |> then(&struct!(SearchResult, &1))
+  end
+
+  defp build_quality_profile do
+    %QualityProfile{
+      name: "Test Profile",
+      qualities: ["1080p", "720p"],
+      quality_standards: %{
+        preferred_resolutions: ["1080p", "720p"]
+      }
+    }
   end
 
   describe "sort_search_results/5 with title relevance" do
@@ -74,13 +85,16 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpersTest do
     end
 
     test "title relevance bonus is applied when search_query is provided" do
+      profile = build_quality_profile()
+
       results = [
         build_result(%{title: "Some.Other.Show.S01.1080p.WEB-DL", seeders: 100}),
         build_result(%{title: "The.Show.S01E01.1080p.WEB-DL", seeders: 50}),
         build_result(%{title: "The.Show.And.More.S01.1080p.WEB-DL", seeders: 75})
       ]
 
-      sorted = SearchHelpers.sort_search_results(results, :quality, nil, :episode, "The Show S01")
+      sorted =
+        SearchHelpers.sort_search_results(results, :quality, profile, :episode, "The Show S01")
 
       # "The.Show.S01E01" should rank first as it closely matches the query
       first = List.first(sorted)
@@ -117,6 +131,8 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpersTest do
     end
 
     test "title with extra unrelated words gets penalty" do
+      profile = build_quality_profile()
+
       results = [
         # Many extra unrelated words
         build_result(%{
@@ -129,7 +145,13 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpersTest do
       ]
 
       sorted =
-        SearchHelpers.sort_search_results(results, :quality, nil, :episode, "The Girlfriend S01")
+        SearchHelpers.sort_search_results(
+          results,
+          :quality,
+          profile,
+          :episode,
+          "The Girlfriend S01"
+        )
 
       # The clean match should rank first due to penalty on extra words
       first = List.first(sorted)

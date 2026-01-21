@@ -7,54 +7,17 @@ import '../../../core/auth/device_info_service.dart';
 import '../../../core/auth/auth_service.dart';
 import '../../../core/connection/connection_provider.dart';
 import '../../../core/protocol/protocol_version.dart';
-import '../../../core/p2p/libp2p_service.dart';
+import '../../../core/p2p/p2p_service.dart';
 
 // Re-export QrPairingData so UI can import from one place
 export '../../../core/channels/pairing_service.dart' show QrPairingData;
 // Re-export UpdateRequiredError so UI can import from one place
 export '../../../core/protocol/protocol_version.dart' show UpdateRequiredError;
-// Re-export DhtStatus so UI can import from one place
-export '../../../core/p2p/libp2p_service.dart' show DhtStatus;
+// Re-export P2pStatus, defaultRelayUrl, and p2pStatusNotifierProvider so UI can import from one place
+export '../../../core/p2p/p2p_service.dart'
+    show P2pStatus, defaultRelayUrl, p2pStatusNotifierProvider;
 
 part 'login_controller.g.dart';
-
-/// Provider for DHT status that auto-initializes the libp2p service
-/// and streams status updates.
-@riverpod
-class DhtStatusNotifier extends _$DhtStatusNotifier {
-  StreamSubscription<DhtStatus>? _subscription;
-  
-  @override
-  DhtStatus build() {
-    // Initialize the libp2p service and start listening for status updates
-    _initializeAndListen();
-    
-    ref.onDispose(() {
-      _subscription?.cancel();
-    });
-    
-    return const DhtStatus.initial();
-  }
-  
-  Future<void> _initializeAndListen() async {
-    try {
-      final libp2pService = ref.read(libp2pServiceProvider);
-      
-      // Subscribe to DHT status updates
-      _subscription = libp2pService.onDhtStatusChanged.listen((status) {
-        state = status;
-      });
-      
-      // Initialize the service (this auto-bootstraps to IPFS DHT)
-      await libp2pService.initialize();
-      
-      // Emit current status immediately after initialization
-      state = libp2pService.dhtStatus;
-    } catch (e) {
-      debugPrint('[DhtStatusNotifier] Failed to initialize: $e');
-    }
-  }
-}
 
 /// Connection mode for the login flow.
 enum ConnectionMode {
@@ -167,10 +130,10 @@ class LoginController extends _$LoginController {
     );
 
     try {
-      // Get the libp2p service from the provider (already initialized in app.dart)
-      final libp2pService = ref.read(libp2pServiceProvider);
+      // Get the P2P service from the provider (already initialized in app.dart)
+      final p2pService = ref.read(p2pServiceProvider);
       final pairingService = PairingService(
-        libp2pService: libp2pService,
+        p2pService: p2pService,
       );
       final deviceInfo = DeviceInfoService();
       final deviceName = await deviceInfo.getDeviceName();
@@ -357,11 +320,10 @@ class LoginController extends _$LoginController {
     );
 
     try {
-      // Get the libp2p service from the provider (already initialized in app.dart)
-      final libp2pService = ref.read(libp2pServiceProvider);
+      // Get the P2P service from the provider (already initialized in app.dart)
+      final p2pService = ref.read(p2pServiceProvider);
       final pairingService = PairingService(
-        libp2pService: libp2pService,
-        // relayUrl defaults to the global relay - QR code no longer contains relay URL
+        p2pService: p2pService,
       );
       final deviceInfo = DeviceInfoService();
       final deviceName = await deviceInfo.getDeviceName();

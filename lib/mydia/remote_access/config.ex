@@ -19,9 +19,6 @@ defmodule Mydia.RemoteAccess.Config do
     field :enabled, :boolean, default: false
     field :direct_urls, {:array, :string}, default: []
     field :cert_fingerprint, :string
-    # Port overrides for public IP URLs (overrides env var if set)
-    field :public_port, :integer
-    field :public_https_port, :integer
     # Authentication token for the relay service
     field :relay_token, :string
 
@@ -40,8 +37,6 @@ defmodule Mydia.RemoteAccess.Config do
       :enabled,
       :direct_urls,
       :cert_fingerprint,
-      :public_port,
-      :public_https_port,
       :relay_token
     ])
     |> validate_required([
@@ -50,8 +45,6 @@ defmodule Mydia.RemoteAccess.Config do
       :static_private_key_encrypted
     ])
     |> validate_length(:instance_id, min: 1, max: 255)
-    |> validate_number(:public_port, greater_than: 0, less_than: 65536)
-    |> validate_number(:public_https_port, greater_than: 0, less_than: 65536)
     |> unique_constraint(:instance_id)
   end
 
@@ -67,33 +60,5 @@ defmodule Mydia.RemoteAccess.Config do
   """
   def update_direct_urls_changeset(config, direct_urls) do
     change(config, direct_urls: direct_urls)
-  end
-
-  @doc """
-  Changeset for updating public port.
-  """
-  def update_public_port_changeset(config, public_port) do
-    config
-    |> change(public_port: public_port)
-    |> validate_number(:public_port, greater_than: 0, less_than: 65536)
-  end
-
-  @doc """
-  Changeset for updating public HTTPS port.
-  """
-  def update_public_https_port_changeset(config, public_https_port) do
-    config
-    |> change(public_https_port: public_https_port)
-    |> validate_number(:public_https_port, greater_than: 0, less_than: 65536)
-  end
-
-  @doc """
-  Changeset for updating both public ports.
-  """
-  def update_public_ports_changeset(config, attrs) do
-    config
-    |> cast(attrs, [:public_port, :public_https_port])
-    |> validate_number(:public_port, greater_than: 0, less_than: 65536)
-    |> validate_number(:public_https_port, greater_than: 0, less_than: 65536)
   end
 end

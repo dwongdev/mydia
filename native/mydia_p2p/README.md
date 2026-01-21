@@ -1,4 +1,4 @@
-# NIF for Elixir.Mydia.Libp2p
+# NIF for Elixir.Mydia.P2p
 
 ## To build the NIF module:
 
@@ -7,8 +7,8 @@
 ## To load the NIF:
 
 ```elixir
-defmodule Mydia.Libp2p do
-  use Rustler, otp_app: :mydia, crate: "mydia_libp2p"
+defmodule Mydia.P2p do
+  use Rustler, otp_app: :mydia, crate: "mydia_p2p"
 
   # When your NIF is loaded, it will override this function.
   def add(_a, _b), do: :erlang.nif_error(:nif_not_loaded)

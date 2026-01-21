@@ -30,13 +30,13 @@
           platformVersions = [ "30" "33" "34" "35" "36" ];
           abiVersions = [ "arm64-v8a" "armeabi-v7a" "x86_64" ];
           includeNDK = true;
-          ndkVersions = [ "27.0.12077973" ];
+          ndkVersions = [ "27.0.12077973" "28.2.13676358" ];
           cmakeVersions = [ "3.22.1" ];
           includeEmulator = false;
         };
 
         androidSdk = androidComposition.androidsdk;
-        ndkPath = "${androidSdk}/libexec/android-sdk/ndk/27.0.12077973";
+        ndkPath = "${androidSdk}/libexec/android-sdk/ndk/28.2.13676358";
 
         # Rust toolchain with Android targets
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
@@ -119,11 +119,12 @@
 
           shellHook = ''
             export PATH="${androidSdk}/libexec/android-sdk/platform-tools:$PATH"
-            export PATH="${ndkPath}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
-            
+            # Note: Do NOT add NDK toolchain to PATH - it interferes with Linux builds.
+            # Rust cross-compilation uses the CARGO_TARGET_* env vars instead.
+
             # Delete stale local.properties that may have wrong SDK paths
             rm -f android/local.properties 2>/dev/null || true
-            
+
             echo ""
             echo "Flutter + Rust Android development shell"
             echo ""

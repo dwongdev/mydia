@@ -227,7 +227,7 @@ defmodule MetadataRelay.Relay do
   @doc """
   Resolves a claim code to a rendezvous namespace and connection info.
 
-  Used by the player to find the server via libp2p rendezvous.
+  Used by the player to find the server via P2P rendezvous.
   """
   def resolve_claim(code) do
     code = normalize_claim_code(code)

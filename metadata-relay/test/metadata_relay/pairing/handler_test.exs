@@ -1,0 +1,190 @@
+defmodule MetadataRelay.Pairing.HandlerTest do
+  use ExUnit.Case, async: false
+
+  alias MetadataRelay.Router
+
+  setup do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(MetadataRelay.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(MetadataRelay.Repo, {:shared, self()})
+
+    # Start the rate limiter if not already started
+    case GenServer.whereis(MetadataRelay.RateLimiter) do
+      nil -> start_supervised!(MetadataRelay.RateLimiter)
+      _pid -> :ok
+    end
+
+    # Clear the rate limiter table before each test
+    :ets.delete_all_objects(:rate_limiter)
+
+    :ok
+  end
+
+  @valid_node_addr Jason.encode!(%{
+                     "relay_url" => "https://relay.example.com",
+                     "node_id" => "abc123def456"
+                   })
+
+  describe "POST /pairing/claim" do
+    test "creates a claim and returns claim_code" do
+      params = %{"node_addr" => @valid_node_addr}
+
+      conn =
+        Plug.Test.conn(:post, "/pairing/claim", params)
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+        |> Plug.Parsers.call(Plug.Parsers.init(parsers: [:json], json_decoder: Jason))
+        |> Router.call([])
+
+      assert conn.status == 200
+      response = Jason.decode!(conn.resp_body)
+      assert is_binary(response["claim_code"])
+      assert String.length(response["claim_code"]) == 6
+    end
+
+    test "returns 400 when node_addr is missing" do
+      conn =
+        Plug.Test.conn(:post, "/pairing/claim", %{})
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+        |> Plug.Parsers.call(Plug.Parsers.init(parsers: [:json], json_decoder: Jason))
+        |> Router.call([])
+
+      assert conn.status == 400
+      response = Jason.decode!(conn.resp_body)
+      assert response["error"] == "Validation error"
+      assert response["message"] =~ "node_addr is required"
+    end
+
+    test "returns 400 when node_addr is not valid JSON" do
+      params = %{"node_addr" => "not-valid-json"}
+
+      conn =
+        Plug.Test.conn(:post, "/pairing/claim", params)
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+        |> Plug.Parsers.call(Plug.Parsers.init(parsers: [:json], json_decoder: Jason))
+        |> Router.call([])
+
+      assert conn.status == 400
+      response = Jason.decode!(conn.resp_body)
+      assert response["error"] == "Validation error"
+      assert response["message"] =~ "node_addr"
+    end
+  end
+
+  describe "GET /pairing/claim/:code" do
+    test "returns node_addr for valid code" do
+      # First create a claim
+      {:ok, claim} = MetadataRelay.Pairing.create_claim(@valid_node_addr)
+
+      conn =
+        Plug.Test.conn(:get, "/pairing/claim/#{claim.code}")
+        |> Router.call([])
+
+      assert conn.status == 200
+      response = Jason.decode!(conn.resp_body)
+      assert response["node_addr"] == @valid_node_addr
+    end
+
+    test "returns 404 for non-existent code" do
+      conn =
+        Plug.Test.conn(:get, "/pairing/claim/NONEXISTENT")
+        |> Router.call([])
+
+      assert conn.status == 404
+      response = Jason.decode!(conn.resp_body)
+      assert response["error"] == "Not found"
+    end
+
+    test "returns 404 for expired code" do
+      # Create an expired claim
+      {:ok, _claim} =
+        MetadataRelay.Pairing.create_claim(@valid_node_addr, ttl_seconds: -1, code: "EXPIRE")
+
+      conn =
+        Plug.Test.conn(:get, "/pairing/claim/EXPIRE")
+        |> Router.call([])
+
+      # Returns 404 (not 410) to prevent enumeration
+      assert conn.status == 404
+      response = Jason.decode!(conn.resp_body)
+      assert response["error"] == "Not found"
+    end
+
+    test "normalizes code (case insensitive)" do
+      {:ok, claim} = MetadataRelay.Pairing.create_claim(@valid_node_addr, code: "ABCDEF")
+
+      conn =
+        Plug.Test.conn(:get, "/pairing/claim/abcdef")
+        |> Router.call([])
+
+      assert conn.status == 200
+      response = Jason.decode!(conn.resp_body)
+      assert response["node_addr"] == @valid_node_addr
+    end
+  end
+
+  describe "DELETE /pairing/claim/:code" do
+    test "deletes existing claim and returns 204" do
+      {:ok, claim} = MetadataRelay.Pairing.create_claim(@valid_node_addr)
+
+      conn =
+        Plug.Test.conn(:delete, "/pairing/claim/#{claim.code}")
+        |> Router.call([])
+
+      assert conn.status == 204
+      assert conn.resp_body == ""
+
+      # Verify claim is deleted
+      get_conn =
+        Plug.Test.conn(:get, "/pairing/claim/#{claim.code}")
+        |> Router.call([])
+
+      assert get_conn.status == 404
+    end
+
+    test "returns 204 even for non-existent claim (idempotent)" do
+      conn =
+        Plug.Test.conn(:delete, "/pairing/claim/NONEXISTENT")
+        |> Router.call([])
+
+      assert conn.status == 204
+    end
+  end
+
+  describe "full pairing flow" do
+    test "complete flow: create, get, delete" do
+      # Step 1: Server creates claim with its node_addr
+      create_params = %{"node_addr" => @valid_node_addr}
+
+      create_conn =
+        Plug.Test.conn(:post, "/pairing/claim", create_params)
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+        |> Plug.Parsers.call(Plug.Parsers.init(parsers: [:json], json_decoder: Jason))
+        |> Router.call([])
+
+      assert create_conn.status == 200
+      %{"claim_code" => code} = Jason.decode!(create_conn.resp_body)
+
+      # Step 2: Client looks up the code to get node_addr
+      get_conn =
+        Plug.Test.conn(:get, "/pairing/claim/#{code}")
+        |> Router.call([])
+
+      assert get_conn.status == 200
+      %{"node_addr" => returned_node_addr} = Jason.decode!(get_conn.resp_body)
+      assert returned_node_addr == @valid_node_addr
+
+      # Step 3: After successful pairing, server deletes the claim
+      delete_conn =
+        Plug.Test.conn(:delete, "/pairing/claim/#{code}")
+        |> Router.call([])
+
+      assert delete_conn.status == 204
+
+      # Verify claim is gone
+      verify_conn =
+        Plug.Test.conn(:get, "/pairing/claim/#{code}")
+        |> Router.call([])
+
+      assert verify_conn.status == 404
+    end
+  end
+end

@@ -11,43 +11,34 @@ fn load(env: Env, _info: Term) -> bool {
     true
 }
 
+/// Start a P2P host using iroh.
+///
+/// Note: With the migration to iroh, the metadata-relay no longer needs to run
+/// its own relay server. iroh uses its own public relay infrastructure.
+/// This function is kept for backwards compatibility but the host doesn't
+/// provide relay functionality - it's just a regular iroh endpoint.
 #[rustler::nif]
 fn start_relay() -> Result<(ResourceArc<HostResource>, String), rustler::Error> {
-    // Get keypair path from environment variable for persistent peer ID
-    let keypair_path = std::env::var("LIBP2P_KEYPAIR_PATH").ok();
-    
-    // Enable Relay Server with rendezvous (Kademlia disabled)
+    // Get secret key path from environment variable for persistent identity
+    let secret_key_path = std::env::var("LIBP2P_KEYPAIR_PATH").ok();
+
+    // Simplified config for iroh - no relay server functionality
     let config = HostConfig {
-        enable_relay_server: true,
-        enable_rendezvous_server: true,
-        enable_kademlia: false,  // Disabled - using rendezvous for discovery
-        bootstrap_peers: vec![],
-        keypair_path,
-        ..Default::default()
+        relay_url: None,  // Use default iroh relays
+        secret_key_path,
     };
-    let (host, peer_id_str) = Host::new(config);
-    
-    // We can also start listening immediately on a standard port if configured,
-    // or let Elixir call listen().
-    
+
+    let (host, node_id_str) = Host::new(config);
+
     let resource = HostResource { host };
-    Ok((ResourceArc::new(resource), peer_id_str))
+    Ok((ResourceArc::new(resource), node_id_str))
 }
 
+/// Get the node address for this host.
+/// Returns the EndpointAddr as a JSON string.
 #[rustler::nif]
-fn listen(resource: ResourceArc<HostResource>, addr: String) -> Result<String, rustler::Error> {
-    match resource.host.listen(addr) {
-        Ok(_) => Ok("ok".to_string()),
-        Err(e) => Err(rustler::Error::Term(Box::new(e))),
-    }
+fn get_node_addr(resource: ResourceArc<HostResource>) -> String {
+    resource.host.get_node_addr()
 }
 
-#[rustler::nif]
-fn add_external_address(resource: ResourceArc<HostResource>, addr: String) -> Result<String, rustler::Error> {
-    match resource.host.add_external_address(addr) {
-        Ok(_) => Ok("ok".to_string()),
-        Err(e) => Err(rustler::Error::Term(Box::new(e))),
-    }
-}
-
-rustler::init!("Elixir.MetadataRelay.P2p", [start_relay, listen, add_external_address], load = load);
+rustler::init!("Elixir.MetadataRelay.P2p", load = load);

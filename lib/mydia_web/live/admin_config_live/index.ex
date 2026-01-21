@@ -253,10 +253,10 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   end
 
   @impl true
-  def handle_info({:remote_access_refresh_libp2p, component_id}, socket) do
+  def handle_info({:remote_access_refresh_p2p, component_id}, socket) do
     send_update(MydiaWeb.AdminConfigLive.RemoteAccessComponent,
       id: component_id,
-      refresh_libp2p: true
+      refresh_p2p: true
     )
 
     {:noreply, socket}

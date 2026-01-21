@@ -120,7 +120,7 @@ defmodule Mydia.Collections.SmartRulesTest do
       movie = media_item_fixture(%{type: "movie", title: "Test Movie"})
 
       rules = %{"match_type" => "all", "conditions" => []}
-      items = SmartRules.execute_query(rules)
+      items = SmartRules.execute_query!(rules)
 
       assert Enum.any?(items, &(&1.id == movie.id))
     end
@@ -136,7 +136,7 @@ defmodule Mydia.Collections.SmartRulesTest do
         ]
       }
 
-      items = SmartRules.execute_query(rules)
+      items = SmartRules.execute_query!(rules)
 
       assert length(items) == 1
       assert hd(items).id == movie.id
@@ -153,7 +153,7 @@ defmodule Mydia.Collections.SmartRulesTest do
         ]
       }
 
-      items = SmartRules.execute_query(rules)
+      items = SmartRules.execute_query!(rules)
       item_ids = Enum.map(items, & &1.id)
 
       assert movie.id in item_ids
@@ -171,7 +171,7 @@ defmodule Mydia.Collections.SmartRulesTest do
         ]
       }
 
-      items = SmartRules.execute_query(rules)
+      items = SmartRules.execute_query!(rules)
 
       assert length(items) == 1
       assert hd(items).id == recent.id
@@ -189,7 +189,7 @@ defmodule Mydia.Collections.SmartRulesTest do
         ]
       }
 
-      items = SmartRules.execute_query(rules)
+      items = SmartRules.execute_query!(rules)
 
       assert length(items) == 1
       assert hd(items).id == in_range.id
@@ -205,7 +205,7 @@ defmodule Mydia.Collections.SmartRulesTest do
         ]
       }
 
-      items = SmartRules.execute_query(rules)
+      items = SmartRules.execute_query!(rules)
 
       assert length(items) == 1
       assert hd(items).id == match.id
@@ -221,7 +221,7 @@ defmodule Mydia.Collections.SmartRulesTest do
         ]
       }
 
-      items = SmartRules.execute_query(rules)
+      items = SmartRules.execute_query!(rules)
 
       assert Enum.all?(items, & &1.monitored)
       assert Enum.any?(items, &(&1.id == monitored.id))
@@ -240,7 +240,7 @@ defmodule Mydia.Collections.SmartRulesTest do
         ]
       }
 
-      items = SmartRules.execute_query(rules)
+      items = SmartRules.execute_query!(rules)
 
       assert length(items) == 1
       assert hd(items).id == match.id
@@ -259,7 +259,7 @@ defmodule Mydia.Collections.SmartRulesTest do
         ]
       }
 
-      items = SmartRules.execute_query(rules)
+      items = SmartRules.execute_query!(rules)
       item_ids = Enum.map(items, & &1.id)
 
       assert movie.id in item_ids
@@ -270,7 +270,7 @@ defmodule Mydia.Collections.SmartRulesTest do
       for _ <- 1..5, do: media_item_fixture(%{type: "movie"})
 
       rules = %{"limit" => 3}
-      items = SmartRules.execute_query(rules)
+      items = SmartRules.execute_query!(rules)
 
       assert length(items) == 3
     end
@@ -279,7 +279,7 @@ defmodule Mydia.Collections.SmartRulesTest do
       for _ <- 1..5, do: media_item_fixture(%{type: "movie"})
 
       rules = %{"limit" => 10}
-      items = SmartRules.execute_query(rules, limit: 2)
+      items = SmartRules.execute_query!(rules, limit: 2)
 
       assert length(items) == 2
     end
@@ -292,7 +292,7 @@ defmodule Mydia.Collections.SmartRulesTest do
         "sort" => %{"field" => "title", "direction" => "asc"}
       }
 
-      items = SmartRules.execute_query(rules)
+      items = SmartRules.execute_query!(rules)
       titles = Enum.map(items, & &1.title)
 
       assert titles == Enum.sort(titles)
@@ -304,7 +304,7 @@ defmodule Mydia.Collections.SmartRulesTest do
       json =
         ~s({"match_type": "all", "conditions": [{"field": "type", "operator": "eq", "value": "movie"}]})
 
-      items = SmartRules.execute_query(json)
+      items = SmartRules.execute_query!(json)
 
       assert length(items) >= 1
     end
@@ -360,7 +360,7 @@ defmodule Mydia.Collections.SmartRulesTest do
         ]
       }
 
-      items = SmartRules.execute_query(rules)
+      items = SmartRules.execute_query!(rules)
 
       assert length(items) == 1
       assert hd(items).id == high_rated.id
@@ -378,7 +378,7 @@ defmodule Mydia.Collections.SmartRulesTest do
         ]
       }
 
-      items = SmartRules.execute_query(rules)
+      items = SmartRules.execute_query!(rules)
 
       assert length(items) == 1
       assert hd(items).id == action.id
@@ -394,7 +394,7 @@ defmodule Mydia.Collections.SmartRulesTest do
         ]
       }
 
-      items = SmartRules.execute_query(rules)
+      items = SmartRules.execute_query!(rules)
 
       assert length(items) == 1
       assert hd(items).id == japanese.id

@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-// WebRTC removed - using libp2p for P2P connections
+// WebRTC removed - using iroh for P2P connections
 import 'package:go_router/go_router.dart';
 import 'package:graphql_flutter/graphql_flutter.dart';
 import 'package:http/http.dart' as http;
@@ -20,7 +20,7 @@ import '../../../core/utils/web_lifecycle.dart' as web_lifecycle;
 import '../../../core/player/platform_features.dart';
 import '../../../core/player/duration_override.dart';
 import '../../../core/player/streaming_strategy.dart';
-// WebRTC connection manager removed - using libp2p
+// WebRTC connection manager removed - using iroh
 import '../../../core/cast/cast_providers.dart';
 import '../../../core/downloads/download_providers.dart';
 import '../../widgets/resume_dialog.dart';
@@ -346,9 +346,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
   }
 
-  /// Initialize P2P playback (not yet implemented - using libp2p)
+  /// Initialize P2P playback (not yet implemented - using iroh)
   Future<void> _initializeP2PPlayback() async {
-    // P2P streaming via libp2p is not yet implemented
+    // P2P streaming via iroh is not yet implemented
     setState(() {
       _error = 'P2P streaming is not yet available. Please use direct connection.';
       _isLoading = false;

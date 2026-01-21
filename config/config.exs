@@ -354,11 +354,18 @@ config :mydia, :features,
   # When enabled, shows the Import Lists UI for syncing external lists (TMDB watchlists, etc.)
   # Can be overridden via ENABLE_IMPORT_LISTS environment variable
   import_lists_enabled: false,
-  # Enable/disable Remote Access feature (libp2p-based peer-to-peer connectivity)
-  # When enabled, starts the libp2p server for remote device pairing and media streaming
+  # Enable/disable Remote Access feature (iroh-based peer-to-peer connectivity)
+  # When enabled, starts the p2p server for remote device pairing and media streaming
   # Set to true to enable remote access functionality
   # Can be overridden via ENABLE_REMOTE_ACCESS environment variable
   remote_access_enabled: false
+
+# P2P networking configuration (iroh)
+# UDP port for direct peer-to-peer connections (enables hole punching)
+# Required when running in Docker to allow direct connections without relay
+# Set to nil for random port (works via relay but higher latency)
+# Can be overridden via P2P_BIND_PORT environment variable
+config :mydia, :p2p_bind_port, nil
 
 # Configure Ueberauth with empty providers by default
 # This is overridden in dev.exs if OIDC is configured

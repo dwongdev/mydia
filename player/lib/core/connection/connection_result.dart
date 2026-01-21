@@ -9,7 +9,7 @@ enum ConnectionType {
   /// Direct HTTPS connection to instance.
   direct,
 
-  /// P2P connection via libp2p.
+  /// P2P connection via iroh.
   p2p,
 }
 

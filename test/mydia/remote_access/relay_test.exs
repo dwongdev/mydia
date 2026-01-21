@@ -52,8 +52,9 @@ defmodule Mydia.RemoteAccess.RelayTest do
 
   describe "relay context helpers" do
     test "relay_status/0 delegates to Relay module" do
-      # Without a running relay, should get error
-      assert {:error, :not_running} = RemoteAccess.relay_status()
+      # Without a running relay, should return disconnected status
+      assert {:ok, %{connected: false, registered: false, instance_id: nil}} =
+               RemoteAccess.relay_status()
     end
 
     test "relay_available?/0 checks registration status" do

@@ -1,9 +1,9 @@
 defmodule Mydia.RemoteAccess.Relay do
   @moduledoc """
-  DEPRECATED: The WebSocket-based relay has been replaced by libp2p.
+  DEPRECATED: The WebSocket-based relay has been replaced by P2P.
 
   This module provides backwards compatibility stubs for the old Relay API.
-  All functionality now goes through the libp2p system - see Mydia.Libp2p.
+  All functionality now goes through the P2P system - see Mydia.P2p.
   """
 
   alias Mydia.RemoteAccess
@@ -25,9 +25,9 @@ defmodule Mydia.RemoteAccess.Relay do
         {:error, :remote_access_disabled}
 
       %{enabled: true} ->
-        # In the new system, libp2p handles connectivity
+        # In the new system, P2P handles connectivity
         # This is a compatibility stub
-        {:error, :use_libp2p}
+        {:error, :use_p2p}
     end
   end
 

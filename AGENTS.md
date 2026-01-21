@@ -12,21 +12,21 @@ Mydia is a self-hosted media management application for organizing and tracking 
 
 The application is designed to be deployed on personal servers or home lab environments, giving users complete control over their media collection data.
 
-## Remote Access Architecture (Libp2p)
+## Remote Access Architecture (P2P)
 
-Mydia uses a decentralized **libp2p** architecture for remote access.
+Mydia uses a decentralized **p2p** architecture for remote access.
 
 ### Key Components
 
 - **Core (Rust)**: The shared networking logic (Host, Swarm, DHT, mDNS) is implemented in a pure Rust crate (`native/mydia_p2p_core`). This ensures protocol parity between client and server.
-- **Backend (Elixir)**: The Phoenix app wraps the core crate using a Rustler NIF (`Mydia.Libp2p`). It acts as a permanent node in the mesh.
+- **Backend (Elixir)**: The Phoenix app wraps the core crate using a Rustler NIF (`Mydia.P2p`). It acts as a permanent node in the mesh.
 - **Frontend (Flutter)**: The player app wraps the same core crate using `flutter_rust_bridge`. It connects to the backend via the p2p mesh for discovery and control.
 
 ### Connectivity
 
 - **Discovery**: Nodes find each other via mDNS (local network) and Kademlia DHT (internet).
 - **Transport**: Connections are established over TCP or QUIC, secured with Noise encryption.
-- **Media**: Media streams (HLS) are served over the libp2p connection (via a local proxy in the client).
+- **Media**: Media streams (HLS) are served over the p2p connection (via a local proxy in the client).
 
 ## Metadata Relay Service
 

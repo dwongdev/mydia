@@ -1,6 +1,6 @@
 defmodule MetadataRelay.Relay.Namespace do
   @moduledoc """
-  Handles namespace derivation for libp2p rendezvous.
+  Handles namespace derivation for P2P rendezvous.
 
   We use a time-based pepper rotation scheme to derive the rendezvous namespace
   from the short claim code. This prevents attackers from brute-forcing the

@@ -23,10 +23,19 @@ Complete reference of all environment variables supported by Mydia.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PHX_HOST` | Public hostname for the application | `localhost` |
-| `PORT` | Web server port | `4000` |
+| `PORT` | HTTP server port (also used for URL generation) | `4000` |
+| `HTTPS_PORT` | HTTPS server port (also used for URL generation) | `4443` |
 | `HOST` | Server binding address | `0.0.0.0` |
 | `URL_SCHEME` | URL scheme for external links | `http` |
 | `PHX_CHECK_ORIGIN` | WebSocket origin checking | Allows `PHX_HOST` with any scheme |
+
+### Port Configuration Notes
+
+The `PORT` and `HTTPS_PORT` environment variables serve dual purposes:
+1. **Server binding** - The ports on which the HTTP and HTTPS servers listen
+2. **URL generation** - Used to generate direct access URLs (e.g., sslip.io URLs for remote access)
+
+This simplifies configuration by eliminating the need for separate port variables for URL generation.
 
 ### PHX_CHECK_ORIGIN Options
 

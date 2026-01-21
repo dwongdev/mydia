@@ -39,11 +39,15 @@ services:
       # Mix environment
       MIX_ENV: dev
 
-      # Rust logging for libp2p NIF
+      # Rust logging for p2p NIF
       RUST_LOG: info
 
       # Metadata relay configuration
       METADATA_RELAY_URL: ${METADATA_RELAY_URL:-https://relay.mydia.dev}
+
+      # P2P bind port for direct connections (iroh hole punching)
+      # Must match the exposed UDP port below
+      P2P_BIND_PORT: 4000
 
       # For interactive debugging
       MIX_HOME: /app/.mix
@@ -52,9 +56,8 @@ services:
       # Flutter cache
       PUB_CACHE: /app/player/.pub-cache
     ports:
-      - "4000:4000"      # Phoenix HTTP
-      - "4001:4001/tcp"  # libp2p TCP
-      - "4001:4001/udp"  # libp2p QUIC
+      - "4000:4000"      # Phoenix HTTP (TCP) + P2P QUIC (UDP) - same port, different protocols
+      - "4000:4000/udp"  # P2P QUIC (iroh) - enables direct connections via hole punching
     volumes:
       # Mount source code for live reloading
       - .:/app

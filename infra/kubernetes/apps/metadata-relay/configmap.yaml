@@ -18,14 +18,13 @@ data:
   # Redis cache for distributed/persistent caching
   REDIS_URL: "redis://redis:6379"
 
-  # Libp2p Relay Server Configuration
+  # P2P Relay Server Configuration (iroh-based)
   # Replaces legacy TURN server for NAT traversal and signaling
-  LIBP2P_RELAY_ENABLED: "true"
-  LIBP2P_RENDEZVOUS_ENABLED: "true"
-  LIBP2P_PORT: "4001"
-  # External hostname for libp2p (DNS-only record, not proxied by Cloudflare)
-  LIBP2P_EXTERNAL_HOST: "p2p.mydia.dev"
+  P2P_RELAY_ENABLED: "true"
+  P2P_PORT: "4001"
+  # External hostname for P2P (DNS-only record, not proxied by Cloudflare)
+  P2P_EXTERNAL_HOST: "p2p.mydia.dev"
   # External IP for clients that can't resolve DNS (e.g., Android without DNS transport)
-  LIBP2P_EXTERNAL_IP: "149.56.129.39"
-  # Path to persist libp2p keypair for stable peer ID across restarts
-  LIBP2P_KEYPAIR_PATH: "/data/libp2p_keypair.bin"
+  P2P_EXTERNAL_IP: "149.56.129.39"
+  # Path to persist keypair for stable peer ID across restarts
+  P2P_KEYPAIR_PATH: "/data/p2p_keypair.bin"

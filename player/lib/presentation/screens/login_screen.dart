@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-import '../../core/graphql/graphql_provider.dart';
 import '../../core/auth/auth_service.dart';
 import '../../core/theme/colors.dart';
 import '../widgets/update_required_dialog.dart';
@@ -26,15 +25,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _claimCodeController = TextEditingController();
+  final _relayUrlController = TextEditingController();
   final _serverUrlFocus = FocusNode();
   final _usernameFocus = FocusNode();
   final _passwordFocus = FocusNode();
   final _claimCodeFocus = FocusNode();
+  final _relayUrlFocus = FocusNode();
 
   bool _isLoadingSavedUrl = true;
   bool _obscurePassword = true;
   bool _showDirectConnection = false;
   bool _showQrScanner = false;
+  bool _showAdvancedSettings = false;
+  bool _isRelayUrlModified = false;
   MobileScannerController? _scannerController;
 
   late AnimationController _animationController;
@@ -45,6 +48,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   void initState() {
     super.initState();
     _loadSavedServerUrl();
+    _loadSavedRelayUrl();
     _setupAnimations();
   }
 
@@ -83,6 +87,59 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     }
   }
 
+  Future<void> _loadSavedRelayUrl() async {
+    final authService = ref.read(authServiceProvider);
+    final savedRelayUrl = await authService.getRelayUrl();
+    if (mounted) {
+      setState(() {
+        // Use saved relay URL or default
+        _relayUrlController.text = savedRelayUrl ?? defaultRelayUrl;
+        _isRelayUrlModified = savedRelayUrl != null;
+      });
+    }
+  }
+
+  Future<void> _saveRelayUrl() async {
+    final newUrl = _relayUrlController.text.trim();
+    final authService = ref.read(authServiceProvider);
+
+    // Check if it's different from default
+    if (newUrl == defaultRelayUrl || newUrl.isEmpty) {
+      // Clear custom relay URL (use default)
+      await authService.clearRelayUrl();
+      setState(() => _isRelayUrlModified = false);
+    } else {
+      // Save custom relay URL
+      await authService.setRelayUrl(newUrl);
+      setState(() => _isRelayUrlModified = true);
+    }
+
+    // Reinitialize P2P with new relay URL
+    final effectiveUrl = newUrl.isEmpty ? null : newUrl;
+    ref.read(p2pStatusNotifierProvider.notifier).reinitializeWithRelayUrl(
+          effectiveUrl == defaultRelayUrl ? null : effectiveUrl,
+        );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _isRelayUrlModified
+                ? 'Custom relay URL saved'
+                : 'Relay URL reset to default',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  void _resetRelayUrlToDefault() {
+    setState(() {
+      _relayUrlController.text = defaultRelayUrl;
+    });
+  }
+
   @override
   void dispose() {
     _animationController.dispose();
@@ -90,10 +147,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     _usernameController.dispose();
     _passwordController.dispose();
     _claimCodeController.dispose();
+    _relayUrlController.dispose();
     _serverUrlFocus.dispose();
     _usernameFocus.dispose();
     _passwordFocus.dispose();
     _claimCodeFocus.dispose();
+    _relayUrlFocus.dispose();
     _scannerController?.dispose();
     super.dispose();
   }
@@ -253,6 +312,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
               ),
             ),
             if (_showQrScanner) _buildQrScannerOverlay(),
+            if (_showAdvancedSettings) _buildAdvancedSettingsOverlay(),
           ],
         ),
       ),
@@ -1103,16 +1163,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           ],
         ),
         const SizedBox(height: 8),
-        _buildDhtStatus(),
+        _buildP2pStatus(),
       ],
     );
   }
 
-  Widget _buildDhtStatus() {
-    final dhtStatus = ref.watch(dhtStatusProvider);
-    
+  Widget _buildP2pStatus() {
+    final p2pStatus = ref.watch(p2pStatusNotifierProvider);
+
     // Don't show anything if not initialized yet
-    if (!dhtStatus.isInitialized) {
+    if (!p2pStatus.isInitialized) {
       return const SizedBox.shrink();
     }
 
@@ -1120,27 +1180,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       mainAxisAlignment: MainAxisAlignment.center,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Bootstrap status indicator
+        // Relay connection status indicator
         Container(
           width: 6,
           height: 6,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: dhtStatus.isBootstrapped
+            color: p2pStatus.isRelayConnected
                 ? AppColors.success
                 : AppColors.warning,
           ),
         ),
         const SizedBox(width: 6),
         Text(
-          dhtStatus.isBootstrapped ? 'DHT Ready' : 'DHT Bootstrapping...',
+          p2pStatus.isRelayConnected ? 'P2P Ready' : 'Connecting...',
           style: TextStyle(
             fontSize: 10,
             color: AppColors.textSecondary.withValues(alpha: 0.5),
           ),
         ),
-        // Show peer count when bootstrapped
-        if (dhtStatus.isBootstrapped && dhtStatus.discoveredPeersCount > 0) ...[
+        // Show connected peer count
+        if (p2pStatus.connectedPeersCount > 0) ...[
           const SizedBox(width: 8),
           Icon(
             Icons.people_outline_rounded,
@@ -1149,14 +1209,243 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           ),
           const SizedBox(width: 3),
           Text(
-            '${dhtStatus.discoveredPeersCount}',
+            '${p2pStatus.connectedPeersCount}',
             style: TextStyle(
               fontSize: 10,
               color: AppColors.textSecondary.withValues(alpha: 0.5),
             ),
           ),
         ],
+        // Settings button
+        const SizedBox(width: 12),
+        GestureDetector(
+          onTap: () => setState(() => _showAdvancedSettings = true),
+          child: Icon(
+            Icons.settings_outlined,
+            size: 14,
+            color: AppColors.textSecondary.withValues(alpha: 0.5),
+          ),
+        ),
       ],
+    );
+  }
+
+  Widget _buildAdvancedSettingsOverlay() {
+    return Positioned.fill(
+      child: GestureDetector(
+        onTap: () => setState(() => _showAdvancedSettings = false),
+        child: Container(
+          color: Colors.black.withValues(alpha: 0.7),
+          child: Center(
+            child: GestureDetector(
+              onTap: () {}, // Prevent tap from closing
+              child: Container(
+                margin: const EdgeInsets.all(24),
+                constraints: const BoxConstraints(maxWidth: 400),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: AppColors.border.withValues(alpha: 0.2),
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Header
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.settings_outlined,
+                            color: AppColors.textSecondary,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Text(
+                              'Advanced Settings',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () =>
+                                setState(() => _showAdvancedSettings = false),
+                            icon: const Icon(
+                              Icons.close,
+                              color: AppColors.textSecondary,
+                              size: 20,
+                            ),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      height: 1,
+                      color: AppColors.border.withValues(alpha: 0.15),
+                    ),
+                    // Content
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Relay URL',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'The relay server used for P2P connections',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color:
+                                  AppColors.textSecondary.withValues(alpha: 0.7),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            controller: _relayUrlController,
+                            focusNode: _relayUrlFocus,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: AppColors.textPrimary,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: defaultRelayUrl,
+                              hintStyle: TextStyle(
+                                color:
+                                    AppColors.textDisabled.withValues(alpha: 0.5),
+                                fontSize: 13,
+                              ),
+                              filled: true,
+                              fillColor:
+                                  AppColors.surfaceVariant.withValues(alpha: 0.4),
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide.none,
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: AppColors.border.withValues(alpha: 0.15),
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: const BorderSide(
+                                  color: AppColors.primary,
+                                  width: 1.5,
+                                ),
+                              ),
+                              suffixIcon: _relayUrlController.text != defaultRelayUrl
+                                  ? IconButton(
+                                      onPressed: _resetRelayUrlToDefault,
+                                      icon: const Icon(
+                                        Icons.refresh,
+                                        size: 18,
+                                        color: AppColors.textSecondary,
+                                      ),
+                                      tooltip: 'Reset to default',
+                                    )
+                                  : null,
+                            ),
+                            onChanged: (_) => setState(() {}),
+                          ),
+                          if (_isRelayUrlModified) ...[
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.info_outline,
+                                  size: 12,
+                                  color: AppColors.primary.withValues(alpha: 0.7),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    'Using custom relay URL',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color:
+                                          AppColors.primary.withValues(alpha: 0.7),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    Container(
+                      height: 1,
+                      color: AppColors.border.withValues(alpha: 0.15),
+                    ),
+                    // Actions
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: () =>
+                                setState(() => _showAdvancedSettings = false),
+                            child: const Text('Cancel'),
+                          ),
+                          const SizedBox(width: 12),
+                          ElevatedButton(
+                            onPressed: () {
+                              _saveRelayUrl();
+                              setState(() => _showAdvancedSettings = false);
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                                vertical: 10,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: const Text(
+                              'Save',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

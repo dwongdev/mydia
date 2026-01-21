@@ -1,7 +1,7 @@
-/// Device pairing service using libp2p.
+/// Device pairing service using P2P.
 ///
 /// This service orchestrates the complete device pairing flow using
-/// the libp2p-based P2P networking with DHT discovery.
+/// iroh-based P2P networking with relay-based discovery.
 library pairing_service;
 
 import 'dart:async';
@@ -9,33 +9,29 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../auth/auth_storage.dart';
-import '../p2p/libp2p_service.dart';
+import '../p2p/p2p_service.dart';
 import '../relay/relay_api_client.dart';
 
 /// Data parsed from a QR code for device pairing.
 ///
 /// The QR code contains JSON with the following fields:
-/// - instance_id: The server's unique instance ID
-/// - peer_id: The server's libp2p peer ID (e.g., "12D3KooW...")
-/// - claim_code: The pairing claim code (rotates every 5 minutes)
-///
-/// With libp2p, we don't need relay URLs or public keys in the QR code.
-/// The peer_id is sufficient for establishing a secure connection via
-/// DHT discovery or direct dialing.
+/// - node_addr: The server's EndpointAddr JSON (for direct dialing)
+/// - claim_code: The pairing claim code (for authentication)
+/// - instance_id: (optional) The server's unique instance ID
 class QrPairingData {
-  /// The server's unique instance ID.
-  final String instanceId;
-
-  /// The server's libp2p peer ID.
-  final String peerId;
+  /// The server's EndpointAddr JSON for direct P2P connection.
+  final String nodeAddr;
 
   /// The pairing claim code.
   final String claimCode;
 
+  /// The server's unique instance ID (optional).
+  final String? instanceId;
+
   const QrPairingData({
-    required this.instanceId,
-    required this.peerId,
+    required this.nodeAddr,
     required this.claimCode,
+    this.instanceId,
   });
 
   /// Parses QR code content into [QrPairingData].
@@ -45,18 +41,18 @@ class QrPairingData {
     try {
       final json = jsonDecode(content) as Map<String, dynamic>;
 
-      final instanceId = json['instance_id'] as String?;
-      final peerId = json['peer_id'] as String?;
+      final nodeAddr = json['node_addr'] as String?;
       final claimCode = json['claim_code'] as String?;
+      final instanceId = json['instance_id'] as String?;
 
-      if (instanceId == null || peerId == null || claimCode == null) {
+      if (nodeAddr == null || claimCode == null) {
         return null;
       }
 
       return QrPairingData(
-        instanceId: instanceId,
-        peerId: peerId,
+        nodeAddr: nodeAddr,
         claimCode: claimCode,
+        instanceId: instanceId,
       );
     } catch (e) {
       return null;
@@ -76,6 +72,7 @@ abstract class _StorageKeys {
   static const instanceName = 'pairing_instance_name';
   static const serverPublicKey = 'server_public_key';
   static const instanceId = 'instance_id';
+  static const serverNodeAddr = 'server_node_addr';
 }
 
 /// Result of a pairing operation.
@@ -105,7 +102,7 @@ class PairingResult {
 
 /// Credentials obtained from successful pairing.
 class PairingCredentials {
-  /// The server URL.
+  /// The server URL (p2p:// URI for P2P mode).
   final String serverUrl;
 
   /// The device ID assigned by the server.
@@ -135,6 +132,9 @@ class PairingCredentials {
   /// Instance ID for P2P connections.
   final String? instanceId;
 
+  /// The server's EndpointAddr JSON for P2P reconnection.
+  final String? serverNodeAddr;
+
   const PairingCredentials({
     required this.serverUrl,
     required this.deviceId,
@@ -146,33 +146,33 @@ class PairingCredentials {
     this.certFingerprint,
     this.instanceName,
     this.instanceId,
+    this.serverNodeAddr,
   });
 }
 
 /// Service for pairing new devices with a Mydia server.
 ///
-/// This service handles the complete pairing flow using libp2p:
-/// - QR code pairing: Uses peer_id from QR to connect directly
-/// - Claim code pairing: Uses DHT to discover the server
+/// This service handles the complete pairing flow using P2P:
+/// - QR code pairing: Uses node_addr from QR to connect directly
+/// - Claim code pairing: Uses relay API to get node_addr, then dials directly
 class PairingService {
   PairingService({
     AuthStorage? authStorage,
-    Libp2pService? libp2pService,
+    P2pService? p2pService,
   })  : _authStorage = authStorage ?? getAuthStorage(),
-        _libp2pService = libp2pService;
+        _p2pService = p2pService;
 
   final AuthStorage _authStorage;
-  final Libp2pService? _libp2pService;
+  final P2pService? _p2pService;
 
-  /// Pairs this device using a claim code via libp2p rendezvous discovery.
+  /// Pairs this device using a claim code via relay API lookup.
   ///
   /// This method:
-  /// 1. Resolves the claim code to a namespace and rendezvous points via Relay API
-  /// 2. Initializes the libp2p host
-  /// 3. Connects to the rendezvous points
-  /// 4. Discovers the server in the namespace
-  /// 5. Dials the server and sends a pairing request
-  /// 6. Stores credentials on success
+  /// 1. Resolves the claim code to get the server's EndpointAddr via relay API
+  /// 2. Initializes the P2P host
+  /// 3. Dials the server using the EndpointAddr
+  /// 4. Sends a pairing request
+  /// 5. Stores credentials on success
   Future<PairingResult> pairWithClaimCodeOnly({
     required String claimCode,
     required String deviceName,
@@ -181,110 +181,72 @@ class PairingService {
   }) async {
     try {
       final devicePlatform = platform ?? _detectPlatform();
-      debugPrint('[PairingService] === PAIRING VIA LIBP2P RENDEZVOUS ===');
+      debugPrint('[PairingService] === PAIRING VIA CLAIM CODE ===');
       debugPrint('[PairingService] claimCode=$claimCode, deviceName=$deviceName, platform=$devicePlatform');
 
-      // Use the injected libp2p service - it must be provided and initialized
-      final libp2pService = _libp2pService;
-      if (libp2pService == null) {
-        return PairingResult.error('Libp2p service not available. Please try again.');
+      // Use the injected P2P service - it must be provided and initialized
+      final p2pService = _p2pService;
+      if (p2pService == null) {
+        return PairingResult.error('P2P service not available. Please try again.');
       }
-      
-      // 1. Resolve claim code via HTTP
+
+      // 1. Resolve claim code via relay API to get server's EndpointAddr
       onStatusUpdate?.call('Resolving pairing code...');
-      final relayClient = RelayApiClient(); // TODO: Inject in constructor for testing
+      final relayClient = RelayApiClient();
       final resolveResult = await relayClient.resolveClaimCode(claimCode);
-      debugPrint('[PairingService] Resolved namespace: ${resolveResult.namespace}');
-      
-      // 2. Initialize the host if needed
+      debugPrint('[PairingService] Resolved node_addr: ${resolveResult.nodeAddr}');
+
+      // 2. Initialize the P2P host
       onStatusUpdate?.call('Initializing secure connection...');
-      await libp2pService.initialize();
-      
-      // 3. Connect to the rendezvous points
-      onStatusUpdate?.call('Connecting to discovery network...');
-      if (resolveResult.rendezvousPoints.isNotEmpty) {
-        for (final addr in resolveResult.rendezvousPoints) {
-          try {
-            await libp2pService.connectRelay(addr);
-            debugPrint('[PairingService] Connected to rendezvous point: $addr');
-          } catch (e) {
-            debugPrint('[PairingService] Failed to connect to rendezvous point $addr: $e');
-          }
-        }
-      } else {
-        // Fallback to default relay
-        try {
-          await libp2pService.connectToDefaultRelay(waitForReservation: false);
-        } catch (e) {
-          debugPrint('[PairingService] Default relay connection failed: $e');
-        }
+      await p2pService.initialize();
+
+      // 3. Dial the server using EndpointAddr
+      onStatusUpdate?.call('Connecting to server...');
+      try {
+        await p2pService.dial(resolveResult.nodeAddr);
+        debugPrint('[PairingService] Dialed server successfully');
+      } catch (e) {
+        debugPrint('[PairingService] Failed to dial server: $e');
+        return PairingResult.error('Could not connect to server. Please check your network connection.');
       }
-      
-      // 4. Discover server via rendezvous
-      onStatusUpdate?.call('Finding server...');
-      final discoveredPeers = await libp2pService.discoverNamespace(resolveResult.namespace).timeout(
-        const Duration(seconds: 15),
-        onTimeout: () {
-          throw TimeoutException('Server discovery timed out');
-        },
-      );
-      
-      if (discoveredPeers.isEmpty) {
-        return PairingResult.error('Server not found. Please check if pairing mode is active.');
-      }
-      
-      final serverPeer = discoveredPeers.first;
-      debugPrint('[PairingService] Found server: peerId=${serverPeer.peerId}, addresses=${serverPeer.addresses}');
-      
-      // 5. Dial the server if we have addresses
-      if (serverPeer.addresses.isNotEmpty) {
-        onStatusUpdate?.call('Connecting to server...');
-        for (final addr in serverPeer.addresses) {
-          try {
-            await libp2pService.dial(addr);
-            debugPrint('[PairingService] Dialed: $addr');
-            break;
-          } catch (e) {
-            debugPrint('[PairingService] Failed to dial $addr: $e');
-          }
-        }
-      }
-      
-      // 6. Send pairing request
+
+      // 4. Send pairing request
       onStatusUpdate?.call('Submitting pairing request...');
-      final result = await libp2pService.sendPairingRequest(
-        peerId: serverPeer.peerId,
+      final result = await p2pService.sendPairingRequest(
+        peer: resolveResult.nodeAddr,
         claimCode: claimCode,
         deviceName: deviceName,
         deviceType: devicePlatform,
       );
-      
+
       final mediaToken = result['mediaToken'] as String?;
       final accessToken = result['accessToken'] as String?;
       final deviceToken = result['deviceToken'] as String?;
-      
+
       if (accessToken == null || mediaToken == null) {
         return PairingResult.error('Server did not return required tokens');
       }
-      
+
       // Store credentials
       await _authStorage.write(_StorageKeys.accessToken, accessToken);
       await _authStorage.write(_StorageKeys.mediaToken, mediaToken);
+      await _authStorage.write(_StorageKeys.serverNodeAddr, resolveResult.nodeAddr);
       if (deviceToken != null) {
         await _authStorage.write(_StorageKeys.deviceToken, deviceToken);
       }
-      
-      // In P2P mode, serverUrl is a p2p:// URI with the peer ID
+
+      // In P2P mode, serverUrl is a p2p:// URI
       final credentials = PairingCredentials(
-        serverUrl: 'p2p://${serverPeer.peerId}',
-        deviceId: 'paired-device', 
+        serverUrl: 'p2p://mydia',
+        deviceId: 'paired-device',
         mediaToken: mediaToken,
         accessToken: accessToken,
         deviceToken: deviceToken,
-        serverPublicKey: Uint8List(0), 
-        directUrls: [], 
+        serverPublicKey: Uint8List(0),
+        directUrls: [],
+        serverNodeAddr: resolveResult.nodeAddr,
       );
-      
+
       onStatusUpdate?.call('Pairing successful!');
       return PairingResult.success(credentials, isP2PMode: true);
     } on InvalidClaimCodeException {
@@ -302,9 +264,8 @@ class PairingService {
 
   /// Pairs this device using QR code data.
   ///
-  /// With libp2p, the QR code contains the server's peer_id and claim_code.
-  /// We use the claim code to find the server's addresses via DHT lookup,
-  /// then send the pairing request.
+  /// With iroh, the QR code contains the server's EndpointAddr JSON directly.
+  /// We dial the server and send the pairing request.
   Future<PairingResult> pairWithQrData({
     required QrPairingData qrData,
     required String deviceName,
@@ -313,108 +274,33 @@ class PairingService {
   }) async {
     try {
       final devicePlatform = platform ?? _detectPlatform();
-      debugPrint('[PairingService] === PAIRING VIA QR CODE (LIBP2P) ===');
-      debugPrint('[PairingService] peerId=${qrData.peerId}, instanceId=${qrData.instanceId}');
+      debugPrint('[PairingService] === PAIRING VIA QR CODE ===');
+      debugPrint('[PairingService] instanceId=${qrData.instanceId}');
       debugPrint('[PairingService] claimCode=${qrData.claimCode}, deviceName=$deviceName');
 
-      final libp2pService = _libp2pService;
-      if (libp2pService == null) {
-        return PairingResult.error('Libp2p service not available. Please try again.');
+      final p2pService = _p2pService;
+      if (p2pService == null) {
+        return PairingResult.error('P2P service not available. Please try again.');
       }
 
-      // Initialize the host if needed
+      // Initialize the host
       onStatusUpdate?.call('Initializing secure connection...');
-      await libp2pService.initialize();
-      
-      // Connect to the relay server for NAT traversal
-      onStatusUpdate?.call('Connecting to relay server...');
+      await p2pService.initialize();
+
+      // Dial the server directly using the EndpointAddr from QR
+      onStatusUpdate?.call('Connecting to server...');
       try {
-        await libp2pService.connectToDefaultRelay();
-        debugPrint('[PairingService] Connected to relay');
+        await p2pService.dial(qrData.nodeAddr);
+        debugPrint('[PairingService] Dialed server successfully');
       } catch (e) {
-        debugPrint('[PairingService] Relay connection failed (continuing anyway): $e');
-      }
-      
-      // Resolve claim code via relay API to get namespace for discovery
-      onStatusUpdate?.call('Resolving pairing code...');
-      bool connectedToServer = false;
-      try {
-        final relayClient = RelayApiClient();
-        final resolveResult = await relayClient.resolveClaimCode(qrData.claimCode);
-        debugPrint('[PairingService] Resolved namespace: ${resolveResult.namespace}');
-
-        // Connect to rendezvous points if available
-        if (resolveResult.rendezvousPoints.isNotEmpty) {
-          for (final addr in resolveResult.rendezvousPoints) {
-            try {
-              await libp2pService.connectRelay(addr);
-              debugPrint('[PairingService] Connected to rendezvous point: $addr');
-              break;
-            } catch (e) {
-              debugPrint('[PairingService] Failed to connect to rendezvous point $addr: $e');
-            }
-          }
-        }
-
-        // Discover server via rendezvous namespace
-        onStatusUpdate?.call('Finding server...');
-        final discoveredPeers = await libp2pService.discoverNamespace(resolveResult.namespace).timeout(
-          const Duration(seconds: 15),
-          onTimeout: () {
-            throw TimeoutException('Server discovery timed out');
-          },
-        );
-
-        if (discoveredPeers.isNotEmpty) {
-          final serverPeer = discoveredPeers.first;
-          debugPrint('[PairingService] Found server via rendezvous: peerId=${serverPeer.peerId}, addresses=${serverPeer.addresses}');
-
-          // Dial the server if we have addresses
-          if (serverPeer.addresses.isNotEmpty) {
-            onStatusUpdate?.call('Connecting to server...');
-            for (final addr in serverPeer.addresses) {
-              try {
-                await libp2pService.dial(addr);
-                debugPrint('[PairingService] Dialed: $addr');
-                connectedToServer = true;
-                break;
-              } catch (e) {
-                debugPrint('[PairingService] Failed to dial $addr: $e');
-              }
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('[PairingService] Rendezvous discovery failed (will try relay circuit): $e');
-      }
-      
-      // If DHT lookup failed or returned no addresses, try connecting via relay circuit
-      if (!connectedToServer) {
-        final circuitAddr = libp2pService.buildCircuitAddress(qrData.peerId);
-        if (circuitAddr != null) {
-          onStatusUpdate?.call('Connecting via relay...');
-          debugPrint('[PairingService] Trying relay circuit: $circuitAddr');
-          try {
-            await libp2pService.dial(circuitAddr);
-            debugPrint('[PairingService] Dialed relay circuit address');
-            // Give the circuit connection time to establish
-            // The dial command is async - connection happens in background
-            await Future.delayed(const Duration(seconds: 2));
-            debugPrint('[PairingService] Proceeding after relay circuit dial');
-            connectedToServer = true;
-          } catch (e) {
-            debugPrint('[PairingService] Failed to dial via relay circuit: $e');
-          }
-        } else {
-          debugPrint('[PairingService] No relay connection available for circuit');
-        }
+        debugPrint('[PairingService] Failed to dial server: $e');
+        return PairingResult.error('Could not connect to server. Please check your network connection.');
       }
 
-      // Send pairing request to the server
+      // Send pairing request
       onStatusUpdate?.call('Submitting pairing request...');
-      debugPrint('[PairingService] Sending pairing request to ${qrData.peerId}');
-      final result = await libp2pService.sendPairingRequest(
-        peerId: qrData.peerId,
+      final result = await p2pService.sendPairingRequest(
+        peer: qrData.nodeAddr,
         claimCode: qrData.claimCode,
         deviceName: deviceName,
         deviceType: devicePlatform,
@@ -431,22 +317,25 @@ class PairingService {
       // Store credentials
       await _authStorage.write(_StorageKeys.accessToken, accessToken);
       await _authStorage.write(_StorageKeys.mediaToken, mediaToken);
-      await _authStorage.write(_StorageKeys.instanceId, qrData.instanceId);
+      await _authStorage.write(_StorageKeys.serverNodeAddr, qrData.nodeAddr);
+      if (qrData.instanceId != null) {
+        await _authStorage.write(_StorageKeys.instanceId, qrData.instanceId!);
+      }
       if (deviceToken != null) {
         await _authStorage.write(_StorageKeys.deviceToken, deviceToken);
       }
 
-      // In P2P mode, serverUrl is a p2p:// URI with the peer ID
-      // serverPublicKey and directUrls are not needed - libp2p handles encryption and addressing
+      // In P2P mode, serverUrl is a p2p:// URI
       final credentials = PairingCredentials(
-        serverUrl: 'p2p://${qrData.peerId}',
-        deviceId: 'paired-device', // Extracted from access_token claims if needed
+        serverUrl: 'p2p://mydia',
+        deviceId: 'paired-device',
         mediaToken: mediaToken,
         accessToken: accessToken,
         deviceToken: deviceToken,
-        serverPublicKey: Uint8List(0), // Not used in P2P mode
-        directUrls: [], // Not used in P2P mode
+        serverPublicKey: Uint8List(0),
+        directUrls: [],
         instanceId: qrData.instanceId,
+        serverNodeAddr: qrData.nodeAddr,
       );
 
       onStatusUpdate?.call('Pairing successful!');
@@ -478,5 +367,6 @@ class PairingService {
     await _authStorage.delete(_StorageKeys.instanceName);
     await _authStorage.delete(_StorageKeys.serverPublicKey);
     await _authStorage.delete(_StorageKeys.instanceId);
+    await _authStorage.delete(_StorageKeys.serverNodeAddr);
   }
 }

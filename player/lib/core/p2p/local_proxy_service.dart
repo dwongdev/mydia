@@ -2,26 +2,26 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:player/core/p2p/libp2p_service.dart';
+import 'package:player/core/p2p/p2p_service.dart';
 
 final localProxyServiceProvider = Provider<LocalProxyService>((ref) {
-  final libp2p = ref.watch(libp2pServiceProvider);
-  final service = LocalProxyService(libp2p);
+  final p2p = ref.watch(p2pServiceProvider);
+  final service = LocalProxyService(p2p);
   ref.onDispose(() => service.stop());
   return service;
 });
 
-/// Local HTTP proxy for streaming media over libp2p.
-/// 
-/// TODO: Media streaming over libp2p is not yet implemented.
-/// This service will proxy HTTP requests to libp2p ReadMedia requests
+/// Local HTTP proxy for streaming media over P2P.
+///
+/// TODO: Media streaming over P2P is not yet implemented.
+/// This service will proxy HTTP requests to P2P ReadMedia requests
 /// once the media streaming protocol is complete.
 class LocalProxyService {
-  final Libp2pService _libp2p;
+  final P2pService _p2p;
   HttpServer? _server;
   int get port => _server?.port ?? 0;
 
-  LocalProxyService(this._libp2p);
+  LocalProxyService(this._p2p);
 
   Future<void> start() async {
     if (_server != null) return;
@@ -45,11 +45,11 @@ class LocalProxyService {
     final path = request.uri.path;
     
     if (path == '/stream') {
-      // TODO: Implement media streaming over libp2p
-      // This requires ReadMedia request/response protocol in the p2p core
+      // TODO: Implement media streaming over P2P
+      // This requires ReadMedia request/response protocol in the P2P core
       debugPrint('[LocalProxy] Media streaming not yet implemented');
       request.response.statusCode = HttpStatus.notImplemented;
-      request.response.write('Media streaming over libp2p not yet implemented');
+      request.response.write('Media streaming over P2P not yet implemented');
       await request.response.close();
     } else {
       request.response.statusCode = HttpStatus.notFound;

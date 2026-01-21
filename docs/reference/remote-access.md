@@ -4,11 +4,11 @@ Remote access allows the Mydia mobile app to connect to your Mydia instance from
 
 ## How It Works
 
-Mydia uses **libp2p** for decentralized peer-to-peer connectivity:
+Mydia uses **p2p** for decentralized peer-to-peer connectivity:
 
 1. **Discovery**: Nodes find each other via mDNS (local network) and Kademlia DHT (internet)
 2. **Transport**: Connections are established over TCP or QUIC, secured with Noise encryption
-3. **Media**: Media streams (HLS) are served over the libp2p connection via a local proxy in the client
+3. **Media**: Media streams (HLS) are served over the p2p connection via a local proxy in the client
 
 This approach provides:
 - **Decentralized**: No central relay dependency for connectivity
@@ -22,7 +22,7 @@ This approach provides:
 
 1. Navigate to **Settings > Remote Access** in the Mydia web interface
 2. Toggle **Enable Remote Access**
-3. Your instance will start the libp2p server and announce itself
+3. Your instance will start the p2p server and announce itself
 
 ### Direct URLs
 
@@ -37,7 +37,7 @@ Direct URLs are automatically detected from your instance's network configuratio
 
 All communication is encrypted end-to-end using the Noise protocol:
 
-- **Transport**: All libp2p connections use Noise encryption
+- **Transport**: All p2p connections use Noise encryption
 - **Authentication**: Peers authenticate via Ed25519 keys
 - **Forward Secrecy**: Fresh ephemeral keys for each connection
 
@@ -53,12 +53,12 @@ For direct HTTPS connections, the app verifies the server's TLS certificate fing
 
 ## Architecture Details
 
-### Libp2p Components
+### P2P Components
 
-The libp2p implementation is shared between backend and frontend:
+The p2p implementation is shared between backend and frontend:
 
 - **Core (Rust)**: `native/mydia_p2p_core` - shared networking logic
-- **Backend (Elixir)**: Wrapped via Rustler NIF (`Mydia.Libp2p`)
+- **Backend (Elixir)**: Wrapped via Rustler NIF (`Mydia.P2p`)
 - **Frontend (Flutter)**: Wrapped via `flutter_rust_bridge`
 
 ### Protocols Used
@@ -73,7 +73,7 @@ The libp2p implementation is shared between backend and frontend:
 ### Instance Registration
 
 When remote access is enabled, your Mydia instance:
-1. Starts the libp2p server
+1. Starts the p2p server
 2. Announces itself via mDNS and DHT
 3. Listens for incoming peer connections
 4. Handles connection requests from paired devices
@@ -82,7 +82,7 @@ When remote access is enabled, your Mydia instance:
 
 When the app connects:
 1. Discovers the instance via mDNS or DHT lookup
-2. Establishes libp2p connection (TCP or QUIC)
+2. Establishes p2p connection (TCP or QUIC)
 3. Completes Noise handshake for authentication
 4. Routes API and media requests over the secure connection
 
@@ -91,7 +91,7 @@ When the app connects:
 ### App won't connect
 
 1. **Check remote access is enabled** on your Mydia instance
-2. **Verify libp2p server is running** - check logs for startup messages
+2. **Verify p2p server is running** - check logs for startup messages
 3. **Check claim code** - codes expire after 5 minutes
 
 ### Slow performance
@@ -102,7 +102,7 @@ When the app connects:
 
 ### Connection drops
 
-The libp2p stack handles reconnection automatically:
+The p2p stack handles reconnection automatically:
 
 1. **Transient failures** - automatic retry with backoff
 2. **Network change** - reconnection after network switch

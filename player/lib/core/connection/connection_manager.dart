@@ -1,7 +1,7 @@
 /// Connection manager for direct-first, p2p-fallback strategy.
 ///
 /// This service orchestrates connection attempts to Mydia instances,
-/// trying direct URLs first, then falling back to P2P via libp2p if
+/// trying direct URLs first, then falling back to P2P via iroh if
 /// all direct attempts fail.
 library;
 
@@ -76,7 +76,7 @@ class ConnectionManager {
 
     // No direct URLs available, try P2P
     _emitState('Falling back to P2P');
-    // P2P connection would be implemented via libp2p service
+    // P2P connection would be implemented via iroh service
     return ConnectionResult.error(
       'Could not connect to server. No direct URLs available and P2P not yet implemented.',
     );

@@ -1,5 +1,9 @@
+//! NIF bindings for mydia_p2p_core (iroh-based)
+//!
+//! Provides Erlang/Elixir interop for the p2p networking functionality.
+
 use rustler::{Env, LocalPid, ResourceArc, Term, OwnedEnv, Encoder, NifStruct, NifTaggedEnum};
-use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingResponse, HostConfig};
+use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingResponse, GraphQLResponse, HostConfig};
 use std::thread;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -20,95 +24,57 @@ fn load(env: Env, _info: Term) -> bool {
     true
 }
 
+/// Start the p2p host with configuration.
+/// relay_url: Custom relay URL for NAT traversal (uses default relays if None).
+/// bind_port: UDP port for direct connections (0 or None for random port).
+/// Returns (resource, node_id_string).
 #[rustler::nif]
-fn start_host() -> Result<(ResourceArc<HostResource>, String), rustler::Error> {
+fn start_host(relay_url: Option<String>, bind_port: Option<u16>) -> Result<(ResourceArc<HostResource>, String), rustler::Error> {
     let config = HostConfig {
-        enable_relay_server: false,
-        enable_kademlia: false,  // Disabled - using rendezvous for discovery
-        enable_rendezvous_client: true,  // Enable for home server
-        enable_rendezvous_server: false,
-        rendezvous_point_addresses: vec![],  // Will be set via connect_rendezvous
+        relay_url,
+        bind_port,
         ..Default::default()
     };
-    let (host, peer_id_str) = Host::new(config);
+    let (host, node_id_str) = Host::new(config);
     let resource = HostResource { host };
-    Ok((ResourceArc::new(resource), peer_id_str))
+    Ok((ResourceArc::new(resource), node_id_str))
 }
 
+/// Dial a peer using their EndpointAddr JSON.
 #[rustler::nif]
-fn listen(resource: ResourceArc<HostResource>, addr: String) -> Result<String, rustler::Error> {
-    match resource.host.listen(addr) {
+fn dial(resource: ResourceArc<HostResource>, endpoint_addr_json: String) -> Result<String, rustler::Error> {
+    match resource.host.dial(endpoint_addr_json) {
         Ok(_) => Ok("ok".to_string()),
         Err(e) => Err(rustler::Error::Term(Box::new(e))),
     }
 }
 
+/// Get this node's EndpointAddr as JSON for sharing.
 #[rustler::nif]
-fn dial(resource: ResourceArc<HostResource>, addr: String) -> Result<String, rustler::Error> {
-    match resource.host.dial(addr) {
-        Ok(_) => Ok("ok".to_string()),
-        Err(e) => Err(rustler::Error::Term(Box::new(e))),
-    }
+fn get_node_addr(resource: ResourceArc<HostResource>) -> String {
+    resource.host.get_node_addr()
 }
 
-#[rustler::nif]
-fn bootstrap(resource: ResourceArc<HostResource>, addr: String) -> Result<String, rustler::Error> {
-    match resource.host.bootstrap(addr) {
-        Ok(_) => Ok("ok".to_string()),
-        Err(e) => Err(rustler::Error::Term(Box::new(e))),
-    }
-}
-
-#[rustler::nif]
-fn connect_relay(resource: ResourceArc<HostResource>, relay_addr: String) -> Result<String, rustler::Error> {
-    match resource.host.connect_relay(relay_addr) {
-        Ok(_) => Ok("ok".to_string()),
-        Err(e) => Err(rustler::Error::Term(Box::new(e))),
-    }
-}
-
-/// Register under a namespace with the rendezvous point.
-/// This is used during pairing mode to make the server discoverable.
-#[rustler::nif(schedule = "DirtyCpu")]
-fn register_namespace(resource: ResourceArc<HostResource>, namespace: String, ttl_secs: u64) -> Result<String, rustler::Error> {
-    match resource.host.register_namespace(namespace, ttl_secs) {
-        Ok(_) => Ok("ok".to_string()),
-        Err(e) => Err(rustler::Error::Term(Box::new(e))),
-    }
-}
-
-/// Unregister from a namespace.
-#[rustler::nif]
-fn unregister_namespace(resource: ResourceArc<HostResource>, namespace: String) -> Result<String, rustler::Error> {
-    match resource.host.unregister_namespace(namespace) {
-        Ok(_) => Ok("ok".to_string()),
-        Err(e) => Err(rustler::Error::Term(Box::new(e))),
-    }
-}
-
+/// Get network statistics.
 #[rustler::nif]
 fn get_network_stats(resource: ResourceArc<HostResource>) -> ElixirNetworkStats {
     let stats = resource.host.get_network_stats();
     ElixirNetworkStats {
-        routing_table_size: stats.routing_table_size,
-        active_registrations: stats.active_registrations,
-        rendezvous_connected: stats.rendezvous_connected,
-        kademlia_enabled: stats.kademlia_enabled,
+        connected_peers: stats.connected_peers,
+        relay_connected: stats.relay_connected,
     }
 }
 
 // Mirror structs for Elixir interop
 #[derive(NifStruct)]
-#[module = "Mydia.Libp2p.NetworkStats"]
+#[module = "Mydia.P2p.NetworkStats"]
 struct ElixirNetworkStats {
-    pub routing_table_size: usize,
-    pub active_registrations: usize,
-    pub rendezvous_connected: bool,
-    pub kademlia_enabled: bool,
+    pub connected_peers: usize,
+    pub relay_connected: bool,
 }
 
 #[derive(NifStruct)]
-#[module = "Mydia.Libp2p.PairingRequest"]
+#[module = "Mydia.P2p.PairingRequest"]
 struct ElixirPairingRequest {
     pub claim_code: String,
     pub device_name: String,
@@ -117,7 +83,7 @@ struct ElixirPairingRequest {
 }
 
 #[derive(NifStruct)]
-#[module = "Mydia.Libp2p.PairingResponse"]
+#[module = "Mydia.P2p.PairingResponse"]
 struct ElixirPairingResponse {
     pub success: bool,
     pub media_token: Option<String>,
@@ -127,7 +93,7 @@ struct ElixirPairingResponse {
 }
 
 #[derive(NifStruct)]
-#[module = "Mydia.Libp2p.ReadMediaRequest"]
+#[module = "Mydia.P2p.ReadMediaRequest"]
 struct ElixirReadMediaRequest {
     pub file_path: String,
     pub offset: u64,
@@ -135,19 +101,30 @@ struct ElixirReadMediaRequest {
 }
 
 #[derive(NifStruct)]
-#[module = "Mydia.Libp2p.DiscoveredPeer"]
-struct ElixirDiscoveredPeer {
-    pub peer_id: String,
-    pub addresses: Vec<String>,
+#[module = "Mydia.P2p.GraphQLRequest"]
+struct ElixirGraphQLRequest {
+    pub query: String,
+    pub variables: Option<String>,
+    pub operation_name: Option<String>,
+    pub auth_token: Option<String>,
+}
+
+#[derive(NifStruct)]
+#[module = "Mydia.P2p.GraphQLResponse"]
+struct ElixirGraphQLResponse {
+    pub data: Option<String>,
+    pub errors: Option<String>,
 }
 
 #[derive(NifTaggedEnum)]
 enum ElixirResponse {
     Pairing(ElixirPairingResponse),
     MediaChunk(Vec<u8>),
+    GraphQL(ElixirGraphQLResponse),
     Error(String),
 }
 
+/// Send a response to an incoming request.
 #[rustler::nif]
 fn send_response(resource: ResourceArc<HostResource>, request_id: String, response: ElixirResponse) -> Result<String, rustler::Error> {
     let core_response = match response {
@@ -159,6 +136,10 @@ fn send_response(resource: ResourceArc<HostResource>, request_id: String, respon
             error: r.error,
         }),
         ElixirResponse::MediaChunk(data) => MydiaResponse::MediaChunk(data),
+        ElixirResponse::GraphQL(r) => MydiaResponse::GraphQL(GraphQLResponse {
+            data: r.data,
+            errors: r.errors,
+        }),
         ElixirResponse::Error(e) => MydiaResponse::Error(e),
     };
 
@@ -168,18 +149,12 @@ fn send_response(resource: ResourceArc<HostResource>, request_id: String, respon
     }
 }
 
-// Helper NIF to read file chunk directly in Rust to avoid passing binary back and forth to Elixir if performance matters.
-// But typically Elixir handles this fine. For "Going all the way", let's implement a NIF that reads the file and sends the response directly.
+/// Read a file chunk and send it as a response.
+/// This is done in a separate thread to avoid blocking the NIF.
 #[rustler::nif]
 fn respond_with_file_chunk(resource: ResourceArc<HostResource>, request_id: String, file_path: String, offset: u64, length: u32) -> Result<String, rustler::Error> {
-    // Open file, seek, read, send response
-    // We should do this in a thread or task to not block the NIF
-    // But for simplicity in Rustler, small reads are OK? No, disk I/O should be threaded.
-    // Since we are inside a NIF, let's spawn a thread.
-    
-    // We can't move 'resource' into thread easily without Arc (it is Arc).
     let resource_clone = resource.clone();
-    
+
     thread::spawn(move || {
         let response = match File::open(&file_path) {
             Ok(mut file) => {
@@ -198,19 +173,20 @@ fn respond_with_file_chunk(resource: ResourceArc<HostResource>, request_id: Stri
             }
             Err(e) => MydiaResponse::Error(format!("File open error: {}", e))
         };
-        
+
         let _ = resource_clone.host.send_response(request_id, response);
     });
 
     Ok("ok".to_string())
 }
 
+/// Start listening for events and forward them to the given Elixir process.
 #[rustler::nif]
 #[allow(unused_variables)]
 fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid) -> Result<String, rustler::Error> {
     let host = &resource.host;
     let event_rx = host.event_rx.clone();
-    
+
     thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
@@ -220,16 +196,10 @@ fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid)
                     let mut msg_env = OwnedEnv::new();
                     let _ = msg_env.send_and_clear(&pid, |env| {
                         match event {
-                            Event::PeerDiscovered(peer_id) => {
-                                (atoms::ok(), "peer_discovered", peer_id).encode(env)
-                            }
-                            Event::PeerExpired(peer_id) => {
-                                (atoms::ok(), "peer_expired", peer_id).encode(env)
-                            }
-                            Event::PeerConnected(peer_id) => {
+                            Event::Connected(peer_id) => {
                                 (atoms::ok(), "peer_connected", peer_id).encode(env)
                             }
-                            Event::PeerDisconnected(peer_id) => {
+                            Event::Disconnected(peer_id) => {
                                 (atoms::ok(), "peer_disconnected", peer_id).encode(env)
                             }
                             Event::RequestReceived { peer: _, request, request_id } => {
@@ -251,38 +221,26 @@ fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid)
                                         };
                                         (atoms::ok(), "request_received", "read_media", request_id, elixir_req).encode(env)
                                     },
+                                    MydiaRequest::GraphQL(req) => {
+                                        let elixir_req = ElixirGraphQLRequest {
+                                            query: req.query,
+                                            variables: req.variables,
+                                            operation_name: req.operation_name,
+                                            auth_token: req.auth_token,
+                                        };
+                                        (atoms::ok(), "request_received", "graphql", request_id, elixir_req).encode(env)
+                                    },
                                     MydiaRequest::Ping => {
                                         (atoms::ok(), "request_received", "ping", request_id).encode(env)
                                     }
                                     _ => (atoms::ok(), "unknown_request").encode(env)
                                 }
                             }
-                            Event::BootstrapCompleted => {
-                                (atoms::ok(), "bootstrap_completed").encode(env)
+                            Event::RelayConnected => {
+                                (atoms::ok(), "relay_connected").encode(env)
                             }
-                            Event::NewListenAddr(addr) => {
-                                (atoms::ok(), "new_listen_addr", addr).encode(env)
-                            }
-                            Event::RelayReservationReady { relay_peer_id, relayed_addr } => {
-                                (atoms::ok(), "relay_ready", relay_peer_id, relayed_addr).encode(env)
-                            }
-                            Event::RelayReservationFailed { relay_peer_id, error } => {
-                                (atoms::ok(), "relay_failed", relay_peer_id, error).encode(env)
-                            }
-                            Event::RendezvousRegistered { namespace } => {
-                                (atoms::ok(), "rendezvous_registered", namespace).encode(env)
-                            }
-                            Event::RendezvousRegistrationFailed { namespace, error } => {
-                                (atoms::ok(), "rendezvous_registration_failed", namespace, error).encode(env)
-                            }
-                            Event::RendezvousDiscovered { namespace, peers } => {
-                                let elixir_peers: Vec<ElixirDiscoveredPeer> = peers.into_iter().map(|p| {
-                                    ElixirDiscoveredPeer {
-                                        peer_id: p.peer_id,
-                                        addresses: p.addresses,
-                                    }
-                                }).collect();
-                                (atoms::ok(), "rendezvous_discovered", namespace, elixir_peers).encode(env)
+                            Event::Ready { node_addr } => {
+                                (atoms::ok(), "ready", node_addr).encode(env)
                             }
                         }
                     });
@@ -296,4 +254,4 @@ fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid)
     Ok("ok".to_string())
 }
 
-rustler::init!("Elixir.Mydia.Libp2p", load = load);
+rustler::init!("Elixir.Mydia.P2p", load = load);

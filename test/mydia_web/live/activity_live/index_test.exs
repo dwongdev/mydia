@@ -22,7 +22,7 @@ defmodule MydiaWeb.ActivityLive.IndexTest do
     test "shows empty state when no events exist", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/activity")
 
-      assert html =~ "No events yet"
+      assert html =~ "No events found"
       assert html =~ "Events will appear here as activity happens"
     end
 
@@ -167,7 +167,7 @@ defmodule MydiaWeb.ActivityLive.IndexTest do
       # Check formatted descriptions
       assert html =~ "Added movie: Inception"
       assert html =~ "Download completed: Test.File.mkv"
-      assert html =~ "Download failed: Failed.File.mkv"
+      assert html =~ "Download failed for: Failed.File.mkv"
       assert html =~ "Connection timeout"
     end
 
@@ -224,9 +224,9 @@ defmodule MydiaWeb.ActivityLive.IndexTest do
       assert has_element?(view, "button", "All")
       assert has_element?(view, "button", "Media")
       assert has_element?(view, "button", "Downloads")
-      assert has_element?(view, "button", "Library")
+      assert has_element?(view, "button", "Search")
       assert has_element?(view, "button", "System")
-      assert has_element?(view, "button", "Auth")
+      assert has_element?(view, "button", "Errors")
     end
   end
 end

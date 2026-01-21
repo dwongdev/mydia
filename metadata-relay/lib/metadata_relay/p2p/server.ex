@@ -1,9 +1,13 @@
 defmodule MetadataRelay.P2p.Server do
   @moduledoc """
-  GenServer that manages the libp2p relay host.
+  GenServer that manages the iroh P2P host.
 
-  Provides relay functionality for NAT traversal and peer discovery.
-  Clients can discover this relay via the /p2p/info endpoint.
+  Note: With the migration to iroh, the metadata-relay no longer needs to run
+  its own relay server. iroh uses its own public relay infrastructure.
+  This server is kept for backwards compatibility but doesn't provide
+  relay functionality - it's just a regular iroh endpoint.
+
+  Clients can query this via the /p2p/info endpoint for the node address.
   """
   use GenServer
   require Logger
@@ -15,7 +19,7 @@ defmodule MetadataRelay.P2p.Server do
   end
 
   @doc """
-  Get the relay server info including peer ID and multiaddrs.
+  Get the P2P server info including node ID and addresses.
   Returns {:ok, info} or {:error, :not_running}
   """
   def get_info do
@@ -28,19 +32,21 @@ defmodule MetadataRelay.P2p.Server do
 
   @impl true
   def init(_) do
-    # Start the relay host
-    # Handle both {:ok, {resource, peer_id}} and {resource, peer_id} return formats
     case P2p.start_relay() do
-      {:ok, {resource, peer_id}} ->
-        start_listening(resource, peer_id)
+      {:ok, {resource, node_id}} ->
+        Logger.info("P2P host started with NodeID: #{node_id}")
+        {:ok, %{resource: resource, node_id: node_id}}
 
-      {resource, peer_id} when is_reference(resource) and is_binary(peer_id) ->
-        start_listening(resource, peer_id)
+      {resource, node_id} when is_reference(resource) and is_binary(node_id) ->
+        Logger.info("P2P host started with NodeID: #{node_id}")
+        {:ok, %{resource: resource, node_id: node_id}}
 
       {:error, reason} ->
+        Logger.error("Failed to start P2P host: #{inspect(reason)}")
         {:stop, {:error, reason}}
 
       error ->
+        Logger.error("Failed to start P2P host: #{inspect(error)}")
         {:stop, error}
     end
   end
@@ -51,113 +57,24 @@ defmodule MetadataRelay.P2p.Server do
     {:reply, {:ok, info}, state}
   end
 
-  defp start_listening(resource, peer_id) do
-    Logger.info("Libp2p Relay Server started with PeerID: #{peer_id}")
-
-    # Listen on all interfaces, TCP port from env or default 4001
-    port = System.get_env("LIBP2P_PORT", "4001")
-    listen_addr = "/ip4/0.0.0.0/tcp/#{port}"
-
-    case P2p.listen(resource, listen_addr) do
-      {:ok, "ok"} ->
-        Logger.info("Libp2p Relay listening on #{listen_addr}")
-        add_external_addresses(resource, port)
-        {:ok, %{resource: resource, peer_id: peer_id, port: port}}
-
-      "ok" ->
-        Logger.info("Libp2p Relay listening on #{listen_addr}")
-        add_external_addresses(resource, port)
-        {:ok, %{resource: resource, peer_id: peer_id, port: port}}
-
-      {:error, reason} ->
-        {:stop, {:error, reason}}
-
-      error ->
-        {:stop, error}
-    end
-  end
-
-  # Add external addresses so the relay server can include them in relay reservations
-  defp add_external_addresses(resource, port) do
-    # Add DNS-based address if configured
-    case System.get_env("LIBP2P_EXTERNAL_HOST") do
-      nil ->
-        :ok
-
-      "" ->
-        :ok
-
-      host ->
-        addr = "/dns4/#{host}/tcp/#{port}"
-        Logger.info("Adding external address: #{addr}")
-        P2p.add_external_address(resource, addr)
-    end
-
-    # Add IP-based address if configured
-    case System.get_env("LIBP2P_EXTERNAL_IP") do
-      nil ->
-        :ok
-
-      "" ->
-        :ok
-
-      ip ->
-        addr = "/ip4/#{ip}/tcp/#{port}"
-        Logger.info("Adding external address: #{addr}")
-        P2p.add_external_address(resource, addr)
-    end
-  end
-
   defp build_info(state) do
-    peer_id = state.peer_id
-    port = state.port
+    node_id = state.node_id
 
-    # Build multiaddrs for clients to connect
-    # Priority: DNS hostname > public IP
-    multiaddrs = build_multiaddrs(peer_id, port)
+    # Get node address as JSON (returns String directly)
+    node_addr = P2p.get_node_addr(state.resource)
+
+    # Treat empty JSON as nil
+    node_addr = if node_addr == "{}", do: nil, else: node_addr
 
     %{
-      peer_id: peer_id,
-      multiaddrs: multiaddrs,
-      # Primary multiaddr for easy copy/paste
-      primary_multiaddr: List.first(multiaddrs),
-      protocol_version: "mydia/1.0.0"
+      node_id: node_id,
+      node_addr: node_addr,
+      # Legacy fields for backwards compatibility
+      peer_id: node_id,
+      addresses: if(node_addr, do: [node_addr], else: []),
+      multiaddrs: [],
+      primary_multiaddr: nil,
+      protocol_version: "mydia/iroh/1.0.0"
     }
-  end
-
-  defp build_multiaddrs(peer_id, port) do
-    addrs = []
-
-    # Add DNS-based multiaddr if LIBP2P_EXTERNAL_HOST is set
-    addrs =
-      case System.get_env("LIBP2P_EXTERNAL_HOST") do
-        nil -> addrs
-        "" -> addrs
-        host -> ["/dns4/#{host}/tcp/#{port}/p2p/#{peer_id}" | addrs]
-      end
-
-    # Add IP-based multiaddr if LIBP2P_EXTERNAL_IP is set
-    addrs =
-      case System.get_env("LIBP2P_EXTERNAL_IP") do
-        nil -> addrs
-        "" -> addrs
-        ip -> ["/ip4/#{ip}/tcp/#{port}/p2p/#{peer_id}" | addrs]
-      end
-
-    # If no external addresses configured, try to get from PHX_HOST
-    # (fallback, though this goes through Cloudflare which won't work for port 4001)
-    addrs =
-      if addrs == [] do
-        case System.get_env("PHX_HOST") do
-          nil -> addrs
-          "" -> addrs
-          # Don't add PHX_HOST as it goes through Cloudflare proxy
-          _host -> addrs
-        end
-      else
-        addrs
-      end
-
-    Enum.reverse(addrs)
   end
 end

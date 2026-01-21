@@ -17,13 +17,3 @@ data:
 
   # Redis cache for distributed/persistent caching
   REDIS_URL: "redis://redis:6379"
-
-  # P2P Relay Server Configuration (iroh-based)
-  P2P_RELAY_ENABLED: "true"
-  P2P_PORT: "4001"
-  # External hostname for P2P (DNS-only record, not proxied by Cloudflare)
-  P2P_EXTERNAL_HOST: "p2p.mydia.dev"
-  # External IP for clients that can't resolve DNS (e.g., Android without DNS transport)
-  P2P_EXTERNAL_IP: "149.56.129.39"
-  # Path to persist keypair for stable peer ID across restarts
-  P2P_KEYPAIR_PATH: "/data/p2p_keypair.bin"

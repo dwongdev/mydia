@@ -33,7 +33,6 @@ defmodule MetadataRelay.Application do
       ] ++
         maybe_tvdb_auth() ++
         maybe_opensubtitles_auth() ++
-        maybe_p2p_relay() ++
         [
           # Phoenix endpoint (serves both API and ErrorTracker dashboard)
           MetadataRelayWeb.Endpoint
@@ -116,16 +115,6 @@ defmodule MetadataRelay.Application do
       [MetadataRelay.OpenSubtitles.Auth]
     else
       Logger.info("OpenSubtitles credentials not configured, subtitle support disabled")
-      []
-    end
-  end
-
-  defp maybe_p2p_relay do
-    if System.get_env("LIBP2P_RELAY_ENABLED") == "true" do
-      Logger.info("Libp2p Relay enabled, starting P2P host")
-      [MetadataRelay.P2p.Server]
-    else
-      Logger.info("Libp2p Relay disabled")
       []
     end
   end

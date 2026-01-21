@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/auth/auth_service.dart';
+import '../../core/p2p/p2p_service.dart' show defaultRelayUrl;
 import '../../core/theme/colors.dart';
 import '../widgets/update_required_dialog.dart';
 import 'login/login_controller.dart';
@@ -1176,55 +1177,84 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       return const SizedBox.shrink();
     }
 
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    // Get display relay URL
+    final displayRelayUrl = p2pStatus.relayUrl ?? defaultRelayUrl;
+
+    return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Relay connection status indicator
-        Container(
-          width: 6,
-          height: 6,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: p2pStatus.isRelayConnected
-                ? AppColors.success
-                : AppColors.warning,
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          p2pStatus.isRelayConnected ? 'P2P Ready' : 'Connecting...',
-          style: TextStyle(
-            fontSize: 10,
-            color: AppColors.textSecondary.withValues(alpha: 0.5),
-          ),
-        ),
-        // Show connected peer count
-        if (p2pStatus.connectedPeersCount > 0) ...[
-          const SizedBox(width: 8),
-          Icon(
-            Icons.people_outline_rounded,
-            size: 10,
-            color: AppColors.textSecondary.withValues(alpha: 0.4),
-          ),
-          const SizedBox(width: 3),
-          Text(
-            '${p2pStatus.connectedPeersCount}',
-            style: TextStyle(
-              fontSize: 10,
-              color: AppColors.textSecondary.withValues(alpha: 0.5),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Relay connection status indicator
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: p2pStatus.isRelayConnected
+                    ? AppColors.success
+                    : AppColors.warning,
+              ),
             ),
-          ),
-        ],
-        // Settings button
-        const SizedBox(width: 12),
-        GestureDetector(
-          onTap: () => setState(() => _showAdvancedSettings = true),
-          child: Icon(
-            Icons.settings_outlined,
-            size: 14,
-            color: AppColors.textSecondary.withValues(alpha: 0.5),
-          ),
+            const SizedBox(width: 6),
+            Text(
+              p2pStatus.isRelayConnected ? 'P2P Ready' : 'Connecting...',
+              style: TextStyle(
+                fontSize: 10,
+                color: AppColors.textSecondary.withValues(alpha: 0.5),
+              ),
+            ),
+            // Show connected peer count
+            if (p2pStatus.connectedPeersCount > 0) ...[
+              const SizedBox(width: 8),
+              Icon(
+                Icons.people_outline_rounded,
+                size: 10,
+                color: AppColors.textSecondary.withValues(alpha: 0.4),
+              ),
+              const SizedBox(width: 3),
+              Text(
+                '${p2pStatus.connectedPeersCount}',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: AppColors.textSecondary.withValues(alpha: 0.5),
+                ),
+              ),
+            ],
+            // Settings button
+            const SizedBox(width: 12),
+            GestureDetector(
+              onTap: () => setState(() => _showAdvancedSettings = true),
+              child: Icon(
+                Icons.settings_outlined,
+                size: 14,
+                color: AppColors.textSecondary.withValues(alpha: 0.5),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        // Show relay URL
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.cloud_outlined,
+              size: 10,
+              color: AppColors.textSecondary.withValues(alpha: 0.3),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              displayRelayUrl,
+              style: TextStyle(
+                fontSize: 9,
+                color: AppColors.textSecondary.withValues(alpha: 0.3),
+              ),
+            ),
+          ],
         ),
       ],
     );

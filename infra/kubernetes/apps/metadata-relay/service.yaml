@@ -7,25 +7,12 @@ metadata:
     app.kubernetes.io/name: metadata-relay
     app.kubernetes.io/component: relay-service
 spec:
-  # Using hostNetwork in deployment, so ClusterIP for HTTP only
-  # P2P traffic goes directly to host ports
   type: ClusterIP
   ports:
     - port: 4000
       targetPort: http
       protocol: TCP
       name: http
-    - port: 4001
-      targetPort: p2p-tcp
-      protocol: TCP
-      name: p2p-tcp
-    - port: 4001
-      targetPort: p2p-udp
-      protocol: UDP
-      name: p2p-udp
   selector:
     app.kubernetes.io/name: metadata-relay
     app.kubernetes.io/component: relay-service
-
-# NOTE: Libp2p Relay uses hostNetwork mode, so ports (4001 TCP/UDP)
-# are exposed directly on the node's IP.

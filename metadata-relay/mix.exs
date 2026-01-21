@@ -37,9 +37,7 @@ defmodule MetadataRelay.MixProject do
       {:phoenix_html, "~> 4.0"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
-      {:corsica, "~> 2.0"},
-      # Rustler for Libp2p Relay
-      {:rustler, "~> 0.34.0", runtime: false}
+      {:corsica, "~> 2.0"}
     ]
   end
 

@@ -56,32 +56,6 @@ defmodule MetadataRelay.Router do
     |> send_resp(200, metrics)
   end
 
-  # P2P relay info endpoint
-  # Returns the relay's address for client bootstrap
-  # Must not be cached as peer ID can change on restart
-  get "/p2p/info" do
-    case MetadataRelay.P2p.Server.get_info() do
-      {:ok, info} ->
-        conn
-        |> put_resp_header("cache-control", "no-store, no-cache, must-revalidate")
-        |> put_resp_header("pragma", "no-cache")
-        |> put_resp_content_type("application/json")
-        |> send_resp(200, Jason.encode!(info))
-
-      {:error, :not_running} ->
-        error_response = %{
-          error: "P2P relay not running",
-          message: "The P2P relay server is not enabled or has not started"
-        }
-
-        conn
-        |> put_resp_header("cache-control", "no-store, no-cache, must-revalidate")
-        |> put_resp_header("pragma", "no-cache")
-        |> put_resp_content_type("application/json")
-        |> send_resp(503, Jason.encode!(error_response))
-    end
-  end
-
   # TMDB Configuration
   get "/configuration" do
     handle_tmdb_request(conn, fn -> Handler.configuration() end)

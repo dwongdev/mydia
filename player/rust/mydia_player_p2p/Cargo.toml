@@ -12,6 +12,9 @@ mydia_p2p_core = { path = "../../../native/mydia_p2p_core" }
 tokio = { version = "1.43", features = ["full"] }
 anyhow = "1.0"
 log = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.14"
+tracing-android = "0.2"

@@ -280,13 +280,9 @@ defmodule MetadataRelay.Relay do
   end
 
   defp process_resolve(claim, code) do
-    # Get relay P2P info for rendezvous points
-    # In a real deployment, these should be stable public addresses
-    rendezvous_points =
-      case MetadataRelay.P2p.Server.get_info() do
-        {:ok, info} -> info.addresses
-        _ -> []
-      end
+    # The iroh relay URL for P2P connections
+    # Clients use this for direct P2P rendezvous via the standalone iroh-relay service
+    relay_url = "https://p2p.mydia.dev"
 
     namespace = MetadataRelay.Relay.Namespace.derive_namespace(code)
 
@@ -294,7 +290,7 @@ defmodule MetadataRelay.Relay do
      %{
        namespace: namespace,
        expires_at: claim.expires_at,
-       rendezvous_points: rendezvous_points
+       relay_url: relay_url
      }}
   end
 

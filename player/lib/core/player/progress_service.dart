@@ -76,6 +76,22 @@ class ProgressService {
     final position = player.state.position.inSeconds;
     final duration = player.state.duration.inSeconds;
 
+    // Skip if duration not yet available or invalid (server requires duration > 0)
+    // This can happen when:
+    // - Media is still loading
+    // - Media failed to load (e.g., invalid URL scheme like p2p://)
+    // - Player is in an error state
+    if (duration <= 0) {
+      debugPrint('[ProgressService] Skipping movie sync: duration=$duration (invalid)');
+      return;
+    }
+
+    // Additional sanity check: position should be within valid range
+    if (position < 0 || position > duration) {
+      debugPrint('[ProgressService] Skipping movie sync: position=$position out of range (0-$duration)');
+      return;
+    }
+
     // Avoid syncing too frequently
     if (_lastSyncTime != null &&
         DateTime.now().difference(_lastSyncTime!) < _syncInterval) {
@@ -84,6 +100,14 @@ class ProgressService {
 
     try {
       _lastSyncTime = DateTime.now();
+
+      debugPrint('[ProgressService] Syncing movie progress: movieId=$movieId, position=$position, duration=$duration');
+
+      // Final safety check - never send invalid duration
+      if (duration <= 0) {
+        debugPrint('[ProgressService] UNEXPECTED: duration=$duration after checks, aborting');
+        return;
+      }
 
       final options = MutationOptions(
         document: documentNodeMutationUpdateMovieProgress,
@@ -97,10 +121,12 @@ class ProgressService {
       final result = await _client.mutate(options);
 
       if (result.hasException) {
-        debugPrint('Error syncing movie progress: ${result.exception}');
+        debugPrint('[ProgressService] Error syncing movie progress: ${result.exception}');
+      } else {
+        debugPrint('[ProgressService] Movie progress synced successfully');
       }
     } catch (e) {
-      debugPrint('Exception syncing movie progress: $e');
+      debugPrint('[ProgressService] Exception syncing movie progress: $e');
     }
   }
 
@@ -111,6 +137,22 @@ class ProgressService {
     final position = player.state.position.inSeconds;
     final duration = player.state.duration.inSeconds;
 
+    // Skip if duration not yet available or invalid (server requires duration > 0)
+    // This can happen when:
+    // - Media is still loading
+    // - Media failed to load (e.g., invalid URL scheme like p2p://)
+    // - Player is in an error state
+    if (duration <= 0) {
+      debugPrint('[ProgressService] Skipping episode sync: duration=$duration (invalid)');
+      return;
+    }
+
+    // Additional sanity check: position should be within valid range
+    if (position < 0 || position > duration) {
+      debugPrint('[ProgressService] Skipping episode sync: position=$position out of range (0-$duration)');
+      return;
+    }
+
     // Avoid syncing too frequently
     if (_lastSyncTime != null &&
         DateTime.now().difference(_lastSyncTime!) < _syncInterval) {
@@ -119,6 +161,14 @@ class ProgressService {
 
     try {
       _lastSyncTime = DateTime.now();
+
+      debugPrint('[ProgressService] Syncing episode progress: episodeId=$episodeId, position=$position, duration=$duration');
+
+      // Final safety check - never send invalid duration
+      if (duration <= 0) {
+        debugPrint('[ProgressService] UNEXPECTED: duration=$duration after checks, aborting');
+        return;
+      }
 
       final options = MutationOptions(
         document: documentNodeMutationUpdateEpisodeProgress,
@@ -132,10 +182,12 @@ class ProgressService {
       final result = await _client.mutate(options);
 
       if (result.hasException) {
-        debugPrint('Error syncing episode progress: ${result.exception}');
+        debugPrint('[ProgressService] Error syncing episode progress: ${result.exception}');
+      } else {
+        debugPrint('[ProgressService] Episode progress synced successfully');
       }
     } catch (e) {
-      debugPrint('Exception syncing episode progress: $e');
+      debugPrint('[ProgressService] Exception syncing episode progress: $e');
     }
   }
 

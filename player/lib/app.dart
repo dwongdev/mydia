@@ -6,7 +6,6 @@ import 'core/providers/providers.dart';
 import 'core/graphql/graphql_provider.dart';
 import 'presentation/widgets/cast_mini_controller.dart';
 import 'package:player/core/p2p/p2p_service.dart';
-import 'package:player/core/p2p/local_proxy_service.dart';
 
 class MyApp extends ConsumerStatefulWidget {
   const MyApp({super.key});
@@ -23,7 +22,8 @@ class _MyAppState extends ConsumerState<MyApp> {
     Future.microtask(() async {
       try {
         await ref.read(p2pServiceProvider).initialize();
-        await ref.read(localProxyServiceProvider).start();
+        // LocalProxyService is started on-demand when streaming,
+        // as it requires a targetPeer parameter
       } catch (e) {
         debugPrint('[MyApp] Failed to initialize P2P: $e');
       }

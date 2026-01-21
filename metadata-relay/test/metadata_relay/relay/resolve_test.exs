@@ -19,7 +19,7 @@ defmodule MetadataRelay.Relay.ResolveTest do
       assert {:ok, result} = Relay.resolve_claim(claim.code)
       assert result.namespace =~ "mydia-claim:"
       assert result.expires_at == claim.expires_at
-      assert is_list(result.rendezvous_points)
+      assert result.relay_url == "https://p2p.mydia.dev"
     end
 
     test "returns expired error for expired claim", %{instance: instance} do

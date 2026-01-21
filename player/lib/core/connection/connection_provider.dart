@@ -9,7 +9,7 @@ import '../auth/auth_storage.dart';
 
 /// Storage keys for connection credentials.
 abstract class _ConnectionStorageKeys {
-  static const instanceId = 'instance_id';
+  static const serverNodeAddr = 'server_node_addr';
   static const relayUrl = 'relay_url';
 }
 
@@ -26,15 +26,15 @@ enum ConnectionType {
 class ConnectionState {
   const ConnectionState({
     this.type = ConnectionType.direct,
-    this.instanceId,
+    this.serverNodeAddr,
     this.relayUrl,
   });
 
   /// The current connection type.
   final ConnectionType type;
 
-  /// The instance ID for p2p connections.
-  final String? instanceId;
+  /// The server's EndpointAddr JSON for P2P connections (required for dialing).
+  final String? serverNodeAddr;
 
   /// The relay URL for re-establishing connections.
   final String? relayUrl;
@@ -45,12 +45,12 @@ class ConnectionState {
   /// Creates a copy with updated fields.
   ConnectionState copyWith({
     ConnectionType? type,
-    String? instanceId,
+    String? serverNodeAddr,
     String? relayUrl,
   }) {
     return ConnectionState(
       type: type ?? this.type,
-      instanceId: instanceId ?? this.instanceId,
+      serverNodeAddr: serverNodeAddr ?? this.serverNodeAddr,
       relayUrl: relayUrl ?? this.relayUrl,
     );
   }
@@ -62,12 +62,12 @@ class ConnectionState {
 
   /// Creates a P2P connection state.
   factory ConnectionState.p2p({
-    String? instanceId,
+    String? serverNodeAddr,
     String? relayUrl,
   }) {
     return ConnectionState(
       type: ConnectionType.p2p,
-      instanceId: instanceId,
+      serverNodeAddr: serverNodeAddr,
       relayUrl: relayUrl,
     );
   }
@@ -88,7 +88,7 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
 
   /// Loads stored connection state on startup.
   Future<void> _loadStoredState() async {
-    final instanceId = await _authStorage.read(_ConnectionStorageKeys.instanceId);
+    final serverNodeAddr = await _authStorage.read(_ConnectionStorageKeys.serverNodeAddr);
     final relayUrl = await _authStorage.read(_ConnectionStorageKeys.relayUrl);
 
     // Check AFTER awaits - setP2PMode may have run during the async gap
@@ -97,12 +97,11 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
       return;
     }
 
-    // If we have relay credentials (instanceId), store them in state for later use.
-    if (instanceId != null) {
-      debugPrint('[ConnectionNotifier] Found relay credentials, will reconnect via p2p');
-      state = ConnectionState(
-        type: ConnectionType.direct, // Start as direct until P2P is established
-        instanceId: instanceId,
+    // If we have P2P credentials (serverNodeAddr), enter P2P mode
+    if (serverNodeAddr != null) {
+      debugPrint('[ConnectionNotifier] Found P2P credentials, entering P2P mode');
+      state = ConnectionState.p2p(
+        serverNodeAddr: serverNodeAddr,
         relayUrl: relayUrl,
       );
     }
@@ -110,21 +109,19 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
 
   /// Sets the connection to P2P mode.
   Future<void> setP2PMode({
-    String? instanceId,
+    required String serverNodeAddr,
     String? relayUrl,
   }) async {
-    debugPrint('[ConnectionNotifier] Setting P2P mode');
+    debugPrint('[ConnectionNotifier] Setting P2P mode with serverNodeAddr');
 
-    // Store relay credentials for reconnection
-    if (instanceId != null) {
-      await _authStorage.write(_ConnectionStorageKeys.instanceId, instanceId);
-    }
+    // Store credentials for reconnection
+    await _authStorage.write(_ConnectionStorageKeys.serverNodeAddr, serverNodeAddr);
     if (relayUrl != null) {
       await _authStorage.write(_ConnectionStorageKeys.relayUrl, relayUrl);
     }
 
     state = ConnectionState.p2p(
-      instanceId: instanceId ?? state.instanceId,
+      serverNodeAddr: serverNodeAddr,
       relayUrl: relayUrl ?? state.relayUrl,
     );
   }
@@ -137,8 +134,8 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
   
   Future<void> clear() async {
     debugPrint('[ConnectionNotifier] Clearing connection state');
-    
-    await _authStorage.delete(_ConnectionStorageKeys.instanceId);
+
+    await _authStorage.delete(_ConnectionStorageKeys.serverNodeAddr);
     await _authStorage.delete(_ConnectionStorageKeys.relayUrl);
 
     state = ConnectionState.direct();

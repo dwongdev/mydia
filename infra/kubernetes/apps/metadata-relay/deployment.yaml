@@ -22,10 +22,6 @@ spec:
         app.kubernetes.io/component: relay-service
         app.kubernetes.io/part-of: mydia
     spec:
-      # Use host network for P2P relay to avoid NAT issues with UDP
-      # This allows the relay to receive and forward traffic directly
-      hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: metadata-relay
           image: ghcr.io/getmydia/mydia/metadata-relay:dev
@@ -34,13 +30,6 @@ spec:
             - name: http
               containerPort: 4000
               protocol: TCP
-            # Libp2p Relay ports
-            - name: p2p-tcp
-              containerPort: 4001
-              protocol: TCP
-            - name: p2p-udp
-              containerPort: 4001
-              protocol: UDP
           envFrom:
             - configMapRef:
                 name: metadata-relay-config

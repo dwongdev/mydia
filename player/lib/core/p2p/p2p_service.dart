@@ -70,31 +70,36 @@ class P2pStatus {
   final bool isRelayConnected;
   final int connectedPeersCount;
   final String? nodeAddr;
+  final String? relayUrl;
 
   const P2pStatus({
     required this.isInitialized,
     required this.isRelayConnected,
     required this.connectedPeersCount,
     this.nodeAddr,
+    this.relayUrl,
   });
 
   const P2pStatus.initial()
       : isInitialized = false,
         isRelayConnected = false,
         connectedPeersCount = 0,
-        nodeAddr = null;
+        nodeAddr = null,
+        relayUrl = null;
 
   P2pStatus copyWith({
     bool? isInitialized,
     bool? isRelayConnected,
     int? connectedPeersCount,
     String? nodeAddr,
+    String? relayUrl,
   }) {
     return P2pStatus(
       isInitialized: isInitialized ?? this.isInitialized,
       isRelayConnected: isRelayConnected ?? this.isRelayConnected,
       connectedPeersCount: connectedPeersCount ?? this.connectedPeersCount,
       nodeAddr: nodeAddr ?? this.nodeAddr,
+      relayUrl: relayUrl ?? this.relayUrl,
     );
   }
 }
@@ -129,18 +134,67 @@ class P2pService {
   String? get nodeId => _nodeId;
 
   /// Current P2P status
-  P2pStatus get status => P2pStatus(
-        isInitialized: _isInitialized,
-        isRelayConnected: _isRelayConnected,
-        connectedPeersCount: _connectedPeers.length,
-        nodeAddr: _nodeAddr,
-      );
+  P2pStatus get status {
+    // Get relay URL from network stats (preferred) or extract from nodeAddr (fallback)
+    final relayUrl = _getEffectiveRelayUrl();
+    return P2pStatus(
+      isInitialized: _isInitialized,
+      isRelayConnected: _isRelayConnected,
+      connectedPeersCount: _connectedPeers.length,
+      nodeAddr: _nodeAddr,
+      relayUrl: relayUrl,
+    );
+  }
 
-  /// The relay URL currently in use
-  String? _activeRelayUrl;
+  /// The custom relay URL passed during initialization (null if using iroh defaults)
+  String? _customRelayUrl;
 
   /// Get the active relay URL (null before initialization)
-  String? get activeRelayUrl => _activeRelayUrl;
+  String? get activeRelayUrl => _getEffectiveRelayUrl();
+
+  /// Get the effective relay URL from network stats or by extracting from nodeAddr
+  String? _getEffectiveRelayUrl() {
+    // Try to get from network stats first (most accurate)
+    if (_host != null) {
+      final stats = _host!.getNetworkStats();
+      if (stats.relayUrl != null) {
+        return stats.relayUrl;
+      }
+    }
+
+    // Fallback: extract from nodeAddr JSON (same logic as Elixir)
+    if (_nodeAddr != null) {
+      final extracted = _extractRelayUrlFromNodeAddr(_nodeAddr!);
+      if (extracted != null) {
+        return extracted;
+      }
+    }
+
+    // Last resort: return custom relay URL if set
+    return _customRelayUrl;
+  }
+
+  /// Extract the relay URL from a nodeAddr JSON string.
+  /// The nodeAddr format is: {"id": "...", "addrs": [{"Relay": "https://..."}, {"Ip": "..."}]}
+  String? _extractRelayUrlFromNodeAddr(String nodeAddrJson) {
+    try {
+      final decoded = json.decode(nodeAddrJson);
+      if (decoded is! Map<String, dynamic>) return null;
+
+      final addrs = decoded['addrs'];
+      if (addrs is! List) return null;
+
+      // Find the first Relay address
+      for (final addr in addrs) {
+        if (addr is Map<String, dynamic> && addr.containsKey('Relay')) {
+          return addr['Relay'] as String?;
+        }
+      }
+    } catch (e) {
+      debugPrint('[P2P] Failed to extract relay URL from nodeAddr: $e');
+    }
+    return null;
+  }
 
   /// Initialize the P2P host.
   ///
@@ -152,7 +206,7 @@ class P2pService {
     // Use provided URL, or custom from env, or null (iroh defaults)
     final effectiveRelayUrl = relayUrl ??
         (_customIrohRelayUrl.isNotEmpty ? _customIrohRelayUrl : null);
-    _activeRelayUrl = effectiveRelayUrl;
+    _customRelayUrl = effectiveRelayUrl;
 
     try {
       debugPrint('[P2P] Initializing iroh-based P2P Host with relay: ${effectiveRelayUrl ?? "(iroh defaults)"}');
@@ -213,6 +267,57 @@ class P2pService {
     await _host!.dial(endpointAddrJson: endpointAddrJson);
   }
 
+  /// Extract the node ID from an EndpointAddr JSON string.
+  /// Returns null if the JSON is invalid or doesn't contain an id field.
+  String? _extractNodeIdFromEndpointAddr(String endpointAddrJson) {
+    try {
+      final decoded = json.decode(endpointAddrJson);
+      if (decoded is Map<String, dynamic>) {
+        return decoded['id'] as String?;
+      }
+    } catch (e) {
+      debugPrint('[P2P] Failed to extract node ID from EndpointAddr: $e');
+    }
+    return null;
+  }
+
+  /// Check if we're currently connected to a peer.
+  /// The peer can be specified as either a bare node ID or an EndpointAddr JSON.
+  bool isConnectedToPeer(String peer) {
+    // If it looks like JSON, extract the node ID
+    final nodeId = peer.startsWith('{')
+        ? _extractNodeIdFromEndpointAddr(peer)
+        : peer;
+    if (nodeId == null) return false;
+    return _connectedPeers.contains(nodeId);
+  }
+
+  /// Ensure we're connected to a peer, initializing and dialing if necessary.
+  /// The peer should be an EndpointAddr JSON string.
+  Future<void> ensureConnected(String endpointAddrJson) async {
+    // Auto-initialize if not already done
+    if (!_isInitialized) {
+      debugPrint('[P2P] Auto-initializing P2P service...');
+      await initialize();
+    }
+
+    if (_host == null) throw Exception("P2P host initialization failed");
+
+    // Check if already connected
+    if (isConnectedToPeer(endpointAddrJson)) {
+      debugPrint('[P2P] Already connected to peer');
+      return;
+    }
+
+    // Not connected, dial the peer
+    debugPrint('[P2P] Not connected, dialing peer...');
+    await dial(endpointAddrJson);
+
+    // Wait briefly for the connection event to be processed
+    // This gives time for the 'connected:' event to be received
+    await Future.delayed(const Duration(milliseconds: 100));
+  }
+
   /// Get this node's EndpointAddr as JSON for sharing.
   String? getNodeAddr() {
     if (_host == null) return null;
@@ -267,6 +372,9 @@ class P2pService {
     String? authToken,
   }) async {
     if (_host == null) throw Exception("P2P host not initialized");
+
+    // Ensure we're connected to the peer before sending
+    await ensureConnected(peer);
 
     debugPrint('[P2P] Sending GraphQL request to $peer');
 
@@ -323,6 +431,34 @@ class P2pService {
     }
   }
 
+  /// Send an HLS request to the server over P2P.
+  /// Returns the complete response with header and data.
+  Future<FlutterHlsResponse> sendHlsRequest({
+    required String peer,
+    required String sessionId,
+    required String path,
+    int? rangeStart,
+    int? rangeEnd,
+    String? authToken,
+  }) async {
+    if (_host == null) throw Exception("P2P host not initialized");
+
+    // Ensure we're connected to the peer before sending
+    await ensureConnected(peer);
+
+    debugPrint('[P2P] Sending HLS request to $peer for $sessionId/$path');
+
+    final req = FlutterHlsRequest(
+      sessionId: sessionId,
+      path: path,
+      rangeStart: rangeStart != null ? BigInt.from(rangeStart) : null,
+      rangeEnd: rangeEnd != null ? BigInt.from(rangeEnd) : null,
+      authToken: authToken,
+    );
+
+    return await _host!.sendHlsRequest(peer: peer, req: req);
+  }
+
   /// Reset the P2P host for re-initialization.
   /// This allows changing the relay URL by calling initialize() again.
   void reset() {
@@ -331,7 +467,7 @@ class P2pService {
     _isRelayConnected = false;
     _nodeAddr = null;
     _nodeId = null;
-    _activeRelayUrl = null;
+    _customRelayUrl = null;
     _connectedPeers.clear();
     _emitStatus();
   }

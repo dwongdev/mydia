@@ -6,6 +6,8 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterHlsStreamEvent`
+
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<P2pHost>>
 abstract class P2PHost implements RustOpaqueInterface {
   /// Dial a peer using their EndpointAddr JSON.
@@ -27,6 +29,13 @@ abstract class P2PHost implements RustOpaqueInterface {
   /// Send a GraphQL request to a specific peer.
   Future<FlutterGraphQLResponse> sendGraphqlRequest(
       {required String peer, required FlutterGraphQLRequest req});
+
+  /// Send an HLS request to a specific peer and collect the complete response.
+  ///
+  /// This is a non-streaming version that collects all chunks into a single buffer.
+  /// For large files, consider using the local proxy service instead.
+  Future<FlutterHlsResponse> sendHlsRequest(
+      {required String peer, required FlutterHlsRequest req});
 
   /// Send a pairing request to a specific peer.
   Future<FlutterPairingResponse> sendPairingRequest(
@@ -87,18 +96,117 @@ class FlutterGraphQLResponse {
           errors == other.errors;
 }
 
+/// HLS request to send over P2P
+class FlutterHlsRequest {
+  final String sessionId;
+  final String path;
+  final BigInt? rangeStart;
+  final BigInt? rangeEnd;
+  final String? authToken;
+
+  const FlutterHlsRequest({
+    required this.sessionId,
+    required this.path,
+    this.rangeStart,
+    this.rangeEnd,
+    this.authToken,
+  });
+
+  @override
+  int get hashCode =>
+      sessionId.hashCode ^
+      path.hashCode ^
+      rangeStart.hashCode ^
+      rangeEnd.hashCode ^
+      authToken.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterHlsRequest &&
+          runtimeType == other.runtimeType &&
+          sessionId == other.sessionId &&
+          path == other.path &&
+          rangeStart == other.rangeStart &&
+          rangeEnd == other.rangeEnd &&
+          authToken == other.authToken;
+}
+
+/// HLS stream complete response (non-streaming version)
+class FlutterHlsResponse {
+  final FlutterHlsResponseHeader header;
+  final Uint8List data;
+
+  const FlutterHlsResponse({
+    required this.header,
+    required this.data,
+  });
+
+  @override
+  int get hashCode => header.hashCode ^ data.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterHlsResponse &&
+          runtimeType == other.runtimeType &&
+          header == other.header &&
+          data == other.data;
+}
+
+/// HLS response header received over P2P
+class FlutterHlsResponseHeader {
+  final int status;
+  final String contentType;
+  final BigInt contentLength;
+  final String? contentRange;
+  final String? cacheControl;
+
+  const FlutterHlsResponseHeader({
+    required this.status,
+    required this.contentType,
+    required this.contentLength,
+    this.contentRange,
+    this.cacheControl,
+  });
+
+  @override
+  int get hashCode =>
+      status.hashCode ^
+      contentType.hashCode ^
+      contentLength.hashCode ^
+      contentRange.hashCode ^
+      cacheControl.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterHlsResponseHeader &&
+          runtimeType == other.runtimeType &&
+          status == other.status &&
+          contentType == other.contentType &&
+          contentLength == other.contentLength &&
+          contentRange == other.contentRange &&
+          cacheControl == other.cacheControl;
+}
+
 /// Network statistics for display in the UI
 class FlutterNetworkStats {
   final BigInt connectedPeers;
   final bool relayConnected;
 
+  /// The relay URL currently in use (extracted from endpoint address)
+  final String? relayUrl;
+
   const FlutterNetworkStats({
     required this.connectedPeers,
     required this.relayConnected,
+    this.relayUrl,
   });
 
   @override
-  int get hashCode => connectedPeers.hashCode ^ relayConnected.hashCode;
+  int get hashCode =>
+      connectedPeers.hashCode ^ relayConnected.hashCode ^ relayUrl.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -106,7 +214,8 @@ class FlutterNetworkStats {
       other is FlutterNetworkStats &&
           runtimeType == other.runtimeType &&
           connectedPeers == other.connectedPeers &&
-          relayConnected == other.relayConnected;
+          relayConnected == other.relayConnected &&
+          relayUrl == other.relayUrl;
 }
 
 class FlutterPairingRequest {
@@ -146,6 +255,7 @@ class FlutterPairingResponse {
   final String? accessToken;
   final String? deviceToken;
   final String? error;
+  final List<String> directUrls;
 
   const FlutterPairingResponse({
     required this.success,
@@ -153,6 +263,7 @@ class FlutterPairingResponse {
     this.accessToken,
     this.deviceToken,
     this.error,
+    required this.directUrls,
   });
 
   @override
@@ -161,7 +272,8 @@ class FlutterPairingResponse {
       mediaToken.hashCode ^
       accessToken.hashCode ^
       deviceToken.hashCode ^
-      error.hashCode;
+      error.hashCode ^
+      directUrls.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -172,5 +284,6 @@ class FlutterPairingResponse {
           mediaToken == other.mediaToken &&
           accessToken == other.accessToken &&
           deviceToken == other.deviceToken &&
-          error == other.error;
+          error == other.error &&
+          directUrls == other.directUrls;
 }

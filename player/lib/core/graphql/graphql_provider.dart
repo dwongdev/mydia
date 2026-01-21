@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:graphql_flutter/graphql_flutter.dart';
 import '../auth/auth_service.dart';
 import '../auth/auth_status.dart';
-import '../auth/auth_storage.dart';
 import '../auth/media_token_service.dart';
 import '../config/web_config.dart';
 import '../connection/connection_provider.dart';
@@ -62,19 +61,20 @@ final graphqlClientProvider = Provider<GraphQLClient?>((ref) {
   // Check if we're in P2P mode
   if (connectionState.isP2PMode) {
     final p2pService = ref.watch(p2pServiceProvider);
-    final instanceId = connectionState.instanceId;
+    final serverNodeAddr = connectionState.serverNodeAddr;
 
-    if (instanceId == null || !p2pService.isInitialized) {
-      debugPrint('[graphqlClientProvider] P2P mode but service not ready');
+    if (serverNodeAddr == null) {
+      debugPrint('[graphqlClientProvider] P2P mode but serverNodeAddr is null');
       return null;
     }
 
-    debugPrint('[graphqlClientProvider] Using P2P mode with instance: $instanceId');
+    debugPrint('[graphqlClientProvider] Using P2P mode (service will auto-initialize on first request)');
 
-    // Create P2P GraphQL client
+    // Create P2P GraphQL client - use the full EndpointAddr JSON for reconnection
+    // The P2P service will auto-initialize when ensureConnected is called
     return createP2pGraphQLClient(
       p2pService: p2pService,
-      serverNodeId: instanceId,
+      serverNodeId: serverNodeAddr,
       getAuthToken: () async => await authService.getToken(),
     );
   }

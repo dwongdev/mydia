@@ -118,12 +118,18 @@
           AR_i686_linux_android = "${ndkPath}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar";
 
           shellHook = ''
-            export PATH="${androidSdk}/libexec/android-sdk/platform-tools:$PATH"
+            export PATH="${androidSdk}/libexec/android-sdk/platform-tools:$HOME/.cargo/bin:$PATH"
             # Note: Do NOT add NDK toolchain to PATH - it interferes with Linux builds.
             # Rust cross-compilation uses the CARGO_TARGET_* env vars instead.
 
             # Delete stale local.properties that may have wrong SDK paths
             rm -f android/local.properties 2>/dev/null || true
+
+            # Ensure flutter_rust_bridge_codegen is installed
+            if ! command -v flutter_rust_bridge_codegen &> /dev/null; then
+              echo "Installing flutter_rust_bridge_codegen..."
+              cargo install flutter_rust_bridge_codegen --quiet
+            fi
 
             echo ""
             echo "Flutter + Rust Android development shell"
@@ -131,8 +137,10 @@
             echo "Rust targets installed:"
             rustup target list --installed 2>/dev/null || rustc --print target-list | grep android | head -4
             echo ""
-            echo "To build for Android: flutter run"
-            echo "To build APK: flutter build apk"
+            echo "Commands:"
+            echo "  flutter run                           - Build and run on device"
+            echo "  flutter build apk                     - Build release APK"
+            echo "  flutter_rust_bridge_codegen generate  - Regenerate Rust-Dart bridge"
             echo ""
           '';
         };

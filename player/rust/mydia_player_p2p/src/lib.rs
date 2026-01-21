@@ -1,24 +1,48 @@
 mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be accurate, and you can change it according to your needs. */
-use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingRequest, GraphQLRequest, HostConfig};
+use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingRequest, GraphQLRequest, HlsRequest, HostConfig};
 use flutter_rust_bridge::frb;
 use crate::frb_generated::StreamSink;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 #[frb(init)]
 pub fn init_app() {
     // Default utilities - e.g. logging
     flutter_rust_bridge::setup_default_user_utils();
-    
-    // Initialize Android logging
+
+    // Initialize Android logging for log:: macros
     #[cfg(target_os = "android")]
     android_logger::init_once(
         android_logger::Config::default()
             .with_max_level(log::LevelFilter::Debug)
             .with_filter(android_logger::FilterBuilder::new()
-                .parse("debug,yamux=warn,libp2p_yamux=warn,multistream_select=warn,netlink_proto=warn")
+                .parse("info,mydia=debug,iroh=info,iroh_quinn=warn,iroh_quinn_proto=warn,yamux=warn,netlink_proto=warn")
                 .build())
             .with_tag("mydia_p2p"),
     );
-    
+
+    // Initialize tracing for mydia_p2p_core and iroh (which use tracing:: macros)
+    // This must be done BEFORE Host::new() is called to capture iroh's startup logs
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,mydia_p2p_core=debug,iroh=info,quinn=warn,rustls=warn"));
+
+    #[cfg(target_os = "android")]
+    {
+        // On Android, use tracing-android to forward tracing events to logcat
+        let _ = tracing_subscriber::registry()
+            .with(filter)
+            .with(tracing_android::layer("mydia_p2p").unwrap())
+            .try_init();
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        // On other platforms, use standard fmt subscriber
+        let _ = tracing_subscriber::registry()
+            .with(filter)
+            .with(tracing_subscriber::fmt::layer())
+            .try_init();
+    }
+
     log::info!("mydia_player_p2p initialized");
 }
 
@@ -39,12 +63,15 @@ pub struct FlutterPairingResponse {
     pub access_token: Option<String>,
     pub device_token: Option<String>,
     pub error: Option<String>,
+    pub direct_urls: Vec<String>,
 }
 
 /// Network statistics for display in the UI
 pub struct FlutterNetworkStats {
     pub connected_peers: usize,
     pub relay_connected: bool,
+    /// The relay URL currently in use (extracted from endpoint address)
+    pub relay_url: Option<String>,
 }
 
 /// GraphQL request to send over P2P
@@ -59,6 +86,39 @@ pub struct FlutterGraphQLRequest {
 pub struct FlutterGraphQLResponse {
     pub data: Option<String>,
     pub errors: Option<String>,
+}
+
+/// HLS request to send over P2P
+pub struct FlutterHlsRequest {
+    pub session_id: String,
+    pub path: String,
+    pub range_start: Option<u64>,
+    pub range_end: Option<u64>,
+    pub auth_token: Option<String>,
+}
+
+/// HLS response header received over P2P
+pub struct FlutterHlsResponseHeader {
+    pub status: u16,
+    pub content_type: String,
+    pub content_length: u64,
+    pub content_range: Option<String>,
+    pub cache_control: Option<String>,
+}
+
+/// HLS stream event (header or chunk)
+#[frb(non_opaque)]
+pub enum FlutterHlsStreamEvent {
+    Header(FlutterHlsResponseHeader),
+    Chunk(Vec<u8>),
+    End,
+    Error(String),
+}
+
+/// HLS stream complete response (non-streaming version)
+pub struct FlutterHlsResponse {
+    pub header: FlutterHlsResponseHeader,
+    pub data: Vec<u8>,
 }
 
 impl P2pHost {
@@ -124,6 +184,14 @@ impl P2pHost {
                             // Client doesn't handle incoming requests
                             continue;
                         }
+                        Event::HlsStreamRequest { .. } => {
+                            // Client doesn't handle incoming HLS requests
+                            continue;
+                        }
+                        Event::Log { .. } => {
+                            // Logs are handled separately via android_logger/tracing
+                            continue;
+                        }
                     };
                     log::debug!("event_stream received: {}", msg);
                     if sink.add(msg).is_err() {
@@ -157,6 +225,7 @@ impl P2pHost {
                     access_token: res.access_token,
                     device_token: res.device_token,
                     error: res.error,
+                    direct_urls: res.direct_urls,
                 })
             }
             Ok(MydiaResponse::Error(e)) => {
@@ -212,9 +281,59 @@ impl P2pHost {
     pub fn get_network_stats(&self) -> FlutterNetworkStats {
         log::debug!("P2pHost::get_network_stats() called");
         let stats = self.inner.get_network_stats();
+        log::debug!("Network stats: connected_peers={}, relay_connected={}, relay_url={:?}",
+            stats.connected_peers, stats.relay_connected, stats.relay_url);
         FlutterNetworkStats {
             connected_peers: stats.connected_peers,
             relay_connected: stats.relay_connected,
+            relay_url: stats.relay_url,
+        }
+    }
+
+    /// Send an HLS request to a specific peer and collect the complete response.
+    ///
+    /// This is a non-streaming version that collects all chunks into a single buffer.
+    /// For large files, consider using the local proxy service instead.
+    pub async fn send_hls_request(&self, peer: String, req: FlutterHlsRequest) -> anyhow::Result<FlutterHlsResponse> {
+        log::info!("P2pHost::send_hls_request() called for peer: {}, session: {}, path: {}",
+            peer, req.session_id, req.path);
+
+        let core_req = HlsRequest {
+            session_id: req.session_id,
+            path: req.path,
+            range_start: req.range_start,
+            range_end: req.range_end,
+            auth_token: req.auth_token,
+        };
+
+        // Call the Host's send_hls_request method
+        match self.inner.send_hls_request(peer.clone(), core_req).await {
+            Ok(stream_response) => {
+                let flutter_header = FlutterHlsResponseHeader {
+                    status: stream_response.header.status,
+                    content_type: stream_response.header.content_type,
+                    content_length: stream_response.header.content_length,
+                    content_range: stream_response.header.content_range,
+                    cache_control: stream_response.header.cache_control,
+                };
+
+                // Collect all chunks into a single buffer
+                let mut data = Vec::with_capacity(stream_response.header.content_length as usize);
+                let mut chunk_rx = stream_response.chunk_rx;
+                while let Some(chunk) = chunk_rx.recv().await {
+                    data.extend_from_slice(&chunk);
+                }
+
+                log::info!("HLS request completed for peer: {}, received {} bytes", peer, data.len());
+                Ok(FlutterHlsResponse {
+                    header: flutter_header,
+                    data,
+                })
+            }
+            Err(e) => {
+                log::error!("send_hls_request failed for peer {}: {}", peer, e);
+                Err(anyhow::anyhow!("HLS request failed: {}", e))
+            }
         }
     }
 }

@@ -199,10 +199,10 @@ class LoginController extends _$LoginController {
       debugPrint('[LoginController] Credentials stored');
 
       // Set connection mode
-      if (result.isP2PMode) {
+      if (result.isP2PMode && credentials.serverNodeAddr != null) {
         debugPrint('[LoginController] Setting P2P mode in connection provider');
         await ref.read(connectionProvider.notifier).setP2PMode(
-          instanceId: credentials.instanceId,
+          serverNodeAddr: credentials.serverNodeAddr!,
         );
         // Invalidate GraphQL providers to force rebuild
         ref.invalidate(graphqlClientProvider);
@@ -379,11 +379,10 @@ class LoginController extends _$LoginController {
       );
 
       // Set connection mode
-      if (result.isP2PMode) {
+      if (result.isP2PMode && credentials.serverNodeAddr != null) {
         debugPrint('[LoginController] Setting P2P mode from QR pairing');
         await ref.read(connectionProvider.notifier).setP2PMode(
-          instanceId: credentials.instanceId,
-          // relayUrl defaults to the global relay
+          serverNodeAddr: credentials.serverNodeAddr!,
         );
         // Invalidate GraphQL providers to force rebuild
         ref.invalidate(graphqlClientProvider);

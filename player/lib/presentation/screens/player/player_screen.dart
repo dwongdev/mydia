@@ -171,6 +171,22 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         return;
       }
 
+      // Check if we're in P2P mode - media streaming over P2P is not yet implemented
+      // The serverUrl will be 'p2p://mydia' in P2P mode
+      if (serverUrl.startsWith('p2p://')) {
+        debugPrint('[PlayerScreen] Detected P2P mode, media streaming not yet implemented');
+        if (mounted) {
+          setState(() {
+            _error = 'Media streaming over P2P is not yet available.\n\n'
+                'The P2P connection is working for metadata and control, '
+                'but direct media streaming requires additional implementation.\n\n'
+                'Please use a direct network connection to your server for now.';
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+
       // Store for session cleanup
       _serverUrl = serverUrl;
       _authToken = token;

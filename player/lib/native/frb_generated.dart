@@ -70,7 +70,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => 1135963228;
+  int get rustContentHash => 1776716824;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -96,6 +96,11 @@ abstract class RustLibApi extends BaseApi {
       {required P2PHost that,
       required String peer,
       required FlutterGraphQLRequest req});
+
+  Future<FlutterHlsResponse> crateP2PHostSendHlsRequest(
+      {required P2PHost that,
+      required String peer,
+      required FlutterHlsRequest req});
 
   Future<FlutterPairingResponse> crateP2PHostSendPairingRequest(
       {required P2PHost that,
@@ -279,6 +284,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<FlutterHlsResponse> crateP2PHostSendHlsRequest(
+      {required P2PHost that,
+      required String peer,
+      required FlutterHlsRequest req}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerP2pHost(
+            that, serializer);
+        sse_encode_String(peer, serializer);
+        sse_encode_box_autoadd_flutter_hls_request(req, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 7, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_flutter_hls_response,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateP2PHostSendHlsRequestConstMeta,
+      argValues: [that, peer, req],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateP2PHostSendHlsRequestConstMeta => const TaskConstMeta(
+        debugName: "P2PHost_send_hls_request",
+        argNames: ["that", "peer", "req"],
+      );
+
+  @override
   Future<FlutterPairingResponse> crateP2PHostSendPairingRequest(
       {required P2PHost that,
       required String peer,
@@ -291,7 +326,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(peer, serializer);
         sse_encode_box_autoadd_flutter_pairing_request(req, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 7, port: port_);
+            funcId: 8, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_flutter_pairing_response,
@@ -315,7 +350,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 8, port: port_);
+            funcId: 9, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -396,10 +431,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterHlsRequest dco_decode_box_autoadd_flutter_hls_request(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_flutter_hls_request(raw);
+  }
+
+  @protected
   FlutterPairingRequest dco_decode_box_autoadd_flutter_pairing_request(
       dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_flutter_pairing_request(raw);
+  }
+
+  @protected
+  BigInt dco_decode_box_autoadd_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_u_64(raw);
   }
 
   @protected
@@ -429,14 +476,57 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  FlutterNetworkStats dco_decode_flutter_network_stats(dynamic raw) {
+  FlutterHlsRequest dco_decode_flutter_hls_request(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return FlutterHlsRequest(
+      sessionId: dco_decode_String(arr[0]),
+      path: dco_decode_String(arr[1]),
+      rangeStart: dco_decode_opt_box_autoadd_u_64(arr[2]),
+      rangeEnd: dco_decode_opt_box_autoadd_u_64(arr[3]),
+      authToken: dco_decode_opt_String(arr[4]),
+    );
+  }
+
+  @protected
+  FlutterHlsResponse dco_decode_flutter_hls_response(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
     if (arr.length != 2)
       throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FlutterHlsResponse(
+      header: dco_decode_flutter_hls_response_header(arr[0]),
+      data: dco_decode_list_prim_u_8_strict(arr[1]),
+    );
+  }
+
+  @protected
+  FlutterHlsResponseHeader dco_decode_flutter_hls_response_header(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return FlutterHlsResponseHeader(
+      status: dco_decode_u_16(arr[0]),
+      contentType: dco_decode_String(arr[1]),
+      contentLength: dco_decode_u_64(arr[2]),
+      contentRange: dco_decode_opt_String(arr[3]),
+      cacheControl: dco_decode_opt_String(arr[4]),
+    );
+  }
+
+  @protected
+  FlutterNetworkStats dco_decode_flutter_network_stats(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return FlutterNetworkStats(
       connectedPeers: dco_decode_usize(arr[0]),
       relayConnected: dco_decode_bool(arr[1]),
+      relayUrl: dco_decode_opt_String(arr[2]),
     );
   }
 
@@ -458,15 +548,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FlutterPairingResponse dco_decode_flutter_pairing_response(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
     return FlutterPairingResponse(
       success: dco_decode_bool(arr[0]),
       mediaToken: dco_decode_opt_String(arr[1]),
       accessToken: dco_decode_opt_String(arr[2]),
       deviceToken: dco_decode_opt_String(arr[3]),
       error: dco_decode_opt_String(arr[4]),
+      directUrls: dco_decode_list_String(arr[5]),
     );
+  }
+
+  @protected
+  List<String> dco_decode_list_String(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_String).toList();
   }
 
   @protected
@@ -479,6 +576,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   String? dco_decode_opt_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_String(raw);
+  }
+
+  @protected
+  BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_u_64(raw);
   }
 
   @protected
@@ -497,6 +600,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           arr[0]),
       dco_decode_String(arr[1]),
     );
+  }
+
+  @protected
+  int dco_decode_u_16(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
+  }
+
+  @protected
+  BigInt dco_decode_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dcoDecodeU64(raw);
   }
 
   @protected
@@ -579,10 +694,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterHlsRequest sse_decode_box_autoadd_flutter_hls_request(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_flutter_hls_request(deserializer));
+  }
+
+  @protected
   FlutterPairingRequest sse_decode_box_autoadd_flutter_pairing_request(
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_flutter_pairing_request(deserializer));
+  }
+
+  @protected
+  BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_u_64(deserializer));
   }
 
   @protected
@@ -610,13 +738,59 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterHlsRequest sse_decode_flutter_hls_request(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_sessionId = sse_decode_String(deserializer);
+    var var_path = sse_decode_String(deserializer);
+    var var_rangeStart = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_rangeEnd = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_authToken = sse_decode_opt_String(deserializer);
+    return FlutterHlsRequest(
+        sessionId: var_sessionId,
+        path: var_path,
+        rangeStart: var_rangeStart,
+        rangeEnd: var_rangeEnd,
+        authToken: var_authToken);
+  }
+
+  @protected
+  FlutterHlsResponse sse_decode_flutter_hls_response(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_header = sse_decode_flutter_hls_response_header(deserializer);
+    var var_data = sse_decode_list_prim_u_8_strict(deserializer);
+    return FlutterHlsResponse(header: var_header, data: var_data);
+  }
+
+  @protected
+  FlutterHlsResponseHeader sse_decode_flutter_hls_response_header(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_status = sse_decode_u_16(deserializer);
+    var var_contentType = sse_decode_String(deserializer);
+    var var_contentLength = sse_decode_u_64(deserializer);
+    var var_contentRange = sse_decode_opt_String(deserializer);
+    var var_cacheControl = sse_decode_opt_String(deserializer);
+    return FlutterHlsResponseHeader(
+        status: var_status,
+        contentType: var_contentType,
+        contentLength: var_contentLength,
+        contentRange: var_contentRange,
+        cacheControl: var_cacheControl);
+  }
+
+  @protected
   FlutterNetworkStats sse_decode_flutter_network_stats(
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_connectedPeers = sse_decode_usize(deserializer);
     var var_relayConnected = sse_decode_bool(deserializer);
+    var var_relayUrl = sse_decode_opt_String(deserializer);
     return FlutterNetworkStats(
-        connectedPeers: var_connectedPeers, relayConnected: var_relayConnected);
+        connectedPeers: var_connectedPeers,
+        relayConnected: var_relayConnected,
+        relayUrl: var_relayUrl);
   }
 
   @protected
@@ -643,12 +817,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_accessToken = sse_decode_opt_String(deserializer);
     var var_deviceToken = sse_decode_opt_String(deserializer);
     var var_error = sse_decode_opt_String(deserializer);
+    var var_directUrls = sse_decode_list_String(deserializer);
     return FlutterPairingResponse(
         success: var_success,
         mediaToken: var_mediaToken,
         accessToken: var_accessToken,
         deviceToken: var_deviceToken,
-        error: var_error);
+        error: var_error,
+        directUrls: var_directUrls);
+  }
+
+  @protected
+  List<String> sse_decode_list_String(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <String>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_String(deserializer));
+    }
+    return ans_;
   }
 
   @protected
@@ -670,6 +858,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_u_64(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   (
     P2PHost,
     String
@@ -681,6 +880,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             deserializer);
     var var_field1 = sse_decode_String(deserializer);
     return (var_field0, var_field1);
+  }
+
+  @protected
+  int sse_decode_u_16(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint16();
+  }
+
+  @protected
+  BigInt sse_decode_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getBigUint64();
   }
 
   @protected
@@ -773,10 +984,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_flutter_hls_request(
+      FlutterHlsRequest self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_flutter_hls_request(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_flutter_pairing_request(
       FlutterPairingRequest self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_flutter_pairing_request(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_64(self, serializer);
   }
 
   @protected
@@ -798,11 +1022,42 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_flutter_hls_request(
+      FlutterHlsRequest self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.sessionId, serializer);
+    sse_encode_String(self.path, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.rangeStart, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.rangeEnd, serializer);
+    sse_encode_opt_String(self.authToken, serializer);
+  }
+
+  @protected
+  void sse_encode_flutter_hls_response(
+      FlutterHlsResponse self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_flutter_hls_response_header(self.header, serializer);
+    sse_encode_list_prim_u_8_strict(self.data, serializer);
+  }
+
+  @protected
+  void sse_encode_flutter_hls_response_header(
+      FlutterHlsResponseHeader self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_16(self.status, serializer);
+    sse_encode_String(self.contentType, serializer);
+    sse_encode_u_64(self.contentLength, serializer);
+    sse_encode_opt_String(self.contentRange, serializer);
+    sse_encode_opt_String(self.cacheControl, serializer);
+  }
+
+  @protected
   void sse_encode_flutter_network_stats(
       FlutterNetworkStats self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_usize(self.connectedPeers, serializer);
     sse_encode_bool(self.relayConnected, serializer);
+    sse_encode_opt_String(self.relayUrl, serializer);
   }
 
   @protected
@@ -824,6 +1079,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.accessToken, serializer);
     sse_encode_opt_String(self.deviceToken, serializer);
     sse_encode_opt_String(self.error, serializer);
+    sse_encode_list_String(self.directUrls, serializer);
+  }
+
+  @protected
+  void sse_encode_list_String(List<String> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_String(item, serializer);
+    }
   }
 
   @protected
@@ -845,6 +1110,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_u_64(self, serializer);
+    }
+  }
+
+  @protected
   void
       sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_p_2_p_host_string(
           (P2PHost, String) self, SseSerializer serializer) {
@@ -852,6 +1127,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerP2pHost(
         self.$1, serializer);
     sse_encode_String(self.$2, serializer);
+  }
+
+  @protected
+  void sse_encode_u_16(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putUint16(self);
+  }
+
+  @protected
+  void sse_encode_u_64(BigInt self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putBigUint64(self);
   }
 
   @protected
@@ -922,6 +1209,15 @@ class P2PHostImpl extends RustOpaque implements P2PHost {
           {required String peer, required FlutterGraphQLRequest req}) =>
       RustLib.instance.api
           .crateP2PHostSendGraphqlRequest(that: this, peer: peer, req: req);
+
+  /// Send an HLS request to a specific peer and collect the complete response.
+  ///
+  /// This is a non-streaming version that collects all chunks into a single buffer.
+  /// For large files, consider using the local proxy service instead.
+  Future<FlutterHlsResponse> sendHlsRequest(
+          {required String peer, required FlutterHlsRequest req}) =>
+      RustLib.instance.api
+          .crateP2PHostSendHlsRequest(that: this, peer: peer, req: req);
 
   /// Send a pairing request to a specific peer.
   Future<FlutterPairingResponse> sendPairingRequest(

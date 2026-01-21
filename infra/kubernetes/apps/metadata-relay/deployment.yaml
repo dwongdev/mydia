@@ -22,8 +22,8 @@ spec:
         app.kubernetes.io/component: relay-service
         app.kubernetes.io/part-of: mydia
     spec:
-      # Use host network for TURN server to avoid NAT issues with UDP
-      # This allows the TURN server to receive and relay media traffic directly
+      # Use host network for P2P relay to avoid NAT issues with UDP
+      # This allows the relay to receive and forward traffic directly
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       containers:

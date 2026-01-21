@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/component: relay-service
 spec:
   # Using hostNetwork in deployment, so ClusterIP for HTTP only
-  # TURN traffic goes directly to host ports
+  # P2P traffic goes directly to host ports
   type: ClusterIP
   ports:
     - port: 4000

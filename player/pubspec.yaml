@@ -34,7 +34,6 @@ dependencies:
   device_info_plus: ^12.3.0
   mobile_scanner: ^7.0.1
   url_launcher: ^6.3.0
-  flutter_webrtc: ^1.2.1
   flutter_rust_bridge: ^2.0.0
   mydia_player_p2p:
     path: rust_builder

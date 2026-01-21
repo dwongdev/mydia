@@ -30,7 +30,7 @@ Automated deployment of metadata-relay on OVHcloud VPS with k3s, external-dns, a
 │  │  │                                                     │  │  │
 │  │  │  • TVDB/TMDB API proxy                             │  │  │
 │  │  │  • WebSocket relay for device pairing              │  │  │
-│  │  │  • Integrated STUN/TURN server (WebRTC)            │  │  │
+│  │  │  • P2P relay for NAT traversal (iroh-based)        │  │  │
 │  │  │  • SQLite database (persistent volume)             │  │  │
 │  │  └─────────────────────────────────────────────────────┘  │  │
 │  │                                                            │  │
@@ -149,46 +149,13 @@ infra/
     └── apps/
         └── metadata-relay/
             ├── namespace.yaml
-            ├── deployment.yaml   # Includes integrated TURN server
+            ├── deployment.yaml
             ├── service.yaml
             ├── ingress.yaml
-            ├── configmap.yaml    # TURN configuration
+            ├── configmap.yaml
             ├── pvc.yaml
             └── secret.yaml.example
 ```
-
-## Integrated TURN Server
-
-The metadata-relay includes an integrated STUN/TURN server for WebRTC NAT traversal,
-eliminating the need for external Coturn deployments.
-
-### Features
-
-- Pure Erlang implementation via `processone/stun` library
-- Full STUN (RFC 5389) and TURN (RFC 5766) support
-- Time-limited credentials with HMAC-SHA1 authentication
-- Automatic public IP detection from Kubernetes node
-
-### Configuration
-
-TURN is enabled by default in the configmap. Key settings:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TURN_ENABLED` | `true` | Enable integrated TURN server |
-| `TURN_SECRET` | (secret) | Shared secret for credential generation |
-| `TURN_PORT` | `3478` | STUN/TURN listener port |
-| `TURN_PUBLIC_IP` | (auto) | Set from `status.hostIP` |
-| `TURN_MIN_PORT` | `49152` | Min relay allocation port |
-| `TURN_MAX_PORT` | `49252` | Max relay allocation port |
-
-### Network Requirements
-
-The deployment uses `hostNetwork: true` for optimal TURN performance:
-- Port 3478 (UDP/TCP): STUN/TURN listener
-- Ports 49152-49252 (UDP): Media relay allocations
-
-Ensure these ports are open in your firewall/security groups.
 
 ## How It Works
 

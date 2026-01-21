@@ -19,7 +19,6 @@ data:
   REDIS_URL: "redis://redis:6379"
 
   # P2P Relay Server Configuration (iroh-based)
-  # Replaces legacy TURN server for NAT traversal and signaling
   P2P_RELAY_ENABLED: "true"
   P2P_PORT: "4001"
   # External hostname for P2P (DNS-only record, not proxied by Cloudflare)

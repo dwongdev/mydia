@@ -9,23 +9,14 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   - HTTP URLs are always generated (for reverse proxy setups)
   - HTTPS URLs are optionally generated (for direct secure access)
 
-  Also supports detecting the instance's public IP address using STUN (primary)
-  or HTTP services (fallback), which is useful when running behind NAT/Docker
-  where the relay can't see the real public IP.
-
-  ## Public IP Detection Methods
-
-  1. **STUN (Primary)** - Uses STUN binding requests to Google, Cloudflare, and
-     other public STUN servers. This is faster and more reliable than HTTP.
-  2. **HTTP (Fallback)** - Falls back to ipify.org, ifconfig.me, and icanhazip.com
-     if STUN fails (e.g., UDP blocked by firewall).
+  Also supports detecting the instance's public IP address using HTTP services
+  (ipify.org, ifconfig.me, icanhazip.com), which is useful when running behind
+  NAT/Docker where the relay can't see the real public IP.
   """
 
   require Logger
 
-  alias Mydia.RemoteAccess.StunClient
-
-  # Fallback HTTP services for public IP detection (used if STUN fails)
+  # HTTP services for public IP detection
   @http_ip_services [
     "https://api.ipify.org",
     "https://ifconfig.me/ip",
@@ -168,11 +159,8 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   @doc """
   Detects the public IP address of this instance.
 
-  Uses STUN (Session Traversal Utilities for NAT) as the primary detection method,
-  which is faster and more reliable than HTTP-based services. Falls back to HTTP
-  services (ipify.org, ifconfig.me, icanhazip.com) if STUN fails.
-
-  Results are cached to avoid repeated requests.
+  Uses HTTP services (ipify.org, ifconfig.me, icanhazip.com) to detect the
+  public IP address. Results are cached to avoid repeated requests.
 
   Returns `{:ok, ip_string}` on success, or `{:error, reason}` on failure.
 
@@ -316,20 +304,6 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   end
 
   defp detect_public_ip_from_services do
-    # Try STUN first (faster, more reliable)
-    case StunClient.detect_public_ip() do
-      {:ok, ip} ->
-        Logger.debug("Detected public IP #{ip} via STUN")
-        {:ok, ip}
-
-      {:error, stun_reason} ->
-        Logger.debug("STUN detection failed: #{inspect(stun_reason)}, trying HTTP fallback")
-        # Fall back to HTTP services
-        detect_public_ip_from_http_services()
-    end
-  end
-
-  defp detect_public_ip_from_http_services do
     Enum.reduce_while(@http_ip_services, {:error, :all_methods_failed}, fn service_url, _acc ->
       case fetch_public_ip_http(service_url) do
         {:ok, ip} ->

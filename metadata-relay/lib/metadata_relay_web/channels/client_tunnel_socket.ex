@@ -151,7 +151,6 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
 
           # Notify the instance about the incoming connection
           # Instance needs to know: session_id, client public key (if available), and client IP
-          # The client IP is needed for TURN permission creation
           Phoenix.PubSub.broadcast(
             MetadataRelay.PubSub,
             "relay:instance:#{instance_id}",
@@ -211,7 +210,6 @@ defmodule MetadataRelayWeb.ClientTunnelSocket do
           state = reset_timeout(state)
 
           # Notify the instance about the incoming connection
-          # Include client IP for TURN permission creation
           Logger.debug(
             "Broadcasting relay_connection to relay:instance:#{info.instance_id}, client_ip=#{state.client_ip || "unknown"}"
           )

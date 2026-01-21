@@ -91,7 +91,6 @@ class Config:
     relay_secret_key_base: str = ""
     relay_tvdb_api_key: str = ""
     relay_tmdb_api_key: str = ""
-    turn_secret: str = ""  # For integrated TURN server
 
     # VPS
     vps_name: str = ""  # Populated after VPS is ordered/found
@@ -138,7 +137,6 @@ class Config:
             "relay_secret_key_base": self.relay_secret_key_base,
             "relay_tvdb_api_key": self.relay_tvdb_api_key,
             "relay_tmdb_api_key": self.relay_tmdb_api_key,
-            "turn_secret": self.turn_secret,
             "vps_name": self.vps_name,
             "vps_ip": self.vps_ip,
             "ssh_public_key_path": self.ssh_public_key_path,
@@ -803,16 +801,6 @@ def phase_app(config: Config, dry_run: bool = False) -> bool:
             run(["kubectl", "create", "namespace", namespace])
         console.print("  [green]✓[/green] Namespace created")
 
-    # --- Generate TURN secret if not set ---
-    if not config.turn_secret:
-        if dry_run:
-            console.print("  [yellow]Would generate:[/yellow] Random TURN auth secret")
-            config.turn_secret = "dry-run-secret"
-        else:
-            console.print("  [dim]Generating new TURN auth secret...[/dim]")
-            config.turn_secret = secrets.token_hex(32)
-            config.save(CONFIG_FILE)
-
     # --- Secret ---
     if k8s_secret_exists("metadata-relay-secrets", namespace):
         console.print("  [green]✓[/green] Secret 'metadata-relay-secrets' exists")
@@ -826,15 +814,14 @@ def phase_app(config: Config, dry_run: bool = False) -> bool:
                 "--dry-run=client", "-o", "yaml",
                 f"--from-literal=RELAY_TOKEN_SECRET={config.relay_secret_key_base}",
                 f"--from-literal=TMDB_API_KEY={config.relay_tmdb_api_key}",
-                f"--from-literal=TVDB_API_KEY={config.relay_tvdb_api_key}",
-                f"--from-literal=TURN_SECRET={config.turn_secret}"],
+                f"--from-literal=TVDB_API_KEY={config.relay_tvdb_api_key}"],
                 stdout=subprocess.PIPE
              )
              subprocess.run(["kubectl", "apply", "-f", "-"], stdin=proc.stdout)
              console.print("  [green]✓[/green] Secret updated")
 
     elif dry_run:
-        console.print("  [yellow]Would create:[/yellow] Secret with API keys and TURN secret")
+        console.print("  [yellow]Would create:[/yellow] Secret with API keys")
     else:
         console.print("  [dim]Creating secret...[/dim]")
         run([
@@ -843,7 +830,6 @@ def phase_app(config: Config, dry_run: bool = False) -> bool:
             f"--from-literal=RELAY_TOKEN_SECRET={config.relay_secret_key_base}",
             f"--from-literal=TMDB_API_KEY={config.relay_tmdb_api_key}",
             f"--from-literal=TVDB_API_KEY={config.relay_tvdb_api_key}",
-            f"--from-literal=TURN_SECRET={config.turn_secret}",
         ])
         console.print("  [green]✓[/green] Secret created")
 
@@ -986,7 +972,7 @@ def print_summary(config: Config) -> None:
 
     table.add_row("VPS", f"{config.vps_name} ({config.vps_ip})")
     table.add_row("Relay URL", f"https://{config.relay_fqdn}")
-    table.add_row("TURN Server", f"turn:{config.vps_ip}:3478 (integrated)")
+    table.add_row("P2P Relay", f"{config.vps_ip}:4001 (iroh)")
     table.add_row("ArgoCD URL", f"https://{config.argocd_fqdn}")
     table.add_row("Health Check", f"https://{config.relay_fqdn}/health")
 

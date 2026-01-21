@@ -96,178 +96,163 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
       |> assign(:detected_urls, detected_urls)
 
     ~H"""
-    <div class="p-4 sm:p-6 space-y-6">
-      <%!-- Header with toggle --%>
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <h2 class="text-lg font-semibold flex items-center gap-2">
-          <.icon name="hero-signal" class="w-5 h-5 opacity-60" /> Remote Access
-          <%= if @ra_config && @ra_config.enabled do %>
-            <span class={[
-              "badge badge-sm",
-              if(@p2p_running, do: "badge-success", else: "badge-warning")
-            ]}>
-              <%= if @p2p_running do %>
-                Running
-              <% else %>
-                Starting...
+    <div class="p-4 sm:p-6 space-y-5">
+      <%!-- Header --%>
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class={[
+            "w-10 h-10 rounded-xl flex items-center justify-center transition-colors",
+            if(@ra_config && @ra_config.enabled && @p2p_running,
+              do: "bg-success/15",
+              else: "bg-base-300"
+            )
+          ]}>
+            <.icon
+              name="hero-signal"
+              class={"w-5 h-5 #{if @ra_config && @ra_config.enabled && @p2p_running, do: "text-success", else: "opacity-50"}"}
+            />
+          </div>
+          <div>
+            <h2 class="font-semibold">Remote Access</h2>
+            <p class="text-xs text-base-content/50">
+              <%= cond do %>
+                <% !(@ra_config && @ra_config.enabled) -> %>
+                  Connect from anywhere
+                <% @p2p_running -> %>
+                  P2P mesh active
+                <% true -> %>
+                  Initializing...
               <% end %>
-            </span>
-          <% else %>
-            <span class="badge badge-ghost badge-sm">Disabled</span>
-          <% end %>
-        </h2>
-        <label class="label cursor-pointer gap-3">
-          <span class="label-text text-sm">
-            {if @ra_config && @ra_config.enabled, do: "Enabled", else: "Disabled"}
-          </span>
-          <input
-            type="checkbox"
-            id="remote-access-toggle"
-            class="toggle toggle-primary"
-            checked={@ra_config && @ra_config.enabled}
-            phx-click="toggle_remote_access"
-            phx-target={@myself}
-            phx-value-enabled={to_string(!(@ra_config && @ra_config.enabled))}
-          />
-        </label>
+            </p>
+          </div>
+        </div>
+        <input
+          type="checkbox"
+          id="remote-access-toggle"
+          class="toggle toggle-success"
+          checked={@ra_config && @ra_config.enabled}
+          phx-click="toggle_remote_access"
+          phx-target={@myself}
+          phx-value-enabled={to_string(!(@ra_config && @ra_config.enabled))}
+        />
       </div>
 
-      <%!-- P2P Status Display --%>
       <%= if @ra_config && @ra_config.enabled do %>
-        <div class="bg-base-200 rounded-box p-4 sm:p-5">
-          <div class="flex flex-col lg:flex-row lg:items-center gap-4">
-            <%!-- Connection Info --%>
-            <div class="flex-1 flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
-              <%!-- Local Address --%>
-              <div class="flex items-center gap-2">
-                <div class="w-8 h-8 rounded-full bg-base-300 flex items-center justify-center shrink-0">
-                  <.icon name="hero-home" class="w-4 h-4 opacity-60" />
+        <%!-- Pairing & Status Row --%>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <%!-- Pair New Device Card --%>
+          <%= if @p2p_running do %>
+            <div
+              class="group flex items-center gap-3 p-4 bg-gradient-to-br from-primary/5 via-base-200 to-secondary/5 rounded-xl border border-primary/20 cursor-pointer hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 transition-all"
+              phx-click="open_pairing_modal"
+              phx-target={@myself}
+            >
+              <div class="w-11 h-11 rounded-xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center shadow-md group-hover:scale-105 transition-transform">
+                <.icon name="hero-qr-code" class="w-5 h-5 text-primary-content" />
+              </div>
+              <div class="flex-1">
+                <div class="font-semibold group-hover:text-primary transition-colors">
+                  Pair New Device
                 </div>
-                <div>
-                  <div class="text-xs text-base-content/50 uppercase tracking-wide">Local</div>
-                  <div class="font-mono text-sm font-medium">
-                    <%= if @local_addr.ip do %>
-                      {@local_addr.ip}:{@local_addr.port}
-                    <% else %>
-                      <span class="text-base-content/50">Unknown</span>
-                    <% end %>
-                  </div>
+                <div class="text-xs text-base-content/50">
+                  Scan QR or enter code
                 </div>
               </div>
-
-              <%!-- Connected Peers --%>
-              <div class="flex items-center gap-2">
-                <div class="w-8 h-8 rounded-full bg-base-300 flex items-center justify-center shrink-0">
-                  <.icon name="hero-users" class="w-4 h-4 opacity-60" />
-                </div>
-                <div>
-                  <div class="text-xs text-base-content/50 uppercase tracking-wide">
-                    Connected Peers
-                  </div>
-                  <div class="font-mono text-sm font-medium">
-                    <%= if @p2p_status do %>
-                      {@p2p_status.connected_peers} peer{if @p2p_status.connected_peers != 1,
-                        do: "s",
-                        else: ""}
-                    <% else %>
-                      <span class="text-base-content/50">-</span>
-                    <% end %>
-                  </div>
-                </div>
+              <.icon
+                name="hero-chevron-right"
+                class="w-5 h-5 text-base-content/30 group-hover:text-primary group-hover:translate-x-0.5 transition-all"
+              />
+            </div>
+          <% else %>
+            <div class="flex items-center gap-3 p-4 bg-base-200 rounded-xl border border-base-300 opacity-60">
+              <div class="w-11 h-11 rounded-xl bg-base-300 flex items-center justify-center">
+                <span class="loading loading-spinner loading-sm"></span>
               </div>
-
-              <%!-- Relay Status --%>
-              <div class="flex items-center gap-2">
-                <div class={[
-                  "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
-                  if(@p2p_status && @p2p_status.relay_connected,
-                    do: "bg-success/20",
-                    else: "bg-base-300"
-                  )
-                ]}>
-                  <%= if @p2p_status && @p2p_status.relay_connected do %>
-                    <.icon name="hero-globe-alt" class="w-4 h-4 text-success" />
-                  <% else %>
-                    <.icon name="hero-globe-alt" class="w-4 h-4 opacity-60" />
-                  <% end %>
-                </div>
-                <div>
-                  <div class="text-xs text-base-content/50 uppercase tracking-wide">Relay</div>
-                  <div class="font-mono text-sm font-medium">
-                    <%= if @p2p_status do %>
-                      <%= if @p2p_status.relay_connected do %>
-                        <span class="text-success">Connected</span>
-                      <% else %>
-                        <span class="text-warning">Connecting...</span>
-                      <% end %>
-                    <% else %>
-                      <span class="text-base-content/50">-</span>
-                    <% end %>
-                  </div>
-                </div>
+              <div class="flex-1">
+                <div class="font-semibold">Pair New Device</div>
+                <div class="text-xs text-base-content/50">Starting...</div>
               </div>
             </div>
+          <% end %>
 
-            <%!-- Status Badge --%>
-            <div class="shrink-0 flex items-center gap-2">
-              <%= if @p2p_running do %>
-                <div class="flex items-center gap-2 px-4 py-2 rounded-full bg-success/10 border border-success/30">
-                  <span class="relative flex h-3 w-3">
-                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75">
+          <%!-- Status Card --%>
+          <div class="flex flex-col gap-2 p-4 bg-base-200 rounded-xl border border-base-300">
+            <div class="flex items-center gap-3">
+              <div class={[
+                "w-3 h-3 rounded-full shrink-0",
+                if(@p2p_running, do: "bg-success", else: "bg-warning animate-pulse")
+              ]}>
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="font-medium text-sm">
+                  {if @p2p_running, do: "P2P Online", else: "P2P Starting..."}
+                </div>
+                <div class="text-xs text-base-content/50">
+                  <%= if @p2p_status && @p2p_status.relay_connected do %>
+                    <span class="text-success">Relay connected</span>
+                  <% else %>
+                    <span class="text-warning">Relay disconnected</span>
+                  <% end %>
+                  <%= if @p2p_status && @p2p_status.connected_peers > 0 do %>
+                    <span class="mx-1">·</span>
+                    <span>
+                      {@p2p_status.connected_peers} device{if @p2p_status.connected_peers == 1,
+                        do: "",
+                        else: "s"} online
                     </span>
-                    <span class="relative inline-flex rounded-full h-3 w-3 bg-success"></span>
-                  </span>
-                  <span class="font-semibold text-success text-sm">P2P Active</span>
+                  <% end %>
                 </div>
-              <% else %>
-                <div class="flex items-center gap-2 px-4 py-2 rounded-full bg-warning/10 border border-warning/30">
-                  <span class="loading loading-spinner loading-xs text-warning"></span>
-                  <span class="font-semibold text-warning text-sm">Starting...</span>
-                </div>
+              </div>
+
+              <%!-- Node ID (subtle) --%>
+              <%= if @p2p_status && @p2p_status.node_id do %>
+                <button
+                  class="hidden lg:flex items-center gap-1.5 text-xs text-base-content/40 hover:text-base-content/60 transition-colors"
+                  phx-click="copy_peer_id"
+                  phx-target={@myself}
+                  onclick={"navigator.clipboard.writeText('#{@p2p_status.node_id}')"}
+                  title={"Copy Node ID: #{@p2p_status.node_id}"}
+                >
+                  <code class="font-mono">{String.slice(@p2p_status.node_id, 0..7)}</code>
+                  <.icon name="hero-clipboard-document" class="w-3 h-3" />
+                </button>
               <% end %>
-              <%!-- Refresh button --%>
+
               <button
-                class="btn btn-ghost btn-sm btn-circle"
+                class="btn btn-ghost btn-xs btn-square opacity-50 hover:opacity-100 shrink-0"
                 phx-click="refresh_p2p"
                 phx-target={@myself}
-                title="Refresh status"
+                title="Refresh"
               >
-                <.icon name="hero-arrow-path" class="w-4 h-4" />
+                <.icon name="hero-arrow-path" class="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
         </div>
-      <% end %>
 
-      <%= if @ra_config && @ra_config.enabled do %>
-        <%!-- Pair New Device - Compact trigger card --%>
-        <%= if @p2p_running do %>
-          <div
-            class="group card bg-gradient-to-br from-primary/5 via-base-200 to-secondary/5 border border-primary/10 hover:border-primary/30 transition-all duration-300 cursor-pointer hover:shadow-lg hover:shadow-primary/5"
-            phx-click="open_pairing_modal"
-            phx-target={@myself}
+        <%!-- Powered by Iroh --%>
+        <div class="flex justify-center -mt-1">
+          <a
+            href="https://www.iroh.computer/"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-base-200 hover:bg-purple-500/10 border border-base-300 hover:border-purple-500/20 text-xs text-base-content/40 hover:text-purple-500 transition-all"
           >
-            <div class="card-body p-4 flex-row items-center gap-4">
-              <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300">
-                <.icon name="hero-qr-code" class="w-6 h-6 text-primary-content" />
-              </div>
-              <div class="flex-1">
-                <h3 class="font-semibold text-base-content group-hover:text-primary transition-colors">
-                  Pair New Device
-                </h3>
-                <p class="text-sm text-base-content/60">
-                  Scan QR or enter code in the Mydia app
-                </p>
-              </div>
-              <div class="shrink-0">
-                <.icon
-                  name="hero-arrow-right"
-                  class="w-5 h-5 text-base-content/30 group-hover:text-primary group-hover:translate-x-1 transition-all duration-300"
-                />
-              </div>
-            </div>
-          </div>
-        <% end %>
+            <span>Powered by</span>
+            <svg viewBox="0 0 93.26 32" aria-hidden="true" class="h-3 fill-purple-500">
+              <path d="M61.21,9.93h-7.74c-3.25,0-5.89,2.64-5.89,5.89v8.27c0,3.25,2.64,5.89,5.89,5.89h7.74c3.25,0,5.89-2.64,5.89-5.89V15.81c0-3.25-2.64-5.89-5.89-5.89Zm2.93,14.79c0,.29-.11,.57-.32,.77l-1.21,1.21c-.2,.2-.49,.32-.77,.32h-8.99c-.29,0-.57-.11-.77-.32l-1.21-1.21c-.21-.21-.32-.48-.32-.77V15.18c0-.29,.11-.57,.32-.77l1.21-1.21c.21-.21,.48-.32,.77-.32h8.99c.29,0,.57,.12,.77,.32l1.21,1.21c.21,.21,.32,.48,.32,.77v9.53Z">
+              </path>
+              <path d="M90.26,14.29c-.29-1.14-.73-2.04-1.32-2.69-.59-.66-1.35-1.11-2.28-1.38-.93-.26-2.03-.39-3.28-.39-1.6,0-2.94,.26-4.01,.77-1.08,.51-1.94,1.33-2.83,2.14h-.2V3.03c0-.33-.27-.6-.6-.6h-4.46v2.64h2.03V29.97h3.03v-13.25h0v-.18c0-.29,.11-.57,.32-.77,0,0,2.49-2.45,3.83-2.93,.68-.24,1.37-.37,2.08-.37,1.02,0,1.86,.14,2.51,.43,.65,.29,1.17,.71,1.55,1.28,.38,.56,.63,1.27,.76,2.1,.13,.84,.2,1.82,.2,2.95v10.74h3.11v-11.33c0-1.76-.14-3.21-.43-4.35Z">
+              </path>
+              <g>
+                <path d="M1.71,29.97v-2.64H9.87V12.94H1.71v-2.64H12.98V27.34h8.21v2.64H1.71Z"></path>
+                <circle cx="11.41" cy="4.65" r="2.44"></circle>
+              </g>
+              <path d="M42.74,14.29c-.11-.93-.31-1.72-.61-2.38-.3-.66-.72-1.15-1.26-1.49-.54-.34-1.25-.51-2.14-.51-1.52,0-2.83,.29-3.93,.87-1.1,.58-2.1,1.27-2.99,2.08h-.2l-.55-2.22c-.05-.2-.23-.34-.43-.34h-7.01v2.64h5.31v14.4h-5.31v2.64h15.89v-2.64h-7.55v-10.63s0-.02,0-.03v-.45c0-.29,.11-.57,.32-.77,0,0,1.87-1.96,3.38-2.47,.66-.22,1.39-.3,2.2-.3,.87,0,1.46,.39,1.79,1.17,.33,.78,.49,2,.49,3.67l2.75-.04c0-1.18-.05-2.24-.16-3.17Z">
+              </path>
+            </svg>
+          </a>
+        </div>
 
         <%!-- Devices Section --%>
         <% device_count = length(@devices)
@@ -424,219 +409,113 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
           <% end %>
         </div>
 
-        <%!-- Settings Section --%>
-        <div class="space-y-4">
-          <div class="flex items-center gap-2">
-            <.icon name="hero-cog-6-tooth" class="w-4 h-4 text-primary" />
-            <h3 class="text-sm font-semibold">Settings</h3>
-          </div>
+        <%!-- Direct URLs Card --%>
+        <div class="card bg-base-200">
+          <div class="card-body p-4 gap-3">
+            <div class="flex items-center justify-between">
+              <h4 class="card-title text-sm gap-2">
+                <.icon name="hero-link" class="w-4 h-4 opacity-60" /> Direct URLs
+              </h4>
+              <button
+                class="btn btn-sm btn-ghost gap-1"
+                phx-click="open_add_url_modal"
+                phx-target={@myself}
+              >
+                <.icon name="hero-plus" class="w-4 h-4" /> Add URL
+              </button>
+            </div>
 
-          <div class="grid gap-4 sm:grid-cols-2">
-            <%!-- Connection Details Card --%>
-            <div class="card bg-base-200">
-              <div class="card-body p-4 gap-3">
-                <h4 class="card-title text-sm gap-2">
-                  <.icon name="hero-information-circle" class="w-4 h-4 opacity-60" />
-                  Connection Details
-                </h4>
+            <p class="text-xs text-base-content/60 -mt-1">
+              Direct URLs allow the app to bypass the relay when on the same network for faster streaming.
+            </p>
 
-                <div class="bg-base-300/50 rounded-lg divide-y divide-base-300">
-                  <%!-- Instance ID --%>
-                  <div class="flex justify-between items-center p-2.5">
-                    <span class="text-xs text-base-content/60 font-medium">Instance ID</span>
-                    <div class="flex items-center gap-1.5">
-                      <code class="font-mono text-xs bg-base-100 px-2 py-1 rounded border border-base-300">
-                        {String.slice(@ra_config.instance_id, 0..11)}...
-                      </code>
-                      <button
-                        class="btn btn-xs btn-ghost btn-square hover:bg-base-100"
-                        phx-click="copy_instance_id"
-                        phx-target={@myself}
-                        onclick={"navigator.clipboard.writeText('#{@ra_config.instance_id}')"}
-                        title="Copy full Instance ID"
-                      >
-                        <.icon name="hero-clipboard" class="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
+            <div class="grid gap-4 sm:grid-cols-2 mt-1">
+              <%!-- Manual URLs Section --%>
+              <div class="space-y-2">
+                <div class="flex items-center gap-2">
+                  <.icon name="hero-pencil-square" class="w-3.5 h-3.5 opacity-50" />
+                  <span class="text-xs font-medium text-base-content/70">Manual URLs</span>
+                  <%= if @ra_config.direct_urls && @ra_config.direct_urls != [] do %>
+                    <span class="badge badge-ghost badge-xs">{length(@ra_config.direct_urls)}</span>
+                  <% end %>
+                </div>
 
-                  <%!-- Node ID --%>
-                  <div class="flex justify-between items-center p-2.5 gap-2">
-                    <span class="text-xs text-base-content/60 font-medium shrink-0">Node ID</span>
-                    <%= if @p2p_status && @p2p_status.node_id do %>
-                      <div class="flex items-center gap-1.5">
-                        <code
-                          class="font-mono text-xs bg-base-100 px-2 py-1 rounded border border-base-300 truncate max-w-[140px]"
-                          title={@p2p_status.node_id}
-                        >
-                          {String.slice(@p2p_status.node_id, 0..11)}...
-                        </code>
+                <%= if @ra_config.direct_urls && @ra_config.direct_urls != [] do %>
+                  <div class="space-y-1.5">
+                    <%= for url <- @ra_config.direct_urls do %>
+                      <div class="flex items-center gap-2 bg-base-300/50 rounded-lg px-3 py-2 group">
+                        <.icon name="hero-link" class="w-3.5 h-3.5 opacity-40 shrink-0" />
+                        <code class="font-mono text-xs truncate flex-1">{url}</code>
                         <button
-                          class="btn btn-xs btn-ghost btn-square hover:bg-base-100"
-                          phx-click="copy_peer_id"
+                          class="btn btn-xs btn-ghost btn-square opacity-50 group-hover:opacity-100 hover:btn-error"
+                          phx-click="remove_direct_url"
                           phx-target={@myself}
-                          onclick={"navigator.clipboard.writeText('#{@p2p_status.node_id}')"}
-                          title="Copy full Node ID"
+                          phx-value-url={url}
+                          title="Remove URL"
                         >
-                          <.icon name="hero-clipboard" class="w-3.5 h-3.5" />
+                          <.icon name="hero-x-mark" class="w-3.5 h-3.5" />
                         </button>
                       </div>
-                    <% else %>
-                      <span class="text-xs text-base-content/50">Not available</span>
                     <% end %>
                   </div>
-
-                  <%!-- Status --%>
-                  <div class="flex justify-between items-center p-2.5">
-                    <span class="text-xs text-base-content/60 font-medium">Status</span>
-                    <div class={[
-                      "badge badge-sm gap-1",
-                      if(@p2p_running, do: "badge-success", else: "badge-warning")
-                    ]}>
-                      <%= if @p2p_running do %>
-                        <span class="relative flex h-2 w-2">
-                          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75">
-                          </span>
-                          <span class="relative inline-flex rounded-full h-2 w-2 bg-success"></span>
-                        </span>
-                        Running
-                      <% else %>
-                        <.icon name="hero-clock" class="w-3 h-3" /> Starting
-                      <% end %>
-                    </div>
+                <% else %>
+                  <div class="flex items-center gap-2 text-xs text-base-content/50 italic bg-base-300/30 rounded-lg px-3 py-3">
+                    <.icon name="hero-plus-circle" class="w-4 h-4 opacity-40" />
+                    <span>Click "Add URL" to add custom addresses</span>
                   </div>
+                <% end %>
+              </div>
 
-                  <%!-- Relay Connection --%>
-                  <div class="flex justify-between items-center p-2.5">
-                    <span class="text-xs text-base-content/60 font-medium">Relay</span>
-                    <%= if @p2p_status do %>
-                      <div class={[
-                        "badge badge-sm gap-1",
-                        if(@p2p_status.relay_connected, do: "badge-success", else: "badge-warning")
-                      ]}>
-                        <%= if @p2p_status.relay_connected do %>
-                          <.icon name="hero-globe-alt" class="w-3 h-3" /> Connected
-                        <% else %>
-                          <.icon name="hero-arrow-path" class="w-3 h-3 animate-spin" /> Connecting
-                        <% end %>
-                      </div>
-                    <% else %>
-                      <span class="text-xs text-base-content/50">Not available</span>
-                    <% end %>
-                  </div>
+              <%!-- Auto-detected URLs Section --%>
+              <div class="space-y-2">
+                <div class="flex items-center gap-2">
+                  <.icon name="hero-signal" class="w-3.5 h-3.5 opacity-50" />
+                  <span class="text-xs font-medium text-base-content/70">Auto-detected</span>
+                  <%= if @detected_urls != [] do %>
+                    <span class="badge badge-ghost badge-xs">{length(@detected_urls)}</span>
+                  <% end %>
                 </div>
+
+                <%= if @detected_urls != [] do %>
+                  <div class="space-y-1.5">
+                    <%= for url <- @detected_urls do %>
+                      <div class="flex items-center gap-2 bg-base-300/30 rounded-lg px-3 py-2 border border-dashed border-base-300">
+                        <.icon name="hero-signal" class="w-3.5 h-3.5 opacity-40 shrink-0" />
+                        <code class="font-mono text-xs truncate flex-1 text-base-content/70">
+                          {url}
+                        </code>
+                        <span class="badge badge-xs badge-ghost">Auto</span>
+                      </div>
+                    <% end %>
+                  </div>
+                <% else %>
+                  <div class="flex items-center gap-2 text-xs text-base-content/50 italic bg-base-300/30 rounded-lg px-3 py-3">
+                    <.icon name="hero-exclamation-circle" class="w-4 h-4 opacity-40" />
+                    <span>No URLs detected. Check network config.</span>
+                  </div>
+                <% end %>
               </div>
             </div>
-          </div>
 
-          <%!-- Direct URLs Card (full width) --%>
-          <div class="card bg-base-200">
-            <div class="card-body p-4 gap-3">
-              <div class="flex items-center justify-between">
-                <h4 class="card-title text-sm gap-2">
-                  <.icon name="hero-link" class="w-4 h-4 opacity-60" /> Direct URLs
-                </h4>
-                <button
-                  class="btn btn-sm btn-ghost gap-1"
-                  phx-click="open_add_url_modal"
-                  phx-target={@myself}
+            <div class="divider my-1"></div>
+
+            <div class="alert bg-info/10 border-info/20 py-2.5">
+              <.icon name="hero-light-bulb" class="w-5 h-5 text-info" />
+              <div class="text-xs">
+                <span class="font-semibold">Tip:</span>
+                Use
+                <a
+                  href="https://tailscale.com"
+                  target="_blank"
+                  rel="noopener"
+                  class="link link-info font-medium"
                 >
-                  <.icon name="hero-plus" class="w-4 h-4" /> Add URL
-                </button>
-              </div>
-
-              <p class="text-xs text-base-content/60 -mt-1">
-                Direct URLs allow the app to bypass the relay when on the same network for faster streaming.
-              </p>
-
-              <div class="grid gap-4 sm:grid-cols-2 mt-1">
-                <%!-- Manual URLs Section --%>
-                <div class="space-y-2">
-                  <div class="flex items-center gap-2">
-                    <.icon name="hero-pencil-square" class="w-3.5 h-3.5 opacity-50" />
-                    <span class="text-xs font-medium text-base-content/70">Manual URLs</span>
-                    <%= if @ra_config.direct_urls && @ra_config.direct_urls != [] do %>
-                      <span class="badge badge-ghost badge-xs">{length(@ra_config.direct_urls)}</span>
-                    <% end %>
-                  </div>
-
-                  <%= if @ra_config.direct_urls && @ra_config.direct_urls != [] do %>
-                    <div class="space-y-1.5">
-                      <%= for url <- @ra_config.direct_urls do %>
-                        <div class="flex items-center gap-2 bg-base-300/50 rounded-lg px-3 py-2 group">
-                          <.icon name="hero-link" class="w-3.5 h-3.5 opacity-40 shrink-0" />
-                          <code class="font-mono text-xs truncate flex-1">{url}</code>
-                          <button
-                            class="btn btn-xs btn-ghost btn-square opacity-50 group-hover:opacity-100 hover:btn-error"
-                            phx-click="remove_direct_url"
-                            phx-target={@myself}
-                            phx-value-url={url}
-                            title="Remove URL"
-                          >
-                            <.icon name="hero-x-mark" class="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      <% end %>
-                    </div>
-                  <% else %>
-                    <div class="flex items-center gap-2 text-xs text-base-content/50 italic bg-base-300/30 rounded-lg px-3 py-3">
-                      <.icon name="hero-plus-circle" class="w-4 h-4 opacity-40" />
-                      <span>Click "Add URL" to add custom addresses</span>
-                    </div>
-                  <% end %>
-                </div>
-
-                <%!-- Auto-detected URLs Section --%>
-                <div class="space-y-2">
-                  <div class="flex items-center gap-2">
-                    <.icon name="hero-signal" class="w-3.5 h-3.5 opacity-50" />
-                    <span class="text-xs font-medium text-base-content/70">Auto-detected</span>
-                    <%= if @detected_urls != [] do %>
-                      <span class="badge badge-ghost badge-xs">{length(@detected_urls)}</span>
-                    <% end %>
-                  </div>
-
-                  <%= if @detected_urls != [] do %>
-                    <div class="space-y-1.5">
-                      <%= for url <- @detected_urls do %>
-                        <div class="flex items-center gap-2 bg-base-300/30 rounded-lg px-3 py-2 border border-dashed border-base-300">
-                          <.icon name="hero-signal" class="w-3.5 h-3.5 opacity-40 shrink-0" />
-                          <code class="font-mono text-xs truncate flex-1 text-base-content/70">
-                            {url}
-                          </code>
-                          <span class="badge badge-xs badge-ghost">Auto</span>
-                        </div>
-                      <% end %>
-                    </div>
-                  <% else %>
-                    <div class="flex items-center gap-2 text-xs text-base-content/50 italic bg-base-300/30 rounded-lg px-3 py-3">
-                      <.icon name="hero-exclamation-circle" class="w-4 h-4 opacity-40" />
-                      <span>No URLs detected. Check network config.</span>
-                    </div>
-                  <% end %>
-                </div>
-              </div>
-
-              <div class="divider my-1"></div>
-
-              <div class="alert bg-info/10 border-info/20 py-2.5">
-                <.icon name="hero-light-bulb" class="w-5 h-5 text-info" />
-                <div class="text-xs">
-                  <span class="font-semibold">Tip:</span>
-                  Use
-                  <a
-                    href="https://tailscale.com"
-                    target="_blank"
-                    rel="noopener"
-                    class="link link-info font-medium"
-                  >
-                    Tailscale
-                  </a>
-                  for secure access anywhere. Add your Tailscale address, e.g.
-                  <code class="bg-info/20 px-1.5 py-0.5 rounded font-mono text-info">
-                    http://mydia.tail1234.ts.net:4000
-                  </code>
-                </div>
+                  Tailscale
+                </a>
+                for secure access anywhere. Add your Tailscale address, e.g.
+                <code class="bg-info/20 px-1.5 py-0.5 rounded font-mono text-info">
+                  http://mydia.tail1234.ts.net:4000
+                </code>
               </div>
             </div>
           </div>
@@ -1009,14 +888,6 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
 
   def handle_event("copy_claim_code", _params, socket) do
     {:noreply, put_flash(socket, :info, "Code copied to clipboard")}
-  end
-
-  def handle_event("copy_public_key", _params, socket) do
-    {:noreply, put_flash(socket, :info, "Public key copied to clipboard")}
-  end
-
-  def handle_event("copy_instance_id", _params, socket) do
-    {:noreply, put_flash(socket, :info, "Instance ID copied to clipboard")}
   end
 
   def handle_event("copy_peer_id", _params, socket) do

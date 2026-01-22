@@ -49,6 +49,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool dco_decode_bool(dynamic raw);
 
   @protected
+  FlutterBlobDownloadRequest
+      dco_decode_box_autoadd_flutter_blob_download_request(dynamic raw);
+
+  @protected
   FlutterGraphQLRequest dco_decode_box_autoadd_flutter_graph_ql_request(
       dynamic raw);
 
@@ -61,6 +65,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BigInt dco_decode_box_autoadd_u_64(dynamic raw);
+
+  @protected
+  FlutterBlobDownloadRequest dco_decode_flutter_blob_download_request(
+      dynamic raw);
+
+  @protected
+  FlutterBlobDownloadResponse dco_decode_flutter_blob_download_response(
+      dynamic raw);
+
+  @protected
+  FlutterConnectionType dco_decode_flutter_connection_type(dynamic raw);
 
   @protected
   FlutterGraphQLRequest dco_decode_flutter_graph_ql_request(dynamic raw);
@@ -85,6 +100,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FlutterPairingResponse dco_decode_flutter_pairing_response(dynamic raw);
+
+  @protected
+  int dco_decode_i_32(dynamic raw);
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
@@ -149,6 +167,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
+  FlutterBlobDownloadRequest
+      sse_decode_box_autoadd_flutter_blob_download_request(
+          SseDeserializer deserializer);
+
+  @protected
   FlutterGraphQLRequest sse_decode_box_autoadd_flutter_graph_ql_request(
       SseDeserializer deserializer);
 
@@ -162,6 +185,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer);
+
+  @protected
+  FlutterBlobDownloadRequest sse_decode_flutter_blob_download_request(
+      SseDeserializer deserializer);
+
+  @protected
+  FlutterBlobDownloadResponse sse_decode_flutter_blob_download_response(
+      SseDeserializer deserializer);
+
+  @protected
+  FlutterConnectionType sse_decode_flutter_connection_type(
+      SseDeserializer deserializer);
 
   @protected
   FlutterGraphQLRequest sse_decode_flutter_graph_ql_request(
@@ -194,6 +229,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   FlutterPairingResponse sse_decode_flutter_pairing_response(
       SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
@@ -230,9 +268,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BigInt sse_decode_usize(SseDeserializer deserializer);
 
   @protected
-  int sse_decode_i_32(SseDeserializer deserializer);
-
-  @protected
   void sse_encode_AnyhowException(
       AnyhowException self, SseSerializer serializer);
 
@@ -262,6 +297,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_flutter_blob_download_request(
+      FlutterBlobDownloadRequest self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_flutter_graph_ql_request(
       FlutterGraphQLRequest self, SseSerializer serializer);
 
@@ -275,6 +314,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_flutter_blob_download_request(
+      FlutterBlobDownloadRequest self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_flutter_blob_download_response(
+      FlutterBlobDownloadResponse self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_flutter_connection_type(
+      FlutterConnectionType self, SseSerializer serializer);
 
   @protected
   void sse_encode_flutter_graph_ql_request(
@@ -309,6 +360,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       FlutterPairingResponse self, SseSerializer serializer);
 
   @protected
+  void sse_encode_i_32(int self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
@@ -340,9 +394,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_usize(BigInt self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_i_32(int self, SseSerializer serializer);
 }
 
 // Section: wire_class

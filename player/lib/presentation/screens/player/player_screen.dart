@@ -11,7 +11,7 @@ import 'package:go_router/go_router.dart';
 import 'package:graphql_flutter/graphql_flutter.dart';
 import 'package:http/http.dart' as http;
 import '../../../core/auth/auth_status.dart';
-import '../../../core/connection/connection_provider.dart';
+import '../../../core/connection/connection_provider.dart' as conn;
 import '../../../core/graphql/graphql_provider.dart';
 import '../../../core/player/progress_service.dart';
 import '../../../core/utils/file_utils.dart' as file_utils;
@@ -36,6 +36,10 @@ import '../../../graphql/fragments/media_file_fragment.graphql.dart';
 import '../../../graphql/queries/movie_detail.graphql.dart';
 import '../../../graphql/queries/episode_detail.graphql.dart';
 import '../../../graphql/queries/season_episodes.graphql.dart';
+import '../../../graphql/mutations/start_streaming_session.graphql.dart';
+import '../../../graphql/mutations/end_streaming_session.graphql.dart';
+import '../../../graphql/schema.graphql.dart';
+import '../../../core/p2p/local_proxy_service.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
   final String mediaId;
@@ -100,6 +104,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _autoPlayCancelled = false;
   Timer? _upNextTimer;
   static const _autoPlayCountdownDuration = 10;
+
+  // P2P mode state
+  bool _isP2PMode = false;
 
   @override
   void initState() {
@@ -171,19 +178,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         return;
       }
 
-      // Check if we're in P2P mode - media streaming over P2P is not yet implemented
-      // The serverUrl will be 'p2p://mydia' in P2P mode
-      if (serverUrl.startsWith('p2p://')) {
-        debugPrint('[PlayerScreen] Detected P2P mode, media streaming not yet implemented');
-        if (mounted) {
-          setState(() {
-            _error = 'Media streaming over P2P is not yet available.\n\n'
-                'The P2P connection is working for metadata and control, '
-                'but direct media streaming requires additional implementation.\n\n'
-                'Please use a direct network connection to your server for now.';
-            _isLoading = false;
-          });
-        }
+      // Check if we're in P2P mode
+      final connectionState = ref.read(conn.connectionProvider);
+      if (connectionState.isP2PMode) {
+        debugPrint('[PlayerScreen] Detected P2P mode, initializing P2P playback');
+        _isP2PMode = true;
+        await _initializeP2PPlayback(connectionState, graphqlClient, token);
         return;
       }
 
@@ -360,13 +360,229 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
   }
 
-  /// Initialize P2P playback (not yet implemented - using iroh)
-  Future<void> _initializeP2PPlayback() async {
-    // P2P streaming via iroh is not yet implemented
-    setState(() {
-      _error = 'P2P streaming is not yet available. Please use direct connection.';
-      _isLoading = false;
-    });
+  /// Initialize P2P playback using iroh and local proxy.
+  Future<void> _initializeP2PPlayback(
+    conn.ConnectionState connectionState,
+    GraphQLClient graphqlClient,
+    String token,
+  ) async {
+    try {
+      // Get server node address from connection state
+      final serverNodeAddr = connectionState.serverNodeAddr;
+      if (serverNodeAddr == null) {
+        throw Exception('Server node address not available for P2P connection');
+      }
+
+      // Store auth token for session cleanup
+      _authToken = token;
+
+      // Start local proxy service
+      if (mounted) {
+        setState(() {
+          _loadingMessage = 'Connecting via P2P...';
+        });
+      }
+
+      final localProxyService = ref.read(localProxyServiceProvider);
+      await localProxyService.start(
+        targetPeer: serverNodeAddr,
+        authToken: token,
+      );
+
+      debugPrint('[PlayerScreen] Local proxy started on port ${localProxyService.port}');
+
+      // Start streaming session via GraphQL
+      if (mounted) {
+        setState(() {
+          _loadingMessage = 'Starting stream...';
+        });
+      }
+
+      // Determine streaming strategy
+      final strategy = StreamingStrategyService.getOptimalStrategy();
+      final graphqlStrategy = strategy == StreamingStrategy.hlsCopy
+          ? Enum$StreamingStrategy.HLS_COPY
+          : Enum$StreamingStrategy.TRANSCODE;
+
+      final result = await graphqlClient.mutate(
+        MutationOptions(
+          document: documentNodeMutationStartStreamingSession,
+          variables: Variables$Mutation$StartStreamingSession(
+            fileId: widget.fileId,
+            strategy: graphqlStrategy,
+          ).toJson(),
+        ),
+      );
+
+      if (result.hasException) {
+        throw Exception('Failed to start streaming session: ${result.exception}');
+      }
+
+      final sessionData = Mutation$StartStreamingSession.fromJson(result.data!);
+      final sessionResult = sessionData.startStreamingSession;
+      if (sessionResult == null) {
+        throw Exception('No session data returned from server');
+      }
+
+      _hlsSessionId = sessionResult.sessionId;
+      debugPrint('[PlayerScreen] P2P HLS session started: $_hlsSessionId');
+
+      // Set total duration if provided
+      if (sessionResult.duration != null) {
+        _totalDuration = Duration(
+          milliseconds: (sessionResult.duration! * 1000).round(),
+        );
+        DurationOverride.value = _totalDuration;
+        debugPrint('[PlayerScreen] Total duration from server: $_totalDuration');
+      }
+
+      // Build HLS URL via local proxy
+      final hlsUrl = localProxyService.buildHlsUrl(_hlsSessionId!);
+      debugPrint('[PlayerScreen] P2P HLS URL: $hlsUrl');
+
+      // Wait for playlist to be ready
+      await _waitForP2PPlaylist(hlsUrl);
+
+      // Initialize progress service
+      _progressService = ProgressService(graphqlClient);
+
+      // Fetch saved progress and episode list for TV shows
+      await _fetchProgressAndEpisodes(graphqlClient);
+
+      // Create media_kit player
+      _player = Player();
+      _videoController = VideoController(_player!);
+
+      // Open media with media_kit (no auth headers needed for local proxy)
+      await _player!.open(
+        Media(hlsUrl),
+        play: false,
+      );
+
+      // Wait for player to be ready
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Check if we should show resume dialog
+      final duration = _player!.state.duration.inSeconds;
+      final savedPosition = _savedPositionSeconds;
+      if (mounted &&
+          savedPosition != null &&
+          savedPosition > _minResumeThresholdSeconds &&
+          duration > 0) {
+        final shouldResume = await showResumeDialog(
+          context,
+          savedPosition,
+          duration,
+        );
+
+        if (shouldResume == true) {
+          await _player!.seek(Duration(seconds: savedPosition));
+        }
+      }
+
+      // Start playback
+      await _player!.play();
+
+      // Start progress tracking
+      if (widget.mediaType == 'movie') {
+        _progressService!.startMovieSync(_player!, widget.mediaId);
+      } else if (widget.mediaType == 'episode') {
+        _progressService!.startEpisodeSync(_player!, widget.mediaId);
+      }
+
+      // Listen for playback completion
+      await _positionSubscription?.cancel();
+      _positionSubscription = _player!.stream.position.listen((_) {
+        _onPlaybackProgress();
+      });
+
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _loadingMessage = null;
+        });
+      }
+
+      debugPrint('[PlayerScreen] P2P playback initialized successfully');
+    } catch (e) {
+      debugPrint('[PlayerScreen] Error initializing P2P playback: $e');
+      if (mounted) {
+        setState(() {
+          _error = 'Failed to start P2P playback: $e';
+          _isLoading = false;
+          _loadingMessage = null;
+        });
+      }
+    }
+  }
+
+  /// Wait for P2P HLS playlist to be ready with enough segments.
+  Future<void> _waitForP2PPlaylist(String playlistUrl) async {
+    const maxRetries = 20;
+    const minSegments = 3;
+    const baseDelay = Duration(milliseconds: 500);
+    const maxDelay = Duration(milliseconds: 3000);
+
+    for (var i = 0; i < maxRetries; i++) {
+      try {
+        // Request via local proxy (no auth needed)
+        final response = await http.get(Uri.parse(playlistUrl));
+
+        if (response.statusCode == 200) {
+          final playlistText = response.body;
+          // Count .ts segments in playlist
+          final segmentCount = '.ts'.allMatches(playlistText).length;
+
+          if (segmentCount >= minSegments) {
+            if (i > 0) {
+              debugPrint('[PlayerScreen] P2P playlist ready after ${i + 1} attempt(s) with $segmentCount segments');
+            }
+            return;
+          }
+
+          final percentage = (segmentCount / minSegments * 100).round();
+          debugPrint('[PlayerScreen] P2P playlist has $segmentCount/$minSegments segments ($percentage%)');
+          if (mounted) {
+            setState(() {
+              _loadingMessage = 'Preparing stream... $percentage%';
+            });
+          }
+        } else {
+          debugPrint('[PlayerScreen] P2P playlist not ready (${response.statusCode}), retrying...');
+          if (mounted) {
+            setState(() {
+              _loadingMessage = 'Starting transcoding... (${i + 1}/$maxRetries)';
+            });
+          }
+        }
+
+        // Exponential backoff with max cap
+        final delay = Duration(
+          milliseconds: (baseDelay.inMilliseconds * (1.5 * i + 1)).clamp(
+            baseDelay.inMilliseconds,
+            maxDelay.inMilliseconds,
+          ).toInt(),
+        );
+        await Future.delayed(delay);
+      } catch (e) {
+        debugPrint('[PlayerScreen] Error checking P2P playlist (attempt ${i + 1}/$maxRetries): $e');
+        if (mounted) {
+          setState(() {
+            _loadingMessage = 'Starting transcoding... (${i + 1}/$maxRetries)';
+          });
+        }
+
+        final delay = Duration(
+          milliseconds: (baseDelay.inMilliseconds * (1.5 * i + 1)).clamp(
+            baseDelay.inMilliseconds,
+            maxDelay.inMilliseconds,
+          ).toInt(),
+        );
+        await Future.delayed(delay);
+      }
+    }
+
+    throw Exception('P2P playlist not ready after maximum retry attempts');
   }
 
   /// Initialize player for offline playback (no network services required).
@@ -831,25 +1047,54 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   /// This stops FFmpeg and cleans up server-side resources.
   Future<void> _terminateHlsSession() async {
     final sessionId = _hlsSessionId;
-    final serverUrl = _serverUrl;
     final token = _authToken;
 
-    if (sessionId == null || serverUrl == null || token == null) {
+    if (sessionId == null || token == null) {
       return;
     }
 
-    debugPrint('Terminating HLS session: $sessionId');
+    debugPrint('Terminating HLS session: $sessionId (P2P: $_isP2PMode)');
 
     try {
-      final response = await http.delete(
-        Uri.parse('$serverUrl/api/v1/hls/$sessionId'),
-        headers: {'Authorization': 'Bearer $token'},
-      );
+      if (_isP2PMode) {
+        // Use GraphQL mutation for P2P mode
+        final graphqlClient = await ref.read(asyncGraphqlClientProvider.future);
+        final result = await graphqlClient.mutate(
+          MutationOptions(
+            document: documentNodeMutationEndStreamingSession,
+            variables: Variables$Mutation$EndStreamingSession(
+              sessionId: sessionId,
+            ).toJson(),
+          ),
+        );
 
-      if (response.statusCode == 200) {
-        debugPrint('HLS session terminated successfully');
+        if (result.hasException) {
+          debugPrint('Failed to terminate HLS session via GraphQL: ${result.exception}');
+        } else {
+          debugPrint('HLS session terminated successfully via GraphQL');
+        }
+
+        // Stop local proxy service
+        final localProxyService = ref.read(localProxyServiceProvider);
+        await localProxyService.stop();
+        debugPrint('Local proxy stopped');
       } else {
-        debugPrint('Failed to terminate HLS session: ${response.statusCode}');
+        // Use HTTP DELETE for direct mode
+        final serverUrl = _serverUrl;
+        if (serverUrl == null) {
+          return;
+        }
+
+        final response = await http.delete(
+          Uri.parse('$serverUrl/api/v1/hls/$sessionId'),
+          headers: {'Authorization': 'Bearer $token'},
+        );
+
+        if (response.statusCode == 200) {
+          debugPrint('HLS session terminated successfully');
+        } else {
+          debugPrint('Failed to terminate HLS session: ${response.statusCode}');
+        }
       }
     } catch (e) {
       debugPrint('Error terminating HLS session: $e');

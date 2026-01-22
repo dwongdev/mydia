@@ -206,6 +206,49 @@ defmodule MydiaWeb.Schema.CommonTypes do
     field :expires_at, non_null(:datetime), description: "When the code expires"
   end
 
+  @desc "Result of starting a streaming session"
+  object :streaming_session_result do
+    field :session_id, non_null(:string), description: "The HLS session identifier"
+    field :duration, :float, description: "Media duration in seconds (if known)"
+  end
+
+  @desc "A download quality option"
+  object :download_option do
+    field :resolution, non_null(:string),
+      description: "Resolution identifier (original, 1080p, 720p, 480p)"
+
+    field :label, non_null(:string), description: "Human-readable label"
+    field :estimated_size, non_null(:integer), description: "Estimated file size in bytes"
+  end
+
+  @desc "Result of preparing a download job"
+  object :prepare_download_result do
+    field :job_id, non_null(:id), description: "The transcode job ID"
+
+    field :status, non_null(:string),
+      description: "Job status (pending, transcoding, ready, failed)"
+
+    field :progress, non_null(:float), description: "Transcoding progress (0.0 to 1.0)"
+    field :file_size, :integer, description: "Final file size in bytes (when ready)"
+  end
+
+  @desc "Download job status"
+  object :download_job_status do
+    field :job_id, non_null(:id), description: "The transcode job ID"
+
+    field :status, non_null(:string),
+      description: "Job status (pending, transcoding, ready, failed)"
+
+    field :progress, non_null(:float), description: "Transcoding progress (0.0 to 1.0)"
+    field :error, :string, description: "Error message if job failed"
+    field :file_size, :integer, description: "Final file size in bytes (when ready)"
+  end
+
+  @desc "Result of cancelling a download job"
+  object :cancel_download_result do
+    field :success, non_null(:boolean), description: "Whether the cancellation succeeded"
+  end
+
   @desc "A subtitle track available for a media file"
   object :subtitle_track do
     @desc "Track identifier (integer for embedded, UUID for external)"

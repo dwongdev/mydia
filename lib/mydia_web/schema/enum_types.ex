@@ -56,4 +56,10 @@ defmodule MydiaWeb.Schema.EnumTypes do
     value(:vobsub, description: "VobSub (image-based)")
     value(:unknown, description: "Unknown format")
   end
+
+  @desc "Streaming strategy for HLS sessions"
+  enum :streaming_strategy do
+    value(:hls_copy, description: "HLS with stream copy (no transcoding)")
+    value(:transcode, description: "Full transcoding to HLS")
+  end
 end

@@ -70,7 +70,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => 1776716824;
+  int get rustContentHash => -116803829;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -84,6 +84,13 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateP2PHostDial(
       {required P2PHost that, required String endpointAddrJson});
 
+  Stream<String> crateP2PHostDownloadBlob(
+      {required P2PHost that,
+      required String peer,
+      required String ticketJson,
+      required String outputPath,
+      String? authToken});
+
   Stream<String> crateP2PHostEventStream({required P2PHost that});
 
   FlutterNetworkStats crateP2PHostGetNetworkStats({required P2PHost that});
@@ -91,6 +98,11 @@ abstract class RustLibApi extends BaseApi {
   String crateP2PHostGetNodeAddr({required P2PHost that});
 
   (P2PHost, String) crateP2PHostInit({String? relayUrl});
+
+  Future<FlutterBlobDownloadResponse> crateP2PHostRequestBlobDownload(
+      {required P2PHost that,
+      required String peer,
+      required FlutterBlobDownloadRequest req});
 
   Future<FlutterGraphQLResponse> crateP2PHostSendGraphqlRequest(
       {required P2PHost that,
@@ -152,6 +164,50 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Stream<String> crateP2PHostDownloadBlob(
+      {required P2PHost that,
+      required String peer,
+      required String ticketJson,
+      required String outputPath,
+      String? authToken}) {
+    final sink = RustStreamSink<String>();
+    unawaited(handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerP2pHost(
+            that, serializer);
+        sse_encode_String(peer, serializer);
+        sse_encode_String(ticketJson, serializer);
+        sse_encode_String(outputPath, serializer);
+        sse_encode_opt_String(authToken, serializer);
+        sse_encode_StreamSink_String_Sse(sink, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 2, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateP2PHostDownloadBlobConstMeta,
+      argValues: [that, peer, ticketJson, outputPath, authToken, sink],
+      apiImpl: this,
+    )));
+    return sink.stream;
+  }
+
+  TaskConstMeta get kCrateP2PHostDownloadBlobConstMeta => const TaskConstMeta(
+        debugName: "P2PHost_download_blob",
+        argNames: [
+          "that",
+          "peer",
+          "ticketJson",
+          "outputPath",
+          "authToken",
+          "sink"
+        ],
+      );
+
+  @override
   Stream<String> crateP2PHostEventStream({required P2PHost that}) {
     final sink = RustStreamSink<String>();
     unawaited(handler.executeNormal(NormalTask(
@@ -161,7 +217,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_StreamSink_String_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 2, port: port_);
+            funcId: 3, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -186,7 +242,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerP2pHost(
             that, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 3)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 4)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_flutter_network_stats,
@@ -211,7 +267,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerP2pHost(
             that, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 4)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 5)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -234,7 +290,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_opt_String(relayUrl, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 5)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 6)!;
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -253,6 +309,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<FlutterBlobDownloadResponse> crateP2PHostRequestBlobDownload(
+      {required P2PHost that,
+      required String peer,
+      required FlutterBlobDownloadRequest req}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerP2pHost(
+            that, serializer);
+        sse_encode_String(peer, serializer);
+        sse_encode_box_autoadd_flutter_blob_download_request(req, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 7, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_flutter_blob_download_response,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateP2PHostRequestBlobDownloadConstMeta,
+      argValues: [that, peer, req],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateP2PHostRequestBlobDownloadConstMeta =>
+      const TaskConstMeta(
+        debugName: "P2PHost_request_blob_download",
+        argNames: ["that", "peer", "req"],
+      );
+
+  @override
   Future<FlutterGraphQLResponse> crateP2PHostSendGraphqlRequest(
       {required P2PHost that,
       required String peer,
@@ -265,7 +352,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(peer, serializer);
         sse_encode_box_autoadd_flutter_graph_ql_request(req, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 6, port: port_);
+            funcId: 8, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_flutter_graph_ql_response,
@@ -296,7 +383,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(peer, serializer);
         sse_encode_box_autoadd_flutter_hls_request(req, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 7, port: port_);
+            funcId: 9, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_flutter_hls_response,
@@ -326,7 +413,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(peer, serializer);
         sse_encode_box_autoadd_flutter_pairing_request(req, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 8, port: port_);
+            funcId: 10, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_flutter_pairing_response,
@@ -350,7 +437,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 9, port: port_);
+            funcId: 11, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -424,6 +511,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterBlobDownloadRequest
+      dco_decode_box_autoadd_flutter_blob_download_request(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_flutter_blob_download_request(raw);
+  }
+
+  @protected
   FlutterGraphQLRequest dco_decode_box_autoadd_flutter_graph_ql_request(
       dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -447,6 +541,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BigInt dco_decode_box_autoadd_u_64(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_u_64(raw);
+  }
+
+  @protected
+  FlutterBlobDownloadRequest dco_decode_flutter_blob_download_request(
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FlutterBlobDownloadRequest(
+      jobId: dco_decode_String(arr[0]),
+      authToken: dco_decode_opt_String(arr[1]),
+    );
+  }
+
+  @protected
+  FlutterBlobDownloadResponse dco_decode_flutter_blob_download_response(
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return FlutterBlobDownloadResponse(
+      success: dco_decode_bool(arr[0]),
+      ticket: dco_decode_opt_String(arr[1]),
+      filename: dco_decode_opt_String(arr[2]),
+      fileSize: dco_decode_opt_box_autoadd_u_64(arr[3]),
+      error: dco_decode_opt_String(arr[4]),
+    );
+  }
+
+  @protected
+  FlutterConnectionType dco_decode_flutter_connection_type(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return FlutterConnectionType.values[raw as int];
   }
 
   @protected
@@ -521,12 +650,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FlutterNetworkStats dco_decode_flutter_network_stats(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return FlutterNetworkStats(
       connectedPeers: dco_decode_usize(arr[0]),
       relayConnected: dco_decode_bool(arr[1]),
       relayUrl: dco_decode_opt_String(arr[2]),
+      peerConnectionType: dco_decode_flutter_connection_type(arr[3]),
     );
   }
 
@@ -558,6 +688,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       error: dco_decode_opt_String(arr[4]),
       directUrls: dco_decode_list_String(arr[5]),
     );
+  }
+
+  @protected
+  int dco_decode_i_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
   }
 
   @protected
@@ -687,6 +823,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterBlobDownloadRequest
+      sse_decode_box_autoadd_flutter_blob_download_request(
+          SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_flutter_blob_download_request(deserializer));
+  }
+
+  @protected
   FlutterGraphQLRequest sse_decode_box_autoadd_flutter_graph_ql_request(
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -711,6 +855,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_u_64(deserializer));
+  }
+
+  @protected
+  FlutterBlobDownloadRequest sse_decode_flutter_blob_download_request(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_jobId = sse_decode_String(deserializer);
+    var var_authToken = sse_decode_opt_String(deserializer);
+    return FlutterBlobDownloadRequest(
+        jobId: var_jobId, authToken: var_authToken);
+  }
+
+  @protected
+  FlutterBlobDownloadResponse sse_decode_flutter_blob_download_response(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_success = sse_decode_bool(deserializer);
+    var var_ticket = sse_decode_opt_String(deserializer);
+    var var_filename = sse_decode_opt_String(deserializer);
+    var var_fileSize = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_error = sse_decode_opt_String(deserializer);
+    return FlutterBlobDownloadResponse(
+        success: var_success,
+        ticket: var_ticket,
+        filename: var_filename,
+        fileSize: var_fileSize,
+        error: var_error);
+  }
+
+  @protected
+  FlutterConnectionType sse_decode_flutter_connection_type(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return FlutterConnectionType.values[inner];
   }
 
   @protected
@@ -787,10 +966,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_connectedPeers = sse_decode_usize(deserializer);
     var var_relayConnected = sse_decode_bool(deserializer);
     var var_relayUrl = sse_decode_opt_String(deserializer);
+    var var_peerConnectionType =
+        sse_decode_flutter_connection_type(deserializer);
     return FlutterNetworkStats(
         connectedPeers: var_connectedPeers,
         relayConnected: var_relayConnected,
-        relayUrl: var_relayUrl);
+        relayUrl: var_relayUrl,
+        peerConnectionType: var_peerConnectionType);
   }
 
   @protected
@@ -825,6 +1007,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         deviceToken: var_deviceToken,
         error: var_error,
         directUrls: var_directUrls);
+  }
+
+  @protected
+  int sse_decode_i_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getInt32();
   }
 
   @protected
@@ -912,12 +1100,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  int sse_decode_i_32(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return deserializer.buffer.getInt32();
-  }
-
-  @protected
   void sse_encode_AnyhowException(
       AnyhowException self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -977,6 +1159,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_flutter_blob_download_request(
+      FlutterBlobDownloadRequest self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_flutter_blob_download_request(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_flutter_graph_ql_request(
       FlutterGraphQLRequest self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -1001,6 +1190,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_64(self, serializer);
+  }
+
+  @protected
+  void sse_encode_flutter_blob_download_request(
+      FlutterBlobDownloadRequest self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.jobId, serializer);
+    sse_encode_opt_String(self.authToken, serializer);
+  }
+
+  @protected
+  void sse_encode_flutter_blob_download_response(
+      FlutterBlobDownloadResponse self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.success, serializer);
+    sse_encode_opt_String(self.ticket, serializer);
+    sse_encode_opt_String(self.filename, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.fileSize, serializer);
+    sse_encode_opt_String(self.error, serializer);
+  }
+
+  @protected
+  void sse_encode_flutter_connection_type(
+      FlutterConnectionType self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected
@@ -1058,6 +1273,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_usize(self.connectedPeers, serializer);
     sse_encode_bool(self.relayConnected, serializer);
     sse_encode_opt_String(self.relayUrl, serializer);
+    sse_encode_flutter_connection_type(self.peerConnectionType, serializer);
   }
 
   @protected
@@ -1080,6 +1296,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.deviceToken, serializer);
     sse_encode_opt_String(self.error, serializer);
     sse_encode_list_String(self.directUrls, serializer);
+  }
+
+  @protected
+  void sse_encode_i_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putInt32(self);
   }
 
   @protected
@@ -1157,12 +1379,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putBigUint64(self);
   }
-
-  @protected
-  void sse_encode_i_32(int self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    serializer.buffer.putInt32(self);
-  }
 }
 
 @sealed
@@ -1188,6 +1404,31 @@ class P2PHostImpl extends RustOpaque implements P2PHost {
   Future<void> dial({required String endpointAddrJson}) => RustLib.instance.api
       .crateP2PHostDial(that: this, endpointAddrJson: endpointAddrJson);
 
+  /// Download a file using a blob ticket over P2P.
+  ///
+  /// This uses the HLS streaming infrastructure to download the file in chunks,
+  /// providing progress updates to the sink as JSON strings. The file is saved
+  /// to the specified output path.
+  ///
+  /// Progress messages are JSON: {"type": "started|progress|completed|failed", ...}
+  /// - started: {"type": "started", "total_size": <bytes>}
+  /// - progress: {"type": "progress", "downloaded": <bytes>, "total": <bytes>}
+  /// - completed: {"type": "completed", "file_path": "<path>"}
+  /// - failed: {"type": "failed", "error": "<message>"}
+  ///
+  /// The ticket JSON should contain: hash, file_size, filename, file_path
+  Stream<String> downloadBlob(
+          {required String peer,
+          required String ticketJson,
+          required String outputPath,
+          String? authToken}) =>
+      RustLib.instance.api.crateP2PHostDownloadBlob(
+          that: this,
+          peer: peer,
+          ticketJson: ticketJson,
+          outputPath: outputPath,
+          authToken: authToken);
+
   /// Start streaming events to Flutter.
   Stream<String> eventStream() => RustLib.instance.api.crateP2PHostEventStream(
         that: this,
@@ -1203,6 +1444,16 @@ class P2PHostImpl extends RustOpaque implements P2PHost {
   String getNodeAddr() => RustLib.instance.api.crateP2PHostGetNodeAddr(
         that: this,
       );
+
+  /// Request a blob download ticket from the server for a transcode job.
+  ///
+  /// This sends a BlobDownload request to the server which returns a ticket
+  /// containing the file hash, size, and path. The ticket can then be used
+  /// with download_blob() to download the actual file.
+  Future<FlutterBlobDownloadResponse> requestBlobDownload(
+          {required String peer, required FlutterBlobDownloadRequest req}) =>
+      RustLib.instance.api
+          .crateP2PHostRequestBlobDownload(that: this, peer: peer, req: req);
 
   /// Send a GraphQL request to a specific peer.
   Future<FlutterGraphQLResponse> sendGraphqlRequest(

@@ -338,6 +338,19 @@ defmodule Mydia.P2p.Server do
     {:noreply, state}
   end
 
+  def handle_info({:ok, "request_received", "blob_download", request_id, req}, state) do
+    Logger.info("P2P Request: Blob download for job #{req.job_id}")
+
+    # Spawn a task to handle the blob ticket creation so we don't block the GenServer
+    resource = state.resource
+
+    Task.start(fn ->
+      handle_blob_download(resource, request_id, req)
+    end)
+
+    {:noreply, state}
+  end
+
   # Handle Rust/iroh log messages
   def handle_info({:ok, "log", level, target, message}, state) do
     # Forward Rust logs to Elixir Logger with appropriate level
@@ -686,4 +699,127 @@ defmodule Mydia.P2p.Server do
         nil
     end
   end
+
+  # Blob download handler
+
+  defp handle_blob_download(resource, request_id, req) do
+    # Verify auth token
+    case verify_blob_auth(req.auth_token) do
+      {:ok, _user} ->
+        # Look up the transcode job by job_id
+        case lookup_transcode_job(req.job_id) do
+          {:ok, job} ->
+            create_and_send_blob_ticket(resource, request_id, job)
+
+          {:error, :not_found} ->
+            Logger.warning("Blob download: Job not found: #{req.job_id}")
+            send_blob_error(resource, request_id, "Job not found")
+
+          {:error, :not_ready} ->
+            Logger.warning("Blob download: Job not ready: #{req.job_id}")
+            send_blob_error(resource, request_id, "Job not ready")
+        end
+
+      {:error, _reason} ->
+        Logger.warning("Blob download: Auth failed")
+        send_blob_error(resource, request_id, "Unauthorized")
+    end
+  end
+
+  defp verify_blob_auth(nil), do: {:error, :no_token}
+
+  defp verify_blob_auth(auth_token) when is_binary(auth_token) do
+    Mydia.Auth.Guardian.verify_token(auth_token)
+  end
+
+  defp lookup_transcode_job(job_id) do
+    alias Mydia.Downloads.TranscodeJob
+    alias Mydia.Repo
+
+    # Look up the transcode job by ID, preloading related media for filename generation
+    case Repo.get(TranscodeJob, job_id) |> Repo.preload(media_file: [:movie, episode: :show]) do
+      nil ->
+        {:error, :not_found}
+
+      job ->
+        # Check if the job is ready (transcoding complete)
+        if (job.status == "ready" and job.output_path) && File.exists?(job.output_path) do
+          {:ok, job}
+        else
+          {:error, :not_ready}
+        end
+    end
+  end
+
+  defp create_and_send_blob_ticket(resource, request_id, job) do
+    # Generate a filename from the job
+    filename = generate_download_filename(job)
+
+    # Create the blob ticket using the NIF
+    case P2p.create_blob_ticket(job.output_path, filename) do
+      ticket when is_binary(ticket) ->
+        # Parse the ticket to get file_size
+        {:ok, ticket_data} = Jason.decode(ticket)
+        file_size = Map.get(ticket_data, "file_size")
+
+        response = %P2p.BlobDownloadResponse{
+          success: true,
+          ticket: ticket,
+          filename: filename,
+          file_size: file_size,
+          error: nil
+        }
+
+        P2p.send_response(resource, request_id, {:blob_download, response})
+
+      {:error, reason} ->
+        Logger.error("Failed to create blob ticket: #{inspect(reason)}")
+        send_blob_error(resource, request_id, "Failed to create download ticket")
+    end
+  end
+
+  defp send_blob_error(resource, request_id, error_message) do
+    response = %P2p.BlobDownloadResponse{
+      success: false,
+      ticket: nil,
+      filename: nil,
+      file_size: nil,
+      error: error_message
+    }
+
+    P2p.send_response(resource, request_id, {:blob_download, response})
+  end
+
+  defp generate_download_filename(job) do
+    # Generate a sensible filename based on the job content
+    # Format: Title_Resolution.mp4
+    # Job has media_file which may have movie or episode association
+    base_name =
+      case job.media_file do
+        %{movie: %{title: title}} when not is_nil(title) ->
+          sanitize_filename(title)
+
+        %{episode: %{show: %{name: show_name}, season_number: season, episode_number: ep}}
+        when not is_nil(show_name) ->
+          "#{sanitize_filename(show_name)}_S#{pad_number(season)}E#{pad_number(ep)}"
+
+        _ ->
+          "download"
+      end
+
+    resolution = job.resolution || "unknown"
+    "#{base_name}_#{resolution}.mp4"
+  end
+
+  defp sanitize_filename(name) do
+    name
+    |> String.replace(~r/[^\w\s-]/, "")
+    |> String.replace(~r/\s+/, "_")
+    |> String.slice(0, 100)
+  end
+
+  defp pad_number(num) when is_integer(num),
+    do: String.pad_leading(Integer.to_string(num), 2, "0")
+
+  defp pad_number(_), do: "00"
 end

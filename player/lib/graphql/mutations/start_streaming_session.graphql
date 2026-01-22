@@ -1,0 +1,6 @@
+mutation StartStreamingSession($fileId: ID!, $strategy: StreamingStrategy!) {
+  startStreamingSession(fileId: $fileId, strategy: $strategy) {
+    sessionId
+    duration
+  }
+}

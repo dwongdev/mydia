@@ -93,6 +93,45 @@ type RootMutationType {
 
   "Revoke a device"
   revokeDevice(id: ID!): RevokeDeviceResult
+
+  "Start an HLS streaming session for a media file"
+  startStreamingSession(fileId: ID!, strategy: StreamingStrategy!): StreamingSessionResult
+
+  "End an HLS streaming session"
+  endStreamingSession(sessionId: String!): Boolean
+
+  "Get available download quality options for a media item"
+  downloadOptions(
+    "Content type: 'movie' or 'episode'"
+    contentType: String!
+
+    "Media item ID (for movie) or Episode ID (for episode)"
+    id: ID!
+  ): [DownloadOption!]
+
+  "Start or return existing transcode job for download"
+  prepareDownload(
+    "Content type: 'movie' or 'episode'"
+    contentType: String!
+
+    "Media item ID (for movie) or Episode ID (for episode)"
+    id: ID!
+
+    "Target resolution"
+    resolution: String
+  ): PrepareDownloadResult
+
+  "Get current status and progress of a transcode job"
+  downloadJobStatus(
+    "The transcode job ID"
+    jobId: ID!
+  ): DownloadJobStatus
+
+  "Cancel a transcode job"
+  cancelDownloadJob(
+    "The transcode job ID"
+    jobId: ID!
+  ): CancelDownloadResult
 }
 
 type RootSubscriptionType {
@@ -710,6 +749,66 @@ type ClaimCode {
   expiresAt: DateTime!
 }
 
+"Result of starting a streaming session"
+type StreamingSessionResult {
+  "The HLS session identifier"
+  sessionId: String!
+
+  "Media duration in seconds (if known)"
+  duration: Float
+}
+
+"A download quality option"
+type DownloadOption {
+  "Resolution identifier (original, 1080p, 720p, 480p)"
+  resolution: String!
+
+  "Human-readable label"
+  label: String!
+
+  "Estimated file size in bytes"
+  estimatedSize: Int!
+}
+
+"Result of preparing a download job"
+type PrepareDownloadResult {
+  "The transcode job ID"
+  jobId: ID!
+
+  "Job status (pending, transcoding, ready, failed)"
+  status: String!
+
+  "Transcoding progress (0.0 to 1.0)"
+  progress: Float!
+
+  "Final file size in bytes (when ready)"
+  fileSize: Int
+}
+
+"Download job status"
+type DownloadJobStatus {
+  "The transcode job ID"
+  jobId: ID!
+
+  "Job status (pending, transcoding, ready, failed)"
+  status: String!
+
+  "Transcoding progress (0.0 to 1.0)"
+  progress: Float!
+
+  "Error message if job failed"
+  error: String
+
+  "Final file size in bytes (when ready)"
+  fileSize: Int
+}
+
+"Result of cancelling a download job"
+type CancelDownloadResult {
+  "Whether the cancellation succeeded"
+  success: Boolean!
+}
+
 "A subtitle track available for a media file"
 type SubtitleTrack {
   "Track identifier (integer for embedded, UUID for external)"
@@ -831,6 +930,15 @@ enum SubtitleFormat {
 
   "Unknown format"
   UNKNOWN
+}
+
+"Streaming strategy for HLS sessions"
+enum StreamingStrategy {
+  "HLS with stream copy (no transcoding)"
+  HLS_COPY
+
+  "Full transcoding to HLS"
+  TRANSCODE
 }
 
 """

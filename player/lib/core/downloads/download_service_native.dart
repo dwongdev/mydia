@@ -13,11 +13,13 @@ import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../domain/models/download.dart';
+import '../../domain/models/download_option.dart';
 import '../../domain/models/download_settings.dart';
 import '../../domain/models/storage_settings.dart';
 import 'background_download_service.dart';
 import 'download_service.dart';
 import 'download_job_service.dart';
+import 'p2p_download_job_service.dart';
 
 /// Whether to use background downloads (true on mobile, false on desktop).
 bool get _useBackgroundDownloader => Platform.isIOS || Platform.isAndroid;
@@ -203,6 +205,9 @@ class _NativeDownloadService implements DownloadService {
   // Job service for resuming progressive downloads
   DownloadJobService? _jobService;
 
+  // P2P job service for P2P mode downloads
+  P2pDownloadJobService? _p2pJobService;
+
   // Queue management
   int _maxConcurrentDownloads = 2;
   bool _autoStartQueued = true;
@@ -326,6 +331,38 @@ class _NativeDownloadService implements DownloadService {
     if (jobService is DownloadJobService) {
       _jobService = jobService;
       _resumeTranscodingTasks();
+    }
+  }
+
+  /// Set the P2P job service for P2P mode downloads.
+  ///
+  /// When set, progressive downloads will use P2P blob download instead of HTTP.
+  @override
+  void setP2PJobService(dynamic p2pJobService) {
+    if (p2pJobService != null && p2pJobService is! P2pDownloadJobService) {
+      return;
+    }
+    _p2pJobService = p2pJobService as P2pDownloadJobService?;
+    if (_p2pJobService != null && _database != null) {
+      _resumeTranscodingTasksP2P();
+    }
+  }
+
+  /// Whether P2P download mode is active.
+  bool get isP2PMode => _p2pJobService != null;
+
+  /// Resume tasks that were interrupted during transcoding using P2P.
+  Future<void> _resumeTranscodingTasksP2P() async {
+    if (_database == null || _p2pJobService == null) return;
+
+    final transcodingTasks = _database!.getAllTasks()
+        .where((t) => t.status == 'transcoding' && t.transcodeJobId != null);
+
+    for (final task in transcodingTasks) {
+      // Check if already being tracked
+      if (_cancelTokens.containsKey(task.id)) continue;
+
+      _startProgressiveDownloadTaskP2P(task);
     }
   }
 
@@ -669,11 +706,16 @@ class _NativeDownloadService implements DownloadService {
     }
 
     // Start the progressive download process
-    _startProgressiveDownloadTask(
-      task,
-      getDownloadUrl: getDownloadUrl,
-      getJobStatus: getJobStatus,
-    );
+    // Use P2P blob download when in P2P mode
+    if (isP2PMode) {
+      _startProgressiveDownloadTaskP2P(task);
+    } else {
+      _startProgressiveDownloadTask(
+        task,
+        getDownloadUrl: getDownloadUrl,
+        getJobStatus: getJobStatus,
+      );
+    }
 
     return task;
   }
@@ -768,7 +810,6 @@ class _NativeDownloadService implements DownloadService {
           return; // Background service will handle the rest
         } catch (e) {
           // Fallback to foreground download if background service fails
-          print('Background download failed to start: $e');
           // Continue to foreground download logic below
         }
       }
@@ -916,6 +957,168 @@ class _NativeDownloadService implements DownloadService {
       _cancelTokens.remove(task.id);
       _pausedTasks.remove(task.id);
       _cancelJobCallbacks.remove(task.id);
+      _processQueue();
+    } catch (e) {
+      final errorTask = updatedTask.copyWith(
+        status: 'failed',
+        error: e.toString(),
+      );
+      await _database!.saveTask(errorTask);
+      _progressController.add(errorTask);
+      _cancelTokens.remove(task.id);
+      _pausedTasks.remove(task.id);
+      _cancelJobCallbacks.remove(task.id);
+      _processQueue();
+    }
+  }
+
+  /// Start a progressive download task using P2P blob download.
+  ///
+  /// This method uses the P2P service for both job status polling and
+  /// file download, avoiding HTTP entirely.
+  Future<void> _startProgressiveDownloadTaskP2P(DownloadTask task) async {
+    if (_database == null) return;
+    if (_p2pJobService == null) {
+      throw StateError('P2P job service not available');
+    }
+    if (task.transcodeJobId == null) return;
+
+    final jobId = task.transcodeJobId!;
+    final p2pService = _p2pJobService!;
+
+    // Use a simple bool for cancellation tracking in P2P mode
+    var isCancelled = false;
+    _cancelTokens[task.id] = CancelToken(); // For tracking
+    _pausedTasks[task.id] = false;
+
+    DownloadTask updatedTask = task;
+
+    try {
+      final downloadDir = await _getDownloadDirectory();
+      final fileName = _generateFileName(task);
+      final filePath = '$downloadDir/$fileName';
+
+      updatedTask = task.copyWith(filePath: filePath);
+      await _database!.saveTask(updatedTask);
+
+      // Phase 1: Wait for transcoding to complete
+      bool transcodeComplete = updatedTask.transcodeProgress >= 1.0;
+      int? lastKnownFileSize;
+
+      while (!transcodeComplete && !isCancelled) {
+        // Check if cancelled
+        if (_cancelTokens[task.id]?.isCancelled == true) {
+          isCancelled = true;
+          break;
+        }
+
+        if (_pausedTasks[task.id] == true) {
+          await Future.delayed(const Duration(seconds: 1));
+          continue;
+        }
+
+        final status = await p2pService.getJobStatus(jobId);
+
+        if (status.error != null) {
+          throw Exception('Transcode failed: ${status.error}');
+        }
+
+        updatedTask = updatedTask.copyWith(
+          transcodeProgress: status.progress,
+          fileSize: status.currentFileSize ?? updatedTask.fileSize,
+          status: status.status == DownloadJobStatusType.ready ? 'downloading' : 'transcoding',
+        );
+        await _database!.saveTask(updatedTask);
+        _progressController.add(updatedTask);
+
+        if (status.status == DownloadJobStatusType.ready) {
+          transcodeComplete = true;
+          lastKnownFileSize = status.currentFileSize;
+        } else {
+          await Future.delayed(const Duration(seconds: 2));
+        }
+      }
+
+      if (isCancelled) {
+        return;
+      }
+
+      // Phase 2: Request blob download ticket
+      updatedTask = updatedTask.copyWith(
+        status: 'downloading',
+        fileSize: lastKnownFileSize ?? updatedTask.fileSize,
+      );
+      await _database!.saveTask(updatedTask);
+      _progressController.add(updatedTask);
+
+      final ticketResult = await p2pService.requestBlobTicket(jobId);
+      final ticket = ticketResult['ticket'] as String;
+      final fileSize = ticketResult['fileSize'] as int? ?? lastKnownFileSize;
+
+      updatedTask = updatedTask.copyWith(fileSize: fileSize);
+      await _database!.saveTask(updatedTask);
+
+      // Phase 3: Download via P2P blob download
+      await p2pService.downloadBlob(
+        ticket: ticket,
+        outputPath: filePath,
+        onProgress: (downloaded, total) async {
+          if (_cancelTokens[task.id]?.isCancelled == true) {
+            // Note: P2P download cannot be cancelled mid-stream currently
+            // The download will complete but we'll clean up after
+            return;
+          }
+
+          final downloadProgress = total > 0 ? downloaded / total : 0.0;
+          updatedTask = updatedTask.copyWith(
+            downloadProgress: downloadProgress.clamp(0.0, 1.0),
+            progress: updatedTask.combinedProgress,
+            downloadedBytes: downloaded,
+          );
+          await _database!.saveTask(updatedTask);
+          _progressController.add(updatedTask);
+        },
+      );
+
+      // Check if cancelled during download - clean up and exit
+      if (_cancelTokens[task.id]?.isCancelled == true) {
+        final file = File(filePath);
+        if (await file.exists()) {
+          try {
+            await file.delete();
+          } catch (_) {}
+        }
+        // The _cancelAndCleanupTask method will have already updated the DB
+        _cancelTokens.remove(task.id);
+        _pausedTasks.remove(task.id);
+        _cancelJobCallbacks.remove(task.id);
+        _processQueue();
+        return;
+      }
+
+      // Download complete
+      final file = File(filePath);
+      final downloadedFileSize = await file.length();
+      updatedTask = updatedTask.copyWith(
+        status: 'completed',
+        progress: 1.0,
+        transcodeProgress: 1.0,
+        downloadProgress: 1.0,
+        fileSize: downloadedFileSize,
+        completedAt: DateTime.now(),
+      );
+      await _database!.saveTask(updatedTask);
+
+      // Save to downloaded media
+      final media = DownloadedMedia.fromTask(updatedTask);
+      await _database!.saveMedia(media);
+
+      _progressController.add(updatedTask);
+      _cancelTokens.remove(task.id);
+      _pausedTasks.remove(task.id);
+      _cancelJobCallbacks.remove(task.id);
+
+      // Process queue to start next download
       _processQueue();
     } catch (e) {
       final errorTask = updatedTask.copyWith(
@@ -1115,12 +1318,22 @@ class _NativeDownloadService implements DownloadService {
 
     // 2. Cancel server-side transcode job for progressive downloads
     if (task != null && task.isProgressive && task.transcodeJobId != null) {
-      final cancelCallback = _cancelJobCallbacks[taskId];
-      if (cancelCallback != null) {
+      if (isP2PMode && _p2pJobService != null) {
+        // Use P2P service to cancel the job in P2P mode
         try {
-          await cancelCallback(task.transcodeJobId!);
+          await _p2pJobService!.cancelJob(task.transcodeJobId!);
         } catch (_) {
           // Ignore errors when cancelling server job - it may have already completed
+        }
+      } else {
+        // Use the stored callback for HTTP mode
+        final cancelCallback = _cancelJobCallbacks[taskId];
+        if (cancelCallback != null) {
+          try {
+            await cancelCallback(task.transcodeJobId!);
+          } catch (_) {
+            // Ignore errors when cancelling server job - it may have already completed
+          }
         }
       }
     }
@@ -1251,13 +1464,4 @@ class _NativeDownloadService implements DownloadService {
     _backgroundProgressSubscription?.cancel();
     _backgroundService?.dispose();
   }
-}
-
-/// Factory function to create a native download service with database.
-/// This is used by the providers to properly wire up the database.
-_NativeDownloadService createNativeDownloadService(
-    _NativeDownloadDatabase database) {
-  final service = _NativeDownloadService();
-  service.setDatabase(database);
-  return service;
 }

@@ -1,4 +1,3 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../domain/models/download.dart';
@@ -36,6 +35,10 @@ Future<DownloadService> downloadManager(Ref ref) async {
   if (jobService != null) {
     service.setJobService(jobService);
   }
+
+  // Inject P2P job service if available (for P2P mode downloads)
+  final p2pJobService = ref.watch(p2pDownloadJobServiceProvider);
+  service.setP2PJobService(p2pJobService);
 
   ref.onDispose(() {
     service.dispose();

@@ -1,5 +1,5 @@
 mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be accurate, and you can change it according to your needs. */
-use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingRequest, GraphQLRequest, HlsRequest, HostConfig};
+use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingRequest, GraphQLRequest, HlsRequest, BlobDownloadRequest, HostConfig, PeerConnectionType};
 use flutter_rust_bridge::frb;
 use crate::frb_generated::StreamSink;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -66,12 +66,38 @@ pub struct FlutterPairingResponse {
     pub direct_urls: Vec<String>,
 }
 
+/// Connection type for a peer (relay vs direct) for display in Flutter UI
+#[frb(non_opaque)]
+pub enum FlutterConnectionType {
+    /// Direct peer-to-peer connection
+    Direct,
+    /// Connection via relay server
+    Relay,
+    /// Using both relay and direct paths
+    Mixed,
+    /// No active connection
+    None,
+}
+
+impl From<PeerConnectionType> for FlutterConnectionType {
+    fn from(ct: PeerConnectionType) -> Self {
+        match ct {
+            PeerConnectionType::Direct => FlutterConnectionType::Direct,
+            PeerConnectionType::Relay => FlutterConnectionType::Relay,
+            PeerConnectionType::Mixed => FlutterConnectionType::Mixed,
+            PeerConnectionType::None => FlutterConnectionType::None,
+        }
+    }
+}
+
 /// Network statistics for display in the UI
 pub struct FlutterNetworkStats {
     pub connected_peers: usize,
     pub relay_connected: bool,
     /// The relay URL currently in use (extracted from endpoint address)
     pub relay_url: Option<String>,
+    /// Connection type for the connected peer (relay vs direct)
+    pub peer_connection_type: FlutterConnectionType,
 }
 
 /// GraphQL request to send over P2P
@@ -119,6 +145,46 @@ pub enum FlutterHlsStreamEvent {
 pub struct FlutterHlsResponse {
     pub header: FlutterHlsResponseHeader,
     pub data: Vec<u8>,
+}
+
+/// Request to download a file as a blob over P2P
+pub struct FlutterBlobDownloadRequest {
+    pub job_id: String,
+    pub auth_token: Option<String>,
+}
+
+/// Response with blob ticket for downloading
+pub struct FlutterBlobDownloadResponse {
+    pub success: bool,
+    /// The blob ticket as a JSON string containing hash, file_size, filename, file_path
+    pub ticket: Option<String>,
+    /// Original filename for the downloaded file
+    pub filename: Option<String>,
+    /// File size in bytes
+    pub file_size: Option<u64>,
+    /// Error message if failed
+    pub error: Option<String>,
+}
+
+/// Progress event for blob downloads
+#[frb(non_opaque)]
+pub enum FlutterBlobDownloadProgress {
+    /// Download started with total size
+    Started { total_size: u64 },
+    /// Progress update with bytes downloaded
+    Progress { downloaded: u64, total: u64 },
+    /// Download completed with file path
+    Completed { file_path: String },
+    /// Download failed with error
+    Failed { error: String },
+}
+
+/// Parsed blob ticket data
+pub struct BlobTicket {
+    pub hash: String,
+    pub file_size: u64,
+    pub filename: String,
+    pub file_path: String,
 }
 
 impl P2pHost {
@@ -279,14 +345,14 @@ impl P2pHost {
     /// Get network statistics.
     #[frb(sync)]
     pub fn get_network_stats(&self) -> FlutterNetworkStats {
-        log::debug!("P2pHost::get_network_stats() called");
         let stats = self.inner.get_network_stats();
-        log::debug!("Network stats: connected_peers={}, relay_connected={}, relay_url={:?}",
-            stats.connected_peers, stats.relay_connected, stats.relay_url);
+        log::info!("Network stats: connected_peers={}, relay_connected={}, relay_url={:?}, peer_conn_type={:?}",
+            stats.connected_peers, stats.relay_connected, stats.relay_url, stats.peer_connection_type);
         FlutterNetworkStats {
             connected_peers: stats.connected_peers,
             relay_connected: stats.relay_connected,
             relay_url: stats.relay_url,
+            peer_connection_type: stats.peer_connection_type.into(),
         }
     }
 
@@ -335,5 +401,160 @@ impl P2pHost {
                 Err(anyhow::anyhow!("HLS request failed: {}", e))
             }
         }
+    }
+
+    /// Request a blob download ticket from the server for a transcode job.
+    ///
+    /// This sends a BlobDownload request to the server which returns a ticket
+    /// containing the file hash, size, and path. The ticket can then be used
+    /// with download_blob() to download the actual file.
+    pub async fn request_blob_download(&self, peer: String, req: FlutterBlobDownloadRequest) -> anyhow::Result<FlutterBlobDownloadResponse> {
+        log::info!("P2pHost::request_blob_download() called for peer: {}, job_id: {}",
+            peer, req.job_id);
+
+        let core_req = BlobDownloadRequest {
+            job_id: req.job_id,
+            auth_token: req.auth_token,
+        };
+
+        match self.inner.send_request(peer.clone(), MydiaRequest::BlobDownload(core_req)).await {
+            Ok(MydiaResponse::BlobDownload(res)) => {
+                log::info!("request_blob_download() succeeded: success={}", res.success);
+                Ok(FlutterBlobDownloadResponse {
+                    success: res.success,
+                    ticket: res.ticket,
+                    filename: res.filename,
+                    file_size: res.file_size,
+                    error: res.error,
+                })
+            }
+            Ok(MydiaResponse::Error(e)) => {
+                log::error!("request_blob_download() server error: {}", e);
+                Err(anyhow::anyhow!("Server error: {}", e))
+            }
+            Ok(other) => {
+                log::error!("request_blob_download() unexpected response type: {:?}", other);
+                Err(anyhow::anyhow!("Unexpected response type"))
+            }
+            Err(e) => {
+                log::error!("request_blob_download() failed for peer {}: {}", peer, e);
+                Err(anyhow::anyhow!("request_blob_download failed: {}", e))
+            }
+        }
+    }
+
+    /// Download a file using a blob ticket over P2P.
+    ///
+    /// This uses the HLS streaming infrastructure to download the file in chunks,
+    /// providing progress updates to the sink as JSON strings. The file is saved
+    /// to the specified output path.
+    ///
+    /// Progress messages are JSON: {"type": "started|progress|completed|failed", ...}
+    /// - started: {"type": "started", "total_size": <bytes>}
+    /// - progress: {"type": "progress", "downloaded": <bytes>, "total": <bytes>}
+    /// - completed: {"type": "completed", "file_path": "<path>"}
+    /// - failed: {"type": "failed", "error": "<message>"}
+    ///
+    /// The ticket JSON should contain: hash, file_size, filename, file_path
+    pub async fn download_blob(
+        &self,
+        peer: String,
+        ticket_json: String,
+        output_path: String,
+        auth_token: Option<String>,
+        sink: StreamSink<String>,
+    ) -> anyhow::Result<()> {
+        log::info!("P2pHost::download_blob() called for peer: {}, output: {}",
+            peer, output_path);
+
+        // Parse the ticket
+        let ticket: serde_json::Value = serde_json::from_str(&ticket_json)
+            .map_err(|e| anyhow::anyhow!("Failed to parse ticket: {}", e))?;
+
+        let file_size = ticket["file_size"].as_u64()
+            .ok_or_else(|| anyhow::anyhow!("Ticket missing file_size"))?;
+        let file_path = ticket["file_path"].as_str()
+            .ok_or_else(|| anyhow::anyhow!("Ticket missing file_path"))?;
+
+        log::info!("Downloading blob: size={}, server_path={}", file_size, file_path);
+
+        // Send start progress
+        let _ = sink.add(format!(r#"{{"type":"started","total_size":{}}}"#, file_size));
+
+        // Create output file
+        let mut output_file = match std::fs::File::create(&output_path) {
+            Ok(f) => f,
+            Err(e) => {
+                let error = format!("Failed to create output file: {}", e);
+                log::error!("{}", error);
+                let _ = sink.add(format!(r#"{{"type":"failed","error":"{}"}}"#, error.replace('"', "\\\"")));
+                return Err(anyhow::anyhow!(error));
+            }
+        };
+
+        // Download using HLS streaming with range requests
+        // We use the file_path as the "session_id" since the server will use it to locate the file
+        const CHUNK_SIZE: u64 = 1024 * 1024; // 1MB chunks
+        let mut downloaded: u64 = 0;
+
+        while downloaded < file_size {
+            let range_end = std::cmp::min(downloaded + CHUNK_SIZE - 1, file_size - 1);
+
+            let core_req = HlsRequest {
+                session_id: "blob-download".to_string(),
+                path: file_path.to_string(),
+                range_start: Some(downloaded),
+                range_end: Some(range_end),
+                auth_token: auth_token.clone(),
+            };
+
+            match self.inner.send_hls_request(peer.clone(), core_req).await {
+                Ok(stream_response) => {
+                    // Check status
+                    if stream_response.header.status != 200 && stream_response.header.status != 206 {
+                        let error = format!("Server returned status: {}", stream_response.header.status);
+                        log::error!("{}", error);
+                        let _ = sink.add(format!(r#"{{"type":"failed","error":"{}"}}"#, error.replace('"', "\\\"")));
+                        return Err(anyhow::anyhow!(error));
+                    }
+
+                    // Write chunks to file
+                    let mut chunk_rx = stream_response.chunk_rx;
+                    while let Some(chunk) = chunk_rx.recv().await {
+                        use std::io::Write;
+                        if let Err(e) = output_file.write_all(&chunk) {
+                            let error = format!("Failed to write to file: {}", e);
+                            log::error!("{}", error);
+                            let _ = sink.add(format!(r#"{{"type":"failed","error":"{}"}}"#, error.replace('"', "\\\"")));
+                            return Err(anyhow::anyhow!(error));
+                        }
+                        downloaded += chunk.len() as u64;
+
+                        // Send progress update
+                        let _ = sink.add(format!(r#"{{"type":"progress","downloaded":{},"total":{}}}"#, downloaded, file_size));
+                    }
+                }
+                Err(e) => {
+                    let error = format!("Download chunk failed: {}", e);
+                    log::error!("{}", error);
+                    let _ = sink.add(format!(r#"{{"type":"failed","error":"{}"}}"#, error.replace('"', "\\\"")));
+                    return Err(anyhow::anyhow!(error));
+                }
+            }
+        }
+
+        // Flush and close file
+        use std::io::Write;
+        if let Err(e) = output_file.flush() {
+            let error = format!("Failed to flush file: {}", e);
+            log::error!("{}", error);
+            let _ = sink.add(format!(r#"{{"type":"failed","error":"{}"}}"#, error.replace('"', "\\\"")));
+            return Err(anyhow::anyhow!(error));
+        }
+
+        log::info!("Blob download completed: {} bytes to {}", downloaded, output_path);
+        let _ = sink.add(format!(r#"{{"type":"completed","file_path":"{}"}}"#, output_path.replace('"', "\\\"")));
+
+        Ok(())
     }
 }

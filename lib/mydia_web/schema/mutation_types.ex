@@ -8,6 +8,8 @@ defmodule MydiaWeb.Schema.MutationTypes do
   alias MydiaWeb.Schema.Resolvers.PlaybackResolver
   alias MydiaWeb.Schema.Resolvers.RemoteAccessResolver
   alias MydiaWeb.Schema.Resolvers.ApiKeyResolver
+  alias MydiaWeb.Schema.Resolvers.StreamingResolver
+  alias MydiaWeb.Schema.Resolvers.DownloadResolver
 
   object :playback_mutations do
     @desc "Update playback progress for a movie"
@@ -112,6 +114,58 @@ defmodule MydiaWeb.Schema.MutationTypes do
     field :revoke_device, :revoke_device_result do
       arg(:id, non_null(:id))
       resolve(&MydiaWeb.Schema.Resolvers.DeviceResolver.revoke_device/3)
+    end
+  end
+
+  object :streaming_mutations do
+    @desc "Start an HLS streaming session for a media file"
+    field :start_streaming_session, :streaming_session_result do
+      arg(:file_id, non_null(:id))
+      arg(:strategy, non_null(:streaming_strategy))
+      resolve(&StreamingResolver.start_streaming_session/3)
+    end
+
+    @desc "End an HLS streaming session"
+    field :end_streaming_session, :boolean do
+      arg(:session_id, non_null(:string))
+      resolve(&StreamingResolver.end_streaming_session/3)
+    end
+  end
+
+  object :download_mutations do
+    @desc "Get available download quality options for a media item"
+    field :download_options, list_of(non_null(:download_option)) do
+      arg(:content_type, non_null(:string), description: "Content type: 'movie' or 'episode'")
+
+      arg(:id, non_null(:id),
+        description: "Media item ID (for movie) or Episode ID (for episode)"
+      )
+
+      resolve(&DownloadResolver.download_options/3)
+    end
+
+    @desc "Start or return existing transcode job for download"
+    field :prepare_download, :prepare_download_result do
+      arg(:content_type, non_null(:string), description: "Content type: 'movie' or 'episode'")
+
+      arg(:id, non_null(:id),
+        description: "Media item ID (for movie) or Episode ID (for episode)"
+      )
+
+      arg(:resolution, :string, default_value: "720p", description: "Target resolution")
+      resolve(&DownloadResolver.prepare_download/3)
+    end
+
+    @desc "Get current status and progress of a transcode job"
+    field :download_job_status, :download_job_status do
+      arg(:job_id, non_null(:id), description: "The transcode job ID")
+      resolve(&DownloadResolver.job_status/3)
+    end
+
+    @desc "Cancel a transcode job"
+    field :cancel_download_job, :cancel_download_result do
+      arg(:job_id, non_null(:id), description: "The transcode job ID")
+      resolve(&DownloadResolver.cancel_job/3)
     end
   end
 end

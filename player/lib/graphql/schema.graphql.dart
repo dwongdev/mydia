@@ -636,6 +636,39 @@ Enum$SubtitleFormat fromJson$Enum$SubtitleFormat(String value) {
   }
 }
 
+enum Enum$StreamingStrategy {
+  HLS_COPY,
+  TRANSCODE,
+  $unknown;
+
+  factory Enum$StreamingStrategy.fromJson(String value) =>
+      fromJson$Enum$StreamingStrategy(value);
+
+  String toJson() => toJson$Enum$StreamingStrategy(this);
+}
+
+String toJson$Enum$StreamingStrategy(Enum$StreamingStrategy e) {
+  switch (e) {
+    case Enum$StreamingStrategy.HLS_COPY:
+      return r'HLS_COPY';
+    case Enum$StreamingStrategy.TRANSCODE:
+      return r'TRANSCODE';
+    case Enum$StreamingStrategy.$unknown:
+      return r'$unknown';
+  }
+}
+
+Enum$StreamingStrategy fromJson$Enum$StreamingStrategy(String value) {
+  switch (value) {
+    case r'HLS_COPY':
+      return Enum$StreamingStrategy.HLS_COPY;
+    case r'TRANSCODE':
+      return Enum$StreamingStrategy.TRANSCODE;
+    default:
+      return Enum$StreamingStrategy.$unknown;
+  }
+}
+
 enum Enum$__TypeKind {
   SCALAR,
   OBJECT,

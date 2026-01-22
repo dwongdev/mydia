@@ -1,0 +1,8 @@
+mutation PrepareDownload($contentType: String!, $id: ID!, $resolution: String) {
+  prepareDownload(contentType: $contentType, id: $id, resolution: $resolution) {
+    jobId
+    status
+    progress
+    fileSize
+  }
+}

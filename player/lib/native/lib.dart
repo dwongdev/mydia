@@ -6,12 +6,32 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterHlsStreamEvent`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BlobTicket`, `FlutterBlobDownloadProgress`, `FlutterHlsStreamEvent`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `from`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<P2pHost>>
 abstract class P2PHost implements RustOpaqueInterface {
   /// Dial a peer using their EndpointAddr JSON.
   Future<void> dial({required String endpointAddrJson});
+
+  /// Download a file using a blob ticket over P2P.
+  ///
+  /// This uses the HLS streaming infrastructure to download the file in chunks,
+  /// providing progress updates to the sink as JSON strings. The file is saved
+  /// to the specified output path.
+  ///
+  /// Progress messages are JSON: {"type": "started|progress|completed|failed", ...}
+  /// - started: {"type": "started", "total_size": <bytes>}
+  /// - progress: {"type": "progress", "downloaded": <bytes>, "total": <bytes>}
+  /// - completed: {"type": "completed", "file_path": "<path>"}
+  /// - failed: {"type": "failed", "error": "<message>"}
+  ///
+  /// The ticket JSON should contain: hash, file_size, filename, file_path
+  Stream<String> downloadBlob(
+      {required String peer,
+      required String ticketJson,
+      required String outputPath,
+      String? authToken});
 
   /// Start streaming events to Flutter.
   Stream<String> eventStream();
@@ -25,6 +45,14 @@ abstract class P2PHost implements RustOpaqueInterface {
   /// Initialize a new P2P host with optional custom relay URL.
   static (P2PHost, String) init({String? relayUrl}) =>
       RustLib.instance.api.crateP2PHostInit(relayUrl: relayUrl);
+
+  /// Request a blob download ticket from the server for a transcode job.
+  ///
+  /// This sends a BlobDownload request to the server which returns a ticket
+  /// containing the file hash, size, and path. The ticket can then be used
+  /// with download_blob() to download the actual file.
+  Future<FlutterBlobDownloadResponse> requestBlobDownload(
+      {required String peer, required FlutterBlobDownloadRequest req});
 
   /// Send a GraphQL request to a specific peer.
   Future<FlutterGraphQLResponse> sendGraphqlRequest(
@@ -40,6 +68,88 @@ abstract class P2PHost implements RustOpaqueInterface {
   /// Send a pairing request to a specific peer.
   Future<FlutterPairingResponse> sendPairingRequest(
       {required String peer, required FlutterPairingRequest req});
+}
+
+/// Request to download a file as a blob over P2P
+class FlutterBlobDownloadRequest {
+  final String jobId;
+  final String? authToken;
+
+  const FlutterBlobDownloadRequest({
+    required this.jobId,
+    this.authToken,
+  });
+
+  @override
+  int get hashCode => jobId.hashCode ^ authToken.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterBlobDownloadRequest &&
+          runtimeType == other.runtimeType &&
+          jobId == other.jobId &&
+          authToken == other.authToken;
+}
+
+/// Response with blob ticket for downloading
+class FlutterBlobDownloadResponse {
+  final bool success;
+
+  /// The blob ticket as a JSON string containing hash, file_size, filename, file_path
+  final String? ticket;
+
+  /// Original filename for the downloaded file
+  final String? filename;
+
+  /// File size in bytes
+  final BigInt? fileSize;
+
+  /// Error message if failed
+  final String? error;
+
+  const FlutterBlobDownloadResponse({
+    required this.success,
+    this.ticket,
+    this.filename,
+    this.fileSize,
+    this.error,
+  });
+
+  @override
+  int get hashCode =>
+      success.hashCode ^
+      ticket.hashCode ^
+      filename.hashCode ^
+      fileSize.hashCode ^
+      error.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterBlobDownloadResponse &&
+          runtimeType == other.runtimeType &&
+          success == other.success &&
+          ticket == other.ticket &&
+          filename == other.filename &&
+          fileSize == other.fileSize &&
+          error == other.error;
+}
+
+/// Connection type for a peer (relay vs direct) for display in Flutter UI
+enum FlutterConnectionType {
+  /// Direct peer-to-peer connection
+  direct,
+
+  /// Connection via relay server
+  relay,
+
+  /// Using both relay and direct paths
+  mixed,
+
+  /// No active connection
+  none,
+  ;
 }
 
 /// GraphQL request to send over P2P
@@ -198,15 +308,22 @@ class FlutterNetworkStats {
   /// The relay URL currently in use (extracted from endpoint address)
   final String? relayUrl;
 
+  /// Connection type for the connected peer (relay vs direct)
+  final FlutterConnectionType peerConnectionType;
+
   const FlutterNetworkStats({
     required this.connectedPeers,
     required this.relayConnected,
     this.relayUrl,
+    required this.peerConnectionType,
   });
 
   @override
   int get hashCode =>
-      connectedPeers.hashCode ^ relayConnected.hashCode ^ relayUrl.hashCode;
+      connectedPeers.hashCode ^
+      relayConnected.hashCode ^
+      relayUrl.hashCode ^
+      peerConnectionType.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -215,7 +332,8 @@ class FlutterNetworkStats {
           runtimeType == other.runtimeType &&
           connectedPeers == other.connectedPeers &&
           relayConnected == other.relayConnected &&
-          relayUrl == other.relayUrl;
+          relayUrl == other.relayUrl &&
+          peerConnectionType == other.peerConnectionType;
 }
 
 class FlutterPairingRequest {

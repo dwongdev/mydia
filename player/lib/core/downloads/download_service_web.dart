@@ -102,6 +102,11 @@ class _WebDownloadService implements DownloadService {
   }
 
   @override
+  void setP2PJobService(dynamic p2pJobService) {
+    // No-op on web
+  }
+
+  @override
   Stream<DownloadTask> get progressStream => _progressController.stream;
 
   @override

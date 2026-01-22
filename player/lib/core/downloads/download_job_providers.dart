@@ -2,12 +2,15 @@ import 'dart:async';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../domain/models/download_option.dart';
+import '../connection/connection_provider.dart';
 import '../graphql/graphql_provider.dart';
+import '../p2p/p2p_service.dart';
 import 'download_job_service.dart';
+import 'p2p_download_job_service.dart';
 
 part 'download_job_providers.g.dart';
 
-/// Provider for the DownloadJobService instance.
+/// Provider for the HTTP-based DownloadJobService instance.
 ///
 /// Returns null if authentication is not available.
 @riverpod
@@ -43,18 +46,64 @@ DownloadJobService? downloadJobService(Ref ref) {
   );
 }
 
+/// Provider for the P2P-based download job service.
+///
+/// Returns null if not in P2P mode or authentication is not available.
+@riverpod
+P2pDownloadJobService? p2pDownloadJobService(Ref ref) {
+  final connectionState = ref.watch(connectionProvider);
+  if (!connectionState.isP2PMode || connectionState.serverNodeAddr == null) {
+    return null;
+  }
+
+  final authTokenAsync = ref.watch(authTokenProvider);
+  final p2pService = ref.watch(p2pServiceProvider);
+
+  return authTokenAsync.when(
+    data: (authToken) {
+      if (authToken == null) return null;
+
+      return P2pDownloadJobService(
+        p2pService: p2pService,
+        serverNodeAddr: connectionState.serverNodeAddr!,
+        authToken: authToken,
+      );
+    },
+    loading: () => null,
+    error: (_, __) => null,
+  );
+}
+
+/// Provider that returns true if currently in P2P mode.
+@riverpod
+bool isP2PDownloadMode(Ref ref) {
+  final connectionState = ref.watch(connectionProvider);
+  return connectionState.isP2PMode && connectionState.serverNodeAddr != null;
+}
+
 /// Provider for fetching download quality options.
 ///
 /// [contentType] must be either "movie" or "episode"
 /// [id] is the media item ID (movie ID or episode ID)
 ///
 /// Returns available quality options with estimated file sizes.
+/// Automatically uses P2P GraphQL when in P2P mode.
 @riverpod
 Future<DownloadOptionsResponse> downloadOptions(
   Ref ref,
   String contentType,
   String id,
 ) async {
+  final isP2PMode = ref.watch(isP2PDownloadModeProvider);
+
+  if (isP2PMode) {
+    final p2pService = ref.watch(p2pDownloadJobServiceProvider);
+    if (p2pService == null) {
+      throw Exception('P2P download service not available');
+    }
+    return await p2pService.getOptions(contentType, id);
+  }
+
   // Wait for server URL and auth token to be available
   final serverUrl = await ref.watch(serverUrlProvider.future);
   final authToken = await ref.watch(authTokenProvider.future);
@@ -78,15 +127,13 @@ Future<DownloadOptionsResponse> downloadOptions(
 ///
 /// Automatically polls for status updates every 2 seconds while job is in progress.
 /// Stops polling once job is complete (ready or failed).
+/// Uses P2P GraphQL when in P2P mode.
 @riverpod
 Stream<DownloadJobStatus> downloadJobStatus(
   Ref ref,
   String jobId,
 ) async* {
-  final service = ref.watch(downloadJobServiceProvider);
-  if (service == null) {
-    throw Exception('Download service not available');
-  }
+  final isP2PMode = ref.watch(isP2PDownloadModeProvider);
 
   // Poll for status updates
   const pollInterval = Duration(seconds: 2);
@@ -94,7 +141,21 @@ Stream<DownloadJobStatus> downloadJobStatus(
 
   while (true) {
     try {
-      final status = await service.getJobStatus(jobId);
+      DownloadJobStatus status;
+
+      if (isP2PMode) {
+        final p2pService = ref.watch(p2pDownloadJobServiceProvider);
+        if (p2pService == null) {
+          throw Exception('P2P download service not available');
+        }
+        status = await p2pService.getJobStatus(jobId);
+      } else {
+        final service = ref.watch(downloadJobServiceProvider);
+        if (service == null) {
+          throw Exception('Download service not available');
+        }
+        status = await service.getJobStatus(jobId);
+      }
 
       // Yield new status
       yield status;
@@ -124,6 +185,7 @@ Stream<DownloadJobStatus> downloadJobStatus(
 ///
 /// This is a family provider that can be used to initiate download preparation.
 /// Use `ref.refresh()` to start a new preparation.
+/// Uses P2P GraphQL when in P2P mode.
 @riverpod
 Future<DownloadJobStatus> prepareDownload(
   Ref ref, {
@@ -131,6 +193,20 @@ Future<DownloadJobStatus> prepareDownload(
   required String id,
   required String resolution,
 }) async {
+  final isP2PMode = ref.watch(isP2PDownloadModeProvider);
+
+  if (isP2PMode) {
+    final p2pService = ref.watch(p2pDownloadJobServiceProvider);
+    if (p2pService == null) {
+      throw Exception('P2P download service not available');
+    }
+    return await p2pService.prepareDownload(
+      contentType: contentType,
+      id: id,
+      resolution: resolution,
+    );
+  }
+
   final service = ref.watch(downloadJobServiceProvider);
   if (service == null) {
     throw Exception('Download service not available');

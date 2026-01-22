@@ -39,6 +39,8 @@ defmodule MydiaWeb.Schema do
     import_fields(:api_key_mutations)
     import_fields(:auth_mutations)
     import_fields(:device_mutations)
+    import_fields(:streaming_mutations)
+    import_fields(:download_mutations)
   end
 
   subscription do

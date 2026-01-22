@@ -4,8 +4,9 @@
 //! NAT traversal and QUIC-based connections.
 
 use iroh::{
-    Endpoint, EndpointAddr, EndpointId, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey,
-    endpoint::{Connection, SendStream},
+    Endpoint, EndpointAddr, EndpointId, RelayConfig, RelayMap, RelayMode,
+    RelayUrl, SecretKey, Watcher,
+    endpoint::{Connection, ConnectionType, SendStream},
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,6 +26,7 @@ pub enum MydiaRequest {
     ReadMedia(ReadMediaRequest),
     GraphQL(GraphQLRequest),
     HlsStream(HlsRequest),
+    BlobDownload(BlobDownloadRequest),
     Custom(Vec<u8>),
 }
 
@@ -71,6 +73,40 @@ pub struct HlsResponseHeader {
     pub cache_control: Option<String>,
 }
 
+/// Request to download a file as an iroh-blob
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct BlobDownloadRequest {
+    pub job_id: String,
+    pub auth_token: Option<String>,
+}
+
+/// Response with blob ticket for downloading
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct BlobDownloadResponse {
+    pub success: bool,
+    /// The iroh-blobs ticket as a serialized string
+    pub ticket: Option<String>,
+    /// Original filename for the downloaded file
+    pub filename: Option<String>,
+    /// File size in bytes
+    pub file_size: Option<u64>,
+    /// Error message if failed
+    pub error: Option<String>,
+}
+
+/// Progress event for blob downloads
+#[derive(Debug, Clone)]
+pub enum BlobDownloadProgress {
+    /// Download started with total size
+    Started { total_size: u64 },
+    /// Progress update with bytes downloaded
+    Progress { downloaded: u64, total: u64 },
+    /// Download completed with file path
+    Completed { file_path: String },
+    /// Download failed with error
+    Failed { error: String },
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GraphQLResponse {
     pub data: Option<String>,   // JSON-encoded
@@ -84,6 +120,7 @@ pub enum MydiaResponse {
     MediaChunk(Vec<u8>),
     GraphQL(GraphQLResponse),
     HlsHeader(HlsResponseHeader),
+    BlobDownload(BlobDownloadResponse),
     Custom(Vec<u8>),
     Error(String),
 }
@@ -199,6 +236,30 @@ impl From<tracing::Level> for LogLevel {
     }
 }
 
+/// Connection type for a peer (relay vs direct)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeerConnectionType {
+    /// Direct peer-to-peer connection
+    Direct,
+    /// Connection via relay server
+    Relay,
+    /// Using both relay and direct paths
+    Mixed,
+    /// No active connection
+    None,
+}
+
+impl From<ConnectionType> for PeerConnectionType {
+    fn from(ct: ConnectionType) -> Self {
+        match ct {
+            ConnectionType::Direct(_) => PeerConnectionType::Direct,
+            ConnectionType::Relay(_) => PeerConnectionType::Relay,
+            ConnectionType::Mixed(_, _) => PeerConnectionType::Mixed,
+            ConnectionType::None => PeerConnectionType::None,
+        }
+    }
+}
+
 /// Global log channel for forwarding logs to Elixir
 static LOG_TX: OnceLock<mpsc::Sender<Event>> = OnceLock::new();
 
@@ -278,6 +339,14 @@ pub struct NetworkStats {
     pub relay_connected: bool,
     /// The relay URL currently in use (None if using iroh defaults)
     pub relay_url: Option<String>,
+    /// Connection type for the first connected peer (for UI display)
+    pub peer_connection_type: PeerConnectionType,
+}
+
+impl Default for PeerConnectionType {
+    fn default() -> Self {
+        PeerConnectionType::None
+    }
 }
 
 /// Configuration for the Host
@@ -660,11 +729,34 @@ async fn run_event_loop(
                         // Get the actual relay URL from the endpoint address
                         let addr = endpoint.addr();
                         let relay_url = addr.relay_urls().next().map(|u| u.to_string());
-                        tracing::debug!("GetNetworkStats: addr={:?}, relay_url={:?}", addr, relay_url);
+
+                        // Get connection type for the first connected peer
+                        let peer_connection_type = if let Some((peer_key, conn)) = connected_peers.iter().next() {
+                            let peer_id = conn.remote_id();
+                            tracing::info!("GetNetworkStats: checking conn_type for peer {} (key={})", peer_id, peer_key);
+                            match endpoint.conn_type(peer_id) {
+                                Some(mut watcher) => {
+                                    let ct = watcher.get();
+                                    tracing::info!("GetNetworkStats: conn_type for {} = {:?}", peer_id, ct);
+                                    ct.into()
+                                }
+                                None => {
+                                    tracing::info!("GetNetworkStats: conn_type returned None for {}", peer_id);
+                                    PeerConnectionType::None
+                                }
+                            }
+                        } else {
+                            tracing::info!("GetNetworkStats: no connected peers (map len={})", connected_peers.len());
+                            PeerConnectionType::None
+                        };
+
+                        tracing::info!("GetNetworkStats: peers={}, relay_url={:?}, peer_conn_type={:?}",
+                            connected_peers.len(), relay_url, peer_connection_type);
                         let stats = NetworkStats {
                             connected_peers: connected_peers.len(),
                             relay_connected,
                             relay_url,
+                            peer_connection_type,
                         };
                         let _ = reply.send(stats);
                     }
@@ -1090,6 +1182,7 @@ mod tests {
             access_token: Some("access456".to_string()),
             device_token: Some("device789".to_string()),
             error: None,
+            direct_urls: vec![],
         });
         let data = serde_cbor::to_vec(&response).unwrap();
         let decoded: MydiaResponse = serde_cbor::from_slice(&data).unwrap();
@@ -1181,6 +1274,45 @@ mod tests {
             content_length: 1024,
             content_range: Some("bytes 0-1023/4096".to_string()),
             cache_control: None,
+        });
+        let data = serde_cbor::to_vec(&response).unwrap();
+        let decoded: MydiaResponse = serde_cbor::from_slice(&data).unwrap();
+        assert_eq!(response, decoded);
+    }
+
+    #[test]
+    fn test_blob_download_request_serialization() {
+        let request = MydiaRequest::BlobDownload(BlobDownloadRequest {
+            job_id: "job_123".to_string(),
+            auth_token: Some("token_abc".to_string()),
+        });
+        let data = serde_cbor::to_vec(&request).unwrap();
+        let decoded: MydiaRequest = serde_cbor::from_slice(&data).unwrap();
+        assert_eq!(request, decoded);
+    }
+
+    #[test]
+    fn test_blob_download_response_serialization() {
+        let response = MydiaResponse::BlobDownload(BlobDownloadResponse {
+            success: true,
+            ticket: Some("blob_ticket_xyz".to_string()),
+            filename: Some("movie.mp4".to_string()),
+            file_size: Some(1024 * 1024 * 100),
+            error: None,
+        });
+        let data = serde_cbor::to_vec(&response).unwrap();
+        let decoded: MydiaResponse = serde_cbor::from_slice(&data).unwrap();
+        assert_eq!(response, decoded);
+    }
+
+    #[test]
+    fn test_blob_download_response_error_serialization() {
+        let response = MydiaResponse::BlobDownload(BlobDownloadResponse {
+            success: false,
+            ticket: None,
+            filename: None,
+            file_size: None,
+            error: Some("Job not found".to_string()),
         });
         let data = serde_cbor::to_vec(&response).unwrap();
         let decoded: MydiaResponse = serde_cbor::from_slice(&data).unwrap();

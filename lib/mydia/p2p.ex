@@ -74,6 +74,20 @@ defmodule Mydia.P2p do
   Must be called after all chunks have been sent.
   """
   def finish_hls_stream(_resource, _stream_id), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc """
+  Create a blob ticket from a file for P2P download.
+
+  Computes the content hash and creates a ticket that clients can use
+  to verify and download the file.
+
+  Returns `{:ok, ticket_json}` on success where ticket_json contains:
+  - hash: BLAKE3 hash of the file content
+  - file_size: size in bytes
+  - filename: original filename
+  - file_path: path to the file
+  """
+  def create_blob_ticket(_file_path, _filename), do: :erlang.nif_error(:nif_not_loaded)
 end
 
 defmodule Mydia.P2p.PairingRequest do
@@ -185,5 +199,32 @@ defmodule Mydia.P2p.HlsResponseHeader do
           content_length: non_neg_integer(),
           content_range: String.t() | nil,
           cache_control: String.t() | nil
+        }
+end
+
+defmodule Mydia.P2p.BlobDownloadRequest do
+  @moduledoc """
+  A blob download request received from a player over P2P.
+  """
+  defstruct [:job_id, :auth_token]
+
+  @type t :: %__MODULE__{
+          job_id: String.t(),
+          auth_token: String.t() | nil
+        }
+end
+
+defmodule Mydia.P2p.BlobDownloadResponse do
+  @moduledoc """
+  A blob download response to send back to a player over P2P.
+  """
+  defstruct [:success, :ticket, :filename, :file_size, :error]
+
+  @type t :: %__MODULE__{
+          success: boolean(),
+          ticket: String.t() | nil,
+          filename: String.t() | nil,
+          file_size: non_neg_integer() | nil,
+          error: String.t() | nil
         }
 end

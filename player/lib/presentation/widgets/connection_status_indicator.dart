@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/connection/connection_provider.dart';
+import '../../core/p2p/p2p_service.dart';
 
 /// A compact badge showing the current connection status.
 class ConnectionStatusBadge extends ConsumerWidget {
@@ -16,19 +17,23 @@ class ConnectionStatusBadge extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connectionState = ref.watch(connectionProvider);
+    final p2pStatus = ref.watch(p2pStatusNotifierProvider);
     final isP2P = connectionState.isP2PMode;
+
+    debugPrint('[ConnectionStatusBadge] build: isP2P=$isP2P, peerConnectionType=${p2pStatus.peerConnectionType}');
+
+    // Get color and label based on connection type
+    final (Color statusColor, String label) = isP2P
+        ? _getP2PStatusInfo(p2pStatus.peerConnectionType)
+        : (Colors.green, 'Direct');
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: isP2P
-            ? Colors.blue.withValues(alpha: 0.15)
-            : Colors.green.withValues(alpha: 0.15),
+        color: statusColor.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isP2P
-              ? Colors.blue.withValues(alpha: 0.3)
-              : Colors.green.withValues(alpha: 0.3),
+          color: statusColor.withValues(alpha: 0.3),
         ),
       ),
       child: Row(
@@ -37,20 +42,30 @@ class ConnectionStatusBadge extends ConsumerWidget {
           Icon(
             isP2P ? Icons.hub_outlined : Icons.wifi,
             size: 14,
-            color: isP2P ? Colors.blue : Colors.green,
+            color: statusColor,
           ),
           const SizedBox(width: 4),
           Text(
-            isP2P ? 'P2P' : 'Direct',
+            label,
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w500,
-              color: isP2P ? Colors.blue : Colors.green,
+              color: statusColor,
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// Get the color and label for P2P connection based on type
+  (Color, String) _getP2PStatusInfo(P2pConnectionType connectionType) {
+    return switch (connectionType) {
+      P2pConnectionType.direct => (Colors.green, 'P2P (Direct)'),
+      P2pConnectionType.relay => (Colors.orange, 'P2P (Relay)'),
+      P2pConnectionType.mixed => (Colors.blue, 'P2P (Mixed)'),
+      P2pConnectionType.none => (Colors.blue, 'P2P'),
+    };
   }
 }
 
@@ -61,6 +76,7 @@ class ConnectionStatusTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connectionState = ref.watch(connectionProvider);
+    final p2pStatus = ref.watch(p2pStatusNotifierProvider);
     final isP2P = connectionState.isP2PMode;
 
     String subtitle;
@@ -68,11 +84,13 @@ class ConnectionStatusTile extends ConsumerWidget {
     Color statusColor;
 
     if (isP2P) {
-      subtitle = 'Connected via P2P mesh';
+      final (color, transportDetail) =
+          _getP2PTransportInfo(p2pStatus.peerConnectionType);
+      subtitle = transportDetail;
       icon = Icons.hub_outlined;
-      statusColor = Colors.blue;
+      statusColor = color;
     } else {
-      subtitle = 'Direct connection to server';
+      subtitle = 'Direct HTTP connection to server';
       icon = Icons.wifi;
       statusColor = Colors.green;
     }
@@ -88,5 +106,24 @@ class ConnectionStatusTile extends ConsumerWidget {
       ),
       subtitle: Text(subtitle),
     );
+  }
+
+  /// Get the color and transport details for P2P connection type
+  (Color, String) _getP2PTransportInfo(P2pConnectionType connectionType) {
+    return switch (connectionType) {
+      P2pConnectionType.direct => (
+          Colors.green,
+          'Direct peer-to-peer connection'
+        ),
+      P2pConnectionType.relay => (
+          Colors.orange,
+          'Connected via relay server'
+        ),
+      P2pConnectionType.mixed => (
+          Colors.blue,
+          'Using both relay and direct paths'
+        ),
+      P2pConnectionType.none => (Colors.blue, 'Connecting via P2P mesh...'),
+    };
   }
 }

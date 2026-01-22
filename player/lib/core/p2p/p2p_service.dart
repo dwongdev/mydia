@@ -34,11 +34,14 @@ class P2pStatusNotifier extends Notifier<P2pStatus> {
 
     // Listen to status changes
     _subscription = service.onStatusChanged.listen((status) {
+      debugPrint('[P2pStatusNotifier] Received status update: peerConnectionType=${status.peerConnectionType}');
       state = status;
     });
 
     // Return initial state from service
-    return service.status;
+    final initialStatus = service.status;
+    debugPrint('[P2pStatusNotifier] Initial status: peerConnectionType=${initialStatus.peerConnectionType}');
+    return initialStatus;
   }
 
   /// Reinitialize P2P with a new relay URL.
@@ -64,6 +67,18 @@ class P2pStatusNotifier extends Notifier<P2pStatus> {
 final p2pStatusNotifierProvider =
     NotifierProvider<P2pStatusNotifier, P2pStatus>(P2pStatusNotifier.new);
 
+/// Connection type for a peer (relay vs direct)
+enum P2pConnectionType {
+  /// Direct peer-to-peer connection
+  direct,
+  /// Connection via relay server
+  relay,
+  /// Using both relay and direct paths
+  mixed,
+  /// No active connection
+  none,
+}
+
 /// P2P status information for UI display
 class P2pStatus {
   final bool isInitialized;
@@ -71,6 +86,7 @@ class P2pStatus {
   final int connectedPeersCount;
   final String? nodeAddr;
   final String? relayUrl;
+  final P2pConnectionType peerConnectionType;
 
   const P2pStatus({
     required this.isInitialized,
@@ -78,6 +94,7 @@ class P2pStatus {
     required this.connectedPeersCount,
     this.nodeAddr,
     this.relayUrl,
+    this.peerConnectionType = P2pConnectionType.none,
   });
 
   const P2pStatus.initial()
@@ -85,7 +102,8 @@ class P2pStatus {
         isRelayConnected = false,
         connectedPeersCount = 0,
         nodeAddr = null,
-        relayUrl = null;
+        relayUrl = null,
+        peerConnectionType = P2pConnectionType.none;
 
   P2pStatus copyWith({
     bool? isInitialized,
@@ -93,6 +111,7 @@ class P2pStatus {
     int? connectedPeersCount,
     String? nodeAddr,
     String? relayUrl,
+    P2pConnectionType? peerConnectionType,
   }) {
     return P2pStatus(
       isInitialized: isInitialized ?? this.isInitialized,
@@ -100,6 +119,7 @@ class P2pStatus {
       connectedPeersCount: connectedPeersCount ?? this.connectedPeersCount,
       nodeAddr: nodeAddr ?? this.nodeAddr,
       relayUrl: relayUrl ?? this.relayUrl,
+      peerConnectionType: peerConnectionType ?? this.peerConnectionType,
     );
   }
 }
@@ -137,13 +157,30 @@ class P2pService {
   P2pStatus get status {
     // Get relay URL from network stats (preferred) or extract from nodeAddr (fallback)
     final relayUrl = _getEffectiveRelayUrl();
+    // Get connection type from network stats
+    final peerConnectionType = _getPeerConnectionType();
     return P2pStatus(
       isInitialized: _isInitialized,
       isRelayConnected: _isRelayConnected,
       connectedPeersCount: _connectedPeers.length,
       nodeAddr: _nodeAddr,
       relayUrl: relayUrl,
+      peerConnectionType: peerConnectionType,
     );
+  }
+
+  /// Get the peer connection type from network stats
+  P2pConnectionType _getPeerConnectionType() {
+    if (_host == null) return P2pConnectionType.none;
+    final stats = _host!.getNetworkStats();
+    final result = switch (stats.peerConnectionType) {
+      FlutterConnectionType.direct => P2pConnectionType.direct,
+      FlutterConnectionType.relay => P2pConnectionType.relay,
+      FlutterConnectionType.mixed => P2pConnectionType.mixed,
+      FlutterConnectionType.none => P2pConnectionType.none,
+    };
+    debugPrint('[P2P] _getPeerConnectionType: ${stats.peerConnectionType} -> $result');
+    return result;
   }
 
   /// The custom relay URL passed during initialization (null if using iroh defaults)
@@ -457,6 +494,97 @@ class P2pService {
     );
 
     return await _host!.sendHlsRequest(peer: peer, req: req);
+  }
+
+  /// Request a blob download ticket from the server for a transcode job.
+  ///
+  /// This returns a ticket containing file metadata that can be used to
+  /// download the file with [downloadBlob].
+  ///
+  /// Returns a map with:
+  /// - `success`: bool
+  /// - `ticket`: String? - JSON ticket to pass to downloadBlob
+  /// - `filename`: String? - Suggested filename for the download
+  /// - `fileSize`: int? - Size of the file in bytes
+  /// - `error`: String? - Error message if failed
+  Future<Map<String, dynamic>> requestBlobDownload({
+    required String peer,
+    required String jobId,
+    String? authToken,
+  }) async {
+    if (_host == null) throw Exception("P2P host not initialized");
+
+    // Ensure we're connected to the peer before sending
+    await ensureConnected(peer);
+
+    debugPrint('[P2P] Requesting blob download ticket for job: $jobId');
+
+    final req = FlutterBlobDownloadRequest(
+      jobId: jobId,
+      authToken: authToken,
+    );
+
+    final res = await _host!.requestBlobDownload(peer: peer, req: req);
+
+    return {
+      'success': res.success,
+      'ticket': res.ticket,
+      'filename': res.filename,
+      'fileSize': res.fileSize?.toInt(),
+      'error': res.error,
+    };
+  }
+
+  /// Download a file using a blob ticket over P2P.
+  ///
+  /// [ticket] - The ticket JSON from [requestBlobDownload]
+  /// [outputPath] - Where to save the downloaded file
+  /// [authToken] - Auth token for the request
+  /// [onProgress] - Optional callback for progress updates
+  ///
+  /// Progress callback receives: downloaded bytes, total bytes
+  Future<void> downloadBlob({
+    required String peer,
+    required String ticket,
+    required String outputPath,
+    String? authToken,
+    void Function(int downloaded, int total)? onProgress,
+  }) async {
+    if (_host == null) throw Exception("P2P host not initialized");
+
+    // Ensure we're connected to the peer before downloading
+    await ensureConnected(peer);
+
+    debugPrint('[P2P] Starting blob download to: $outputPath');
+
+    // The download_blob method streams progress updates as JSON strings
+    final stream = _host!.downloadBlob(
+      peer: peer,
+      ticketJson: ticket,
+      outputPath: outputPath,
+      authToken: authToken,
+    );
+
+    await for (final progressJson in stream) {
+      final progress = _decodeJson(progressJson);
+      if (progress == null) continue;
+
+      final type = progress['type'] as String?;
+      switch (type) {
+        case 'started':
+          debugPrint('[P2P] Download started, total size: ${progress["total_size"]} bytes');
+        case 'progress':
+          final downloaded = progress['downloaded'] as int;
+          final total = progress['total'] as int;
+          onProgress?.call(downloaded, total);
+        case 'completed':
+          debugPrint('[P2P] Download completed: ${progress["file_path"]}');
+        case 'failed':
+          final error = progress['error'] as String?;
+          debugPrint('[P2P] Download failed: $error');
+          throw Exception(error ?? 'Download failed');
+      }
+    }
   }
 
   /// Reset the P2P host for re-initialization.

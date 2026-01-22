@@ -1,0 +1,7 @@
+mutation DownloadOptions($contentType: String!, $id: ID!) {
+  downloadOptions(contentType: $contentType, id: $id) {
+    resolution
+    label
+    estimatedSize
+  }
+}

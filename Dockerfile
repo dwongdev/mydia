@@ -1,8 +1,5 @@
 # syntax=docker/dockerfile:1.4
 
-# Global ARGs - must be declared before any FROM to be used in FROM instructions
-ARG BASE_IMAGE=elixir:1.18-alpine
-
 # ============================================
 # Flutter Build Stage
 # ============================================
@@ -31,12 +28,9 @@ RUN --mount=type=cache,target=/root/.pub-cache,sharing=locked \
 # ============================================
 # Elixir Build Stage
 # ============================================
-# Use pre-built base image with Rust, Node, Hex, Rebar already installed
-# CI workflows pass BASE_IMAGE=ghcr.io/getmydia/mydia-base:builder for faster builds
-# Default to standard elixir image for standalone builds (set via global ARG above)
-FROM ${BASE_IMAGE} AS builder
+FROM elixir:1.18-alpine AS builder
 
-# Install build dependencies (idempotent - fast if already in base image)
+# Install build dependencies
 RUN apk add --no-cache \
     build-base \
     git \
@@ -52,7 +46,7 @@ RUN apk add --no-cache \
 # Increase hex timeout for slow networks/CI
 ENV HEX_HTTP_TIMEOUT=300000
 
-# Install Hex and Rebar (idempotent)
+# Install Hex and Rebar
 RUN mix local.hex --force && mix local.rebar --force
 
 # Database type: sqlite (default) or postgres

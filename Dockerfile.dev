@@ -1,11 +1,8 @@
 # syntax=docker/dockerfile:1.4
-# Use pre-built base image with all dev tools (Elixir, Rust, Node, Flutter, Chrome)
-# compose.yml passes BASE_IMAGE=ghcr.io/getmydia/mydia-base:dev for faster builds
-# Default to standard elixir image for standalone builds (works without base image)
-ARG BASE_IMAGE=elixir:1.18
-FROM ${BASE_IMAGE}
+# Development image with all tools (Elixir, Rust, Node, Flutter, Chrome)
+FROM elixir:1.18
 
-# Install build dependencies and development tools (idempotent if using base image)
+# Install build dependencies and development tools
 RUN apt-get update -qq && \
     apt-get install -y \
       build-essential \

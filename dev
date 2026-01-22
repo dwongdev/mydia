@@ -369,7 +369,7 @@ case "$COMMAND" in
                     build)
                         echo -e "${GREEN}Building Android APK using player/flake.nix...${NC}"
                         echo ""
-                        nix develop ./player --command bash -c "cd player && flutter build apk --release"
+                        nix develop ./player --command bash -c "cd player && flutter pub get && flutter build apk --release"
                         if [ $? -eq 0 ]; then
                             echo ""
                             echo -e "${GREEN}APK built successfully!${NC}"
@@ -379,7 +379,7 @@ case "$COMMAND" in
                     run)
                         echo -e "${GREEN}Building and running on Android device...${NC}"
                         echo ""
-                        nix develop ./player --command bash -c "cd player && flutter run"
+                        nix develop ./player --command bash -c "cd player && flutter pub get && flutter run"
                         ;;
                     shell)
                         echo -e "${GREEN}Opening nix develop shell in player directory...${NC}"

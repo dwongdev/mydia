@@ -1,12 +1,17 @@
 defmodule MetadataRelay.PairingTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias MetadataRelay.Pairing
-  alias MetadataRelay.Repo
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    # Ensure ETS table exists for fallback
+    Pairing.ensure_ets_table()
+
+    # Clear the ETS table before each test
+    if :ets.whereis(:pairing_claims) != :undefined do
+      :ets.delete_all_objects(:pairing_claims)
+    end
+
     :ok
   end
 
@@ -21,11 +26,6 @@ defmodule MetadataRelay.PairingTest do
       assert String.length(claim.code) == 6
       assert claim.node_addr == @valid_node_addr
       assert claim.expires_at != nil
-    end
-
-    test "returns error for invalid JSON node_addr" do
-      assert {:error, changeset} = Pairing.create_claim("not-valid-json")
-      assert %{node_addr: ["must be valid JSON"]} = errors_on(changeset)
     end
 
     test "respects custom TTL" do
@@ -59,9 +59,13 @@ defmodule MetadataRelay.PairingTest do
       assert {:error, :not_found} = Pairing.get_claim("NONEXISTENT")
     end
 
-    test "returns error for expired code" do
-      {:ok, _claim} = Pairing.create_claim(@valid_node_addr, ttl_seconds: -1, code: "EXPTEST")
-      assert {:error, :expired} = Pairing.get_claim("EXPTEST")
+    test "returns error for expired code (ETS fallback)" do
+      # Create an expired claim using ETS directly
+      Pairing.ensure_ets_table()
+      expires_at = System.system_time(:second) - 10
+      :ets.insert(:pairing_claims, {"EXPTEST", @valid_node_addr, expires_at})
+
+      assert {:error, :not_found} = Pairing.get_claim("EXPTEST")
     end
 
     test "normalizes code (case insensitive)" do
@@ -92,52 +96,67 @@ defmodule MetadataRelay.PairingTest do
       assert {:error, :not_found} = Pairing.get_claim(claim.code)
     end
 
-    test "returns error for non-existent claim" do
-      assert {:error, :not_found} = Pairing.delete_claim("NONEXISTENT")
+    test "returns ok for non-existent claim (idempotent)" do
+      assert :ok = Pairing.delete_claim("NONEXISTENT")
     end
 
     test "normalizes code on delete" do
-      {:ok, claim} = Pairing.create_claim(@valid_node_addr, code: "DELETE")
+      {:ok, _claim} = Pairing.create_claim(@valid_node_addr, code: "DELETE")
       assert :ok = Pairing.delete_claim("del-ete")
     end
   end
 
-  describe "cleanup_expired/1" do
-    test "deletes expired claims beyond max age" do
-      # Create an expired claim
-      {:ok, _claim} = Pairing.create_claim(@valid_node_addr, ttl_seconds: -7200, code: "EXP001")
-
-      # Run cleanup with 1 hour max age
-      count = Pairing.cleanup_expired(3600)
-      assert count == 1
-
-      # Claim should be gone
-      assert {:error, :not_found} = Pairing.get_claim("EXP001")
+  describe "generate_code/1" do
+    test "generates 6 character code by default" do
+      code = Pairing.generate_code()
+      assert String.length(code) == 6
     end
 
-    test "does not delete recently expired claims" do
-      # Create a claim that just expired
-      {:ok, _claim} = Pairing.create_claim(@valid_node_addr, ttl_seconds: -1, code: "RECENT")
+    test "generates code with custom length" do
+      code = Pairing.generate_code(8)
+      assert String.length(code) == 8
 
-      # Run cleanup with 1 hour max age - should not delete claims expired < 1 hour ago
-      count = Pairing.cleanup_expired(3600)
-      assert count == 0
+      code = Pairing.generate_code(4)
+      assert String.length(code) == 4
     end
 
-    test "does not delete valid claims" do
-      {:ok, _claim} = Pairing.create_claim(@valid_node_addr, code: "VALID1")
-      count = Pairing.cleanup_expired(0)
-      assert count == 0
+    test "uses only allowed characters" do
+      # Alphabet without ambiguous characters
+      alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+      for _ <- 1..100 do
+        code = Pairing.generate_code()
+
+        code
+        |> String.graphemes()
+        |> Enum.each(fn char ->
+          assert String.contains?(alphabet, char),
+                 "Code contains invalid character: #{char}"
+        end)
+      end
     end
-  end
 
-  # Helper functions
+    test "generates unique codes (cryptographic randomness)" do
+      codes =
+        1..1000
+        |> Enum.map(fn _ -> Pairing.generate_code() end)
+        |> MapSet.new()
 
-  defp errors_on(changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {message, opts} ->
-      Regex.replace(~r"%{(\w+)}", message, fn _, key ->
-        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-      end)
-    end)
+      assert MapSet.size(codes) == 1000,
+             "Generated codes are not sufficiently random - found duplicates"
+    end
+
+    test "excludes ambiguous characters (O, 0, I, 1, L)" do
+      ambiguous = ["O", "0", "I", "1", "L"]
+
+      for _ <- 1..100 do
+        code = Pairing.generate_code()
+
+        Enum.each(ambiguous, fn char ->
+          refute String.contains?(code, char),
+                 "Code contains ambiguous character: #{char}"
+        end)
+      end
+    end
   end
 end

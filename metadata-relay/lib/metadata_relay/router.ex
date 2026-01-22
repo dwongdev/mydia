@@ -10,7 +10,6 @@ defmodule MetadataRelay.Router do
   alias MetadataRelay.Music.Handler, as: MusicHandler
   alias MetadataRelay.OpenLibrary.Handler, as: OpenLibraryHandler
   alias MetadataRelay.OpenSubtitles.Handler, as: SubtitlesHandler
-  alias MetadataRelay.Relay.Handler, as: RelayHandler
   alias MetadataRelay.Pairing.Handler, as: PairingHandler
 
   plug(Plug.Logger)
@@ -287,110 +286,12 @@ defmodule MetadataRelay.Router do
   end
 
   # ============================================================================
-  # Relay API - Remote Access
-  # ============================================================================
-
-  # Register new instance
-  post "/relay/instances" do
-    with :ok <- check_relay_rate_limit(conn, limit: 10, window_ms: 60_000) do
-      handle_relay_request(conn, fn -> RelayHandler.register_instance(conn.body_params) end)
-    else
-      {:error, :rate_limited} -> send_rate_limited(conn, 60)
-    end
-  end
-
-  # Update instance heartbeat/presence
-  put "/relay/instances/:id/heartbeat" do
-    with {:ok, _instance_id} <- verify_relay_auth(conn, id) do
-      handle_relay_request(conn, fn ->
-        RelayHandler.update_heartbeat(id, conn.body_params)
-      end)
-    else
-      {:error, :unauthorized} ->
-        send_unauthorized(conn)
-    end
-  end
-
-  # Create claim code
-  post "/relay/instances/:id/claim" do
-    with {:ok, _instance_id} <- verify_relay_auth(conn, id) do
-      handle_relay_request(conn, fn ->
-        RelayHandler.create_claim(id, conn.body_params)
-      end)
-    else
-      {:error, :unauthorized} ->
-        send_unauthorized(conn)
-    end
-  end
-
-  # Redeem claim code
-  post "/relay/claim/:code" do
-    with :ok <- check_relay_rate_limit(conn, limit: 5, window_ms: 60_000) do
-      handle_relay_request(conn, fn -> RelayHandler.redeem_claim(code) end)
-    else
-      {:error, :rate_limited} -> send_rate_limited(conn, 60)
-    end
-  end
-
-  # Resolve claim code (Rendezvous)
-  post "/relay/claim/:code/resolve" do
-    # 5 requests/minute per IP
-    with :ok <- check_relay_rate_limit(conn, limit: 5, window_ms: 60_000) do
-      handle_relay_request(
-        conn,
-        fn -> RelayHandler.resolve_claim(code) end,
-        "mydia_relay_claim_resolve_total"
-      )
-    else
-      {:error, :rate_limited} ->
-        MetadataRelay.Metrics.inc("mydia_relay_claim_resolve_total", status: "rate_limited")
-        send_rate_limited(conn, 60)
-    end
-  end
-
-  # Lock claim code
-  post "/relay/claim/:code/lock" do
-    with {:ok, _instance_id} <- verify_relay_auth_from_claim(conn) do
-      handle_relay_request(
-        conn,
-        fn -> RelayHandler.lock_claim(code) end,
-        "mydia_relay_claim_lock_total"
-      )
-    else
-      {:error, :unauthorized} ->
-        MetadataRelay.Metrics.inc("mydia_relay_claim_lock_total", status: "unauthorized")
-        send_unauthorized(conn)
-    end
-  end
-
-  # Consume claim (after successful pairing)
-  post "/relay/claim/consume" do
-    with {:ok, instance_id} <- verify_relay_auth_from_claim(conn) do
-      handle_relay_request(conn, fn ->
-        RelayHandler.consume_claim(instance_id, conn.body_params)
-      end)
-    else
-      {:error, :unauthorized} ->
-        send_unauthorized(conn)
-    end
-  end
-
-  # Get connection info
-  get "/relay/instances/:id/connect" do
-    with :ok <- check_relay_rate_limit(conn, limit: 30, window_ms: 60_000) do
-      handle_relay_request(conn, fn -> RelayHandler.get_connection_info(id) end)
-    else
-      {:error, :rate_limited} -> send_rate_limited(conn, 60)
-    end
-  end
-
-  # ============================================================================
   # Pairing API - Simplified iroh-based P2P pairing
   # ============================================================================
 
   # Create claim code for node_addr
   post "/pairing/claim" do
-    with :ok <- check_relay_rate_limit(conn, limit: 10, window_ms: 60_000) do
+    with :ok <- check_pairing_rate_limit(conn, limit: 10, window_ms: 60_000) do
       handle_pairing_request(conn, fn -> PairingHandler.create_claim(conn.body_params) end)
     else
       {:error, :rate_limited} -> send_rate_limited(conn, 60)
@@ -399,7 +300,7 @@ defmodule MetadataRelay.Router do
 
   # Get node_addr for claim code
   get "/pairing/claim/:code" do
-    with :ok <- check_relay_rate_limit(conn, limit: 30, window_ms: 60_000) do
+    with :ok <- check_pairing_rate_limit(conn, limit: 30, window_ms: 60_000) do
       handle_pairing_request(conn, fn -> PairingHandler.get_claim(code) end)
     else
       {:error, :rate_limited} -> send_rate_limited(conn, 60)
@@ -760,130 +661,15 @@ defmodule MetadataRelay.Router do
     end
   end
 
-  # Relay request handler
-  defp handle_relay_request(conn, handler_fn, metric_name \\ nil) do
-    case handler_fn.() do
-      {:ok, body} ->
-        if metric_name, do: MetadataRelay.Metrics.inc(metric_name, status: "success")
-
-        conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(200, Jason.encode!(body))
-
-      {:error, {:http_error, status, body}} ->
-        if metric_name do
-          status_label =
-            case status do
-              409 -> "conflict"
-              401 -> "unauthorized"
-              _ -> "error"
-            end
-
-          MetadataRelay.Metrics.inc(metric_name, status: status_label)
-        end
-
-        conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(status, Jason.encode!(body))
-
-      {:error, :not_found} ->
-        if metric_name, do: MetadataRelay.Metrics.inc(metric_name, status: "not_found")
-        error_response = %{error: "Not found", message: "Resource not found"}
-
-        conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(404, Jason.encode!(error_response))
-
-      {:error, {:validation, message}} ->
-        if metric_name, do: MetadataRelay.Metrics.inc(metric_name, status: "validation_error")
-        error_response = %{error: "Validation error", message: message}
-
-        conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(400, Jason.encode!(error_response))
-
-      {:error, reason} ->
-        if metric_name, do: MetadataRelay.Metrics.inc(metric_name, status: "internal_error")
-        error_response = %{error: "Internal server error", message: inspect(reason)}
-
-        conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(500, Jason.encode!(error_response))
-    end
-  end
-
-  # Verify relay authentication token
-  defp verify_relay_auth(conn, expected_instance_id) do
-    case get_req_header(conn, "authorization") do
-      ["Bearer " <> token] ->
-        case MetadataRelay.Relay.verify_instance_token(token) do
-          {:ok, instance_id} when instance_id == expected_instance_id ->
-            {:ok, instance_id}
-
-          {:ok, _other_instance_id} ->
-            {:error, :unauthorized}
-
-          {:error, _reason} ->
-            {:error, :unauthorized}
-        end
-
-      _ ->
-        {:error, :unauthorized}
-    end
-  end
-
-  # Verify relay authentication token without checking instance_id
-  # Returns the instance_id from the token for further validation
-  defp verify_relay_auth_from_claim(conn) do
-    case get_req_header(conn, "authorization") do
-      ["Bearer " <> token] ->
-        case MetadataRelay.Relay.verify_instance_token(token) do
-          {:ok, instance_id} ->
-            {:ok, instance_id}
-
-          {:error, _reason} ->
-            {:error, :unauthorized}
-        end
-
-      _ ->
-        {:error, :unauthorized}
-    end
-  end
-
-  defp send_unauthorized(conn) do
-    error_response = %{error: "Unauthorized", message: "Invalid or missing authentication token"}
-
-    conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(401, Jason.encode!(error_response))
-  end
-
-  # Rate limiting helpers
-
-  defp check_relay_rate_limit(conn, opts) do
+  defp check_pairing_rate_limit(conn, opts) do
     client_ip = get_client_ip(conn)
-    # Normalize path to group all similar requests together
-    normalized_path = normalize_relay_path(conn.request_path)
-    key = "relay:#{normalized_path}:#{client_ip}"
+    key = "pairing:#{client_ip}"
 
     case MetadataRelay.RateLimiter.check_rate_limit(key, opts) do
       {:ok, _remaining} -> :ok
       {:error, :rate_limited} -> {:error, :rate_limited}
     end
   end
-
-  defp normalize_relay_path("/relay/instances/" <> rest) do
-    case String.split(rest, "/") do
-      [_id, "connect"] -> "/relay/instances/:id/connect"
-      _ -> "/relay/instances"
-    end
-  end
-
-  defp normalize_relay_path("/relay/claim/" <> _code) do
-    "/relay/claim/:code"
-  end
-
-  defp normalize_relay_path(path), do: path
 
   defp send_rate_limited(conn, retry_after_seconds) do
     error_response = %{

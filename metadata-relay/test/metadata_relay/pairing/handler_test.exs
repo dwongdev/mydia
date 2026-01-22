@@ -2,10 +2,16 @@ defmodule MetadataRelay.Pairing.HandlerTest do
   use ExUnit.Case, async: false
 
   alias MetadataRelay.Router
+  alias MetadataRelay.Pairing
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(MetadataRelay.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(MetadataRelay.Repo, {:shared, self()})
+    # Ensure ETS table exists for fallback
+    Pairing.ensure_ets_table()
+
+    # Clear the ETS table before each test
+    if :ets.whereis(:pairing_claims) != :undefined do
+      :ets.delete_all_objects(:pairing_claims)
+    end
 
     # Start the rate limiter if not already started
     case GenServer.whereis(MetadataRelay.RateLimiter) do
@@ -72,7 +78,7 @@ defmodule MetadataRelay.Pairing.HandlerTest do
   describe "GET /pairing/claim/:code" do
     test "returns node_addr for valid code" do
       # First create a claim
-      {:ok, claim} = MetadataRelay.Pairing.create_claim(@valid_node_addr)
+      {:ok, claim} = Pairing.create_claim(@valid_node_addr)
 
       conn =
         Plug.Test.conn(:get, "/pairing/claim/#{claim.code}")
@@ -93,10 +99,10 @@ defmodule MetadataRelay.Pairing.HandlerTest do
       assert response["error"] == "Not found"
     end
 
-    test "returns 404 for expired code" do
-      # Create an expired claim
-      {:ok, _claim} =
-        MetadataRelay.Pairing.create_claim(@valid_node_addr, ttl_seconds: -1, code: "EXPIRE")
+    test "returns 404 for expired code (ETS fallback)" do
+      # Create an expired claim using ETS directly
+      expires_at = System.system_time(:second) - 10
+      :ets.insert(:pairing_claims, {"EXPIRE", @valid_node_addr, expires_at})
 
       conn =
         Plug.Test.conn(:get, "/pairing/claim/EXPIRE")
@@ -109,7 +115,7 @@ defmodule MetadataRelay.Pairing.HandlerTest do
     end
 
     test "normalizes code (case insensitive)" do
-      {:ok, claim} = MetadataRelay.Pairing.create_claim(@valid_node_addr, code: "ABCDEF")
+      {:ok, claim} = Pairing.create_claim(@valid_node_addr, code: "ABCDEF")
 
       conn =
         Plug.Test.conn(:get, "/pairing/claim/abcdef")
@@ -123,7 +129,7 @@ defmodule MetadataRelay.Pairing.HandlerTest do
 
   describe "DELETE /pairing/claim/:code" do
     test "deletes existing claim and returns 204" do
-      {:ok, claim} = MetadataRelay.Pairing.create_claim(@valid_node_addr)
+      {:ok, claim} = Pairing.create_claim(@valid_node_addr)
 
       conn =
         Plug.Test.conn(:delete, "/pairing/claim/#{claim.code}")

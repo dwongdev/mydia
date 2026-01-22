@@ -30,16 +30,9 @@ defmodule MetadataRelay.Pairing.Handler do
   def create_claim(params) do
     node_addr = params["node_addr"]
 
-    if is_nil(node_addr) or node_addr == "" do
-      {:error, {:validation, "node_addr is required"}}
-    else
-      case Pairing.create_claim(node_addr) do
-        {:ok, claim} ->
-          {:ok, %{claim_code: claim.code}}
-
-        {:error, %Ecto.Changeset{} = changeset} ->
-          {:error, {:validation, format_changeset_errors(changeset)}}
-      end
+    with :ok <- validate_node_addr(node_addr),
+         {:ok, claim} <- Pairing.create_claim(node_addr) do
+      {:ok, %{claim_code: claim.code}}
     end
   end
 
@@ -62,10 +55,6 @@ defmodule MetadataRelay.Pairing.Handler do
 
       {:error, :not_found} ->
         {:error, :not_found}
-
-      {:error, :expired} ->
-        # Return generic not_found to prevent enumeration
-        {:error, :not_found}
     end
   end
 
@@ -75,28 +64,24 @@ defmodule MetadataRelay.Pairing.Handler do
   Called after successful pairing.
 
   ## Response
-  204 No Content on success, 404 if not found.
+  204 No Content on success.
   """
   def delete_claim(code) do
-    case Pairing.delete_claim(code) do
-      :ok ->
-        {:ok, :no_content}
-
-      {:error, :not_found} ->
-        # Return success even if not found (idempotent delete)
-        {:ok, :no_content}
-    end
+    Pairing.delete_claim(code)
+    {:ok, :no_content}
   end
 
   # Private helpers
 
-  defp format_changeset_errors(changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
-        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-      end)
-    end)
-    |> Enum.map(fn {field, errors} -> "#{field}: #{Enum.join(errors, ", ")}" end)
-    |> Enum.join("; ")
+  defp validate_node_addr(nil), do: {:error, {:validation, "node_addr is required"}}
+  defp validate_node_addr(""), do: {:error, {:validation, "node_addr is required"}}
+
+  defp validate_node_addr(node_addr) when is_binary(node_addr) do
+    case Jason.decode(node_addr) do
+      {:ok, _} -> :ok
+      {:error, _} -> {:error, {:validation, "node_addr must be valid JSON"}}
+    end
   end
+
+  defp validate_node_addr(_), do: {:error, {:validation, "node_addr must be a string"}}
 end

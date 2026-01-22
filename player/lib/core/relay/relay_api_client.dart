@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'claim_resolve_result.dart';
 
+export 'claim_resolve_result.dart' show ServerNotOnlineException;
+
 class RelayApiClient {
   final String baseUrl;
   final http.Client _client;
@@ -12,10 +14,11 @@ class RelayApiClient {
   }) : _client = client ?? http.Client();
 
   Future<ClaimResolveResult> resolveClaimCode(String code) async {
-    final url = Uri.parse('$baseUrl/relay/claim/$code/resolve');
-    
+    // Use the new /pairing/claim/:code endpoint which directly returns node_addr
+    final url = Uri.parse('$baseUrl/pairing/claim/$code');
+
     try {
-      final response = await _client.post(url);
+      final response = await _client.get(url);
 
       if (response.statusCode == 200) {
         return ClaimResolveResult.fromJson(jsonDecode(response.body));
@@ -27,8 +30,13 @@ class RelayApiClient {
         throw Exception('Relay API error: ${response.statusCode}');
       }
     } catch (e) {
-      if (e is InvalidClaimCodeException || e is RateLimitedException) {
+      if (e is InvalidClaimCodeException ||
+          e is RateLimitedException ||
+          e is ServerNotOnlineException) {
         rethrow;
+      }
+      if (e is FormatException) {
+        throw Exception('Invalid response from relay server: $e');
       }
       throw Exception('Network error connecting to relay: $e');
     }

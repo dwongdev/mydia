@@ -404,20 +404,22 @@ defmodule Mydia.RemoteAccess do
   The code expires after 5 minutes.
 
   This function:
-  1. Requests a new claim code from the relay service
-  2. Creates a local claim record
-  3. Registers under a rendezvous namespace for discovery
+  1. Gets the P2P server's node_addr
+  2. Posts the node_addr to the relay to get a claim code
+  3. Creates a local claim record
 
   Returns {:ok, claim} if successful, {:error, reason} otherwise.
   """
   def generate_claim_code(user_id) do
-    config = get_config!()
+    # Get the P2P server's node address
+    with {:ok, node_addr} <- get_p2p_node_addr(),
+         {:ok, %{"claim_code" => code}} <- create_pairing_claim(node_addr) do
+      # Calculate expiration (5 minutes from now)
+      expires_at =
+        DateTime.utc_now()
+        |> DateTime.add(300, :second)
+        |> DateTime.truncate(:second)
 
-    with {:ok, token} <- ensure_relay_registration(config),
-         {:ok, %{"code" => code, "expires_at" => expires_at_str}} <-
-           create_claim_on_relay(token, user_id),
-         {:ok, expires_at, _} <- DateTime.from_iso8601(expires_at_str),
-         {:ok, %{"namespace" => namespace}} <- resolve_claim_on_relay(code) do
       # Store local claim record
       {:ok, claim} =
         %PairingClaim{}
@@ -428,13 +430,41 @@ defmodule Mydia.RemoteAccess do
         })
         |> Repo.insert()
 
-      # Note: With iroh, pairing coordination is handled via relay server API
-      # The relay server stores the claim code -> node_addr mapping
-      # Players fetch the node_addr via GET /pairing/claim/{code}
-      require Logger
-      Logger.debug("Claim code #{code} registered in relay namespace #{namespace}")
+      Logger.debug("Claim code #{code} created with node_addr")
 
       {:ok, claim}
+    end
+  end
+
+  defp get_p2p_node_addr do
+    case p2p_status() do
+      {:ok, %{node_addr: node_addr}} when not is_nil(node_addr) ->
+        {:ok, node_addr}
+
+      _ ->
+        {:error, :p2p_not_ready}
+    end
+  end
+
+  defp create_pairing_claim(node_addr) do
+    url = "#{get_relay_url()}/pairing/claim"
+
+    body = %{node_addr: node_addr}
+
+    case Req.post(url, json: body) do
+      {:ok, %Req.Response{status: 200, body: body}} ->
+        {:ok, body}
+
+      {:ok, %Req.Response{status: 429}} ->
+        {:error, :rate_limited}
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        Logger.error("Create pairing claim failed: #{status} - #{inspect(body)}")
+        {:error, :create_claim_failed}
+
+      {:error, reason} ->
+        Logger.error("Create pairing claim error: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 
@@ -443,128 +473,22 @@ defmodule Mydia.RemoteAccess do
       "https://relay.mydia.dev"
   end
 
-  defp ensure_relay_registration(config) do
-    if config.relay_token do
-      {:ok, config.relay_token}
-    else
-      register_with_relay(config)
-    end
-  end
-
-  defp register_with_relay(config) do
-    url = "#{get_relay_url()}/relay/instances"
-
-    body = %{
-      instance_id: config.instance_id,
-      public_key: Base.encode64(config.static_public_key),
-      direct_urls: config.direct_urls || []
-    }
-
-    case Req.post(url, json: body) do
-      {:ok, %Req.Response{status: 200, body: %{"token" => token}}} ->
-        # Store the token
-        case upsert_config(%{relay_token: token}) do
-          {:ok, _updated_config} -> {:ok, token}
-          {:error, changeset} -> {:error, changeset}
-        end
-
-      {:ok, %Req.Response{status: status, body: body}} ->
-        Logger.error("Relay registration failed: #{status} - #{inspect(body)}")
-        {:error, :registration_failed}
-
-      {:error, reason} ->
-        Logger.error("Relay registration error: #{inspect(reason)}")
-        {:error, reason}
-    end
-  end
-
-  defp create_claim_on_relay(token, user_id) do
-    config = get_config!()
-    url = "#{get_relay_url()}/relay/instances/#{config.instance_id}/claim"
-
-    body = %{
-      user_id: user_id,
-      ttl_seconds: 300
-    }
-
-    case Req.post(url, json: body, headers: [{"authorization", "Bearer #{token}"}]) do
-      {:ok, %Req.Response{status: 200, body: body}} ->
-        {:ok, body}
-
-      {:ok, %Req.Response{status: 401}} ->
-        # Token might be expired, clear it and retry once?
-        # For now just fail, user can retry
-        upsert_config(%{relay_token: nil})
-        {:error, :unauthorized}
-
-      {:ok, %Req.Response{status: status, body: body}} ->
-        Logger.error("Create claim failed: #{status} - #{inspect(body)}")
-        {:error, :create_claim_failed}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp resolve_claim_on_relay(code) do
-    url = "#{get_relay_url()}/relay/claim/#{code}/resolve"
-
-    case Req.post(url, json: %{}) do
-      {:ok, %Req.Response{status: 200, body: body}} ->
-        {:ok, body}
-
-      {:ok, %Req.Response{status: 404}} ->
-        {:error, :not_found}
-
-      {:ok, %Req.Response{status: 429}} ->
-        {:error, :rate_limited}
-
-      {:ok, %Req.Response{status: status}} ->
-        Logger.warning("Resolve claim failed during generation: #{status}")
-        {:error, :resolve_failed}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
   @doc """
-  Resumes registration for active claims on startup.
+  Cleans up stale local claims on startup.
   Called by startup task.
+
+  With the new /pairing/claim API, claims are ephemeral on the relay side.
+  We just need to clean up expired local claims.
   """
   def resume_active_claims do
-    # Get all users (or just iterate all claims if we had a function for it)
-    # Since we don't have list_all_active_claims, we can do it via Repo directly
-    now = DateTime.utc_now()
+    # Clean up expired claims
+    {:ok, count} = cleanup_expired_claims()
 
-    query =
-      from c in PairingClaim,
-        where: is_nil(c.used_at) and c.expires_at > ^now
+    if count > 0 do
+      Logger.info("Cleaned up #{count} expired pairing claims on startup")
+    end
 
-    claims = Repo.all(query)
-
-    Logger.info("Resuming #{length(claims)} active pairing claims")
-
-    # With iroh, we don't need to re-register with rendezvous
-    # The relay server maintains the claim code -> node_addr mapping
-    # Just verify claims are still valid on the relay
-    Enum.each(claims, fn claim ->
-      Task.start(fn ->
-        case resolve_claim_on_relay(claim.code) do
-          {:ok, _} ->
-            Logger.debug("Verified claim #{claim.code} is still active on relay")
-
-          {:error, :not_found} ->
-            # Claim expired/consumed on relay but not locally?
-            # Delete it
-            Repo.delete(claim)
-            Logger.info("Deleted stale claim #{claim.code}")
-
-          _ ->
-            :ok
-        end
-      end)
-    end)
+    :ok
   end
 
   @doc """

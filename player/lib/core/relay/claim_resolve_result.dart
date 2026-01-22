@@ -1,26 +1,32 @@
+/// Exception thrown when the server for a claim code is not online.
+class ServerNotOnlineException implements Exception {
+  final String message;
+  ServerNotOnlineException(this.message);
+
+  @override
+  String toString() => message;
+}
+
 /// Result of resolving a claim code via the relay API.
 ///
-/// In iroh mode, the relay returns the server's EndpointAddr JSON directly,
+/// The /pairing/claim/:code endpoint returns the server's EndpointAddr directly,
 /// which can be used to dial the server.
 class ClaimResolveResult {
   /// The server's EndpointAddr as JSON string.
   /// This can be passed directly to P2pService.dial().
   final String nodeAddr;
 
-  /// When this claim code expires.
-  final DateTime? expiresAt;
-
   ClaimResolveResult({
     required this.nodeAddr,
-    this.expiresAt,
   });
 
   factory ClaimResolveResult.fromJson(Map<String, dynamic> json) {
-    return ClaimResolveResult(
-      nodeAddr: json['node_addr'] as String,
-      expiresAt: json['expires_at'] != null
-          ? DateTime.parse(json['expires_at'] as String)
-          : null,
-    );
+    final nodeAddr = json['node_addr'] as String?;
+    if (nodeAddr == null) {
+      throw FormatException(
+        'Invalid response from relay: missing node_addr. Response: $json',
+      );
+    }
+    return ClaimResolveResult(nodeAddr: nodeAddr);
   }
 }

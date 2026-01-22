@@ -253,6 +253,10 @@ class PairingService {
       return PairingResult.error('Invalid or expired claim code');
     } on RateLimitedException {
       return PairingResult.error('Too many attempts. Please wait a moment.');
+    } on ServerNotOnlineException {
+      return PairingResult.error(
+        'The Mydia server is not currently online. Please ensure the server is running and try again.',
+      );
     } on TimeoutException catch (e) {
       debugPrint('[PairingService] Timeout: $e');
       return PairingResult.error('Connection timed out. Please try again.');

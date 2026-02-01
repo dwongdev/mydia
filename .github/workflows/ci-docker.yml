@@ -50,7 +50,9 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          build-args: DATABASE_TYPE=${{ matrix.db }}
+          build-args: |
+            DATABASE_TYPE=${{ matrix.db }}
+            BUILD_COMMIT=${{ github.sha }}
           push: ${{ github.event_name == 'push' }}
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.tag }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-${{ matrix.db }}

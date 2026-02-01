@@ -54,9 +54,14 @@ RUN mix local.hex --force && mix local.rebar --force
 # It CANNOT be changed at runtime - each Docker image is built for a specific database
 ARG DATABASE_TYPE=sqlite
 
+# Build commit hash for development/master builds
+# When set, the version will display as "X.Y.Z*<short-commit>" instead of just "X.Y.Z"
+ARG BUILD_COMMIT=""
+
 # Set build environment
 ENV MIX_ENV=prod
 ENV DATABASE_TYPE=${DATABASE_TYPE}
+ENV BUILD_COMMIT=${BUILD_COMMIT}
 
 # Create app directory
 WORKDIR /app

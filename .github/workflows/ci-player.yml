@@ -20,7 +20,7 @@ concurrency:
 
 env:
   PLAYER_PATH: 'player'
-  FLUTTER_VERSION: '3.32.2'
+  FLUTTER_VERSION: '3.38.6'
 
 jobs:
   build:

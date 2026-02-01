@@ -420,12 +420,13 @@ defmodule Mydia.Indexers.ReleaseRankerTRaSHGuideIntegrationTest do
 
       ranked =
         ReleaseRanker.rank_all(results,
+          quality_profile: trash_remux_web_1080p_profile(),
           preferred_qualities: ["1080p"],
           size_range: @default_size_range
         )
 
       # Both are 1080p, REMUX should win on source quality
-      # Note: The QualityParser's source_score gives REMUX 500 vs BluRay 450
+      # Note: The QualityProfile's preferred_sources gives REMUX priority
       first = List.first(ranked)
       # The REMUX release should rank higher due to higher source score
       assert String.contains?(first.result.title, "REMUX") or
@@ -446,6 +447,7 @@ defmodule Mydia.Indexers.ReleaseRankerTRaSHGuideIntegrationTest do
 
       ranked =
         ReleaseRanker.rank_all(results,
+          quality_profile: trash_hd_bluray_web_profile(),
           preferred_qualities: ["1080p"],
           size_range: @default_size_range
         )
@@ -469,6 +471,7 @@ defmodule Mydia.Indexers.ReleaseRankerTRaSHGuideIntegrationTest do
 
       ranked =
         ReleaseRanker.rank_all(results,
+          quality_profile: trash_hd_bluray_web_profile(),
           preferred_qualities: ["720p"],
           size_range: @default_size_range
         )
@@ -596,6 +599,7 @@ defmodule Mydia.Indexers.ReleaseRankerTRaSHGuideIntegrationTest do
 
       ranked =
         ReleaseRanker.rank_all(results,
+          quality_profile: trash_uhd_bluray_web_profile(),
           preferred_qualities: ["2160p"],
           size_range: @default_size_range
         )
@@ -630,6 +634,7 @@ defmodule Mydia.Indexers.ReleaseRankerTRaSHGuideIntegrationTest do
 
       ranked =
         ReleaseRanker.rank_all(results,
+          quality_profile: trash_uhd_bluray_web_profile(),
           preferred_qualities: ["2160p"],
           size_range: @default_size_range
         )
@@ -748,6 +753,7 @@ defmodule Mydia.Indexers.ReleaseRankerTRaSHGuideIntegrationTest do
 
       ranked =
         ReleaseRanker.rank_all(results,
+          quality_profile: trash_uhd_bluray_web_profile(),
           preferred_qualities: ["2160p"],
           size_range: @default_size_range
         )
@@ -775,7 +781,11 @@ defmodule Mydia.Indexers.ReleaseRankerTRaSHGuideIntegrationTest do
         })
       ]
 
-      ranked = ReleaseRanker.rank_all(results, preferred_qualities: ["1080p"])
+      ranked =
+        ReleaseRanker.rank_all(results,
+          quality_profile: trash_hd_bluray_web_profile(),
+          preferred_qualities: ["1080p"]
+        )
 
       first = List.first(ranked)
 
@@ -1139,10 +1149,10 @@ defmodule Mydia.Indexers.ReleaseRankerTRaSHGuideIntegrationTest do
       best_uhd = ReleaseRanker.select_best_result(results, preferred_qualities: ["2160p"])
       assert best_uhd.result.quality.resolution == "2160p"
 
-      # No preference - highest quality wins
+      # No preference and no quality profile - highest seeders wins
       best_any = ReleaseRanker.select_best_result(results)
-      # Without preference, 2160p has highest raw quality score
-      assert best_any.result.quality.resolution == "2160p"
+      # Without quality profile, seeders determine ranking, so 720p with 500 seeders wins
+      assert best_any.result.quality.resolution == "720p"
     end
   end
 

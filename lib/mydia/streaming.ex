@@ -63,32 +63,37 @@ defmodule Mydia.Streaming do
       # Fetch User
       user = Repo.get(User, user_id)
 
-      # Fetch Media Info
-      media_file =
-        Library.get_media_file!(media_file_id, preload: [:media_item, :episode])
+      # Fetch Media Info - use non-raising query to handle deleted files gracefully
+      media_file = Library.get_media_file(media_file_id, preload: [:media_item, :episode])
 
-      # Derive title/type
-      {title, type, episode_info} =
-        case media_file do
-          %{episode: %{season_number: s, episode_number: e, title: ep_title}, media_item: show} ->
-            {show.title, :tv_show, "S#{pad(s)}E#{pad(e)} - #{ep_title}"}
+      # Return nil if media file doesn't exist (will be filtered out below)
+      if media_file do
+        # Derive title/type
+        {title, type, episode_info} =
+          case media_file do
+            %{episode: %{season_number: s, episode_number: e, title: ep_title}, media_item: show} ->
+              {show.title, :tv_show, "S#{pad(s)}E#{pad(e)} - #{ep_title}"}
 
-          %{media_item: movie} ->
-            {movie.title, :movie, nil}
-        end
+            %{media_item: movie} ->
+              {movie.title, :movie, nil}
+          end
 
-      %ActiveSession{
-        session_id: session_id,
-        user: user,
-        media_title: title,
-        media_type: type,
-        episode_info: episode_info,
-        mode: mode,
-        started_at: started_at,
-        ready: ready
-      }
+        %ActiveSession{
+          session_id: session_id,
+          user: user,
+          media_title: title,
+          media_type: type,
+          episode_info: episode_info,
+          mode: mode,
+          started_at: started_at,
+          ready: ready
+        }
+      else
+        nil
+      end
     end)
     # Filter out sessions where user or media might be missing (deleted)
+    |> Enum.reject(&is_nil/1)
     |> Enum.filter(&(&1.user != nil))
     |> Enum.sort_by(& &1.started_at, {:desc, DateTime})
   end

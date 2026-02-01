@@ -64,6 +64,20 @@ defmodule Mydia.Library do
   end
 
   @doc """
+  Gets a single media file, returning nil if not found.
+
+  ## Options
+    - `:preload` - List of associations to preload
+
+  Returns the media file or nil if not found.
+  """
+  def get_media_file(id, opts \\ []) do
+    MediaFile
+    |> maybe_preload(opts[:preload])
+    |> Repo.get(id)
+  end
+
+  @doc """
   Gets adjacent media files (previous and next) for navigation.
 
   Files are ordered by insertion date (newest first) to match the default

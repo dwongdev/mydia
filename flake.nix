@@ -15,7 +15,7 @@
         };
 
         # BEAM packages (Erlang/Elixir)
-        beamPackages = pkgs.beam.packages.erlang_27;
+        beamPackages = pkgs.beam.packages.erlang_28;
 
         # Fine package (needed for lazy_html)
         fineVersion = "0.1.4";

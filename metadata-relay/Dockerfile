@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.4
-FROM elixir:1.18-alpine AS builder
+FROM elixir:1.19-alpine AS builder
 
 # Install build dependencies including Rust for NIF compilation
 RUN apk add --no-cache build-base git openssl-dev rust cargo

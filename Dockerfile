@@ -3,7 +3,7 @@
 # ============================================
 # Flutter Build Stage
 # ============================================
-FROM ghcr.io/cirruslabs/flutter:stable AS flutter-builder
+FROM ghcr.io/cirruslabs/flutter:3.38.6 AS flutter-builder
 
 WORKDIR /app/player
 
@@ -28,7 +28,7 @@ RUN --mount=type=cache,target=/root/.pub-cache,sharing=locked \
 # ============================================
 # Elixir Build Stage
 # ============================================
-FROM elixir:1.18-alpine AS builder
+FROM elixir:1.19-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
@@ -113,7 +113,7 @@ RUN mix release
 # ============================================
 # Runtime Stage
 # ============================================
-FROM erlang:27-alpine
+FROM erlang:28-alpine
 
 # Database type: sqlite (default) or postgres
 # This argument is only used for image labels - the actual adapter is already compiled

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 # Development image with all tools (Elixir, Rust, Node, Flutter, Chrome)
-FROM elixir:1.18
+FROM elixir:1.19
 
 # Install build dependencies and development tools
 RUN apt-get update -qq && \
@@ -29,7 +29,7 @@ RUN which rustc || (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | 
 
 # Install Flutter if not present
 RUN which flutter || ( \
-    curl -L https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.38.5-stable.tar.xz -o flutter.tar.xz && \
+    curl -L https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.38.6-stable.tar.xz -o flutter.tar.xz && \
     tar xf flutter.tar.xz -C /opt && \
     rm flutter.tar.xz && \
     git config --global --add safe.directory /opt/flutter && \

@@ -662,6 +662,7 @@ jobs:
 
   publish:
     name: Publish Release
+    if: always() && needs.prepare.result == 'success'
     needs:
       - prepare
       - docker-sqlite

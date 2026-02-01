@@ -11,18 +11,7 @@ env:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: blacksmith-4vcpu-ubuntu-2404
-            platform: linux/amd64
-            arch: amd64
-          - runner: blacksmith-4vcpu-ubuntu-2404-arm
-            platform: linux/arm64
-            arch: arm64
-
-    runs-on: ${{ matrix.runner }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
       packages: write
@@ -39,72 +28,22 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build SQLite
-        id: build-sqlite
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64,linux/arm64
           build-args: DATABASE_TYPE=sqlite
-          outputs: ${{ github.event_name == 'push' && format('type=image,name={0}/{1},push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, env.IMAGE_NAME) || '' }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-${{ matrix.arch }}
-          cache-to: ${{ github.event_name == 'push' && format('type=registry,ref={0}/{1}:cache-{2},mode=max', env.REGISTRY, env.IMAGE_NAME, matrix.arch) || '' }}
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:master
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache
+          cache-to: ${{ github.event_name == 'push' && format('type=registry,ref={0}/{1}:cache,mode=max', env.REGISTRY, env.IMAGE_NAME) || '' }}
 
       - name: Build PostgreSQL
-        id: build-postgres
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64,linux/arm64
           build-args: DATABASE_TYPE=postgres
-          outputs: ${{ github.event_name == 'push' && format('type=image,name={0}/{1},push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, env.IMAGE_NAME) || '' }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-${{ matrix.arch }}
-
-      - name: Export digests
-        if: github.event_name == 'push'
-        run: |
-          mkdir -p /tmp/digests
-          echo "${{ steps.build-sqlite.outputs.digest }}" > /tmp/digests/sqlite-${{ matrix.arch }}
-          echo "${{ steps.build-postgres.outputs.digest }}" > /tmp/digests/postgres-${{ matrix.arch }}
-
-      - name: Upload digests
-        if: github.event_name == 'push'
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-${{ matrix.arch }}
-          path: /tmp/digests/*
-          retention-days: 1
-
-  merge:
-    if: github.event_name == 'push'
-    needs: build
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - uses: useblacksmith/setup-buildx@v1
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download digests
-        uses: actions/download-artifact@v4
-        with:
-          pattern: digests-*
-          merge-multiple: true
-          path: /tmp/digests
-
-      - name: Create multi-arch manifests
-        run: |
-          REPO=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-
-          docker buildx imagetools create -t $REPO:master \
-            $REPO@$(cat /tmp/digests/sqlite-amd64) \
-            $REPO@$(cat /tmp/digests/sqlite-arm64)
-
-          docker buildx imagetools create -t $REPO:master-pg \
-            $REPO@$(cat /tmp/digests/postgres-amd64) \
-            $REPO@$(cat /tmp/digests/postgres-arm64)
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:master-pg
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache

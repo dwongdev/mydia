@@ -92,8 +92,6 @@ jobs:
 
   build-and-push-postgres:
     name: Build PostgreSQL Image
-    # Run after SQLite build to benefit from shared cached layers (Flutter stage, etc.)
-    needs: build-and-push-sqlite
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read

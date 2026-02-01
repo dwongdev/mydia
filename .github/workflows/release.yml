@@ -625,7 +625,8 @@ jobs:
             pkg-config \
             libgtk-3-dev \
             liblzma-dev \
-            libsecret-1-dev
+            libsecret-1-dev \
+            libmpv-dev
 
       - name: Setup Flutter
         if: steps.check_linux.outputs.enabled == 'true'

@@ -284,9 +284,10 @@ defmodule Mydia.Indexers.SearchScorer do
       media_type: media_type
     }
 
-    # Add HDR format if present
+    # Add HDR format if present - use actual format, not hardcoded hdr10
     if quality.hdr do
-      Map.put(base_attrs, :hdr_format, "hdr10")
+      hdr_format = normalize_hdr_format(quality.hdr_format)
+      Map.put(base_attrs, :hdr_format, hdr_format)
     else
       base_attrs
     end
@@ -376,15 +377,41 @@ defmodule Mydia.Indexers.SearchScorer do
     codec
     |> String.downcase()
     |> case do
-      "truehd" -> "truehd"
-      "dolby truehd" -> "truehd"
-      "dts-hd" -> "dts-hd"
-      "dts-hd ma" -> "dts-hd"
+      # TrueHD Atmos is the highest tier - map to "atmos"
+      "truehd atmos" -> "atmos"
       "atmos" -> "atmos"
       "dolby atmos" -> "atmos"
+      # TrueHD without Atmos
+      "truehd" -> "truehd"
+      "dolby truehd" -> "truehd"
+      # DTS variants
+      "dts:x" -> "dts-hd"
+      "dts-hd ma" -> "dts-hd"
+      "dts-hd" -> "dts-hd"
+      # Dolby Digital variants
       "dd+" -> "eac3"
       "ddp" -> "eac3"
       "dd" -> "ac3"
+      other -> other
+    end
+  end
+
+  # Normalize HDR format names to match quality profile format
+  # QualityParser returns: "DV", "HDR10+", "HDR10"
+  # QualityProfile expects: "dolby_vision", "hdr10+", "hdr10"
+  defp normalize_hdr_format(nil), do: "hdr10"
+
+  defp normalize_hdr_format(format) when is_binary(format) do
+    format
+    |> String.downcase()
+    |> case do
+      "dv" -> "dolby_vision"
+      "dolby vision" -> "dolby_vision"
+      "dolbyvision" -> "dolby_vision"
+      "hdr10+" -> "hdr10+"
+      "hdr10plus" -> "hdr10+"
+      "hdr10" -> "hdr10"
+      "hdr" -> "hdr10"
       other -> other
     end
   end

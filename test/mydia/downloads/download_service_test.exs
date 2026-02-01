@@ -101,6 +101,7 @@ defmodule Mydia.Downloads.DownloadServiceTest do
       %{media_item: media_item, media_file: media_file}
     end
 
+    @tag :requires_ffmpeg
     test "creates a transcode job for movie", %{media_item: media_item} do
       assert {:ok, job_info} = DownloadService.prepare("movie", media_item.id, "720p")
 
@@ -109,6 +110,7 @@ defmodule Mydia.Downloads.DownloadServiceTest do
       assert job_info.progress >= 0.0
     end
 
+    @tag :requires_ffmpeg
     test "returns same job when called twice", %{media_item: media_item} do
       {:ok, first_job} = DownloadService.prepare("movie", media_item.id, "720p")
       {:ok, second_job} = DownloadService.prepare("movie", media_item.id, "720p")
@@ -116,6 +118,7 @@ defmodule Mydia.Downloads.DownloadServiceTest do
       assert first_job.job_id == second_job.job_id
     end
 
+    @tag :requires_ffmpeg
     test "creates separate jobs for different resolutions", %{media_item: media_item} do
       {:ok, job_720} = DownloadService.prepare("movie", media_item.id, "720p")
       {:ok, job_480} = DownloadService.prepare("movie", media_item.id, "480p")

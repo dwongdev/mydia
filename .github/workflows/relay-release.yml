@@ -36,7 +36,7 @@ jobs:
           echo "Releasing version: $VERSION"
 
       - name: Set up Docker Buildx
-        uses: useblacksmith/setup-buildx@v1
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3

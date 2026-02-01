@@ -1,0 +1,129 @@
+name: CI / Player Desktop
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - "player/**"
+      - ".github/workflows/ci-player.yml"
+  pull_request:
+    paths:
+      - "player/**"
+      - ".github/workflows/ci-player.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PLAYER_PATH: 'player'
+  FLUTTER_VERSION: '3.32.2'
+
+jobs:
+  build:
+    name: Build / ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Windows
+            os: windows-latest
+            platform_dir: windows
+            artifact_name: player-windows-release
+            artifact_path: player/build/windows/x64/runner/Release/
+            shell: bash
+          - platform: macOS
+            os: macos-latest
+            platform_dir: macos
+            artifact_name: player-macos-app
+            artifact_path: player/build/macos/Build/Products/Release/Mydia.app
+            shell: bash
+          - platform: Linux
+            os: ubuntu-latest
+            platform_dir: linux
+            artifact_name: player-linux-bundle
+            artifact_path: player/build/linux/x64/release/bundle
+            shell: bash
+
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check platform support
+        id: check_platform
+        run: |
+          if [ -d "${{ env.PLAYER_PATH }}/${{ matrix.platform_dir }}" ]; then
+            echo "enabled=true" >> $GITHUB_OUTPUT
+          else
+            echo "enabled=false" >> $GITHUB_OUTPUT
+            echo "::warning::${{ matrix.platform }} platform not configured yet. Skipping build."
+          fi
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'Linux' && steps.check_platform.outputs.enabled == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libgtk-3-dev \
+            liblzma-dev \
+            libmpv-dev \
+            libsecret-1-dev
+
+      - name: Setup Flutter
+        if: steps.check_platform.outputs.enabled == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+          cache: true
+
+      - name: Cache pub dependencies
+        if: steps.check_platform.outputs.enabled == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            ${{ env.PLAYER_PATH }}/.dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Install dependencies
+        if: steps.check_platform.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter pub get
+
+      - name: Run code generation
+        if: steps.check_platform.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter pub run build_runner build --delete-conflicting-outputs
+
+      - name: Generate icons
+        if: matrix.platform == 'Windows' && steps.check_platform.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: dart run flutter_launcher_icons
+
+      - name: Build ${{ matrix.platform }}
+        if: steps.check_platform.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}
+        run: flutter build ${{ matrix.platform_dir }} --release
+
+      - name: Upload artifact
+        if: steps.check_platform.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_path }}
+          retention-days: 7

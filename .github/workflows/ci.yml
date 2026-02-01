@@ -1,4 +1,4 @@
-name: Test & Quality
+name: CI
 
 on:
   push:
@@ -9,27 +9,32 @@ on:
     branches:
       - "**"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   MIX_ENV: test
   ELIXIR_VERSION: "1.18"
   OTP_VERSION: "27"
+  FLUTTER_VERSION: "3.32.2"
 
 jobs:
   test:
-    name: Test & Quality Checks
+    name: Test
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Elixir
+      - name: Setup Elixir
         uses: erlef/setup-beam@v1
         with:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
 
-      - name: Restore dependencies cache
+      - name: Cache dependencies
         uses: actions/cache@v4
         with:
           path: deps
@@ -37,7 +42,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-deps-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
 
-      - name: Restore build cache
+      - name: Cache build
         uses: actions/cache@v4
         with:
           path: _build
@@ -48,26 +53,26 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
 
-      - name: Check for unused dependencies
+      - name: Check unused dependencies
         run: mix deps.unlock --check-unused
 
-      - name: Compile code
+      - name: Compile
         run: mix compile
 
-      - name: Check code formatting
+      - name: Check formatting
         run: mix format --check-formatted
 
-      - name: Run Credo static analysis
+      - name: Run Credo
         run: mix credo --mute-exit-status
 
-      - name: Setup test database
+      - name: Setup database
         run: mix ecto.create && mix ecto.migrate
 
-      - name: Run tests with coverage
+      - name: Run tests
         run: mix test --cover
 
-  postgres-migrations:
-    name: PostgreSQL Migrations
+  test-postgres:
+    name: Test / PostgreSQL Migrations
     runs-on: ubuntu-latest
 
     services:
@@ -94,16 +99,16 @@ jobs:
       DATABASE_NAME: mydia_test
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Elixir
+      - name: Setup Elixir
         uses: erlef/setup-beam@v1
         with:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
 
-      - name: Restore dependencies cache
+      - name: Cache dependencies
         uses: actions/cache@v4
         with:
           path: deps
@@ -114,20 +119,20 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
 
-      - name: Compile code with PostgreSQL adapter
+      - name: Compile
         run: mix compile
 
-      - name: Create PostgreSQL database
+      - name: Create database
         run: mix ecto.create
 
-      - name: Run all migrations
+      - name: Run migrations
         run: mix ecto.migrate
 
-      - name: Verify migration status
+      - name: Verify migrations
         run: mix ecto.migrations
 
-  flutter-test:
-    name: Flutter Player Tests
+  test-player:
+    name: Test / Player
     runs-on: ubuntu-latest
 
     defaults:
@@ -135,13 +140,13 @@ jobs:
         working-directory: player
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Flutter
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.32.2"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
 
@@ -150,3 +155,57 @@ jobs:
 
       - name: Run tests
         run: flutter test
+
+  test-e2e:
+    name: Test / E2E Browser
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Compile
+        run: mix compile
+
+      - name: Install Node.js dependencies
+        run: npm ci --prefix assets
+
+      - name: Build assets
+        run: mix assets.deploy
+        env:
+          MIX_ENV: test
+
+      - name: Run feature tests
+        run: ./scripts/run-feature-tests.sh
+
+      - name: Upload screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wallaby-screenshots
+          path: tmp/wallaby_screenshots/
+          retention-days: 7

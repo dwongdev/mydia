@@ -1,13 +1,13 @@
-name: Stale Issues
+name: Maintenance / Stale Issues
 
 on:
   schedule:
-    - cron: "0 0 * * *" # Run daily at midnight UTC
-  workflow_dispatch: # Allow manual trigger
+    - cron: "0 0 * * *"
+  workflow_dispatch:
 
 jobs:
   stale:
-    name: Mark Stale Issues and PRs
+    name: Mark Stale
     runs-on: ubuntu-latest
 
     permissions:
@@ -15,7 +15,7 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Mark stale issues and PRs
+      - name: Process stale issues and PRs
         uses: actions/stale@v9
         with:
           stale-issue-message: >

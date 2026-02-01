@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.4
 FROM elixir:1.19-alpine AS builder
 
-# Install build dependencies including Rust for NIF compilation
-RUN apk add --no-cache build-base git openssl-dev rust cargo
+# Install build dependencies
+RUN apk add --no-cache build-base git openssl-dev
 
 # Set build environment
 ENV MIX_ENV=prod
@@ -45,17 +45,9 @@ COPY metadata-relay/config ./config
 COPY metadata-relay/lib ./lib
 COPY metadata-relay/priv ./priv
 
-# Copy native Rust crates for NIF compilation
-# metadata_relay_p2p depends on mydia_p2p_core from parent project
-# When building, use: docker build -f metadata-relay/Dockerfile .
-COPY metadata-relay/native ./native
-COPY native/mydia_p2p_core /native/mydia_p2p_core
-
-# Compile the application (Rustler will compile the NIF automatically)
+# Compile the application
 RUN --mount=type=cache,target=/root/.hex \
     --mount=type=cache,target=/root/.mix \
-    --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/root/.cargo/git \
     mix compile
 
 # Build release

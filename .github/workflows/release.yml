@@ -357,7 +357,7 @@ jobs:
           bundle exec fastlane internal
           rm play-store-credentials.json
 
-      - name: Upload artifact: APK
+      - name: "Upload artifact: APK"
         if: steps.check_android.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:

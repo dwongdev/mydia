@@ -59,7 +59,7 @@ jobs:
         id: push
         uses: docker/build-push-action@v6
         with:
-          context: ./metadata-relay
+          context: .
           file: ./metadata-relay/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true

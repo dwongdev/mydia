@@ -1097,9 +1097,13 @@ class TestDownloadService {
       updatedTask = updatedTask.copyWith(progress: progress);
 
       if (!database.isOpen) return;
-      await database.saveTask(updatedTask);
-      if (!_progressController.isClosed) {
-        _progressController.add(updatedTask);
+
+      // Don't save progress if paused - pauseDownload already saved the correct status
+      if (_pausedTasks[task.id] != true) {
+        await database.saveTask(updatedTask);
+        if (!_progressController.isClosed) {
+          _progressController.add(updatedTask);
+        }
       }
     }
 

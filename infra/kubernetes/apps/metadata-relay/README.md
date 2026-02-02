@@ -193,29 +193,19 @@ Adjust in deployment.yaml based on your cluster capacity and traffic patterns.
 3. **Protect API keys** - Store them securely in Kubernetes secrets
 4. **Use TLS** - The ingress enforces HTTPS with Let's Encrypt certificates
 
-## ArgoCD Integration
+## Auto-Deploy with Keel
 
-To integrate with ArgoCD, create an Application manifest:
+The deployment is configured for automatic updates via [Keel](https://keel.sh/).
+When a new image is pushed to the container registry, Keel automatically triggers a rolling update.
 
+Deployment annotations:
 ```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: metadata-relay
-  namespace: argocd
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/yourusername/mydia.git
-    targetRevision: HEAD
-    path: infra/kubernetes/apps/metadata-relay
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: metadata-relay
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
+keel.sh/policy: major           # Update on any new semver version
+keel.sh/trigger: poll           # Poll registry for new images
+keel.sh/pollSchedule: "@every 5m"
+```
+
+To manually trigger an update:
+```bash
+kubectl rollout restart deployment/metadata-relay -n metadata-relay
 ```

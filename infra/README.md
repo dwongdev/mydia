@@ -1,20 +1,20 @@
 # Metadata Relay Infrastructure
 
-Automated deployment of metadata-relay on OVHcloud VPS with k3s, external-dns, and ArgoCD.
+Automated deployment of metadata-relay on OVHcloud VPS with k3s and external-dns.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         Cloudflare                               │
-│  ┌─────────────────┐    ┌─────────────────┐                     │
-│  │ relay.mydia.dev │    │ argocd.mydia.dev│                     │
-│  └────────┬────────┘    └────────┬────────┘                     │
-└───────────┼──────────────────────┼──────────────────────────────┘
-            │                      │
-            │    DNS managed by    │
-            │    external-dns      │
-            ▼                      ▼
+│  ┌─────────────────┐                                            │
+│  │ relay.mydia.dev │                                            │
+│  └────────┬────────┘                                            │
+└───────────┼─────────────────────────────────────────────────────┘
+            │
+            │    DNS managed by
+            │    external-dns
+            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    OVHcloud VPS ($4.20/mo)                       │
 │                    4 vCPU / 8GB RAM / Unlimited BW               │
@@ -29,14 +29,13 @@ Automated deployment of metadata-relay on OVHcloud VPS with k3s, external-dns, a
 │  │  │              metadata-relay (Phoenix)               │  │  │
 │  │  │                                                     │  │  │
 │  │  │  • TVDB/TMDB API proxy                             │  │  │
-│  │  │  • WebSocket relay for device pairing              │  │  │
-│  │  │  • P2P relay for NAT traversal (iroh-based)        │  │  │
+│  │  │  • Device pairing via Redis                        │  │  │
 │  │  │  • SQLite database (persistent volume)             │  │  │
 │  │  └─────────────────────────────────────────────────────┘  │  │
 │  │                                                            │  │
 │  │  ┌─────────────────────────────────────────────────────┐  │  │
-│  │  │                    ArgoCD                           │  │  │
-│  │  │              (GitOps deployments)                   │  │  │
+│  │  │                     Keel                            │  │  │
+│  │  │           (auto-deploy on new images)               │  │  │
 │  │  └─────────────────────────────────────────────────────┘  │  │
 │  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
@@ -144,8 +143,6 @@ infra/
     ├── cert-manager/
     │   ├── values.yaml         # Helm values
     │   └── cluster-issuer.yaml # Let's Encrypt issuers
-    ├── argocd/
-    │   └── values.yaml         # Helm values
     └── apps/
         └── metadata-relay/
             ├── namespace.yaml
@@ -165,9 +162,21 @@ infra/
    - Traefik (ingress controller)
    - cert-manager (Let's Encrypt TLS)
    - external-dns (automatic Cloudflare DNS)
-   - ArgoCD (GitOps)
+   - Keel (auto-deploy on new images)
 4. **App Phase**: Deploys metadata-relay manifests
 5. **Verify Phase**: Checks health endpoint
+
+## Auto-Deploy
+
+Keel watches for new container images and automatically updates deployments.
+When a new `metadata-relay` image is pushed to GHCR, Keel triggers a rolling update.
+
+The deployment is annotated with:
+```yaml
+keel.sh/policy: major      # Update on any new semver version
+keel.sh/trigger: poll      # Poll registry for new images
+keel.sh/pollSchedule: "@every 5m"
+```
 
 ## DNS Management
 
@@ -212,14 +221,12 @@ kubectl logs -n cert-manager -l app=cert-manager
 kubectl logs -n external-dns -l app.kubernetes.io/name=external-dns
 ```
 
-## ArgoCD Access
+## Keel Dashboard
 
-After deployment:
+Keel provides a simple web UI for monitoring deployments:
 ```bash
-# Get admin password
-kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+# Port-forward to access Keel UI
+kubectl port-forward -n kube-system svc/keel 9300:9300
 
-# Access UI
-open https://argocd.mydia.dev
-# Username: admin
+# Access at http://localhost:9300
 ```

@@ -12,7 +12,6 @@ cloudflare_zone_id: "your-cloudflare-zone-id"
 # Domain Configuration
 domain_name: "mydia.dev"
 relay_subdomain: "relay"
-argocd_subdomain: "argocd"
 
 # Application Secrets
 # Generate with: openssl rand -hex 32

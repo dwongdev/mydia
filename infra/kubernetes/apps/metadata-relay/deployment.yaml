@@ -6,6 +6,10 @@ metadata:
   labels:
     app.kubernetes.io/name: metadata-relay
     app.kubernetes.io/component: relay-service
+  annotations:
+    keel.sh/policy: major
+    keel.sh/trigger: poll
+    keel.sh/pollSchedule: "@every 5m"
 spec:
   replicas: 1
   strategy:
@@ -24,8 +28,8 @@ spec:
     spec:
       containers:
         - name: metadata-relay
-          image: ghcr.io/getmydia/mydia/metadata-relay:dev
-          imagePullPolicy: Always
+          image: ghcr.io/getmydia/mydia/metadata-relay:0.7.0
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 4000

@@ -522,12 +522,28 @@ jobs:
         working-directory: ${{ env.PLAYER_PATH }}
         run: flutter build macos --release
 
+      - name: Create DMG
+        if: steps.check_macos.outputs.enabled == 'true'
+        working-directory: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release
+        run: |
+          # Create a temporary directory for DMG contents
+          mkdir -p dmg_contents
+          cp -R Mydia.app dmg_contents/
+
+          # Create a symlink to Applications folder
+          ln -s /Applications dmg_contents/Applications
+
+          # Create DMG
+          hdiutil create -volname "Mydia" -srcfolder dmg_contents -ov -format UDZO Mydia.dmg
+
+          rm -rf dmg_contents
+
       - name: Upload artifact
         if: steps.check_macos.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: player-macos-app
-          path: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/Mydia.app
+          name: player-macos-dmg
+          path: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/Mydia.dmg
           retention-days: 30
 
   player-windows:
@@ -697,9 +713,8 @@ jobs:
           [ -d "player-android-apk" ] && \
             mv player-android-apk/app-release.apk player-android-v${{ needs.prepare.outputs.version }}.apk || true
 
-          [ -d "player-macos-app" ] && \
-            mv player-macos-app Mydia.app && \
-            tar -czf player-macos-v${{ needs.prepare.outputs.version }}.tar.gz Mydia.app || true
+          [ -d "player-macos-dmg" ] && \
+            mv player-macos-dmg/Mydia.dmg player-macos-v${{ needs.prepare.outputs.version }}.dmg || true
 
           [ -d "player-windows-exe" ] && \
             cd player-windows-exe && zip -r ../player-windows-v${{ needs.prepare.outputs.version }}.zip . && cd .. || true
@@ -734,7 +749,7 @@ jobs:
             |----------|-------|
             | **Android** | APK for direct installation |
             | **iOS** | Available on TestFlight (if configured) |
-            | **macOS** | .app bundle in tar.gz archive |
+            | **macOS** | DMG disk image |
             | **Windows** | Executable in zip archive |
             | **Linux** | Bundle in tar.gz archive |
             | **Web** | Integrated at `/player` on your Mydia server |
@@ -743,7 +758,7 @@ jobs:
 
           files: |
             artifacts/player-android-*.apk
-            artifacts/player-macos-*.tar.gz
+            artifacts/player-macos-*.dmg
             artifacts/player-windows-*.zip
             artifacts/player-linux-*.tar.gz
         env:

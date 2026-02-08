@@ -1,15 +1,13 @@
 # Docker Compose for Player E2E Integration Tests
 #
 # This runs the full stack with Flutter integration tests:
-# - metadata-relay: Relay service for NAT traversal
+# - metadata-relay: Used by backend claim-code flow during pairing
 # - mydia: Main application
-# - player: Flutter web app served via nginx (for manual verification)
-# - test: Flutter integration test runner (includes Chrome)
+# - test: Flutter Linux desktop integration test runner
 #
 # How it works:
-# Chrome is installed directly in the test container and controlled by
-# Flutter's `flutter test -d chrome` command. This avoids the WebDriver
-# complexity and ensures proper integration test binding.
+# Tests run on native Linux (`flutter test -d linux`) under xvfb so the
+# iroh P2P code path is exercised. This is intentionally not web/chrome.
 #
 # Performance optimizations:
 # - BuildKit enabled for cache mounts (DOCKER_BUILDKIT=1)
@@ -75,6 +73,7 @@ services:
 
       # E2E test mode - auto-enable remote access
       E2E_MODE: "true"
+      ENABLE_REMOTE_ACCESS: "true"
       E2E_ADMIN_EMAIL: "admin@test.local"
       E2E_ADMIN_PASSWORD: "testpassword123"
 
@@ -105,33 +104,6 @@ services:
       - e2e
 
   # ============================================
-  # Flutter Web Player (served via nginx)
-  # ============================================
-  # Note: player doesn't need to depend on mydia - it's just static files
-  # The test runner will wait for mydia to be healthy
-  player:
-    build:
-      context: .
-      dockerfile: player/Dockerfile.e2e
-      args:
-        # Bake in the relay URL at build time
-        RELAY_URL: "http://relay:4001"
-        MYDIA_URL: "http://mydia:4000"
-    container_name: e2e_player
-    ports:
-      - "18080:80"
-    # No depends_on - player is just nginx serving static files
-    # This allows it to start immediately while other services spin up
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/"]
-      interval: 2s
-      timeout: 2s
-      start_period: 5s
-      retries: 5
-    networks:
-      - e2e
-
-  # ============================================
   # Flutter Integration Test Runner
   # ============================================
   # The test container includes Chrome and runs tests using
@@ -145,6 +117,10 @@ services:
       # Backend service URLs (test container is on the e2e network)
       MYDIA_URL: "http://mydia:4000"
       RELAY_URL: "http://relay:4001"
+
+      # Test selection (set by ./dev player e2e --target/-- args)
+      E2E_TEST_TARGET: ${E2E_TEST_TARGET:-integration_test/pairing_flow_test.dart}
+      E2E_TEST_ARGS: ${E2E_TEST_ARGS:-}
 
       # Test admin credentials
       E2E_ADMIN_EMAIL: "admin@test.local"

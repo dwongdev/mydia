@@ -206,6 +206,15 @@ defmodule MydiaWeb.Schema.CommonTypes do
     field :expires_at, non_null(:datetime), description: "When the code expires"
   end
 
+  @desc "Remote access / P2P connection status"
+  object :remote_access_status do
+    field :enabled, non_null(:boolean),
+      description: "Whether remote access is enabled and running"
+
+    field :endpoint_addr, :string, description: "The node's endpoint address for sharing"
+    field :connected_peers, non_null(:integer), description: "Number of connected peers"
+  end
+
   @desc "Result of starting a streaming session"
   object :streaming_session_result do
     field :session_id, non_null(:string), description: "The HLS session identifier"

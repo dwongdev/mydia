@@ -371,7 +371,8 @@ class P2pService {
   }) async {
     if (_host == null) throw Exception("P2P host not initialized");
 
-    debugPrint('[P2P] Sending pairing request to $peer');
+    final normalized = await _normalizePeerForRequest(peer);
+    debugPrint('[P2P] Sending pairing request to ${normalized.nodeId}');
 
     final req = FlutterPairingRequest(
       claimCode: claimCode,
@@ -380,7 +381,7 @@ class P2pService {
       deviceOs: kIsWeb ? 'web' : Platform.operatingSystem,
     );
 
-    final res = await _host!.sendPairingRequest(peer: peer, req: req);
+    final res = await _host!.sendPairingRequest(peer: normalized.nodeId, req: req);
 
     if (res.success) {
       return {
@@ -410,10 +411,9 @@ class P2pService {
   }) async {
     if (_host == null) throw Exception("P2P host not initialized");
 
-    // Ensure we're connected to the peer before sending
-    await ensureConnected(peer);
+    final normalized = await _normalizePeerForRequest(peer);
 
-    debugPrint('[P2P] Sending GraphQL request to $peer');
+    debugPrint('[P2P] Sending GraphQL request to ${normalized.nodeId}');
 
     // Convert variables to JSON string if provided
     String? variablesJson;
@@ -428,7 +428,7 @@ class P2pService {
       authToken: authToken,
     );
 
-    final res = await _host!.sendGraphqlRequest(peer: peer, req: req);
+    final res = await _host!.sendGraphqlRequest(peer: normalized.nodeId, req: req);
 
     // Parse the response
     if (res.errors != null) {
@@ -480,10 +480,11 @@ class P2pService {
   }) async {
     if (_host == null) throw Exception("P2P host not initialized");
 
-    // Ensure we're connected to the peer before sending
-    await ensureConnected(peer);
+    final normalized = await _normalizePeerForRequest(peer);
 
-    debugPrint('[P2P] Sending HLS request to $peer for $sessionId/$path');
+    debugPrint(
+      '[P2P] Sending HLS request to ${normalized.nodeId} for $sessionId/$path',
+    );
 
     final req = FlutterHlsRequest(
       sessionId: sessionId,
@@ -493,7 +494,7 @@ class P2pService {
       authToken: authToken,
     );
 
-    return await _host!.sendHlsRequest(peer: peer, req: req);
+    return await _host!.sendHlsRequest(peer: normalized.nodeId, req: req);
   }
 
   /// Request a blob download ticket from the server for a transcode job.
@@ -514,8 +515,7 @@ class P2pService {
   }) async {
     if (_host == null) throw Exception("P2P host not initialized");
 
-    // Ensure we're connected to the peer before sending
-    await ensureConnected(peer);
+    final normalized = await _normalizePeerForRequest(peer);
 
     debugPrint('[P2P] Requesting blob download ticket for job: $jobId');
 
@@ -524,7 +524,7 @@ class P2pService {
       authToken: authToken,
     );
 
-    final res = await _host!.requestBlobDownload(peer: peer, req: req);
+    final res = await _host!.requestBlobDownload(peer: normalized.nodeId, req: req);
 
     return {
       'success': res.success,
@@ -552,14 +552,13 @@ class P2pService {
   }) async {
     if (_host == null) throw Exception("P2P host not initialized");
 
-    // Ensure we're connected to the peer before downloading
-    await ensureConnected(peer);
+    final normalized = await _normalizePeerForRequest(peer);
 
     debugPrint('[P2P] Starting blob download to: $outputPath');
 
     // The download_blob method streams progress updates as JSON strings
     final stream = _host!.downloadBlob(
-      peer: peer,
+      peer: normalized.nodeId,
       ticketJson: ticket,
       outputPath: outputPath,
       authToken: authToken,
@@ -598,6 +597,38 @@ class P2pService {
     _customRelayUrl = null;
     _connectedPeers.clear();
     _emitStatus();
+  }
+
+  Future<({String nodeId, String? endpointAddrJson})> _normalizePeerForRequest(
+    String peer,
+  ) async {
+    final endpointAddrJson = peer.startsWith('{') ? peer : null;
+    final nodeId = endpointAddrJson != null ? _extractNodeIdFromEndpointAddr(endpointAddrJson) : peer;
+
+    if (nodeId == null || nodeId.isEmpty) {
+      throw Exception('Invalid peer address');
+    }
+
+    if (endpointAddrJson != null) {
+      await ensureConnected(endpointAddrJson);
+      await _waitForConnectedPeer(nodeId);
+      return (nodeId: nodeId, endpointAddrJson: endpointAddrJson);
+    }
+
+    // If the caller provided a bare node ID, wait briefly for any in-flight
+    // connection (for example from a prior dial()) before sending the request.
+    await _waitForConnectedPeer(nodeId);
+    return (nodeId: nodeId, endpointAddrJson: null);
+  }
+
+  Future<void> _waitForConnectedPeer(String nodeId, {Duration timeout = const Duration(seconds: 10)}) async {
+    final deadline = DateTime.now().add(timeout);
+    while (!isConnectedToPeer(nodeId)) {
+      if (DateTime.now().isAfter(deadline)) {
+        throw TimeoutException('Timed out waiting for peer connection: $nodeId');
+      }
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
   }
 
   Future<void> dispose() async {

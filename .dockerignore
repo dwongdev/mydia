@@ -1,0 +1,43 @@
+# VCS
+.git
+.gitignore
+
+# Build/test outputs
+_build
+cover
+tmp
+
+# Elixir deps/cache from host (always rebuilt in image)
+deps
+.elixir_ls
+.hex
+.mix
+.nix-mix
+
+# Databases and local runtime state
+*.db
+*.db-shm
+*.db-wal
+
+# Flutter/Dart generated artifacts
+player/.dart_tool
+player/.pub-cache
+player/build
+player/android/build
+player/.flutter-plugins
+player/.flutter-plugins-dependencies
+player/.packages
+
+# Rust build artifacts
+player/rust/**/target
+native/**/target
+
+# Metadata relay local build artifacts
+metadata-relay/_build
+metadata-relay/deps
+metadata-relay/.nix-hex
+metadata-relay/.nix-mix
+
+# Misc local artifacts
+screenshots
+*.log

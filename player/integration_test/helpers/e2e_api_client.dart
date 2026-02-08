@@ -13,6 +13,9 @@ class E2eApiClient {
 
   String? _authToken;
 
+  /// The current auth token (if logged in).
+  String? get authToken => _authToken;
+
   E2eApiClient({
     required this.mydiaUrl,
     required this.adminEmail,
@@ -63,7 +66,7 @@ class E2eApiClient {
       },
     };
 
-    final response = await _graphqlRequest(query, variables);
+    final response = await graphqlRequest(query, variables);
 
     if (response['errors'] != null) {
       final errors = response['errors'] as List;
@@ -90,7 +93,7 @@ class E2eApiClient {
       }
     ''';
 
-    final response = await _graphqlRequest(query, {});
+    final response = await graphqlRequest(query, {});
 
     if (response['errors'] != null) {
       final errors = response['errors'] as List;
@@ -105,7 +108,7 @@ class E2eApiClient {
   }
 
   /// Perform a GraphQL request.
-  Future<Map<String, dynamic>> _graphqlRequest(
+  Future<Map<String, dynamic>> graphqlRequest(
     String query,
     Map<String, dynamic> variables,
   ) async {

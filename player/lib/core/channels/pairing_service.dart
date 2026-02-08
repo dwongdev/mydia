@@ -210,10 +210,17 @@ class PairingService {
         return PairingResult.error('Could not connect to server. Please check your network connection.');
       }
 
+      final peerId = _extractNodeId(resolveResult.nodeAddr);
+      if (peerId == null) {
+        debugPrint('[PairingService] Could not extract node ID from resolved node_addr');
+        return PairingResult.error('Pairing failed: server address is invalid');
+      }
+      debugPrint('[PairingService] Using peer node ID: $peerId');
+
       // 4. Send pairing request
       onStatusUpdate?.call('Submitting pairing request...');
       final result = await p2pService.sendPairingRequest(
-        peer: resolveResult.nodeAddr,
+        peer: peerId,
         claimCode: claimCode,
         deviceName: deviceName,
         deviceType: devicePlatform,
@@ -301,10 +308,17 @@ class PairingService {
         return PairingResult.error('Could not connect to server. Please check your network connection.');
       }
 
+      final peerId = _extractNodeId(qrData.nodeAddr);
+      if (peerId == null) {
+        debugPrint('[PairingService] Could not extract node ID from QR node_addr');
+        return PairingResult.error('Pairing failed: QR code contains an invalid server address');
+      }
+      debugPrint('[PairingService] Using peer node ID: $peerId');
+
       // Send pairing request
       onStatusUpdate?.call('Submitting pairing request...');
       final result = await p2pService.sendPairingRequest(
-        peer: qrData.nodeAddr,
+        peer: peerId,
         claimCode: qrData.claimCode,
         deviceName: deviceName,
         deviceType: devicePlatform,
@@ -357,6 +371,19 @@ class PairingService {
   String _detectPlatform() {
     if (kIsWeb) return 'web';
     return defaultTargetPlatform.name.toLowerCase();
+  }
+
+  /// Extract node ID from EndpointAddr JSON.
+  String? _extractNodeId(String endpointAddrJson) {
+    try {
+      final decoded = jsonDecode(endpointAddrJson);
+      if (decoded is Map<String, dynamic>) {
+        return decoded['id'] as String?;
+      }
+    } catch (e) {
+      debugPrint('[PairingService] Failed to parse endpoint address: $e');
+    }
+    return null;
   }
 
   /// Clears stored pairing credentials.

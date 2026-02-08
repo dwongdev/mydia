@@ -4,12 +4,17 @@ import 'claim_resolve_result.dart';
 
 export 'claim_resolve_result.dart' show ServerNotOnlineException;
 
+const _defaultRelayUrl = String.fromEnvironment(
+  'RELAY_URL',
+  defaultValue: 'https://relay.mydia.dev',
+);
+
 class RelayApiClient {
   final String baseUrl;
   final http.Client _client;
 
   RelayApiClient({
-    this.baseUrl = 'https://relay.mydia.dev',
+    this.baseUrl = _defaultRelayUrl,
     http.Client? client,
   }) : _client = client ?? http.Client();
 

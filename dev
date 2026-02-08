@@ -88,13 +88,18 @@ ${YELLOW}Player (Flutter in App Container):${NC}
   player shell         Open shell in player directory
   player logs          Follow build_runner logs
   player restart       Restart app container (includes build_runner)
-  player e2e           Run player E2E integration tests
+  player e2e [opts]    Run player E2E integration tests (native Linux app)
   player e2e-build     Pre-build E2E images (faster subsequent runs)
 
 ${YELLOW}Player Android (Native, uses player/flake.nix):${NC}
   player android build Build Android APK (release)
   player android run   Build and run on connected Android device
   player android shell Open nix develop shell in player directory
+
+${YELLOW}Player E2E Options:${NC}
+  --build              Rebuild Docker images before running tests
+  --target <path>      Test file to run (default: pairing_flow_test.dart)
+  -- <flutter-args>    Extra args passed to flutter test
 
 ${YELLOW}Player Development:${NC}
   Access: http://localhost:4000/player
@@ -326,21 +331,69 @@ case "$COMMAND" in
                 echo -e "${GREEN}App container restarted. Follow build_runner logs with: ./dev player logs${NC}"
                 ;;
             e2e)
-                echo -e "${GREEN}Running player E2E integration tests...${NC}"
+                shift
+
+                rebuild_images=false
+                test_target="integration_test/pairing_flow_test.dart"
+                test_args=""
+
+                while [ $# -gt 0 ]; do
+                    case "$1" in
+                        --build)
+                            rebuild_images=true
+                            ;;
+                        --target)
+                            if [ -z "$2" ]; then
+                                echo -e "${RED}Error: --target requires a test file path${NC}"
+                                echo "Example: ./dev player e2e --target integration_test/p2p_streaming_test.dart"
+                                exit 1
+                            fi
+                            test_target="$2"
+                            shift
+                            ;;
+                        --)
+                            shift
+                            if [ $# -gt 0 ]; then
+                                test_args="$*"
+                            fi
+                            break
+                            ;;
+                        *)
+                            test_args="${test_args:+$test_args }$1"
+                            ;;
+                    esac
+                    shift
+                done
+
+                echo -e "${GREEN}Running player E2E integration tests (native Linux app)...${NC}"
                 echo ""
                 echo "This will:"
-                echo "  1. Build and start metadata-relay"
+                echo "  1. Build and start metadata-relay (claim code generation path)"
                 echo "  2. Build and start Mydia (E2E mode with test admin user)"
-                echo "  3. Start Selenium Chrome for browser automation"
-                echo "  4. Build Flutter web app and run integration tests"
+                echo "  3. Build Linux test runner image (Flutter desktop + Rust/iroh)"
+                echo "  4. Run Flutter integration tests on Linux (xvfb, not web/chrome)"
                 echo ""
-                echo "Test flow: claim code → Noise handshake → device registration"
+                echo "Test target: $test_target"
+                if [ -n "$test_args" ]; then
+                    echo "Extra test args: $test_args"
+                fi
                 echo ""
-                echo "Tip: Run './dev player e2e-build' first to pre-cache Docker layers"
+                echo "Test flow: claim code → Noise handshake → iroh P2P pairing/device registration"
                 echo ""
-                # Build and run E2E tests
-                DOCKER_BUILDKIT=1 docker compose -f compose.player-e2e.yml build
-                docker compose -f compose.player-e2e.yml up --abort-on-container-exit --exit-code-from test
+                if [ "$rebuild_images" = true ]; then
+                    echo "Image rebuild: enabled (--build)"
+                else
+                    echo "Image rebuild: disabled (reuses cached images)"
+                    echo "Tip: add '--build' only when Dockerfiles/deps changed"
+                fi
+                echo ""
+
+                if [ "$rebuild_images" = true ]; then
+                    DOCKER_BUILDKIT=1 docker compose -f compose.player-e2e.yml build
+                fi
+
+                E2E_TEST_TARGET="$test_target" E2E_TEST_ARGS="$test_args" \
+                    docker compose -f compose.player-e2e.yml up --abort-on-container-exit --exit-code-from test
                 exit_code=$?
                 # Clean up
                 docker compose -f compose.player-e2e.yml down -v

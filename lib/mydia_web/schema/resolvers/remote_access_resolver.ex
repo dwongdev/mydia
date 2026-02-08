@@ -39,6 +39,29 @@ defmodule MydiaWeb.Schema.Resolvers.RemoteAccessResolver do
     {:error, "Authentication required"}
   end
 
+  @doc """
+  Returns the current remote access / P2P connection status.
+  Requires authentication.
+  """
+  def status(_parent, _args, %{context: %{current_user: _user}}) do
+    case RemoteAccess.p2p_status() do
+      {:ok, %{running: true} = s} ->
+        {:ok,
+         %{
+           enabled: true,
+           endpoint_addr: s.node_addr,
+           connected_peers: s.connected_peers
+         }}
+
+      _ ->
+        {:ok, %{enabled: false, endpoint_addr: nil, connected_peers: 0}}
+    end
+  end
+
+  def status(_parent, _args, _context) do
+    {:error, "Authentication required"}
+  end
+
   def refresh_media_token(_parent, %{token: token}, _context) do
     case MediaToken.refresh_token(token) do
       {:ok, new_token, claims} ->

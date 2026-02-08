@@ -103,6 +103,7 @@ class LocalProxyService {
       await _handleHlsRequest(request);
     } else {
       request.response.statusCode = HttpStatus.notFound;
+      _setCorsHeaders(request.response);
       request.response.write('Not Found');
       await request.response.close();
     }
@@ -114,6 +115,7 @@ class LocalProxyService {
       final pathParts = request.uri.path.substring('/hls/'.length).split('/');
       if (pathParts.length < 2) {
         request.response.statusCode = HttpStatus.badRequest;
+        _setCorsHeaders(request.response);
         request.response.write('Invalid HLS path format. Expected: /hls/{session_id}/{path}');
         await request.response.close();
         return;
@@ -124,6 +126,7 @@ class LocalProxyService {
 
       if (sessionId.isEmpty || hlsPath.isEmpty) {
         request.response.statusCode = HttpStatus.badRequest;
+        _setCorsHeaders(request.response);
         request.response.write('Session ID and path are required');
         await request.response.close();
         return;
@@ -131,6 +134,7 @@ class LocalProxyService {
 
       if (_targetPeer == null) {
         request.response.statusCode = HttpStatus.serviceUnavailable;
+        _setCorsHeaders(request.response);
         request.response.write('No target peer configured');
         await request.response.close();
         return;
@@ -163,7 +167,10 @@ class LocalProxyService {
 
       // Set response headers
       request.response.headers.contentType = ContentType.parse(response.header.contentType);
-      request.response.headers.contentLength = response.header.contentLength.toInt();
+      final payloadLength = response.data.length;
+      final headerLength = response.header.contentLength.toInt();
+      request.response.headers.contentLength =
+          headerLength == payloadLength ? headerLength : payloadLength;
 
       if (response.header.contentRange != null) {
         request.response.headers.set('Content-Range', response.header.contentRange!);
@@ -173,7 +180,7 @@ class LocalProxyService {
       }
 
       // Allow CORS for local playback
-      request.response.headers.set('Access-Control-Allow-Origin', '*');
+      _setCorsHeaders(request.response);
 
       // Write response body
       request.response.add(response.data);
@@ -185,16 +192,20 @@ class LocalProxyService {
       debugPrint('[LocalProxy] Error handling HLS request: $e');
       debugPrint('[LocalProxy] Stack: $stack');
 
-      if (!request.response.headers.persistentConnection) {
-        // Response already started, can't change status
+      try {
+        request.response.statusCode = HttpStatus.internalServerError;
+        _setCorsHeaders(request.response);
+        request.response.write('Error: $e');
+      } catch (_) {
+        // Response may already be started or closed, best-effort cleanup below.
+      } finally {
         await request.response.close();
-        return;
       }
-
-      request.response.statusCode = HttpStatus.internalServerError;
-      request.response.write('Error: $e');
-      await request.response.close();
     }
+  }
+
+  void _setCorsHeaders(HttpResponse response) {
+    response.headers.set('Access-Control-Allow-Origin', '*');
   }
 
   /// Parse HTTP Range header.

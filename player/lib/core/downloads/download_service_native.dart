@@ -986,9 +986,10 @@ class _NativeDownloadService implements DownloadService {
     final jobId = task.transcodeJobId!;
     final p2pService = _p2pJobService!;
 
-    // Use a simple bool for cancellation tracking in P2P mode
-    var isCancelled = false;
-    _cancelTokens[task.id] = CancelToken(); // For tracking
+    // Keep a local reference to the cancel token so we can check it even
+    // after _cancelAndCleanupTask removes it from the map.
+    final cancelToken = CancelToken();
+    _cancelTokens[task.id] = cancelToken;
     _pausedTasks[task.id] = false;
 
     DownloadTask updatedTask = task;
@@ -1005,10 +1006,9 @@ class _NativeDownloadService implements DownloadService {
       bool transcodeComplete = updatedTask.transcodeProgress >= 1.0;
       int? lastKnownFileSize;
 
-      while (!transcodeComplete && !isCancelled) {
+      while (!transcodeComplete && !cancelToken.isCancelled) {
         // Check if cancelled
-        if (_cancelTokens[task.id]?.isCancelled == true) {
-          isCancelled = true;
+        if (cancelToken.isCancelled) {
           break;
         }
 
@@ -1039,7 +1039,7 @@ class _NativeDownloadService implements DownloadService {
         }
       }
 
-      if (isCancelled) {
+      if (cancelToken.isCancelled) {
         return;
       }
 
@@ -1063,9 +1063,9 @@ class _NativeDownloadService implements DownloadService {
         ticket: ticket,
         outputPath: filePath,
         onProgress: (downloaded, total) async {
-          if (_cancelTokens[task.id]?.isCancelled == true) {
-            // Note: P2P download cannot be cancelled mid-stream currently
-            // The download will complete but we'll clean up after
+          if (cancelToken.isCancelled) {
+            // P2P download cannot be cancelled mid-stream currently.
+            // The download will complete but we'll clean up after.
             return;
           }
 
@@ -1081,7 +1081,7 @@ class _NativeDownloadService implements DownloadService {
       );
 
       // Check if cancelled during download - clean up and exit
-      if (_cancelTokens[task.id]?.isCancelled == true) {
+      if (cancelToken.isCancelled) {
         final file = File(filePath);
         if (await file.exists()) {
           try {

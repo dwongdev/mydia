@@ -106,6 +106,14 @@ defmodule MydiaWeb.Schema.QueryTypes do
     end
   end
 
+  # Remote access queries
+  object :remote_access_queries do
+    @desc "Get remote access / P2P connection status"
+    field :remote_access_status, :remote_access_status do
+      resolve(&MydiaWeb.Schema.Resolvers.RemoteAccessResolver.status/3)
+    end
+  end
+
   # Discovery queries - for home screen rails
   object :discovery_queries do
     @desc "Get items the user is currently watching (in-progress)"

@@ -25,6 +25,8 @@ RUN apk add --no-cache \
     nodejs \
     npm \
     sqlite-dev \
+    rust \
+    cargo \
     curl
 
 # Set build environment
@@ -78,6 +80,7 @@ COPY config ./config
 COPY priv ./priv
 COPY lib ./lib
 COPY assets ./assets
+COPY native ./native
 
 # Compile application
 RUN --mount=type=cache,target=/root/.hex \
@@ -152,64 +155,146 @@ chown -R "$PUID:$PGID" /config /data /app
 echo "Running database migrations..."
 su-exec mydia /app/bin/mydia eval "Mydia.Release.migrate()"
 
-# E2E setup: create admin user and enable remote access
+# Start the application
+echo "Starting Mydia server..."
+su-exec mydia /app/bin/mydia start &
+APP_PID=$!
+
+cleanup() {
+    if kill -0 "$APP_PID" 2>/dev/null; then
+        kill -TERM "$APP_PID" 2>/dev/null || true
+        wait "$APP_PID" || true
+    fi
+}
+trap cleanup INT TERM
+
+echo "Waiting for Mydia to become healthy..."
+max_attempts=30
+attempt=0
+while [ $attempt -lt $max_attempts ]; do
+    if curl -sf "http://localhost:4000/health" > /dev/null 2>&1; then
+        echo "Mydia is healthy."
+        break
+    fi
+    attempt=$((attempt + 1))
+    sleep 2
+done
+
+if [ $attempt -eq $max_attempts ]; then
+    echo "Mydia failed to become healthy in time."
+    cleanup
+    exit 1
+fi
+
+# E2E setup: create admin user and enable remote access (app must be running for endpoint config)
 if [ "$E2E_MODE" = "true" ]; then
     echo "E2E Mode enabled - setting up test environment..."
 
     # Create admin user if configured
     if [ -n "$E2E_ADMIN_EMAIL" ] && [ -n "$E2E_ADMIN_PASSWORD" ]; then
         echo "Creating admin user: $E2E_ADMIN_EMAIL"
-        su-exec mydia /app/bin/mydia eval "
-            Application.load(:mydia)
-            {:ok, _, _} = Ecto.Migrator.with_repo(Mydia.Repo, fn _repo ->
-                case Mydia.Accounts.get_user_by_email(\"$E2E_ADMIN_EMAIL\") do
-                    nil ->
-                        result = Mydia.Accounts.create_user(%{
-                            username: \"e2e_admin\",
-                            email: \"$E2E_ADMIN_EMAIL\",
-                            password: \"$E2E_ADMIN_PASSWORD\",
-                            role: \"admin\"
-                        })
-                        case result do
-                            {:ok, user} ->
-                                IO.puts(\"Admin user created: #{user.email}\")
-                            {:error, changeset} ->
-                                IO.puts(\"Failed to create user: #{inspect(changeset.errors)}\")
-                        end
-                    user ->
-                        IO.puts(\"Admin user already exists: #{user.email}\")
-                end
-            end)
-        " 2>&1 || echo "Warning: eval command failed"
+        su-exec mydia /app/bin/mydia rpc "
+            case Mydia.Accounts.get_user_by_email(\"$E2E_ADMIN_EMAIL\") do
+                nil ->
+                    case Mydia.Accounts.create_user(%{
+                        username: \"e2e_admin\",
+                        email: \"$E2E_ADMIN_EMAIL\",
+                        password: \"$E2E_ADMIN_PASSWORD\",
+                        role: \"admin\"
+                    }) do
+                        {:ok, user} -> IO.puts(\"Admin user created: #{user.email}\")
+                        {:error, changeset} -> IO.puts(\"Failed to create user: #{inspect(changeset.errors)}\")
+                    end
+                user ->
+                    IO.puts(\"Admin user already exists: #{user.email}\")
+            end
+        " 2>&1 || echo "Warning: Could not create admin user"
     fi
 
-    # Initialize remote access if not already configured
     echo "Initializing remote access..."
-    su-exec mydia /app/bin/mydia eval "
-        Application.load(:mydia)
-        {:ok, _, _} = Ecto.Migrator.with_repo(Mydia.Repo, fn _repo ->
-            case Mydia.RemoteAccess.get_config() do
-                nil ->
-                    {:ok, _config} = Mydia.RemoteAccess.initialize_keypair()
-                    {:ok, _} = Mydia.RemoteAccess.toggle_remote_access(true)
-                    IO.puts(\"Remote access initialized and enabled\")
-                config ->
-                    if not config.enabled do
-                        {:ok, _} = Mydia.RemoteAccess.toggle_remote_access(true)
-                        IO.puts(\"Remote access enabled\")
-                    else
-                        IO.puts(\"Remote access already enabled\")
+    su-exec mydia /app/bin/mydia rpc "
+        case Mydia.RemoteAccess.get_config() do
+            nil ->
+                case Mydia.RemoteAccess.initialize_keypair() do
+                    {:ok, _config} ->
+                        case Mydia.RemoteAccess.toggle_remote_access(true) do
+                            {:ok, _} -> IO.puts(\"Remote access initialized and enabled\")
+                            {:error, reason} -> IO.puts(\"Failed to enable remote access: #{inspect(reason)}\")
+                        end
+                    {:error, reason} ->
+                        IO.puts(\"Failed to initialize keypair: #{inspect(reason)}\")
+                end
+            config ->
+                if config.enabled do
+                    IO.puts(\"Remote access already enabled\")
+                else
+                    case Mydia.RemoteAccess.toggle_remote_access(true) do
+                        {:ok, _} -> IO.puts(\"Remote access enabled\")
+                        {:error, reason} -> IO.puts(\"Failed to enable remote access: #{inspect(reason)}\")
                     end
+                end
+        end
+    " 2>&1 || echo "Warning: Could not initialize remote access"
+
+    # Seed test media for streaming tests
+    echo "Seeding test media..."
+    mkdir -p /media/movies
+    ffmpeg -y -f lavfi -i testsrc2=duration=5:size=1280x720:rate=24 \
+           -f lavfi -i sine=frequency=440:duration=5 \
+           -c:v libx264 -preset ultrafast -crf 28 -pix_fmt yuv420p \
+           -g 24 -keyint_min 24 \
+           -c:a aac -b:a 128k \
+           -movflags +faststart \
+           /media/movies/e2e-test-video.mp4 2>&1 || echo "Warning: Could not generate test video"
+
+    if [ -f /media/movies/e2e-test-video.mp4 ]; then
+        chown mydia:mydia /media/movies/e2e-test-video.mp4
+        echo "Test video generated, creating library entries..."
+        su-exec mydia /app/bin/mydia rpc "
+            alias Mydia.{Settings, Media, Library, Repo}
+            alias Mydia.Settings.LibraryPath
+
+            file_size = File.stat!(\"/media/movies/e2e-test-video.mp4\").size
+
+            # Find or create library path (may already exist from auto-scan)
+            lib_path = case Repo.get_by(LibraryPath, path: \"/media/movies\") do
+              nil ->
+                case Settings.create_library_path(%{path: \"/media/movies\", type: :movies}) do
+                  {:ok, lp} -> lp
+                  {:error, reason} ->
+                    IO.puts(\"Failed to create library path: #{inspect(reason)}\")
+                    nil
+                end
+              existing -> existing
             end
-        end)
-    " || echo "Warning: Could not initialize remote access"
+
+            if lib_path do
+              with {:ok, movie} <- Media.create_media_item(%{type: \"movie\", title: \"E2E Test Movie\", year: 2025}, skip_episode_refresh: true),
+                   {:ok, _file} <- Library.create_media_file(%{
+                     media_item_id: movie.id,
+                     library_path_id: lib_path.id,
+                     relative_path: \"e2e-test-video.mp4\",
+                     size: file_size,
+                     resolution: \"720p\",
+                     codec: \"h264\",
+                     audio_codec: \"aac\",
+                     metadata: %{\"duration\" => 5.0}
+                   }) do
+                IO.puts(\"Test media seeded: E2E Test Movie (#{file_size} bytes)\")
+              else
+                {:error, reason} ->
+                  IO.puts(\"Failed to seed test media: #{inspect(reason)}\")
+              end
+            end
+        " 2>&1 || echo "Warning: Could not seed test media"
+    else
+        echo "Warning: Test video file was not generated"
+    fi
 
     echo "E2E setup complete!"
 fi
 
-# Start the application
-echo "Starting Mydia server..."
-exec su-exec mydia /app/bin/mydia start
+wait "$APP_PID"
 EOF
 
 RUN chmod +x /docker-entrypoint.sh

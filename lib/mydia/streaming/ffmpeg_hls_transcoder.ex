@@ -269,6 +269,13 @@ defmodule Mydia.Streaming.FfmpegHlsTranscoder do
   def handle_info({port, {:exit_status, 0}}, %{ffmpeg_port: port} = state) do
     Logger.info("FFmpeg transcoding completed successfully")
 
+    # Notify readiness if not already done — when FFmpeg completes very quickly
+    # (e.g., stream copy), the scheduled :check_playlist_ready may not have fired yet.
+    if !state.ready_notified && state.on_ready && File.exists?(state.playlist_path) do
+      Logger.info("FFmpeg completed before readiness check — notifying ready now")
+      state.on_ready.()
+    end
+
     if state.on_complete do
       state.on_complete.()
     end

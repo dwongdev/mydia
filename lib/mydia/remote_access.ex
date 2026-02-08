@@ -438,10 +438,31 @@ defmodule Mydia.RemoteAccess do
 
   defp get_p2p_node_addr do
     case p2p_status() do
-      {:ok, %{node_addr: node_addr}} when not is_nil(node_addr) ->
+      {:ok, %{node_addr: node_addr}} when is_binary(node_addr) and node_addr != "" ->
         {:ok, node_addr}
 
+      {:ok, %{running: true}} ->
+        fetch_live_node_addr()
+
       _ ->
+        {:error, :p2p_not_ready}
+    end
+  end
+
+  defp fetch_live_node_addr do
+    try do
+      case Mydia.P2p.Server.get_node_addr() do
+        node_addr when is_binary(node_addr) and node_addr != "" ->
+          {:ok, node_addr}
+
+        _ ->
+          {:error, :p2p_not_ready}
+      end
+    rescue
+      _ ->
+        {:error, :p2p_not_ready}
+    catch
+      :exit, _ ->
         {:error, :p2p_not_ready}
     end
   end

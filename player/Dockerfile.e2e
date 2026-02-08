@@ -27,6 +27,7 @@ WORKDIR /app
 
 # Copy pubspec files first for better caching
 COPY player/pubspec.yaml player/pubspec.lock ./
+COPY player/rust_builder ./rust_builder
 
 # Install dependencies with cache
 RUN --mount=type=cache,target=/root/.pub-cache \

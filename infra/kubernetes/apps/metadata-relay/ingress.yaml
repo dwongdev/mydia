@@ -29,6 +29,7 @@ metadata:
 spec:
   dnsNames:
     - relay.mydia.dev
+    - metadata-relay.arsfeld.dev
   issuerRef:
     kind: ClusterIssuer
     name: letsencrypt-prod
@@ -62,7 +63,7 @@ spec:
     - web
   routes:
     - kind: Rule
-      match: Host(`relay.mydia.dev`)
+      match: Host(`relay.mydia.dev`) || Host(`metadata-relay.arsfeld.dev`)
       middlewares:
         - name: redirect-https
           namespace: metadata-relay
@@ -87,7 +88,7 @@ spec:
     - websecure
   routes:
     - kind: Rule
-      match: Host(`relay.mydia.dev`)
+      match: Host(`relay.mydia.dev`) || Host(`metadata-relay.arsfeld.dev`)
       services:
         - name: metadata-relay
           port: 4000

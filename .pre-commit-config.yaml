@@ -1,0 +1,41 @@
+repos:
+  - repo: local
+    hooks:
+      # Elixir / Phoenix
+      - id: mix-format
+        name: mix format
+        entry: mix format --check-formatted
+        language: system
+        files: '\.(?:ex|exs|heex)$'
+        pass_filenames: false
+
+      # Rust (native NIFs)
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --manifest-path native/mydia_p2p/Cargo.toml -- --check
+        language: system
+        files: '\.rs$'
+        pass_filenames: false
+
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --manifest-path native/mydia_p2p/Cargo.toml -- -D warnings
+        language: system
+        files: '\.rs$'
+        pass_filenames: false
+
+      # Flutter / Dart
+      - id: dart-format
+        name: dart format
+        entry: dart format --set-exit-if-changed --line-length 80
+        language: system
+        files: '\.dart$'
+        exclude: '\.(?:g|freezed)\.dart$'
+
+      - id: dart-analyze
+        name: dart analyze
+        entry: dart analyze --fatal-infos
+        language: system
+        files: '\.dart$'
+        exclude: '\.(?:g|freezed)\.dart$'
+        pass_filenames: false

@@ -21,6 +21,8 @@ defmodule MetadataRelay.Application do
         {Phoenix.PubSub, name: MetadataRelay.PubSub},
         # Cache adapter (Redis or in-memory)
         {cache_adapter, cache_opts},
+        # Long-lived ETS owner for pairing fallback storage
+        MetadataRelay.PairingStore,
         # Rate limiter for crash reports and pairing
         MetadataRelay.RateLimiter,
         # Metrics collector

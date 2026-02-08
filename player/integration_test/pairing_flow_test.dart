@@ -6,6 +6,8 @@ import 'package:integration_test/integration_test.dart';
 import 'package:media_kit/media_kit.dart';
 
 import 'package:player/app.dart';
+import 'package:player/native/frb_generated.dart'
+    if (dart.library.js_interop) 'package:player/native/frb_stub.dart';
 
 /// E2E integration tests for the device pairing flow.
 ///
@@ -25,6 +27,8 @@ void main() {
 
   // Set up the app once before all tests
   setUpAll(() async {
+    await RustLib.init();
+
     // Initialize media_kit for video playback
     MediaKit.ensureInitialized();
 
@@ -82,13 +86,10 @@ void main() {
       if (i % 5 == 0 && i > 0) {
         final allText = tester.widgetList<Text>(find.byType(Text));
         for (final text in allText) {
-          final data = text.data;
-          // Look for our step markers
-          if (data != null && (data.contains('Step') || data.contains('Error') ||
-              data.contains('Looking') || data.contains('Connecting'))) {
-            // Use print instead of debugPrint to try to get output
+          final data = text.data?.trim();
+          if (data != null && data.isNotEmpty) {
             // ignore: avoid_print
-            print('[Test@$i] Status: $data');
+            print('[Test@$i] UI: $data');
           }
         }
       }

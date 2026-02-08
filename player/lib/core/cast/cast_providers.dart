@@ -1,17 +1,23 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'cast_service.dart';
+import '../player/platform_features.dart';
 import '../../domain/models/cast_device.dart';
 
 /// Provider for the CastService singleton.
 final castServiceProvider = Provider<CastService>((ref) {
   final service = CastService();
+  final canUseCast = PlatformFeatures.isMobile;
 
-  // Start discovery when service is created
-  service.startDiscovery();
+  // Chromecast plugin support is limited to mobile platforms.
+  if (canUseCast) {
+    service.startDiscovery();
+  }
 
   // Clean up when provider is disposed
   ref.onDispose(() {
-    service.stopDiscovery();
+    if (canUseCast) {
+      service.stopDiscovery();
+    }
     service.dispose();
   });
 

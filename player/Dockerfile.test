@@ -2,13 +2,8 @@
 # ============================================
 # E2E Test Runner - Flutter Integration Tests
 # ============================================
-# This Dockerfile runs Flutter integration tests using `flutter drive` with ChromeDriver.
-#
-# How it works:
-# 1. Chrome and ChromeDriver are installed in this container
-# 2. ChromeDriver is started in the background on port 4444
-# 3. `flutter drive` launches the app and runs tests against it
-# 4. Tests run against real Mydia and Relay services on the e2e network
+# This Dockerfile runs Flutter integration tests on native Linux
+# so tests exercise the same iroh P2P code path used by real devices.
 #
 # NOTE: This Dockerfile expects the build context to be the project root
 # (not the player directory) so it can access priv/graphql/schema.graphql
@@ -23,41 +18,48 @@ FROM ghcr.io/cirruslabs/flutter:stable
 
 # Set pub cache location for caching
 ENV PUB_CACHE=/root/.pub-cache
+ENV CARGO_HOME=/root/.cargo
+ENV RUSTUP_HOME=/root/.rustup
+ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Install Chrome, ChromeDriver and additional dependencies
+# Install dependencies for Linux desktop Flutter + utilities
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
         curl \
         jq \
-        wget \
-        gnupg \
         ca-certificates \
-        unzip \
-    && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
-    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
-    && apt-get update -qq \
-    && apt-get install -y -qq --no-install-recommends google-chrome-stable \
+        xvfb \
+        clang \
+        cmake \
+        ninja-build \
+        pkg-config \
+        libgtk-3-dev \
+        libblkid-dev \
+        liblzma-dev \
+        libstdc++-12-dev \
+        libsecret-1-dev \
+        libjsoncpp-dev \
+        libmpv-dev \
+        libx11-dev \
+        libx11-xcb-dev \
+        libxrandr-dev \
+        libxinerama-dev \
+        libxcursor-dev \
+        libxi-dev \
+        libgl1-mesa-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ChromeDriver that matches Chrome version
-RUN CHROME_VERSION=$(google-chrome-stable --version | awk '{print $3}' | cut -d. -f1) && \
-    echo "Chrome major version: $CHROME_VERSION" && \
-    CHROMEDRIVER_VERSION=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_$CHROME_VERSION") && \
-    echo "ChromeDriver version: $CHROMEDRIVER_VERSION" && \
-    wget -q "https://storage.googleapis.com/chrome-for-testing-public/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip" -O /tmp/chromedriver.zip && \
-    unzip -q /tmp/chromedriver.zip -d /tmp && \
-    mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/ && \
-    chmod +x /usr/local/bin/chromedriver && \
-    rm -rf /tmp/chromedriver* && \
-    chromedriver --version
+# Rust toolchain is required for building the mydia_player_p2p plugin.
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --profile minimal --default-toolchain stable
 
-# Set Chrome as the default browser for Flutter
-ENV CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
+RUN flutter config --enable-linux-desktop
 
 WORKDIR /app
 
 # Copy pubspec files first for better caching
 COPY player/pubspec.yaml player/pubspec.lock ./
+COPY player/rust_builder ./rust_builder
 
 # Install dependencies with cache
 RUN --mount=type=cache,target=/root/.pub-cache \
@@ -67,6 +69,11 @@ RUN --mount=type=cache,target=/root/.pub-cache \
 # Copy the rest of the player app
 COPY player/ .
 
+# The Rust crate `player/rust/mydia_player_p2p` depends on
+# `../../../native/mydia_p2p_core`, which resolves to `/native/...`
+# in this container layout.
+COPY native /native
+
 # Remove the broken symlink and copy the actual schema file
 RUN rm -f lib/graphql/schema.graphql
 COPY priv/graphql/schema.graphql lib/graphql/schema.graphql
@@ -75,6 +82,10 @@ COPY priv/graphql/schema.graphql lib/graphql/schema.graphql
 RUN --mount=type=cache,target=/root/.pub-cache \
     cp -r /tmp/.pub-cache-copy/* /root/.pub-cache/ 2>/dev/null || true && \
     flutter pub run build_runner build --delete-conflicting-outputs
+
+# Persist pub cache into the image filesystem (cache mounts are ephemeral).
+RUN mkdir -p /root/.pub-cache && \
+    cp -a /tmp/.pub-cache-copy/. /root/.pub-cache/
 
 # Copy the test entrypoint script
 COPY <<'EOF' /entrypoint.sh
@@ -88,11 +99,12 @@ echo ""
 echo "Configuration:"
 echo "  MYDIA_URL: ${MYDIA_URL:-not set}"
 echo "  RELAY_URL: ${RELAY_URL:-not set}"
-echo "  Chrome: $(google-chrome-stable --version)"
-echo "  ChromeDriver: $(chromedriver --version)"
+echo "  E2E_TEST_TARGET: ${E2E_TEST_TARGET:-integration_test/pairing_flow_test.dart}"
+echo "  E2E_TEST_ARGS: ${E2E_TEST_ARGS:-<none>}"
+echo "  Target device: linux (native)"
 echo ""
 
-# Wait for Mydia to be ready and resolve its IP for Chrome
+# Wait for Mydia to be ready
 echo "Waiting for Mydia..."
 max_attempts=30
 attempt=0
@@ -111,20 +123,7 @@ if [ $attempt -eq $max_attempts ]; then
     exit 1
 fi
 
-# Get Mydia IP for Chrome (Chrome may not use Docker DNS)
-MYDIA_HOST=$(echo "${MYDIA_URL}" | sed -E 's|https?://([^:/]+).*|\1|')
-MYDIA_PORT=$(echo "${MYDIA_URL}" | sed -E 's|https?://[^:]+:([0-9]+).*|\1|')
-MYDIA_IP=$(getent hosts "${MYDIA_HOST}" 2>/dev/null | awk '{print $1}')
-if [ -n "$MYDIA_IP" ]; then
-    echo "  Resolved ${MYDIA_HOST} to ${MYDIA_IP}"
-    RESOLVED_MYDIA_URL="http://${MYDIA_IP}:${MYDIA_PORT}"
-    echo "  Using resolved URL: ${RESOLVED_MYDIA_URL}"
-else
-    echo "  Warning: Could not resolve ${MYDIA_HOST}, using original URL"
-    RESOLVED_MYDIA_URL="${MYDIA_URL}"
-fi
-
-# Wait for Relay to be ready and resolve its IP for Chrome
+# Wait for Relay to be ready
 echo ""
 echo "Waiting for Relay..."
 attempt=0
@@ -141,19 +140,6 @@ done
 if [ $attempt -eq $max_attempts ]; then
     echo "ERROR: Relay not available at ${RELAY_URL}"
     exit 1
-fi
-
-# Get relay IP for Chrome (Chrome may not use Docker DNS)
-RELAY_HOST=$(echo "${RELAY_URL}" | sed -E 's|https?://([^:/]+).*|\1|')
-RELAY_PORT=$(echo "${RELAY_URL}" | sed -E 's|https?://[^:]+:([0-9]+).*|\1|')
-RELAY_IP=$(getent hosts "${RELAY_HOST}" 2>/dev/null | awk '{print $1}')
-if [ -n "$RELAY_IP" ]; then
-    echo "  Resolved ${RELAY_HOST} to ${RELAY_IP}"
-    RESOLVED_RELAY_URL="http://${RELAY_IP}:${RELAY_PORT}"
-    echo "  Using resolved URL: ${RESOLVED_RELAY_URL}"
-else
-    echo "  Warning: Could not resolve ${RELAY_HOST}, using original URL"
-    RESOLVED_RELAY_URL="${RELAY_URL}"
 fi
 
 echo ""
@@ -175,6 +161,21 @@ echo "Setting up test environment..."
 echo "  Mydia API: ${MYDIA_URL}"
 echo ""
 
+# Ensure deps are present at runtime for linux integration test build.
+echo "Ensuring Flutter dependencies are available..."
+# Remove stale generated Linux plugin artifacts copied from host paths.
+rm -rf linux/flutter/ephemeral/.plugin_symlinks
+rm -f linux/flutter/ephemeral/generated_config.cmake
+rm -f linux/flutter/generated_plugins.cmake
+rm -f linux/flutter/generated_plugin_registrant.cc
+rm -f linux/flutter/generated_plugin_registrant.h
+
+flutter pub get >/tmp/flutter-pub-get.log 2>&1 || {
+    echo "ERROR: flutter pub get failed"
+    cat /tmp/flutter-pub-get.log
+    exit 1
+}
+
 # Login to Mydia and get auth token
 echo "Logging in as test admin..."
 LOGIN_RESPONSE=$(curl -sf "${MYDIA_URL}/api/graphql" \
@@ -187,7 +188,7 @@ LOGIN_RESPONSE=$(curl -sf "${MYDIA_URL}/api/graphql" \
                 "password": "'"${E2E_ADMIN_PASSWORD:-testpassword123}"'",
                 "deviceId": "e2e-test-runner",
                 "deviceName": "E2E Test Runner",
-                "platform": "web"
+                "platform": "linux"
             }
         }
     }' 2>&1)
@@ -201,79 +202,76 @@ if [ -z "$AUTH_TOKEN" ]; then
 fi
 echo "  ✓ Login successful"
 
-# Generate a claim code
+# Generate a claim code (with retry while P2P/remote access initializes)
 echo "Generating claim code..."
-CLAIM_RESPONSE=$(curl -sf "${MYDIA_URL}/api/graphql" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $AUTH_TOKEN" \
-    -d '{
-        "query": "mutation { generateClaimCode { code expiresAt } }"
-    }' 2>&1)
+CLAIM_CODE=""
+CLAIM_RESPONSE=""
+max_claim_attempts=30
+claim_attempt=0
+while [ $claim_attempt -lt $max_claim_attempts ]; do
+    CLAIM_RESPONSE=$(curl -sf "${MYDIA_URL}/api/graphql" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $AUTH_TOKEN" \
+        -d '{
+            "query": "mutation { generateClaimCode { code expiresAt } }"
+        }' 2>&1)
 
-CLAIM_CODE=$(echo "$CLAIM_RESPONSE" | jq -r '.data.generateClaimCode.code // empty')
+    CLAIM_CODE=$(echo "$CLAIM_RESPONSE" | jq -r '.data.generateClaimCode.code // empty')
+    if [ -n "$CLAIM_CODE" ]; then
+        break
+    fi
+
+    claim_attempt=$((claim_attempt + 1))
+    CLAIM_ERROR=$(echo "$CLAIM_RESPONSE" | jq -r '.errors[0].message // "unknown error"')
+    echo "  Claim code attempt $claim_attempt/$max_claim_attempts failed: $CLAIM_ERROR"
+    sleep 2
+done
 
 if [ -z "$CLAIM_CODE" ]; then
-    echo "ERROR: Failed to generate claim code"
+    echo "ERROR: Failed to generate claim code after $max_claim_attempts attempts"
     echo "Response: $CLAIM_RESPONSE"
     exit 1
 fi
 echo "  ✓ Claim code generated: $CLAIM_CODE"
 
-echo ""
-echo "Starting ChromeDriver..."
-chromedriver --port=4444 --log-level=WARNING &
-CHROMEDRIVER_PID=$!
-sleep 2
-
-if ! kill -0 $CHROMEDRIVER_PID 2>/dev/null; then
-    echo "ERROR: ChromeDriver failed to start"
-    exit 1
-fi
-echo "  ✓ ChromeDriver started (PID: $CHROMEDRIVER_PID)"
-
-echo ""
 echo "Running Flutter integration tests..."
 echo "  Claim Code: $CLAIM_CODE"
 echo ""
 
+TEST_TARGET="${E2E_TEST_TARGET:-integration_test/pairing_flow_test.dart}"
+
+if [ ! -f "$TEST_TARGET" ]; then
+    echo "ERROR: Test target not found: $TEST_TARGET"
+    exit 1
+fi
+
 echo "  Flutter dart-define values:"
-echo "    RELAY_URL=${RESOLVED_RELAY_URL}"
-echo "    MYDIA_URL=${RESOLVED_MYDIA_URL}"
+echo "    RELAY_URL=${RELAY_URL}"
+echo "    MYDIA_URL=${MYDIA_URL}"
 echo "    E2E_CLAIM_CODE=${CLAIM_CODE}"
 echo ""
 
-# Run Flutter drive tests with ChromeDriver
-# --target: the integration test file
-# -d web-server: use web-server device (required for web)
-# --browser-name: specify chrome
-# --driver: the test driver (handles communication)
-# --dart-define: pass environment variables
-#
-# Note: Additional Chrome flags are needed for Docker:
-# --no-sandbox: Required when running as root
-# --disable-dev-shm-usage: Avoid /dev/shm issues in containers
-# --disable-gpu: Disable GPU acceleration in headless mode
-
-flutter drive \
-    --target=integration_test/pairing_flow_test.dart \
-    --driver=test_driver/integration_test.dart \
-    -d web-server \
-    --browser-name=chrome \
-    --headless \
-    --web-browser-flag="--no-sandbox" \
-    --web-browser-flag="--disable-dev-shm-usage" \
-    --web-browser-flag="--disable-gpu" \
-    --dart-define=MYDIA_URL=${RESOLVED_MYDIA_URL} \
-    --dart-define=RELAY_URL=${RESOLVED_RELAY_URL} \
-    --dart-define=E2E_MODE=true \
+# Run native Linux integration test under a virtual X server.
+flutter_cmd=(
+    flutter test "$TEST_TARGET"
+    -d linux
+    -v
+    --reporter expanded
+    --dart-define=MYDIA_URL=${MYDIA_URL}
+    --dart-define=RELAY_URL=${RELAY_URL}
+    --dart-define=E2E_MODE=true
     --dart-define=E2E_CLAIM_CODE=${CLAIM_CODE}
+)
+
+if [ -n "${E2E_TEST_ARGS:-}" ]; then
+    # shellcheck disable=SC2206
+    extra_args=(${E2E_TEST_ARGS})
+    flutter_cmd+=("${extra_args[@]}")
+fi
+
+xvfb-run -a "${flutter_cmd[@]}"
 
 TEST_EXIT_CODE=$?
-
-# Cleanup ChromeDriver
-echo ""
-echo "Stopping ChromeDriver..."
-kill $CHROMEDRIVER_PID 2>/dev/null || true
 
 echo ""
 echo "============================================"

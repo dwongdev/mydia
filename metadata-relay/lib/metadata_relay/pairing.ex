@@ -100,16 +100,27 @@ defmodule MetadataRelay.Pairing do
   end
 
   @doc """
-  Ensures ETS table exists for fallback storage.
-  Called during application startup.
+  Initializes ETS table for fallback storage.
+  Should be called by a long-lived process at application startup.
   """
-  def ensure_ets_table do
+  def init_ets_table do
     if :ets.whereis(@ets_table) == :undefined do
       :ets.new(@ets_table, [:set, :public, :named_table, read_concurrency: true])
       Logger.info("Created ETS table for pairing claims fallback")
     end
 
     :ok
+  end
+
+  @doc """
+  Ensures ETS table is available for fallback storage.
+  """
+  def ensure_ets_table do
+    if :ets.whereis(@ets_table) == :undefined do
+      {:error, :table_not_initialized}
+    else
+      :ok
+    end
   end
 
   # Storage functions - try Redis first, fall back to ETS
@@ -170,26 +181,30 @@ defmodule MetadataRelay.Pairing do
   # ETS fallback storage
 
   defp store_in_ets(code, node_addr, ttl_seconds) do
-    ensure_ets_table()
-    expires_at = System.system_time(:second) + ttl_seconds
-    :ets.insert(@ets_table, {code, node_addr, expires_at})
-    :ok
+    with :ok <- ensure_ets_table() do
+      expires_at = System.system_time(:second) + ttl_seconds
+      :ets.insert(@ets_table, {code, node_addr, expires_at})
+      :ok
+    end
   end
 
   defp fetch_from_ets(code) do
-    ensure_ets_table()
+    with :ok <- ensure_ets_table() do
+      case :ets.lookup(@ets_table, code) do
+        [{^code, node_addr, expires_at}] ->
+          if System.system_time(:second) < expires_at do
+            {:ok, node_addr}
+          else
+            # Expired - clean up
+            :ets.delete(@ets_table, code)
+            {:error, :not_found}
+          end
 
-    case :ets.lookup(@ets_table, code) do
-      [{^code, node_addr, expires_at}] ->
-        if System.system_time(:second) < expires_at do
-          {:ok, node_addr}
-        else
-          # Expired - clean up
-          :ets.delete(@ets_table, code)
+        [] ->
           {:error, :not_found}
-        end
-
-      [] ->
+      end
+    else
+      {:error, :table_not_initialized} ->
         {:error, :not_found}
     end
   end

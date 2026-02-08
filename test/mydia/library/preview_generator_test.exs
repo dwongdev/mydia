@@ -6,7 +6,7 @@ defmodule Mydia.Library.PreviewGeneratorTest do
   alias Mydia.Library.MediaFile
   alias Mydia.Library.ThumbnailGenerator
 
-  @moduletag :external
+  @moduletag :requires_ffmpeg
 
   setup do
     # Use a temporary directory for generated content
@@ -51,7 +51,7 @@ defmodule Mydia.Library.PreviewGeneratorTest do
         video_path = create_test_video(30)
 
         case PreviewGenerator.generate_from_path(video_path) do
-          {:ok, checksum} ->
+          {:ok, %{preview_checksum: checksum}} ->
             # Verify checksum is valid
             assert String.length(checksum) == 32
 
@@ -89,9 +89,9 @@ defmodule Mydia.Library.PreviewGeneratorTest do
 
         case PreviewGenerator.generate_from_path(video_path,
                segment_count: 2,
-               segment_duration: 2
+               segment_duration: 2.0
              ) do
-          {:ok, checksum} ->
+          {:ok, %{preview_checksum: checksum}} ->
             # Verify checksum is valid
             assert String.length(checksum) == 32
 
@@ -122,11 +122,11 @@ defmodule Mydia.Library.PreviewGeneratorTest do
 
         case PreviewGenerator.generate_from_path(video_path,
                segment_count: 4,
-               segment_duration: 2,
-               skip_start_percent: 10,
-               skip_end_percent: 10
+               segment_duration: 2.0,
+               skip_start_percent: 0.10,
+               skip_end_percent: 0.10
              ) do
-          {:ok, checksum} ->
+          {:ok, %{preview_checksum: checksum}} ->
             assert String.length(checksum) == 32
             assert GeneratedMedia.exists?(:preview, checksum)
 
@@ -144,16 +144,17 @@ defmodule Mydia.Library.PreviewGeneratorTest do
         IO.puts("Skipping test: FFmpeg not available")
         assert true
       else
-        # Create a 5 second video but request 4x3=12 seconds of segments
-        video_path = create_test_video(5)
+        # Create a 2 second video with 5% skip (effective ~1.8s) and request 3s segments
+        # effective_duration < segment_duration triggers :video_too_short
+        video_path = create_test_video(2)
 
         result =
           PreviewGenerator.generate_from_path(video_path,
             segment_count: 4,
-            segment_duration: 3
+            segment_duration: 3.0
           )
 
-        # Should fail due to video being too short
+        # Should fail due to video being too short for even a single segment
         assert {:error, :video_too_short} = result
 
         File.rm(video_path)
@@ -169,7 +170,7 @@ defmodule Mydia.Library.PreviewGeneratorTest do
         video_path = create_test_video_with_audio(30)
 
         case PreviewGenerator.generate_from_path(video_path) do
-          {:ok, checksum} ->
+          {:ok, %{preview_checksum: checksum}} ->
             assert String.length(checksum) == 32
             assert GeneratedMedia.exists?(:preview, checksum)
 

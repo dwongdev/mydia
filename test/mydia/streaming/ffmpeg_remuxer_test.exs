@@ -3,10 +3,10 @@ defmodule Mydia.Streaming.FfmpegRemuxerTest do
 
   alias Mydia.Streaming.FfmpegRemuxer
 
-  @moduletag :external
+  @moduletag :requires_ffmpeg
 
   describe "start_remux/2" do
-    @tag :external
+    @tag :requires_ffmpeg
     test "starts FFmpeg process for valid video file" do
       # Create a small test video file using FFmpeg
       test_dir = System.tmp_dir!()
@@ -47,7 +47,7 @@ defmodule Mydia.Streaming.FfmpegRemuxerTest do
       FfmpegRemuxer.stop_remux(port, os_pid)
     end
 
-    @tag :external
+    @tag :requires_ffmpeg
     test "returns error for non-existent file" do
       # FFmpeg will fail when the file doesn't exist
       {:ok, port, _os_pid} = FfmpegRemuxer.start_remux("/nonexistent/path/video.mkv")
@@ -57,7 +57,7 @@ defmodule Mydia.Streaming.FfmpegRemuxerTest do
       assert status != 0
     end
 
-    @tag :external
+    @tag :requires_ffmpeg
     test "supports seek_seconds option" do
       test_dir = System.tmp_dir!()
       input_path = Path.join(test_dir, "test_seek_input_#{:rand.uniform(100_000)}.mkv")
@@ -98,7 +98,7 @@ defmodule Mydia.Streaming.FfmpegRemuxerTest do
   end
 
   describe "stop_remux/2" do
-    @tag :external
+    @tag :requires_ffmpeg
     test "stops running FFmpeg process" do
       test_dir = System.tmp_dir!()
       input_path = Path.join(test_dir, "test_stop_input_#{:rand.uniform(100_000)}.mkv")
@@ -145,7 +145,7 @@ defmodule Mydia.Streaming.FfmpegRemuxerTest do
   end
 
   describe "ffmpeg availability" do
-    @describetag :external
+    @describetag :requires_ffmpeg
 
     test "FFmpeg is available on the system" do
       assert System.find_executable("ffmpeg") != nil

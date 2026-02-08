@@ -3,10 +3,9 @@
 # Using 1 concurrent case to avoid "Database busy" errors with SQLite
 # Exclude external integration tests by default (require external services)
 # Exclude feature tests by default (require chromedriver)
-# Exclude FFmpeg tests by default (they crash the JobManager and affect other tests)
 # Exclude relay tests by default (require connected relay service)
 # Run specific tests explicitly with: mix test --include <tag>
-ExUnit.start(max_cases: 1, exclude: [:external, :feature, :requires_ffmpeg, :requires_relay])
+ExUnit.start(max_cases: 1, exclude: [:external, :feature, :requires_relay])
 Ecto.Adapters.SQL.Sandbox.mode(Mydia.Repo, :manual)
 
 # Configure ExMachina

@@ -5,7 +5,7 @@ defmodule Mydia.Library.PhashGeneratorTest do
   alias Mydia.Library.MediaFile
   alias Mydia.Library.ThumbnailGenerator
 
-  @moduletag :external
+  @moduletag :requires_ffmpeg
 
   describe "hamming_distance/2" do
     test "returns 0 for identical hashes" do

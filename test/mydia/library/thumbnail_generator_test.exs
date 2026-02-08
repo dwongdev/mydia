@@ -5,7 +5,7 @@ defmodule Mydia.Library.ThumbnailGeneratorTest do
   alias Mydia.Library.GeneratedMedia
   alias Mydia.Library.MediaFile
 
-  @moduletag :external
+  @moduletag :requires_ffmpeg
 
   setup do
     # Use a temporary directory for generated content

@@ -6,7 +6,7 @@ defmodule Mydia.Library.SpriteGeneratorTest do
   alias Mydia.Library.MediaFile
   alias Mydia.Library.ThumbnailGenerator
 
-  @moduletag :external
+  @moduletag :requires_ffmpeg
 
   setup do
     # Use a temporary directory for generated content
@@ -51,7 +51,8 @@ defmodule Mydia.Library.SpriteGeneratorTest do
         # Create a test video (10 seconds)
         video_path = create_test_video(10)
 
-        case SpriteGenerator.generate_from_path(video_path, interval: 2) do
+        # Use frame_count: 5 for a manageable test (default is 81)
+        case SpriteGenerator.generate_from_path(video_path, frame_count: 5, columns: 5) do
           {:ok, result} ->
             # Verify result structure
             assert Map.has_key?(result, :sprite_checksum)
@@ -77,9 +78,8 @@ defmodule Mydia.Library.SpriteGeneratorTest do
             assert vtt_content =~ "WEBVTT"
             assert vtt_content =~ "#xywh="
 
-            # Verify frame count is reasonable (10 second video, 2 second interval = ~5 frames)
-            assert result.frame_count >= 3
-            assert result.frame_count <= 6
+            # Verify frame count matches requested
+            assert result.frame_count == 5
 
           {:error, reason} ->
             IO.puts("Sprite generation failed: #{inspect(reason)}")
@@ -100,16 +100,16 @@ defmodule Mydia.Library.SpriteGeneratorTest do
       else
         video_path = create_test_video(10)
 
+        # 10 seconds - 2 skip_start - 2 skip_end = 6 seconds effective
+        # Request 6 frames distributed across 6 seconds
         case SpriteGenerator.generate_from_path(video_path,
-               interval: 1,
+               frame_count: 6,
+               columns: 6,
                skip_start: 2,
                skip_end: 2
              ) do
           {:ok, result} ->
-            # 10 seconds - 2 skip_start - 2 skip_end = 6 seconds
-            # With 1 second interval = ~6 frames
-            assert result.frame_count >= 4
-            assert result.frame_count <= 7
+            assert result.frame_count == 6
 
           {:error, reason} ->
             IO.puts("Sprite generation failed: #{inspect(reason)}")
@@ -129,7 +129,8 @@ defmodule Mydia.Library.SpriteGeneratorTest do
         video_path = create_test_video(5)
 
         case SpriteGenerator.generate_from_path(video_path,
-               interval: 2,
+               frame_count: 3,
+               columns: 3,
                thumbnail_width: 200,
                thumbnail_height: 120
              ) do
@@ -156,7 +157,7 @@ defmodule Mydia.Library.SpriteGeneratorTest do
         # Create a 0.5 second video with 5 second interval and 1 second skip
         video_path = create_test_video(0.5)
 
-        result = SpriteGenerator.generate_from_path(video_path, interval: 5, skip_start: 1)
+        result = SpriteGenerator.generate_from_path(video_path, frame_count: 5, skip_start: 1)
 
         # Should fail due to video being too short
         assert {:error, _reason} = result
@@ -175,7 +176,7 @@ defmodule Mydia.Library.SpriteGeneratorTest do
       else
         video_path = create_test_video(15)
 
-        case SpriteGenerator.generate_from_path(video_path, interval: 5) do
+        case SpriteGenerator.generate_from_path(video_path, frame_count: 5, columns: 5) do
           {:ok, result} ->
             vtt_path = GeneratedMedia.get_path(:vtt, result.vtt_checksum)
             {:ok, vtt_content} = File.read(vtt_path)

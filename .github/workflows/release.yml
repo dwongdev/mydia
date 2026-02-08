@@ -681,13 +681,12 @@ jobs:
         working-directory: ${{ env.PLAYER_PATH }}
         run: flutter build windows --release
 
-      - name: Install Inno Setup
-        if: steps.check_windows.outputs.enabled == 'true'
-        uses: Minionguyjpro/Inno-Setup-Action@v1.2.4
-
       - name: Build installer
         if: steps.check_windows.outputs.enabled == 'true'
-        run: iscc player/windows/installer.iss /DMyAppVersion=${{ needs.prepare.outputs.version }}
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.4
+        with:
+          path: player/windows/installer.iss
+          options: /DMyAppVersion=${{ needs.prepare.outputs.version }}
 
       - name: Upload artifact
         if: steps.check_windows.outputs.enabled == 'true'

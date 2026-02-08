@@ -115,5 +115,4 @@ defmodule MetadataRelay.Application do
       []
     end
   end
-
 end

@@ -1,6 +1,8 @@
 defmodule MetadataRelay.PairingTest do
   use ExUnit.Case, async: false
 
+  @moduletag :capture_log
+
   alias MetadataRelay.Pairing
 
   setup do
@@ -74,7 +76,7 @@ defmodule MetadataRelay.PairingTest do
     end
 
     test "normalizes code (strips dashes and spaces)" do
-      {:ok, claim} = Pairing.create_claim(@valid_node_addr, code: "ABCDEF")
+      {:ok, _claim} = Pairing.create_claim(@valid_node_addr, code: "ABCDEF")
 
       # Should work with dashes
       assert {:ok, _} = Pairing.get_claim("ABC-DEF")

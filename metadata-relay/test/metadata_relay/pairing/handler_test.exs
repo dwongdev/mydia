@@ -1,6 +1,8 @@
 defmodule MetadataRelay.Pairing.HandlerTest do
   use ExUnit.Case, async: false
 
+  @moduletag :capture_log
+
   alias MetadataRelay.Router
   alias MetadataRelay.Pairing
 
@@ -115,7 +117,7 @@ defmodule MetadataRelay.Pairing.HandlerTest do
     end
 
     test "normalizes code (case insensitive)" do
-      {:ok, claim} = Pairing.create_claim(@valid_node_addr, code: "ABCDEF")
+      {:ok, _claim} = Pairing.create_claim(@valid_node_addr, code: "ABCDEF")
 
       conn =
         Plug.Test.conn(:get, "/pairing/claim/abcdef")

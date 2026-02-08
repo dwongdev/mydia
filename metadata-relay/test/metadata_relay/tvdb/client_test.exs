@@ -6,6 +6,7 @@ defmodule MetadataRelay.TVDB.ClientTest do
   alias MetadataRelay.Test.TVDBHelpers
 
   @moduletag :tvdb
+  @moduletag :capture_log
 
   setup do
     # Set a test API key to avoid the missing key error

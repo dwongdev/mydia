@@ -522,6 +522,35 @@ jobs:
         working-directory: ${{ env.PLAYER_PATH }}
         run: flutter build macos --release
 
+      - name: Install signing certificate
+        if: steps.check_macos.outputs.enabled == 'true' && env.MACOS_CERTIFICATE != ''
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+        run: |
+          CERT_PATH=$RUNNER_TEMP/certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          echo -n "${{ secrets.MACOS_CERTIFICATE }}" | base64 --decode -o $CERT_PATH
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security import $CERT_PATH -P "${{ secrets.MACOS_CERTIFICATE_PASSWORD }}" \
+            -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+      - name: Sign app bundle
+        if: steps.check_macos.outputs.enabled == 'true' && env.MACOS_CERTIFICATE != ''
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+        run: |
+          codesign --deep --force --options runtime \
+            --sign "${{ secrets.MACOS_SIGNING_IDENTITY }}" \
+            ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/Mydia.app
+
       - name: Create DMG
         if: steps.check_macos.outputs.enabled == 'true'
         working-directory: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release
@@ -538,13 +567,68 @@ jobs:
 
           rm -rf dmg_contents
 
-      - name: Upload artifact
+      - name: Download Sparkle tools
+        if: steps.check_macos.outputs.enabled == 'true'
+        run: |
+          curl -L https://github.com/sparkle-project/Sparkle/releases/download/2.8.1/Sparkle-2.8.1.tar.xz -o sparkle.tar.xz
+          mkdir -p sparkle-tools
+          tar xf sparkle.tar.xz -C sparkle-tools
+
+      - name: Generate appcast
+        if: steps.check_macos.outputs.enabled == 'true' && env.SPARKLE_EDDSA_KEY != ''
+        env:
+          SPARKLE_EDDSA_KEY: ${{ secrets.SPARKLE_EDDSA_KEY }}
+        working-directory: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          DMG_FILE="Mydia.dmg"
+          DMG_URL="https://github.com/getmydia/mydia/releases/download/v${VERSION}/player-macos-v${VERSION}.dmg"
+
+          # Sign the DMG and get the EdDSA signature
+          SIGNATURE=$(echo "$SPARKLE_EDDSA_KEY" | $GITHUB_WORKSPACE/sparkle-tools/bin/sign_update "$DMG_FILE" --ed-key-file -)
+          FILE_SIZE=$(stat -f%z "$DMG_FILE")
+
+          # Generate appcast.xml
+          cat > appcast.xml << EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <channel>
+              <title>Mydia Player</title>
+              <item>
+                <title>Version ${VERSION}</title>
+                <sparkle:version>${VERSION}</sparkle:version>
+                <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+                <pubDate>$(date -R)</pubDate>
+                <enclosure url="${DMG_URL}"
+                           sparkle:edSignature="${SIGNATURE}"
+                           length="${FILE_SIZE}"
+                           type="application/octet-stream" />
+              </item>
+            </channel>
+          </rss>
+          EOF
+
+      - name: Upload DMG artifact
         if: steps.check_macos.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: player-macos-dmg
           path: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/Mydia.dmg
           retention-days: 30
+
+      - name: Upload appcast artifact
+        if: steps.check_macos.outputs.enabled == 'true' && env.SPARKLE_EDDSA_KEY != ''
+        env:
+          SPARKLE_EDDSA_KEY: ${{ secrets.SPARKLE_EDDSA_KEY }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: player-macos-appcast
+          path: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/appcast.xml
+          retention-days: 30
+
+      - name: Cleanup keychain
+        if: always()
+        run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
 
   player-windows:
     name: Player / Windows
@@ -597,12 +681,20 @@ jobs:
         working-directory: ${{ env.PLAYER_PATH }}
         run: flutter build windows --release
 
+      - name: Install Inno Setup
+        if: steps.check_windows.outputs.enabled == 'true'
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.4
+
+      - name: Build installer
+        if: steps.check_windows.outputs.enabled == 'true'
+        run: iscc player/windows/installer.iss /DMyAppVersion=${{ needs.prepare.outputs.version }}
+
       - name: Upload artifact
         if: steps.check_windows.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: player-windows-exe
-          path: ${{ env.PLAYER_PATH }}/build/windows/x64/runner/Release
+          name: player-windows-installer
+          path: ${{ env.PLAYER_PATH }}/build/installer/player-windows-v${{ needs.prepare.outputs.version }}.exe
           retention-days: 30
 
   player-linux:
@@ -716,11 +808,15 @@ jobs:
           [ -d "player-macos-dmg" ] && \
             mv player-macos-dmg/Mydia.dmg player-macos-v${{ needs.prepare.outputs.version }}.dmg || true
 
-          [ -d "player-windows-exe" ] && \
-            cd player-windows-exe && zip -r ../player-windows-v${{ needs.prepare.outputs.version }}.zip . && cd .. || true
+          [ -d "player-windows-installer" ] && \
+            mv player-windows-installer/player-windows-v${{ needs.prepare.outputs.version }}.exe . || true
 
           [ -d "player-linux-bundle" ] && \
+            chmod +x player-linux-bundle/mydia && \
             tar -czf player-linux-v${{ needs.prepare.outputs.version }}.tar.gz -C player-linux-bundle . || true
+
+          [ -d "player-macos-appcast" ] && \
+            mv player-macos-appcast/appcast.xml . || true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -750,7 +846,7 @@ jobs:
             | **Android** | APK for direct installation |
             | **iOS** | Available on TestFlight (if configured) |
             | **macOS** | DMG disk image |
-            | **Windows** | Executable in zip archive |
+            | **Windows** | Installer (.exe) |
             | **Linux** | Bundle in tar.gz archive |
             | **Web** | Integrated at `/player` on your Mydia server |
 
@@ -759,7 +855,8 @@ jobs:
           files: |
             artifacts/player-android-*.apk
             artifacts/player-macos-*.dmg
-            artifacts/player-windows-*.zip
+            artifacts/player-windows-*.exe
             artifacts/player-linux-*.tar.gz
+            artifacts/appcast.xml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

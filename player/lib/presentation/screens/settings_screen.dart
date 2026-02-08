@@ -1,9 +1,15 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/connection/connection_diagnostics_provider.dart';
 import '../../core/connection/connection_provider.dart';
 import '../../core/graphql/graphql_provider.dart';
+import '../../core/update/update_provider.dart';
+import '../../core/update/updaters/macos_updater.dart';
+import '../widgets/update_tile.dart';
 import 'settings/settings_controller.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -106,13 +112,18 @@ class SettingsScreen extends ConsumerWidget {
             const _ConnectionDiagnosticsTile(),
             const Divider(),
 
+            // Updates section (desktop only)
+            if (!kIsWeb) ...[
+              const _SectionHeader(title: 'Updates'),
+              // On macOS, Sparkle manages update notifications natively
+              if (!Platform.isMacOS) const UpdateTile(),
+              const _CheckForUpdatesTile(),
+              const Divider(),
+            ],
+
             // About section
             const _SectionHeader(title: 'About'),
-            const ListTile(
-              leading: Icon(Icons.copyright),
-              title: Text('Mydia Player'),
-              subtitle: Text('Media streaming client'),
-            ),
+            const _VersionTile(),
           ],
         ),
       ),
@@ -208,6 +219,60 @@ class _ConnectionDiagnosticsTileState
           subtitle: Text(subtitle),
         ),
       ],
+    );
+  }
+}
+
+/// Tile showing the current app version.
+class _VersionTile extends ConsumerWidget {
+  const _VersionTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final updateState = ref.watch(updateProvider);
+    final version = updateState.currentVersion;
+
+    return ListTile(
+      leading: const Icon(Icons.info_outline),
+      title: const Text('Mydia Player'),
+      subtitle: Text(version.isNotEmpty ? 'Version $version' : 'Media streaming client'),
+    );
+  }
+}
+
+/// Manual "Check for Updates" tile.
+class _CheckForUpdatesTile extends ConsumerWidget {
+  const _CheckForUpdatesTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // On macOS, Sparkle manages its own UI — just trigger it directly
+    if (!kIsWeb && Platform.isMacOS) {
+      return ListTile(
+        leading: const Icon(Icons.refresh),
+        title: const Text('Check for Updates'),
+        subtitle: const Text('Opens Sparkle update dialog'),
+        onTap: () => MacOSUpdater.checkForUpdates(),
+      );
+    }
+
+    final updateState = ref.watch(updateProvider);
+
+    return ListTile(
+      leading: updateState.isChecking
+          ? const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.refresh),
+      title: const Text('Check for Updates'),
+      subtitle: updateState.availableUpdate != null
+          ? Text('v${updateState.availableUpdate!.version} available')
+          : const Text('You\'re up to date'),
+      onTap: updateState.isChecking
+          ? null
+          : () => ref.read(updateProvider.notifier).checkForUpdate(),
     );
   }
 }

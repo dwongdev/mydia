@@ -43,16 +43,20 @@ spec:
             - redis-server
             - --appendonly
             - "yes"
+            - --maxmemory
+            - "384mb"
+            - --maxmemory-policy
+            - allkeys-lru
           volumeMounts:
             - name: data
               mountPath: /data
           resources:
             requests:
-              memory: "64Mi"
+              memory: "256Mi"
               cpu: "50m"
             limits:
-              memory: "128Mi"
-              cpu: "100m"
+              memory: "512Mi"
+              cpu: "200m"
           livenessProbe:
             exec:
               command:

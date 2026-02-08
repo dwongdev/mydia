@@ -66,8 +66,8 @@ defmodule Mydia.Streaming do
       # Fetch Media Info - use non-raising query to handle deleted files gracefully
       media_file = Library.get_media_file(media_file_id, preload: [:media_item, :episode])
 
-      # Return nil if media file doesn't exist (will be filtered out below)
-      if media_file do
+      # Return nil if media file or media_item doesn't exist (will be filtered out below)
+      if media_file && media_file.media_item do
         # Derive title/type
         {title, type, episode_info} =
           case media_file do

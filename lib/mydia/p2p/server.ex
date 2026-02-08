@@ -10,6 +10,7 @@ defmodule Mydia.P2p.Server do
 
   alias Mydia.P2p
   alias Mydia.RemoteAccess.Pairing
+  alias Mydia.Streaming.HlsSession
   alias MydiaWeb.Schema.Middleware.Logging, as: GraphQLLogging
 
   @doc """
@@ -384,18 +385,26 @@ defmodule Mydia.P2p.Server do
       {:ok, _user} ->
         # Look up the session by session_id
         case lookup_hls_session(req.session_id) do
-          {:ok, session_info} ->
-            # Build the file path
-            file_path = Path.join(session_info.temp_dir, req.path)
-
-            # Security check: ensure path is within temp_dir
-            case validate_path(file_path, session_info.temp_dir) do
+          {:ok, pid, session_info} ->
+            # Wait for the session to be ready (FFmpeg has created initial files)
+            case HlsSession.await_ready(pid, 30_000) do
               :ok ->
-                stream_hls_file(resource, stream_id, file_path, req)
+                # Build the file path
+                file_path = Path.join(session_info.temp_dir, req.path)
 
-              {:error, reason} ->
-                Logger.warning("HLS path validation failed: #{inspect(reason)}")
-                send_hls_error(resource, stream_id, 403, "Forbidden")
+                # Security check: ensure path is within temp_dir
+                case validate_path(file_path, session_info.temp_dir) do
+                  :ok ->
+                    stream_hls_file(resource, stream_id, file_path, req)
+
+                  {:error, reason} ->
+                    Logger.warning("HLS path validation failed: #{inspect(reason)}")
+                    send_hls_error(resource, stream_id, 403, "Forbidden")
+                end
+
+              {:error, :timeout} ->
+                Logger.warning("HLS session #{req.session_id} not ready after timeout")
+                send_hls_error(resource, stream_id, 503, "Transcoding not ready")
             end
 
           {:error, :not_found} ->
@@ -417,17 +426,10 @@ defmodule Mydia.P2p.Server do
 
   defp lookup_hls_session(session_id) do
     case Registry.lookup(Mydia.Streaming.HlsSessionRegistry, {:session, session_id}) do
-      [{_pid, info}] ->
+      [{pid, info}] ->
         # Trigger heartbeat to keep session alive
-        case Registry.lookup(Mydia.Streaming.HlsSessionRegistry, {:session, session_id}) do
-          [{pid, _}] when is_pid(pid) ->
-            Mydia.Streaming.HlsSession.heartbeat(pid)
-
-          _ ->
-            :ok
-        end
-
-        {:ok, info}
+        HlsSession.heartbeat(pid)
+        {:ok, pid, info}
 
       [] ->
         {:error, :not_found}
@@ -446,12 +448,8 @@ defmodule Mydia.P2p.Server do
     end
   end
 
-  # Max wait time for HLS files to appear (e.g. FFmpeg hasn't created them yet)
-  @hls_file_wait_max_ms 5_000
-  @hls_file_wait_interval_ms 200
-
   defp stream_hls_file(resource, stream_id, file_path, req) do
-    case wait_for_hls_file(file_path) do
+    case File.stat(file_path) do
       {:ok, %File.Stat{size: file_size}} ->
         # Determine content type
         content_type = hls_content_type(file_path)
@@ -477,33 +475,12 @@ defmodule Mydia.P2p.Server do
         end
 
       {:error, :enoent} ->
-        Logger.debug("HLS file not found after waiting: #{file_path}")
+        Logger.debug("HLS file not found: #{file_path}")
         send_hls_error(resource, stream_id, 404, "Not found")
 
       {:error, reason} ->
         Logger.warning("HLS file error: #{inspect(reason)}")
         send_hls_error(resource, stream_id, 500, "Internal error")
-    end
-  end
-
-  # Waits for an HLS file to appear on disk, polling at intervals.
-  # This handles the race between the client requesting HLS content
-  # and FFmpeg creating the initial playlist/segments.
-  defp wait_for_hls_file(file_path) do
-    wait_for_hls_file(file_path, 0)
-  end
-
-  defp wait_for_hls_file(file_path, elapsed) do
-    case File.stat(file_path) do
-      {:ok, stat} ->
-        {:ok, stat}
-
-      {:error, :enoent} when elapsed < @hls_file_wait_max_ms ->
-        Process.sleep(@hls_file_wait_interval_ms)
-        wait_for_hls_file(file_path, elapsed + @hls_file_wait_interval_ms)
-
-      error ->
-        error
     end
   end
 

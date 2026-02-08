@@ -446,8 +446,12 @@ defmodule Mydia.P2p.Server do
     end
   end
 
+  # Max wait time for HLS files to appear (e.g. FFmpeg hasn't created them yet)
+  @hls_file_wait_max_ms 5_000
+  @hls_file_wait_interval_ms 200
+
   defp stream_hls_file(resource, stream_id, file_path, req) do
-    case File.stat(file_path) do
+    case wait_for_hls_file(file_path) do
       {:ok, %File.Stat{size: file_size}} ->
         # Determine content type
         content_type = hls_content_type(file_path)
@@ -473,12 +477,33 @@ defmodule Mydia.P2p.Server do
         end
 
       {:error, :enoent} ->
-        Logger.debug("HLS file not found: #{file_path}")
+        Logger.debug("HLS file not found after waiting: #{file_path}")
         send_hls_error(resource, stream_id, 404, "Not found")
 
       {:error, reason} ->
         Logger.warning("HLS file error: #{inspect(reason)}")
         send_hls_error(resource, stream_id, 500, "Internal error")
+    end
+  end
+
+  # Waits for an HLS file to appear on disk, polling at intervals.
+  # This handles the race between the client requesting HLS content
+  # and FFmpeg creating the initial playlist/segments.
+  defp wait_for_hls_file(file_path) do
+    wait_for_hls_file(file_path, 0)
+  end
+
+  defp wait_for_hls_file(file_path, elapsed) do
+    case File.stat(file_path) do
+      {:ok, stat} ->
+        {:ok, stat}
+
+      {:error, :enoent} when elapsed < @hls_file_wait_max_ms ->
+        Process.sleep(@hls_file_wait_interval_ms)
+        wait_for_hls_file(file_path, elapsed + @hls_file_wait_interval_ms)
+
+      error ->
+        error
     end
   end
 
@@ -600,6 +625,8 @@ defmodule Mydia.P2p.Server do
 
   defp send_hls_error(resource, stream_id, status, message) do
     # Send error as header-only response
+    # Wrapped in try/rescue because the P2P stream may already be closed
+    # (e.g. peer disconnected), causing NIF calls to raise ArgumentError
     header = %P2p.HlsResponseHeader{
       status: status,
       content_type: "text/plain",
@@ -608,12 +635,18 @@ defmodule Mydia.P2p.Server do
       cache_control: nil
     }
 
-    case P2p.send_hls_header(resource, stream_id, header) do
-      "ok" ->
-        P2p.send_hls_chunk(resource, stream_id, message)
-        P2p.finish_hls_stream(resource, stream_id)
+    try do
+      case P2p.send_hls_header(resource, stream_id, header) do
+        "ok" ->
+          P2p.send_hls_chunk(resource, stream_id, message)
+          P2p.finish_hls_stream(resource, stream_id)
 
-      _ ->
+        _ ->
+          :ok
+      end
+    rescue
+      e ->
+        Logger.debug("Failed to send HLS error response: #{inspect(e)}")
         :ok
     end
   end

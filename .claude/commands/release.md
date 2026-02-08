@@ -21,8 +21,8 @@ Create a new release by:
    - Use **major (X.0.0)** ONLY if explicitly instructed with `$ARGUMENTS` containing "major"
    - Use **beta** to create a pre-release version with `-beta.N` suffix (e.g., v1.2.3-beta.1)
    - Use **rc** to create a release candidate with `-rc.N` suffix (e.g., v1.2.3-rc.1)
-   - Current version is in mix.exs on line 7
-   - Parse current version, increment appropriately
+   - Current version is derived from the latest git tag (mix.exs reads BUILD_VERSION at compile time)
+   - Parse the latest tag version, increment appropriately
 
 3. **Categorize changes** for release notes:
 
@@ -32,25 +32,17 @@ Create a new release by:
    - 🚀 **Deployment Notes** - Important deployment-related changes (migrations, config changes)
    - Skip empty sections
 
-4. **Update version in mix.exs**
+4. **Create release tag**
 
-   - Read the file, update line 7: `version: "X.Y.Z",` (or `version: "X.Y.Z-beta.N",` for pre-releases)
-   - Use the Edit tool to make the change
-   - **For beta/rc releases**: Do NOT update mix.exs, keep the base version
-
-5. **Create release commit and tag**
-
+   - Version is set automatically from the git tag via `BUILD_VERSION` in CI — no need to update mix.exs
    - **For stable releases**:
-     - Stage mix.exs: `git add mix.exs`
-     - Commit: `git commit -m "chore: bump version to vX.Y.Z"`
      - Tag: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
      - Push: `git push && git push --tags`
    - **For beta/rc releases**:
-     - DO NOT commit or update mix.exs
      - Tag: `git tag -a vX.Y.Z-beta.N -m "Release vX.Y.Z-beta.N"`
      - Push: `git push --tags`
 
-6. **Create GitHub release with gh CLI**
+5. **Create GitHub release with gh CLI**
    - Generate release notes with sections identified above
    - Keep it concise - short bullet points (one line each)
    - Add link to full changelog: `**Full Changelog**: https://github.com/OWNER/REPO/compare/vOLD...vNEW`
@@ -60,12 +52,11 @@ Create a new release by:
 ## Important Notes
 
 - Always verify you're on the correct branch (usually main/master)
-- Ensure working directory is clean before starting (except for beta/rc releases)
+- Ensure working directory is clean before starting
 - If $1 is provided (major/minor/patch/beta/rc), use that instead of auto-detection
 - Be conservative: when in doubt, use patch version
 - **Beta/RC releases**: These are for testing unreleased versions without affecting stable production
   - Docker images are tagged with 'beta' (not 'latest')
-  - Mix.exs version is NOT updated (keeps base version)
   - No commit is made, only a Git tag
   - GitHub release is marked as pre-release
   - To create beta.N, find existing beta tags and increment N (e.g., if v1.2.3-beta.1 exists, create v1.2.3-beta.2)

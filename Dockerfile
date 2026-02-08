@@ -97,6 +97,10 @@ COPY native ./native
 # Copy Flutter build output from flutter-builder stage
 COPY --from=flutter-builder /app/player/build/web ./priv/static/player
 
+# Application version: set by CI from the git tag, defaults to "dev" for local builds
+ARG BUILD_VERSION=""
+ENV BUILD_VERSION=${BUILD_VERSION}
+
 # Compile application (includes building Rust NIFs via Rustler)
 # Cache cargo for Rust NIF compilation
 RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \

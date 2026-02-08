@@ -4,7 +4,7 @@ defmodule Mydia.MixProject do
   def project do
     [
       app: :mydia,
-      version: "0.7.4",
+      version: version(),
       elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -34,6 +34,14 @@ defmodule Mydia.MixProject do
     [
       preferred_envs: [precommit: :test]
     ]
+  end
+
+  defp version do
+    case System.get_env("BUILD_VERSION") do
+      nil -> "0.0.0-dev"
+      "" -> "0.0.0-dev"
+      v -> v
+    end
   end
 
   # Specifies which paths to compile per environment.

@@ -118,7 +118,9 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: DATABASE_TYPE=sqlite
+          build-args: |
+            DATABASE_TYPE=sqlite
+            BUILD_VERSION=${{ needs.prepare.outputs.version }}
           tags: ${{ needs.prepare.outputs.is_prerelease == 'true' && steps.meta_beta.outputs.tags || steps.meta.outputs.tags }}
           labels: ${{ needs.prepare.outputs.is_prerelease == 'true' && steps.meta_beta.outputs.labels || steps.meta.outputs.labels }}
           cache-from: |
@@ -192,7 +194,9 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: DATABASE_TYPE=postgres
+          build-args: |
+            DATABASE_TYPE=postgres
+            BUILD_VERSION=${{ needs.prepare.outputs.version }}
           tags: ${{ needs.prepare.outputs.is_prerelease == 'true' && steps.meta_pg_beta.outputs.tags || steps.meta_pg.outputs.tags }}
           labels: ${{ needs.prepare.outputs.is_prerelease == 'true' && steps.meta_pg_beta.outputs.labels || steps.meta_pg.outputs.labels }}
           cache-from: |

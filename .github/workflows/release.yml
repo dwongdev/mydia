@@ -551,6 +551,27 @@ jobs:
             --sign "${{ secrets.MACOS_SIGNING_IDENTITY }}" \
             ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/Mydia.app
 
+      - name: Notarize app bundle
+        if: steps.check_macos.outputs.enabled == 'true' && env.MACOS_CERTIFICATE != ''
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+        working-directory: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release
+        run: |
+          ditto -c -k --keepParent Mydia.app Mydia.zip
+          xcrun notarytool submit Mydia.zip \
+            --apple-id "${{ secrets.APPLE_ID }}" \
+            --password "${{ secrets.APPLE_APP_PASSWORD }}" \
+            --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+            --wait
+          rm Mydia.zip
+
+      - name: Staple notarization ticket
+        if: steps.check_macos.outputs.enabled == 'true' && env.MACOS_CERTIFICATE != ''
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+        run: |
+          xcrun stapler staple ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/Mydia.app
+
       - name: Create DMG
         if: steps.check_macos.outputs.enabled == 'true'
         working-directory: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release

@@ -238,7 +238,7 @@ defmodule Mydia.Library.PreviewGenerator do
       input_path,
       # Duration of segment
       "-t",
-      Float.to_string(duration),
+      to_string(duration * 1.0),
       # Video filters: scale, ensure even dimensions for H.264
       "-vf",
       "scale=#{width}:-2",

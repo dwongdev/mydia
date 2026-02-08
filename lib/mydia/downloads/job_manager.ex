@@ -242,8 +242,15 @@ defmodule Mydia.Downloads.JobManager do
 
           # Only try to stop if process is still alive
           if Process.alive?(job_info.pid) do
-            FfmpegMp4Transcoder.stop_transcoding(job_info.pid)
+            try do
+              FfmpegMp4Transcoder.stop_transcoding(job_info.pid)
+            catch
+              :exit, _ -> :ok
+            end
           end
+
+          # Clean up Registry entry
+          Registry.unregister(@registry_name, job_key)
 
           Logger.info("Job cancelled: #{media_file_id} @ #{resolution}")
 
@@ -329,8 +336,8 @@ defmodule Mydia.Downloads.JobManager do
           # Log completion/failure
           log_job_completion(job_info, reason)
 
-          # Registry will automatically clean up when the transcoder process dies
-          # No need to manually unregister
+          # Clean up Registry entry (registered to JobManager, not the transcoder)
+          Registry.unregister(@registry_name, job_key)
 
           # Remove from active jobs
           state = %{state | active_jobs: Map.delete(state.active_jobs, job_key)}
@@ -384,6 +391,10 @@ defmodule Mydia.Downloads.JobManager do
         # Start the transcoder
         case FfmpegMp4Transcoder.start_transcoding(opts) do
           {:ok, pid} ->
+            # Unlink from the transcoder process - we use Process.monitor instead
+            # to avoid crashing the JobManager when a transcoder exits abnormally
+            Process.unlink(pid)
+
             # Register in the registry
             case Registry.register(@registry_name, job_key, %{
                    media_file_id: media_file_id,

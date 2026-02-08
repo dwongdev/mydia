@@ -449,6 +449,17 @@ defmodule Mydia.P2p.Server do
   end
 
   defp stream_hls_file(resource, stream_id, file_path, req) do
+    try do
+      do_stream_hls_file(resource, stream_id, file_path, req)
+    rescue
+      e in ArgumentError ->
+        Logger.error("HLS stream failed for #{file_path}: #{Exception.message(e)}")
+
+        :ok
+    end
+  end
+
+  defp do_stream_hls_file(resource, stream_id, file_path, req) do
     case File.stat(file_path) do
       {:ok, %File.Stat{size: file_size}} ->
         # Determine content type

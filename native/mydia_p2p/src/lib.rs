@@ -43,7 +43,7 @@ fn start_host(relay_url: Option<String>, bind_port: Option<u16>, keypair_path: O
 }
 
 /// Dial a peer using their EndpointAddr JSON.
-#[rustler::nif]
+#[rustler::nif(schedule = "DirtyIo")]
 fn dial(resource: ResourceArc<HostResource>, endpoint_addr_json: String) -> Result<String, rustler::Error> {
     match resource.host.dial(endpoint_addr_json) {
         Ok(_) => Ok("ok".to_string()),
@@ -52,13 +52,13 @@ fn dial(resource: ResourceArc<HostResource>, endpoint_addr_json: String) -> Resu
 }
 
 /// Get this node's EndpointAddr as JSON for sharing.
-#[rustler::nif]
+#[rustler::nif(schedule = "DirtyIo")]
 fn get_node_addr(resource: ResourceArc<HostResource>) -> String {
     resource.host.get_node_addr()
 }
 
 /// Get network statistics.
-#[rustler::nif]
+#[rustler::nif(schedule = "DirtyIo")]
 fn get_network_stats(resource: ResourceArc<HostResource>) -> ElixirNetworkStats {
     let stats = resource.host.get_network_stats();
     ElixirNetworkStats {
@@ -168,7 +168,7 @@ enum ElixirResponse {
 }
 
 /// Send a response to an incoming request.
-#[rustler::nif]
+#[rustler::nif(schedule = "DirtyIo")]
 fn send_response(resource: ResourceArc<HostResource>, request_id: String, response: ElixirResponse) -> Result<String, rustler::Error> {
     let core_response = match response {
         ElixirResponse::Pairing(r) => MydiaResponse::Pairing(PairingResponse {
@@ -233,7 +233,8 @@ fn respond_with_file_chunk(resource: ResourceArc<HostResource>, request_id: Stri
 
 /// Send an HLS response header for a streaming request.
 /// Must be called before any send_hls_chunk calls.
-#[rustler::nif]
+/// Uses DirtyIo scheduler because blocking_send/blocking_recv block the thread.
+#[rustler::nif(schedule = "DirtyIo")]
 fn send_hls_header(resource: ResourceArc<HostResource>, stream_id: String, header: ElixirHlsResponseHeader) -> Result<String, rustler::Error> {
     let core_header = HlsResponseHeader {
         status: header.status,
@@ -251,7 +252,8 @@ fn send_hls_header(resource: ResourceArc<HostResource>, stream_id: String, heade
 
 /// Send a chunk of HLS data.
 /// Must be called after send_hls_header and before finish_hls_stream.
-#[rustler::nif]
+/// Uses DirtyIo scheduler because blocking_send/blocking_recv block the thread.
+#[rustler::nif(schedule = "DirtyIo")]
 fn send_hls_chunk(resource: ResourceArc<HostResource>, stream_id: String, data: Vec<u8>) -> Result<String, rustler::Error> {
     match resource.host.send_hls_chunk(stream_id, data) {
         Ok(_) => Ok("ok".to_string()),
@@ -261,7 +263,8 @@ fn send_hls_chunk(resource: ResourceArc<HostResource>, stream_id: String, data: 
 
 /// Finish an HLS stream.
 /// Must be called after all chunks have been sent.
-#[rustler::nif]
+/// Uses DirtyIo scheduler because blocking_send/blocking_recv block the thread.
+#[rustler::nif(schedule = "DirtyIo")]
 fn finish_hls_stream(resource: ResourceArc<HostResource>, stream_id: String) -> Result<String, rustler::Error> {
     match resource.host.finish_hls_stream(stream_id) {
         Ok(_) => Ok("ok".to_string()),

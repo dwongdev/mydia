@@ -51,9 +51,7 @@ services:
 
       # Flutter cache
       PUB_CACHE: /app/player/.pub-cache
-    ports:
-      - "4000:4000"      # Phoenix HTTP (TCP) + P2P QUIC (UDP) - same port, different protocols
-      - "4000:4000/udp"  # P2P QUIC (iroh) - enables direct connections via hole punching
+    network_mode: host
     volumes:
       # Mount source code for live reloading
       - .:/app

@@ -13,5 +13,6 @@ analyzer:
   exclude:
     - "**/*.g.dart"
     - "**/*.freezed.dart"
+    - "rust_builder/cargokit/**"
   errors:
     invalid_annotation_target: ignore

@@ -9,6 +9,9 @@ class SettingsService {
     aOptions: AndroidOptions(
       encryptedSharedPreferences: true,
     ),
+    mOptions: MacOsOptions(
+      accessibility: KeychainAccessibility.first_unlock,
+    ),
   );
 
   static const _defaultQualityKey = 'default_quality';

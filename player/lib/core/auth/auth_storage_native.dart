@@ -3,6 +3,7 @@
 /// This provides secure storage on iOS, Android, macOS, Windows, and Linux.
 library;
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'auth_storage.dart';
@@ -14,19 +15,25 @@ class _NativeAuthStorage implements AuthStorage {
     aOptions: AndroidOptions(
       encryptedSharedPreferences: true,
     ),
+    mOptions: MacOsOptions(
+      accessibility: KeychainAccessibility.first_unlock,
+    ),
   );
 
   static final Map<String, String> _memoryStorage = <String, String>{};
   static bool _fallbackToMemory = false;
 
-  Future<T> _withFallback<T>(Future<T> Function() operation, T Function() onFallback) async {
+  Future<T> _withFallback<T>(
+      Future<T> Function() operation, T Function() onFallback) async {
     if (_fallbackToMemory) {
       return onFallback();
     }
 
     try {
       return await operation();
-    } catch (_) {
+    } catch (e) {
+      debugPrint(
+          '[AuthStorage] Secure storage failed, falling back to memory: $e');
       _fallbackToMemory = true;
       return onFallback();
     }

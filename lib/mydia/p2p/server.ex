@@ -419,6 +419,10 @@ defmodule Mydia.P2p.Server do
           {:error, :timeout} ->
             Logger.warning("HLS session #{req.session_id} not ready after timeout")
             send_hls_error(resource, stream_id, 503, "Transcoding not ready")
+
+          {:error, {:session_exit, reason}} ->
+            Logger.warning("HLS session #{req.session_id} terminated: #{inspect(reason)}")
+            send_hls_error(resource, stream_id, 503, "Session terminated")
         end
 
       {:error, :not_found} ->
@@ -499,8 +503,10 @@ defmodule Mydia.P2p.Server do
     try do
       do_stream_hls_file(resource, stream_id, file_path, req)
     rescue
-      e in ArgumentError ->
-        Logger.error("HLS stream failed for #{file_path}: #{Exception.message(e)}")
+      e ->
+        Logger.error(
+          "HLS stream failed for #{file_path}: #{Exception.message(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}"
+        )
 
         :ok
     end

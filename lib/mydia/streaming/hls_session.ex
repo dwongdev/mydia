@@ -151,11 +151,12 @@ defmodule Mydia.Streaming.HlsSession do
   Returns `:ok` when ready, or `{:error, :timeout}` if the timeout is reached.
   Default timeout is 30 seconds.
   """
-  @spec await_ready(pid(), timeout()) :: :ok | {:error, :timeout}
+  @spec await_ready(pid(), timeout()) :: :ok | {:error, :timeout} | {:error, term()}
   def await_ready(pid, timeout \\ 30_000) do
     GenServer.call(pid, :await_ready, timeout)
   catch
     :exit, {:timeout, _} -> {:error, :timeout}
+    :exit, reason -> {:error, {:session_exit, reason}}
   end
 
   @doc """

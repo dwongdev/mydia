@@ -75,6 +75,7 @@ fn get_network_stats(resource: ResourceArc<HostResource>) -> ElixirNetworkStats 
         connected_peers: stats.connected_peers,
         relay_connected: stats.relay_connected,
         relay_url: stats.relay_url,
+        peer_connection_type: stats.peer_connection_type.as_str().to_string(),
     }
 }
 
@@ -85,6 +86,7 @@ struct ElixirNetworkStats {
     pub connected_peers: usize,
     pub relay_connected: bool,
     pub relay_url: Option<String>,
+    pub peer_connection_type: String,
 }
 
 #[derive(NifStruct)]
@@ -392,12 +394,29 @@ fn start_listening(
             while let Some(event) = rx.recv().await {
                 let mut msg_env = OwnedEnv::new();
                 let _ = msg_env.send_and_clear(&pid, |env| match event {
-                    Event::Connected(peer_id) => {
-                        (atoms::ok(), "peer_connected", peer_id).encode(env)
-                    }
+                    Event::Connected {
+                        peer_id,
+                        connection_type,
+                    } => (
+                        atoms::ok(),
+                        "peer_connected",
+                        peer_id,
+                        connection_type.as_str(),
+                    )
+                        .encode(env),
                     Event::Disconnected(peer_id) => {
                         (atoms::ok(), "peer_disconnected", peer_id).encode(env)
                     }
+                    Event::ConnectionTypeChanged {
+                        peer_id,
+                        connection_type,
+                    } => (
+                        atoms::ok(),
+                        "peer_connection_type_changed",
+                        peer_id,
+                        connection_type.as_str(),
+                    )
+                        .encode(env),
                     Event::RequestReceived {
                         peer: _,
                         request,

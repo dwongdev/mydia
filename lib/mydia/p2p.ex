@@ -137,12 +137,13 @@ defmodule Mydia.P2p.NetworkStats do
   @moduledoc """
   Network statistics from the p2p host.
   """
-  defstruct [:connected_peers, :relay_connected, :relay_url]
+  defstruct [:connected_peers, :relay_connected, :relay_url, :peer_connection_type]
 
   @type t :: %__MODULE__{
           connected_peers: non_neg_integer(),
           relay_connected: boolean(),
-          relay_url: String.t() | nil
+          relay_url: String.t() | nil,
+          peer_connection_type: String.t()
         }
 end
 

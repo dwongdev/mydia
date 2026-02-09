@@ -200,6 +200,12 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
                         do: "",
                         else: "s"} online
                     </span>
+                    <%= if @p2p_status.peer_connection_type do %>
+                      <span class="mx-1">·</span>
+                      <span class={connection_type_class(@p2p_status.peer_connection_type)}>
+                        {connection_type_label(@p2p_status.peer_connection_type)}
+                      </span>
+                    <% end %>
                   <% end %>
                 </div>
               </div>
@@ -1324,4 +1330,14 @@ defmodule MydiaWeb.AdminConfigLive.RemoteAccessComponent do
 
   defp display_relay_url(nil), do: "(connecting...)"
   defp display_relay_url(url), do: url
+
+  defp connection_type_label("direct"), do: "Direct"
+  defp connection_type_label("relay"), do: "Relay"
+  defp connection_type_label("mixed"), do: "Mixed"
+  defp connection_type_label(_), do: nil
+
+  defp connection_type_class("direct"), do: "text-success font-medium"
+  defp connection_type_class("relay"), do: "text-warning font-medium"
+  defp connection_type_class("mixed"), do: "text-info font-medium"
+  defp connection_type_class(_), do: ""
 end

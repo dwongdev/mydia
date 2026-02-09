@@ -23,7 +23,8 @@ defmodule Mydia.P2p.Server do
       :running,
       :connected_peers,
       :relay_connected,
-      :relay_url
+      :relay_url,
+      :peer_connection_type
     ]
 
     @type t :: %__MODULE__{
@@ -32,7 +33,8 @@ defmodule Mydia.P2p.Server do
             running: boolean(),
             connected_peers: non_neg_integer(),
             relay_connected: boolean(),
-            relay_url: String.t() | nil
+            relay_url: String.t() | nil,
+            peer_connection_type: String.t() | nil
           }
   end
 
@@ -89,8 +91,8 @@ defmodule Mydia.P2p.Server do
       node_id: node_id,
       node_addr: nil,
       relay_connected: false,
-      # Track connected peers (MapSet of peer IDs)
-      connected_peers: MapSet.new()
+      # Track connected peers (Map of peer_id => connection_type)
+      connected_peers: %{}
     }
 
     {:ok, state}
@@ -156,13 +158,20 @@ defmodule Mydia.P2p.Server do
     # Try to get relay_url from network_stats first, fallback to extracting from node_addr
     relay_url = network_stats.relay_url || extract_relay_url_from_node_addr(state.node_addr)
 
+    # Get connection type from network stats (computed from first connected peer)
+    peer_connection_type =
+      if network_stats.peer_connection_type != "none",
+        do: network_stats.peer_connection_type,
+        else: nil
+
     status = %Status{
       node_id: state.node_id,
       node_addr: state.node_addr,
       running: true,
-      connected_peers: MapSet.size(state.connected_peers),
+      connected_peers: map_size(state.connected_peers),
       relay_connected: network_stats.relay_connected,
-      relay_url: relay_url
+      relay_url: relay_url,
+      peer_connection_type: peer_connection_type
     }
 
     {:reply, status, state}
@@ -175,15 +184,21 @@ defmodule Mydia.P2p.Server do
 
   # Handle events from Rust NIF
 
-  def handle_info({:ok, "peer_connected", peer_id}, state) do
-    Logger.info("P2P Event: Peer Connected #{peer_id}")
-    state = %{state | connected_peers: MapSet.put(state.connected_peers, peer_id)}
+  def handle_info({:ok, "peer_connected", peer_id, connection_type}, state) do
+    Logger.info("P2P Event: Peer Connected #{peer_id} (#{connection_type})")
+    state = %{state | connected_peers: Map.put(state.connected_peers, peer_id, connection_type)}
+    {:noreply, state}
+  end
+
+  def handle_info({:ok, "peer_connection_type_changed", peer_id, connection_type}, state) do
+    Logger.info("P2P Event: Connection type changed for #{peer_id}: #{connection_type}")
+    state = %{state | connected_peers: Map.put(state.connected_peers, peer_id, connection_type)}
     {:noreply, state}
   end
 
   def handle_info({:ok, "peer_disconnected", peer_id}, state) do
     Logger.info("P2P Event: Peer Disconnected #{peer_id}")
-    state = %{state | connected_peers: MapSet.delete(state.connected_peers, peer_id)}
+    state = %{state | connected_peers: Map.delete(state.connected_peers, peer_id)}
     {:noreply, state}
   end
 
@@ -432,8 +447,6 @@ defmodule Mydia.P2p.Server do
   end
 
   defp handle_direct_stream(resource, stream_id, file_id, user, req) do
-    Logger.info("P2P Direct stream request for file_id=#{file_id}")
-
     try do
       media_file = Mydia.Library.get_media_file!(file_id, preload: [:library_path])
 
@@ -444,12 +457,19 @@ defmodule Mydia.P2p.Server do
 
         absolute_path ->
           if File.exists?(absolute_path) do
-            # Start a direct play session for tracking
+            # Start or reuse a direct play session for tracking
             case Mydia.Streaming.HlsSessionSupervisor.start_direct_session(
                    media_file.id,
                    user.id
                  ) do
-              {:ok, pid} ->
+              {:ok, pid, :started} ->
+                Logger.info(
+                  "P2P Direct Play started: file=#{file_id}, path=#{Path.basename(absolute_path)}"
+                )
+
+                Mydia.Streaming.DirectPlaySession.heartbeat(pid)
+
+              {:ok, pid, :existing} ->
                 Mydia.Streaming.DirectPlaySession.heartbeat(pid)
 
               _ ->
@@ -517,12 +537,15 @@ defmodule Mydia.P2p.Server do
       {:ok, %File.Stat{size: file_size}} ->
         # Determine content type
         content_type = hls_content_type(file_path)
+        basename = Path.basename(file_path)
 
         # Handle range requests
         case parse_range(req.range_start, req.range_end, file_size) do
           {:full, _} ->
             # Full file request
             send_full_hls_file(resource, stream_id, file_path, file_size, content_type)
+
+            Logger.info("P2P stream: path=#{basename}, bytes=#{file_size}/#{file_size}")
 
           {:partial, range_start, range_end, content_length} ->
             # Partial content (206)
@@ -535,6 +558,10 @@ defmodule Mydia.P2p.Server do
               range_end,
               content_length,
               content_type
+            )
+
+            Logger.info(
+              "P2P stream: path=#{basename}, range=#{range_start}-#{range_end}, bytes=#{content_length}/#{file_size}"
             )
         end
 

@@ -189,7 +189,10 @@ enum Command {
 /// Events emitted by the Host
 #[derive(Debug)]
 pub enum Event {
-    Connected(String),
+    Connected {
+        peer_id: String,
+        connection_type: PeerConnectionType,
+    },
     Disconnected(String),
     RequestReceived {
         peer: String,
@@ -201,6 +204,11 @@ pub enum Event {
         peer: String,
         request: HlsRequest,
         stream_id: String,
+    },
+    /// Connection type changed (e.g. relay -> direct after hole-punching)
+    ConnectionTypeChanged {
+        peer_id: String,
+        connection_type: PeerConnectionType,
     },
     RelayConnected,
     Ready {
@@ -251,7 +259,7 @@ pub enum PeerConnectionType {
 
 impl PeerConnectionType {
     /// Determine connection type from a Connection's paths
-    fn from_connection(conn: &Connection) -> Self {
+    pub fn from_connection(conn: &Connection) -> Self {
         let mut paths = conn.paths();
         let paths_list = paths.get();
         if paths_list.is_empty() {
@@ -264,6 +272,16 @@ impl PeerConnectionType {
             (true, false) => PeerConnectionType::Direct,
             (false, true) => PeerConnectionType::Relay,
             (false, false) => PeerConnectionType::None,
+        }
+    }
+
+    /// Return a string representation of the connection type
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PeerConnectionType::Direct => "direct",
+            PeerConnectionType::Relay => "relay",
+            PeerConnectionType::Mixed => "mixed",
+            PeerConnectionType::None => "none",
         }
     }
 }
@@ -717,17 +735,28 @@ async fn run_event_loop(
                 };
 
                 let peer_id = conn.remote_id().to_string();
-                tracing::info!("Peer connected: {}", peer_id);
+                let connection_type = PeerConnectionType::from_connection(&conn);
+                tracing::info!("Peer connected: {} ({:?})", peer_id, connection_type);
 
                 connected_peers.insert(peer_id.clone(), conn.clone());
-                let _ = event_tx.send(Event::Connected(peer_id.clone())).await;
+                let _ = event_tx.send(Event::Connected {
+                    peer_id: peer_id.clone(),
+                    connection_type,
+                }).await;
 
                 // Spawn a task to handle incoming streams from this peer
                 let event_tx_clone = event_tx.clone();
                 let peer_id_clone = peer_id.clone();
                 let shared_state_clone = shared_state.clone();
+                let conn_clone = conn.clone();
                 tokio::spawn(async move {
-                    handle_connection(conn, peer_id_clone, event_tx_clone, shared_state_clone).await;
+                    handle_connection(conn_clone, peer_id_clone, event_tx_clone, shared_state_clone).await;
+                });
+
+                // Monitor connection type changes (relay -> direct)
+                let monitor_tx = event_tx.clone();
+                tokio::spawn(async move {
+                    monitor_connection_type(conn, peer_id, monitor_tx).await;
                 });
             }
 
@@ -880,19 +909,68 @@ async fn handle_dial(
         .await
         .map_err(|e| format!("Failed to connect: {}", e))?;
 
-    tracing::info!("Connected to peer: {}", node_id);
+    let connection_type = PeerConnectionType::from_connection(&conn);
+    tracing::info!("Connected to peer: {} ({:?})", node_id, connection_type);
 
     connected_peers.insert(node_id.clone(), conn.clone());
-    let _ = event_tx.send(Event::Connected(node_id.clone())).await;
+    let _ = event_tx.send(Event::Connected {
+        peer_id: node_id.clone(),
+        connection_type,
+    }).await;
 
     // Spawn a task to handle incoming streams from this peer
     let event_tx_clone = event_tx.clone();
     let shared_state_clone = shared_state.clone();
+    let conn_clone = conn.clone();
+    let node_id_clone = node_id.clone();
     tokio::spawn(async move {
-        handle_connection(conn, node_id, event_tx_clone, shared_state_clone).await;
+        handle_connection(conn_clone, node_id_clone, event_tx_clone, shared_state_clone).await;
+    });
+
+    // Monitor connection type changes (relay -> direct)
+    let monitor_tx = event_tx.clone();
+    tokio::spawn(async move {
+        monitor_connection_type(conn, node_id, monitor_tx).await;
     });
 
     Ok(())
+}
+
+/// Monitor a peer connection for type changes (e.g. relay -> direct after hole-punching).
+/// Checks every 5 seconds for up to 2 minutes, then stops.
+async fn monitor_connection_type(
+    conn: Connection,
+    peer_id: String,
+    event_tx: mpsc::Sender<Event>,
+) {
+    let mut current_type = PeerConnectionType::from_connection(&conn);
+
+    // Check for connection type changes for up to 2 minutes
+    // (hole-punching typically completes within this window)
+    for _ in 0..24 {
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        let new_type = PeerConnectionType::from_connection(&conn);
+        if new_type != current_type {
+            tracing::info!(
+                "Connection type changed for {}: {:?} -> {:?}",
+                peer_id,
+                current_type,
+                new_type
+            );
+            let _ = event_tx
+                .send(Event::ConnectionTypeChanged {
+                    peer_id: peer_id.clone(),
+                    connection_type: new_type,
+                })
+                .await;
+            current_type = new_type;
+
+            // If we reached Direct, no need to keep monitoring
+            if new_type == PeerConnectionType::Direct {
+                break;
+            }
+        }
+    }
 }
 
 /// Handle incoming streams from a peer connection

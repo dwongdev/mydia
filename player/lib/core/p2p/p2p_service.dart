@@ -34,13 +34,15 @@ class P2pStatusNotifier extends Notifier<P2pStatus> {
 
     // Listen to status changes
     _subscription = service.onStatusChanged.listen((status) {
-      debugPrint('[P2pStatusNotifier] Received status update: peerConnectionType=${status.peerConnectionType}');
+      debugPrint(
+          '[P2pStatusNotifier] Received status update: peerConnectionType=${status.peerConnectionType}');
       state = status;
     });
 
     // Return initial state from service
     final initialStatus = service.status;
-    debugPrint('[P2pStatusNotifier] Initial status: peerConnectionType=${initialStatus.peerConnectionType}');
+    debugPrint(
+        '[P2pStatusNotifier] Initial status: peerConnectionType=${initialStatus.peerConnectionType}');
     return initialStatus;
   }
 
@@ -71,10 +73,13 @@ final p2pStatusNotifierProvider =
 enum P2pConnectionType {
   /// Direct peer-to-peer connection
   direct,
+
   /// Connection via relay server
   relay,
+
   /// Using both relay and direct paths
   mixed,
+
   /// No active connection
   none,
 }
@@ -179,7 +184,8 @@ class P2pService {
       FlutterConnectionType.mixed => P2pConnectionType.mixed,
       FlutterConnectionType.none => P2pConnectionType.none,
     };
-    debugPrint('[P2P] _getPeerConnectionType: ${stats.peerConnectionType} -> $result');
+    debugPrint(
+        '[P2P] _getPeerConnectionType: ${stats.peerConnectionType} -> $result');
     return result;
   }
 
@@ -246,7 +252,8 @@ class P2pService {
     _customRelayUrl = effectiveRelayUrl;
 
     try {
-      debugPrint('[P2P] Initializing iroh-based P2P Host with relay: ${effectiveRelayUrl ?? "(iroh defaults)"}');
+      debugPrint(
+          '[P2P] Initializing iroh-based P2P Host with relay: ${effectiveRelayUrl ?? "(iroh defaults)"}');
 
       // Initialize Host via FRB - returns (P2PHost, String)
       final (host, nodeId) = P2PHost.init(relayUrl: effectiveRelayUrl);
@@ -260,9 +267,21 @@ class P2pService {
         debugPrint('[P2P] Event: $event');
 
         if (event.startsWith('connected:')) {
-          final peerId = event.substring('connected:'.length);
+          // Format: "connected:<peer_id>:<connection_type>"
+          final parts = event.substring('connected:'.length).split(':');
+          final peerId = parts.first;
+          final connectionType = parts.length > 1 ? parts[1] : 'unknown';
+          debugPrint('[P2P] Peer connected: $peerId ($connectionType)');
           _connectedPeers.add(peerId);
           _peerConnectedController.add(peerId);
+          _emitStatus();
+        } else if (event.startsWith('connection_type_changed:')) {
+          final parts =
+              event.substring('connection_type_changed:'.length).split(':');
+          final peerId = parts.first;
+          final connectionType = parts.length > 1 ? parts[1] : 'unknown';
+          debugPrint(
+              '[P2P] Connection type changed: $peerId -> $connectionType');
           _emitStatus();
         } else if (event.startsWith('disconnected:')) {
           final peerId = event.substring('disconnected:'.length);
@@ -322,9 +341,8 @@ class P2pService {
   /// The peer can be specified as either a bare node ID or an EndpointAddr JSON.
   bool isConnectedToPeer(String peer) {
     // If it looks like JSON, extract the node ID
-    final nodeId = peer.startsWith('{')
-        ? _extractNodeIdFromEndpointAddr(peer)
-        : peer;
+    final nodeId =
+        peer.startsWith('{') ? _extractNodeIdFromEndpointAddr(peer) : peer;
     if (nodeId == null) return false;
     return _connectedPeers.contains(nodeId);
   }
@@ -381,7 +399,8 @@ class P2pService {
       deviceOs: kIsWeb ? 'web' : Platform.operatingSystem,
     );
 
-    final res = await _host!.sendPairingRequest(peer: normalized.nodeId, req: req);
+    final res =
+        await _host!.sendPairingRequest(peer: normalized.nodeId, req: req);
 
     if (res.success) {
       return {
@@ -428,7 +447,8 @@ class P2pService {
       authToken: authToken,
     );
 
-    final res = await _host!.sendGraphqlRequest(peer: normalized.nodeId, req: req);
+    final res =
+        await _host!.sendGraphqlRequest(peer: normalized.nodeId, req: req);
 
     // Parse the response
     if (res.errors != null) {
@@ -524,7 +544,8 @@ class P2pService {
       authToken: authToken,
     );
 
-    final res = await _host!.requestBlobDownload(peer: normalized.nodeId, req: req);
+    final res =
+        await _host!.requestBlobDownload(peer: normalized.nodeId, req: req);
 
     return {
       'success': res.success,
@@ -571,7 +592,8 @@ class P2pService {
       final type = progress['type'] as String?;
       switch (type) {
         case 'started':
-          debugPrint('[P2P] Download started, total size: ${progress["total_size"]} bytes');
+          debugPrint(
+              '[P2P] Download started, total size: ${progress["total_size"]} bytes');
         case 'progress':
           final downloaded = progress['downloaded'] as int;
           final total = progress['total'] as int;
@@ -603,7 +625,9 @@ class P2pService {
     String peer,
   ) async {
     final endpointAddrJson = peer.startsWith('{') ? peer : null;
-    final nodeId = endpointAddrJson != null ? _extractNodeIdFromEndpointAddr(endpointAddrJson) : peer;
+    final nodeId = endpointAddrJson != null
+        ? _extractNodeIdFromEndpointAddr(endpointAddrJson)
+        : peer;
 
     if (nodeId == null || nodeId.isEmpty) {
       throw Exception('Invalid peer address');
@@ -621,11 +645,13 @@ class P2pService {
     return (nodeId: nodeId, endpointAddrJson: null);
   }
 
-  Future<void> _waitForConnectedPeer(String nodeId, {Duration timeout = const Duration(seconds: 10)}) async {
+  Future<void> _waitForConnectedPeer(String nodeId,
+      {Duration timeout = const Duration(seconds: 10)}) async {
     final deadline = DateTime.now().add(timeout);
     while (!isConnectedToPeer(nodeId)) {
       if (DateTime.now().isAfter(deadline)) {
-        throw TimeoutException('Timed out waiting for peer connection: $nodeId');
+        throw TimeoutException(
+            'Timed out waiting for peer connection: $nodeId');
       }
       await Future.delayed(const Duration(milliseconds: 100));
     }

@@ -242,7 +242,7 @@ impl P2pHost {
                 log::info!("event_stream listening for events");
                 while let Some(event) = rx.recv().await {
                     let msg = match event {
-                        Event::Connected(peer_id) => format!("connected:{}", peer_id),
+                        Event::Connected { peer_id, connection_type } => format!("connected:{}:{}", peer_id, connection_type.as_str()),
                         Event::Disconnected(peer_id) => format!("disconnected:{}", peer_id),
                         Event::RelayConnected => "relay_connected".to_string(),
                         Event::Ready { node_addr } => format!("ready:{}", node_addr),
@@ -253,6 +253,9 @@ impl P2pHost {
                         Event::HlsStreamRequest { .. } => {
                             // Client doesn't handle incoming HLS requests
                             continue;
+                        }
+                        Event::ConnectionTypeChanged { peer_id, connection_type } => {
+                            format!("connection_type_changed:{}:{}", peer_id, connection_type.as_str())
                         }
                         Event::Log { .. } => {
                             // Logs are handled separately via android_logger/tracing

@@ -53,6 +53,7 @@ defmodule Mydia.Streaming.HlsSession do
       :media_file_id,
       :user_id,
       :mode,
+      :max_bitrate,
       :backend,
       :backend_pid,
       :temp_dir,
@@ -177,6 +178,7 @@ defmodule Mydia.Streaming.HlsSession do
     user_id = Keyword.fetch!(opts, :user_id)
     registry_key = Keyword.fetch!(opts, :registry_key)
     mode = Keyword.get(opts, :mode, :transcode)
+    max_bitrate = Keyword.get(opts, :max_bitrate)
 
     # Load media file with metadata
     try do
@@ -241,7 +243,7 @@ defmodule Mydia.Streaming.HlsSession do
           Logger.info("Starting HLS transcoding with FFmpeg backend")
 
           # Start FFmpeg backend
-          case start_backend(:ffmpeg, media_file, temp_dir, job.id) do
+          case start_backend(:ffmpeg, media_file, temp_dir, job.id, max_bitrate: max_bitrate) do
             {:ok, backend_pid} ->
               # Link to backend process so we terminate if it crashes
               Process.link(backend_pid)
@@ -252,6 +254,7 @@ defmodule Mydia.Streaming.HlsSession do
                 media_file_id: media_file_id,
                 user_id: user_id,
                 mode: mode,
+                max_bitrate: max_bitrate,
                 backend: :ffmpeg,
                 backend_pid: backend_pid,
                 temp_dir: temp_dir,
@@ -415,7 +418,7 @@ defmodule Mydia.Streaming.HlsSession do
   ## Private Functions
 
   # Start FFmpeg backend
-  defp start_backend(:ffmpeg, media_file, temp_dir, job_id) do
+  defp start_backend(:ffmpeg, media_file, temp_dir, job_id, opts) do
     # Resolve absolute path for FFmpeg input
     absolute_path = Mydia.Library.MediaFile.absolute_path(media_file)
     Logger.info("Starting FFmpeg backend for #{absolute_path}")
@@ -423,46 +426,50 @@ defmodule Mydia.Streaming.HlsSession do
     # Capture self() to notify when FFmpeg is ready
     session_pid = self()
 
-    case FfmpegHlsTranscoder.start_transcoding(
-           input_path: absolute_path,
-           output_dir: temp_dir,
-           media_file: media_file,
-           on_ready: fn ->
-             __MODULE__.notify_ready(session_pid)
-           end,
-           on_progress: fn progress ->
-             # Update DB job progress
-             # We spin up a separate task or just cast to self to avoid blocking the transcoder loop?
-             # Actually, FfmpegHlsTranscoder runs in its own process, so this callback runs in that process context.
-             # Updating Repo directly here is fine, but cleaner to cast to session if we want to centralize.
-             # But direct DB update is simpler for now.
-             if progress[:percentage] do
-               # Convert percentage 0-100 to float 0.0-1.0
-               normalized_progress = progress.percentage / 100.0
-               # Clamp to 0.99 for streaming (it's never fully "done" until stream ends)
-               normalized_progress = min(normalized_progress, 0.99)
+    # Build transcoder opts, including max_bitrate if set
+    base_opts =
+      [
+        input_path: absolute_path,
+        output_dir: temp_dir,
+        media_file: media_file
+      ] ++ if(opts[:max_bitrate], do: [max_bitrate: opts[:max_bitrate]], else: [])
 
-               # Fire and forget update to avoid bottleneck
-               Task.start(fn ->
-                 Mydia.Downloads.TranscodeJob
-                 |> Repo.get(job_id)
-                 |> case do
-                   nil ->
-                     :ok
+    transcoder_opts =
+      base_opts ++
+        [
+          on_ready: fn ->
+            __MODULE__.notify_ready(session_pid)
+          end,
+          on_progress: fn progress ->
+            if progress[:percentage] do
+              # Convert percentage 0-100 to float 0.0-1.0
+              normalized_progress = progress.percentage / 100.0
+              # Clamp to 0.99 for streaming (it's never fully "done" until stream ends)
+              normalized_progress = min(normalized_progress, 0.99)
 
-                   job ->
-                     Mydia.Downloads.update_job_progress(job, normalized_progress)
-                 end
-               end)
-             end
-           end,
-           on_complete: fn ->
-             Logger.info("FFmpeg transcoding completed for #{absolute_path}")
-           end,
-           on_error: fn error ->
-             Logger.error("FFmpeg transcoding error for #{absolute_path}: #{error}")
-           end
-         ) do
+              # Fire and forget update to avoid bottleneck
+              Task.start(fn ->
+                Mydia.Downloads.TranscodeJob
+                |> Repo.get(job_id)
+                |> case do
+                  nil ->
+                    :ok
+
+                  job ->
+                    Mydia.Downloads.update_job_progress(job, normalized_progress)
+                end
+              end)
+            end
+          end,
+          on_complete: fn ->
+            Logger.info("FFmpeg transcoding completed for #{absolute_path}")
+          end,
+          on_error: fn error ->
+            Logger.error("FFmpeg transcoding error for #{absolute_path}: #{error}")
+          end
+        ]
+
+    case FfmpegHlsTranscoder.start_transcoding(transcoder_opts) do
       {:ok, pid} ->
         {:ok, pid}
 
@@ -471,7 +478,7 @@ defmodule Mydia.Streaming.HlsSession do
     end
   end
 
-  defp start_backend(backend, _media_file, _temp_dir, _job_id) do
+  defp start_backend(backend, _media_file, _temp_dir, _job_id, _opts) do
     Logger.error("Unknown backend: #{backend}")
     {:error, :unknown_backend}
   end

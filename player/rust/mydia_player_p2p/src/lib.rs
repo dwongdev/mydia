@@ -458,7 +458,7 @@ impl P2pHost {
     /// - completed: {"type": "completed", "file_path": "<path>"}
     /// - failed: {"type": "failed", "error": "<message>"}
     ///
-    /// The ticket JSON should contain: hash, file_size, filename, file_path
+    /// The ticket JSON should contain: hash, file_size, filename, job_id
     pub async fn download_blob(
         &self,
         peer: String,
@@ -476,10 +476,10 @@ impl P2pHost {
 
         let file_size = ticket["file_size"].as_u64()
             .ok_or_else(|| anyhow::anyhow!("Ticket missing file_size"))?;
-        let file_path = ticket["file_path"].as_str()
-            .ok_or_else(|| anyhow::anyhow!("Ticket missing file_path"))?;
+        let job_id = ticket["job_id"].as_str()
+            .ok_or_else(|| anyhow::anyhow!("Ticket missing job_id"))?;
 
-        log::info!("Downloading blob: size={}, server_path={}", file_size, file_path);
+        log::info!("Downloading blob: size={}, job_id={}", file_size, job_id);
 
         // Send start progress
         let _ = sink.add(format!(r#"{{"type":"started","total_size":{}}}"#, file_size));
@@ -496,16 +496,17 @@ impl P2pHost {
         };
 
         // Download using HLS streaming with range requests
-        // We use the file_path as the "session_id" since the server will use it to locate the file
+        // We use "download:<job_id>" so the server routes to the transcode job handler
         const CHUNK_SIZE: u64 = 1024 * 1024; // 1MB chunks
         let mut downloaded: u64 = 0;
+        let session_id = format!("download:{}", job_id);
 
         while downloaded < file_size {
             let range_end = std::cmp::min(downloaded + CHUNK_SIZE - 1, file_size - 1);
 
             let core_req = HlsRequest {
-                session_id: "blob-download".to_string(),
-                path: file_path.to_string(),
+                session_id: session_id.clone(),
+                path: String::new(),
                 range_start: Some(downloaded),
                 range_end: Some(range_end),
                 auth_token: auth_token.clone(),

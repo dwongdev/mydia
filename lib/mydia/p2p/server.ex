@@ -290,7 +290,9 @@ defmodule Mydia.P2p.Server do
     variables = parse_graphql_variables(req.variables)
 
     # Build context from auth token, marking source as p2p
-    context = build_graphql_context(req.auth_token, :p2p)
+    # Include peer connection type so resolvers can enforce relay caps
+    peer_connection_type = infer_peer_connection_type(state.connected_peers)
+    context = build_graphql_context(req.auth_token, :p2p, peer_connection_type)
 
     # Execute the GraphQL query with logging
     result =
@@ -398,11 +400,17 @@ defmodule Mydia.P2p.Server do
     # Verify auth token
     case verify_hls_auth(req.auth_token) do
       {:ok, user} ->
-        if String.starts_with?(req.session_id, "direct:") do
-          file_id = String.replace_prefix(req.session_id, "direct:", "")
-          handle_direct_stream(resource, stream_id, file_id, user, req)
-        else
-          handle_hls_session_stream(resource, stream_id, req)
+        cond do
+          String.starts_with?(req.session_id, "direct:") ->
+            file_id = String.replace_prefix(req.session_id, "direct:", "")
+            handle_direct_stream(resource, stream_id, file_id, user, req)
+
+          String.starts_with?(req.session_id, "download:") ->
+            job_id = String.replace_prefix(req.session_id, "download:", "")
+            handle_download_stream(resource, stream_id, job_id, req)
+
+          true ->
+            handle_hls_session_stream(resource, stream_id, req)
         end
 
       {:error, _reason} ->
@@ -486,6 +494,21 @@ defmodule Mydia.P2p.Server do
       Ecto.NoResultsError ->
         Logger.warning("Direct stream: media file #{file_id} not found in database")
         send_hls_error(resource, stream_id, 404, "Media file not found")
+    end
+  end
+
+  defp handle_download_stream(resource, stream_id, job_id, req) do
+    case lookup_transcode_job(job_id) do
+      {:ok, job} ->
+        stream_hls_file(resource, stream_id, job.output_path, req)
+
+      {:error, :not_found} ->
+        Logger.warning("Download stream: job #{job_id} not found")
+        send_hls_error(resource, stream_id, 404, "Job not found")
+
+      {:error, :not_ready} ->
+        Logger.warning("Download stream: job #{job_id} not ready")
+        send_hls_error(resource, stream_id, 503, "Job not ready")
     end
   end
 
@@ -745,17 +768,33 @@ defmodule Mydia.P2p.Server do
     end
   end
 
-  defp build_graphql_context(nil, source), do: %{source: source}
+  defp build_graphql_context(nil, source, peer_connection_type),
+    do: %{source: source, peer_connection_type: peer_connection_type}
 
-  defp build_graphql_context(auth_token, source) when is_binary(auth_token) do
+  defp build_graphql_context(auth_token, source, peer_connection_type)
+       when is_binary(auth_token) do
     # Use Guardian to verify the token and get the user
     case Mydia.Auth.Guardian.verify_token(auth_token) do
       {:ok, user} ->
-        %{current_user: user, source: source}
+        %{current_user: user, source: source, peer_connection_type: peer_connection_type}
 
       {:error, _reason} ->
         Logger.debug("P2P GraphQL: Invalid auth token")
-        %{source: source}
+        %{source: source, peer_connection_type: peer_connection_type}
+    end
+  end
+
+  # Infer the peer connection type from connected peers map.
+  # Returns "relay", "direct", "mixed", or nil if no peers connected.
+  defp infer_peer_connection_type(connected_peers) when map_size(connected_peers) == 0, do: nil
+
+  defp infer_peer_connection_type(connected_peers) do
+    types = Map.values(connected_peers) |> Enum.uniq()
+
+    case types do
+      ["relay"] -> "relay"
+      ["direct"] -> "direct"
+      _ -> "mixed"
     end
   end
 
@@ -864,9 +903,11 @@ defmodule Mydia.P2p.Server do
     # Create the blob ticket using the NIF
     case P2p.create_blob_ticket(job.output_path, filename) do
       ticket when is_binary(ticket) ->
-        # Parse the ticket to get file_size
+        # Parse the ticket to add job_id and get file_size
         {:ok, ticket_data} = Jason.decode(ticket)
         file_size = Map.get(ticket_data, "file_size")
+        ticket_data = Map.put(ticket_data, "job_id", job.id)
+        ticket = Jason.encode!(ticket_data)
 
         response = %P2p.BlobDownloadResponse{
           success: true,

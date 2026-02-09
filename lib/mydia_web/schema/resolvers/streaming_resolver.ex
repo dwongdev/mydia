@@ -31,6 +31,15 @@ defmodule MydiaWeb.Schema.Resolvers.StreamingResolver do
             candidates = Candidates.build_streaming_candidates(media_file)
             metadata = Candidates.build_metadata_response(media_file)
 
+            # For relay connections, only allow TRANSCODE (direct play won't work
+            # within relay bandwidth limits)
+            candidates =
+              if context[:peer_connection_type] == "relay" do
+                Enum.filter(candidates, fn c -> c.strategy == "TRANSCODE" end)
+              else
+                candidates
+              end
+
             # Convert string strategies to atoms for the GraphQL enum
             candidates =
               Enum.map(candidates, fn candidate ->
@@ -62,6 +71,8 @@ defmodule MydiaWeb.Schema.Resolvers.StreamingResolver do
 
   Returns the session ID and media duration for the client to use.
   """
+  @relay_bitrate_cap 2000
+
   def start_streaming_session(_parent, args, %{context: context}) do
     %{file_id: file_id, strategy: strategy} = args
 
@@ -70,7 +81,19 @@ defmodule MydiaWeb.Schema.Resolvers.StreamingResolver do
         {:error, "Authentication required"}
 
       user ->
-        start_session_for_user(file_id, user.id, strategy)
+        # Determine effective max_bitrate:
+        # - For relay connections, cap at @relay_bitrate_cap regardless of request
+        # - For direct connections, use player-requested value (nil means CRF default)
+        max_bitrate =
+          case context[:peer_connection_type] do
+            "relay" ->
+              min(args[:max_bitrate] || @relay_bitrate_cap, @relay_bitrate_cap)
+
+            _ ->
+              args[:max_bitrate]
+          end
+
+        start_session_for_user(file_id, user.id, strategy, max_bitrate)
     end
   end
 
@@ -91,19 +114,24 @@ defmodule MydiaWeb.Schema.Resolvers.StreamingResolver do
 
   # Private functions
 
-  defp start_session_for_user(file_id, user_id, strategy) do
+  defp start_session_for_user(file_id, user_id, strategy, max_bitrate) do
     # Convert strategy to mode
     mode = strategy_to_mode(strategy)
 
+    # Build session opts
+    session_opts = if max_bitrate, do: [max_bitrate: max_bitrate], else: []
+
     # Load media file to get duration
     with {:ok, media_file} <- load_media_file(file_id),
-         {:ok, pid} <- HlsSessionSupervisor.start_session(media_file.id, user_id, mode),
+         {:ok, pid} <-
+           HlsSessionSupervisor.start_session(media_file.id, user_id, mode, session_opts),
          {:ok, info} <- HlsSession.get_info(pid) do
       # Extract duration from media file metadata
       duration = get_duration_from_metadata(media_file)
 
       Logger.info(
-        "Started streaming session #{info.session_id} for file #{file_id}, user #{user_id}"
+        "Started streaming session #{info.session_id} for file #{file_id}, user #{user_id}" <>
+          if(max_bitrate, do: " (max_bitrate: #{max_bitrate}kbps)", else: "")
       )
 
       {:ok,

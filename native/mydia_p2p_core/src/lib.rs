@@ -4,10 +4,13 @@
 //! NAT traversal and QUIC-based connections.
 
 use iroh::{
+    dns::DnsResolver,
     endpoint::{Connection, SendStream},
     Endpoint, EndpointAddr, EndpointId, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey,
     Watcher,
 };
+#[cfg(feature = "dns-over-https")]
+use iroh_relay::dns::DnsProtocol;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -614,6 +617,23 @@ struct SharedState {
     hls_streams: HashMap<String, SendStream>,
 }
 
+/// Create a DNS resolver, using DNS-over-HTTPS when the feature is enabled.
+/// This is needed on Android where raw UDP/TCP DNS sockets are blocked by SELinux.
+fn create_dns_resolver() -> DnsResolver {
+    #[cfg(feature = "dns-over-https")]
+    {
+        tracing::info!("Using DNS-over-HTTPS resolver");
+        DnsResolver::builder()
+            .with_nameserver("8.8.8.8:443".parse().unwrap(), DnsProtocol::Https)
+            .with_nameserver("1.1.1.1:443".parse().unwrap(), DnsProtocol::Https)
+            .build()
+    }
+    #[cfg(not(feature = "dns-over-https"))]
+    {
+        DnsResolver::default()
+    }
+}
+
 /// Main event loop that runs in a background thread
 async fn run_event_loop(
     secret_key: SecretKey,
@@ -627,7 +647,8 @@ async fn run_event_loop(
     // Build the endpoint
     let mut builder = Endpoint::builder()
         .secret_key(secret_key)
-        .alpns(vec![ALPN.to_vec()]);
+        .alpns(vec![ALPN.to_vec()])
+        .dns_resolver(create_dns_resolver());
 
     // Configure relay
     if let Some(relay_url) = &config.relay_url {

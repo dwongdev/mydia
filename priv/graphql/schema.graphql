@@ -101,7 +101,7 @@ type RootMutationType {
   revokeDevice(id: ID!): RevokeDeviceResult
 
   "Start an HLS streaming session for a media file"
-  startStreamingSession(fileId: ID!, strategy: StreamingStrategy!): StreamingSessionResult
+  startStreamingSession(fileId: ID!, strategy: StreamingStrategy!, maxBitrate: Int): StreamingSessionResult
 
   "End an HLS streaming session"
   endStreamingSession(sessionId: String!): Boolean

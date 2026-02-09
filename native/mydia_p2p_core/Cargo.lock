@@ -1935,6 +1935,7 @@ dependencies = [
  "futures",
  "iroh",
  "iroh-blobs",
+ "iroh-relay",
  "rand",
  "serde",
  "serde_cbor",

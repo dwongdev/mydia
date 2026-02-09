@@ -51,7 +51,7 @@ defmodule Mydia.Streaming.HlsSessionSupervisor do
     * `{:ok, pid}` - Session process
     * `{:error, reason}` - If session failed to start
   """
-  def start_session(media_file_id, user_id, mode \\ :transcode) do
+  def start_session(media_file_id, user_id, mode \\ :transcode, opts \\ []) do
     session_key = session_key(media_file_id, user_id)
 
     case Registry.lookup(@registry_name, session_key) do
@@ -61,18 +61,17 @@ defmodule Mydia.Streaming.HlsSessionSupervisor do
 
       [] ->
         # Start new session
+        session_opts =
+          [
+            media_file_id: media_file_id,
+            user_id: user_id,
+            registry_key: session_key,
+            mode: mode
+          ] ++ opts
+
         child_spec = %{
           id: HlsSession,
-          start:
-            {HlsSession, :start_link,
-             [
-               [
-                 media_file_id: media_file_id,
-                 user_id: user_id,
-                 registry_key: session_key,
-                 mode: mode
-               ]
-             ]},
+          start: {HlsSession, :start_link, [session_opts]},
           restart: :temporary
         }
 

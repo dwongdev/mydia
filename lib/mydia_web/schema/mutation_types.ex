@@ -122,6 +122,7 @@ defmodule MydiaWeb.Schema.MutationTypes do
     field :start_streaming_session, :streaming_session_result do
       arg(:file_id, non_null(:id))
       arg(:strategy, non_null(:streaming_strategy))
+      arg(:max_bitrate, :integer, description: "Total kbps cap (video + audio), e.g. 2000")
       resolve(&StreamingResolver.start_streaming_session/3)
     end
 

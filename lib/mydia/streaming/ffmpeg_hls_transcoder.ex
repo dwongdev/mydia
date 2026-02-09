@@ -393,19 +393,34 @@ defmodule Mydia.Streaming.FfmpegHlsTranscoder do
     normalized in ["aac", "mp4a"]
   end
 
+  # Audio bitrate budget (kbps) subtracted from total when calculating video bitrate
+  @audio_bitrate_kbps 128
+
   # Build FFmpeg command arguments for HLS transcoding
   defp build_ffmpeg_args(input_path, output_dir, opts) do
     media_file = Keyword.get(opts, :media_file)
+    max_bitrate = Keyword.get(opts, :max_bitrate)
 
     # Get transcode policy from config
     transcode_policy =
       Application.get_env(:mydia, :streaming, [])
       |> Keyword.get(:transcode_policy, :copy_when_compatible)
 
+    # When max_bitrate is set, force transcoding (no video stream copy)
+    # since we need to control the output bitrate
+    force_transcode = not is_nil(max_bitrate)
+
     # Determine video codec - use copy if compatible and policy allows, otherwise transcode
     video_codec =
-      case Keyword.get(opts, :video_codec) do
-        nil when not is_nil(media_file) and transcode_policy == :copy_when_compatible ->
+      cond do
+        Keyword.get(opts, :video_codec) ->
+          Keyword.get(opts, :video_codec)
+
+        force_transcode ->
+          Logger.info("Bitrate cap set (#{max_bitrate}kbps), forcing video transcode to H.264")
+          "libx264"
+
+        not is_nil(media_file) and transcode_policy == :copy_when_compatible ->
           if should_copy_video?(media_file.codec) do
             Logger.info(
               "Video codec #{media_file.codec} is compatible, using stream copy (fast, no quality loss)"
@@ -414,19 +429,15 @@ defmodule Mydia.Streaming.FfmpegHlsTranscoder do
             "copy"
           else
             Logger.info("Video codec #{media_file.codec || "unknown"} needs transcoding to H.264")
-
             "libx264"
           end
 
-        nil ->
+        true ->
           if transcode_policy == :always do
             Logger.debug("Transcode policy is :always, transcoding video to H.264")
           end
 
           "libx264"
-
-        codec ->
-          codec
       end
 
     # Determine audio codec - use copy if compatible and policy allows, otherwise transcode
@@ -479,16 +490,12 @@ defmodule Mydia.Streaming.FfmpegHlsTranscoder do
         # Stream copy - no encoding parameters needed
         ["-c:v", "copy"]
       else
-        # Full transcoding with encoding parameters
-        # Force 8-bit output (yuv420p) for maximum browser compatibility
-        # This handles 10-bit sources (common with AV1/HEVC) by converting to 8-bit
-        [
+        # Base encoding parameters shared by CRF and ABR modes
+        base_video = [
           "-c:v",
           video_codec,
           "-preset",
           preset,
-          "-crf",
-          to_string(crf),
           "-pix_fmt",
           "yuv420p",
           "-profile:v",
@@ -500,6 +507,27 @@ defmodule Mydia.Streaming.FfmpegHlsTranscoder do
           "-bf",
           "0"
         ]
+
+        # Rate control: ABR when max_bitrate is set, CRF otherwise
+        rate_control =
+          if max_bitrate do
+            video_kbps = max(max_bitrate - @audio_bitrate_kbps, 100)
+
+            Logger.info("Using ABR mode: video=#{video_kbps}kbps, total_cap=#{max_bitrate}kbps")
+
+            [
+              "-b:v",
+              "#{video_kbps}k",
+              "-maxrate",
+              "#{video_kbps}k",
+              "-bufsize",
+              "#{video_kbps * 2}k"
+            ]
+          else
+            ["-crf", to_string(crf)]
+          end
+
+        base_video ++ rate_control
       end
 
     # Build audio encoding args
@@ -513,7 +541,7 @@ defmodule Mydia.Streaming.FfmpegHlsTranscoder do
           "-c:a",
           audio_codec,
           "-b:a",
-          "128k",
+          "#{@audio_bitrate_kbps}k",
           "-ar",
           "48000",
           "-ac",

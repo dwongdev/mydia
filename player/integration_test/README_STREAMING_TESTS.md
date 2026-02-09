@@ -57,7 +57,40 @@ final segmentsReady = await streaming.waitForSegmentData(session.hlsUrl!);
 
 // Clean up
 await streaming.endStreamingSession(session.sessionId);
+
+// Streaming candidates (new)
+final candidates = await streaming.fetchStreamingCandidates(
+  contentType: 'movie',
+  id: mediaItemId,
+);
+print(candidates.hasDirectPlay); // true for H.264/AAC/MP4
+
+// Direct file streaming
+final ok = await streaming.verifyDirectFileStream(fileId);
 ```
+
+#### StreamingCandidatesResult
+Represents the result of a streaming candidates query:
+- `fileId`: The resolved media file ID
+- `candidates`: List of `StreamingCandidate` objects
+- `metadata`: Optional `StreamingMetadata`
+- `hasDirectPlay`: Whether DIRECT_PLAY is available
+- `hasHlsCopy`: Whether HLS_COPY is available
+- `hasTranscode`: Whether TRANSCODE is available
+
+#### StreamingCandidate
+A single streaming strategy candidate:
+- `strategy`: One of DIRECT_PLAY, REMUX, HLS_COPY, TRANSCODE
+- `mime`: RFC 6381 MIME type (e.g., `video/mp4; codecs="avc1.640028,mp4a.40.2"`)
+- `container`: Container format (mp4, ts, mkv, etc.)
+- `videoCodec`: Video codec string (nullable)
+- `audioCodec`: Audio codec string (nullable)
+
+#### StreamingMetadata
+File metadata from the candidates query:
+- `duration`: Duration in seconds
+- `width`: Video width in pixels
+- `height`: Video height in pixels
 
 #### StreamingSession
 Represents an active streaming session:
@@ -100,12 +133,27 @@ Represents P2P connection state:
 - Verifies connection status via GraphQL
 - Confirms peer is connected
 
-#### Test 3: P2P Streaming Works End-to-End (Skipped)
+#### Test 3: P2P Streaming Works End-to-End
 - Full P2P streaming test
-- Currently skipped as it requires full P2P proxy implementation
+- Establishes P2P connection, starts HLS session
+- Verifies HLS playlist and segments over HTTP
 - Tests streaming through the local proxy service
 
-#### Test 4: Player Navigation and Playback
+#### Test 4: Streaming Candidates Query Returns Valid Candidates
+- Queries the `streamingCandidates` GraphQL query for test media
+- Verifies DIRECT_PLAY candidate is present (H.264/AAC/MP4 test video)
+- Verifies TRANSCODE fallback is always present
+- Validates metadata (duration, width, height)
+- Validates each candidate has strategy, mime, container fields
+- Tests both "movie" and "file" content types
+
+#### Test 5: Direct File Streaming Works via HTTP
+- Tests the `/api/v1/stream/file/:id` REST endpoint
+- Verifies HTTP 200/206 response with Range header support
+- Validates that the direct stream URL is accessible
+- Confirms the direct play path works without HLS transcoding
+
+#### Test 6: Player Navigation and Playback
 - Navigates to media library
 - Finds and taps on test movie
 - Taps play button
@@ -206,14 +254,29 @@ Represents P2P connection state:
    Linux Flutter App (xvfb) → Device Pairing → P2P Connection → HLS Request → Video Playback
    ```
 
-3. **HTTP Streaming**:
+3. **Streaming Candidates Flow**:
+   ```
+   Player → GraphQL Query (streamingCandidates) → Server analyzes codecs → Returns candidate strategies
+   ```
+
+4. **HTTP Streaming (HLS)**:
    ```
    Player → GraphQL Mutation → Server HLS Session → HLS Playlist → Segment Requests
    ```
 
-4. **P2P Streaming**:
+5. **HTTP Streaming (Direct Play)**:
    ```
-   Player → Local Proxy → P2P Service → iroh QUIC → Server → HLS Response
+   Player → GET /api/v1/stream/file/:id → Server streams raw file → Range request support
+   ```
+
+6. **P2P Streaming (Direct Play)**:
+   ```
+   Player → Local Proxy (/direct/:fileId/stream) → P2P (session: direct:fileId) → Server → Raw file
+   ```
+
+7. **P2P Streaming (HLS Fallback)**:
+   ```
+   Player → Local Proxy (/hls/:sessionId/*) → P2P Service → iroh QUIC → Server → HLS Response
    ```
 
 ### Test Isolation

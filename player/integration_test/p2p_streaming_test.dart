@@ -23,11 +23,12 @@ import 'helpers/streaming_helpers.dart';
 /// - Device paired with server
 ///
 /// Test scenarios:
-/// 1. Direct HTTP streaming works
-/// 2. HLS playlist is accessible and valid
-/// 3. P2P connection can be established
-/// 4. Streaming over P2P works end-to-end
-/// 5. Playback can start via the player UI
+/// 1. Direct HTTP streaming works (HLS path)
+/// 2. P2P connection can be established
+/// 3. Streaming over P2P works end-to-end (HLS)
+/// 4. Streaming candidates query returns valid candidates
+/// 5. Direct file streaming works via HTTP (direct play path)
+/// 6. Playback can start via the player UI
 void main() {
   // Initialize integration test binding FIRST
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -91,8 +92,7 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       final loginTitle = find.text('Connect to Server');
       if (loginTitle.evaluate().isEmpty) {
-        debugPrint(
-            '[P2P Streaming Test] Paired successfully after $i seconds');
+        debugPrint('[P2P Streaming Test] Paired successfully after $i seconds');
         return true;
       }
     }
@@ -165,8 +165,7 @@ void main() {
   }
 
   group('P2P Streaming E2E', () {
-    testWidgets('Direct HTTP streaming works',
-        (WidgetTester tester) async {
+    testWidgets('Direct HTTP streaming works', (WidgetTester tester) async {
       debugPrint('[P2P Streaming Test] Starting direct HTTP streaming test');
 
       // Launch the app
@@ -264,7 +263,8 @@ void main() {
       final connected = await streaming.waitForP2pConnection(
         timeout: const Duration(seconds: 30),
       );
-      debugPrint('[P2P Streaming Test] waitForP2pConnection result: $connected');
+      debugPrint(
+          '[P2P Streaming Test] waitForP2pConnection result: $connected');
 
       // Stop app
       await tester.pumpWidget(const SizedBox.shrink());
@@ -273,8 +273,7 @@ void main() {
       debugPrint('[P2P Streaming Test] P2P connection test passed!');
     });
 
-    testWidgets('P2P streaming works end-to-end',
-        (WidgetTester tester) async {
+    testWidgets('P2P streaming works end-to-end', (WidgetTester tester) async {
       debugPrint('[P2P Streaming Test] Starting full P2P streaming test');
 
       // Launch the app
@@ -330,6 +329,180 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       debugPrint('[P2P Streaming Test] P2P streaming test passed!');
+    });
+
+    testWidgets('Streaming candidates query returns valid candidates',
+        (WidgetTester tester) async {
+      debugPrint(
+          '[P2P Streaming Test] Starting streaming candidates query test');
+
+      // Launch the app
+      await tester.pumpWidget(
+        const ProviderScope(
+          child: MyApp(),
+        ),
+      );
+
+      // Complete pairing
+      await performPairing(tester);
+
+      // Get streaming helper
+      final streaming = StreamingTestHelper.fromEnvironment();
+      await streaming.initialize();
+
+      // Get test media item ID
+      final fileId = await streaming.getTestMediaFileId();
+      if (fileId == null) {
+        debugPrint(
+            '[P2P Streaming Test] Skipping candidates test: no media file found');
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump(const Duration(milliseconds: 100));
+        return;
+      }
+
+      // We need the media item ID, not the file ID.
+      // The getTestMediaFileId() also stores the item ID internally,
+      // but we need to query again to get it.
+      const query = r'''
+        query GetTestMedia {
+          movies(first: 50) {
+            edges {
+              node {
+                id
+                title
+                files { id }
+              }
+            }
+          }
+        }
+      ''';
+
+      final response = await apiClient.graphqlRequest(query, {});
+      final edges = response['data']['movies']['edges'] as List;
+      String? mediaItemId;
+      for (final edge in edges) {
+        final movie = edge['node'];
+        final files = movie['files'] as List?;
+        if (files != null && files.any((f) => f['id'] == fileId)) {
+          mediaItemId = movie['id'] as String;
+          break;
+        }
+      }
+
+      expect(mediaItemId, isNotNull,
+          reason: 'Should find media item ID for test file');
+
+      // Fetch streaming candidates using the "movie" content type
+      final candidates = await streaming.fetchStreamingCandidates(
+        contentType: 'movie',
+        id: mediaItemId!,
+      );
+
+      expect(candidates, isNotNull,
+          reason: 'Streaming candidates should be returned');
+      debugPrint('[P2P Streaming Test] Candidates result: $candidates');
+
+      // Verify we got candidates
+      expect(candidates!.candidates, isNotEmpty,
+          reason: 'Should have at least one streaming candidate');
+
+      // The E2E test video is H.264/AAC/MP4, which should be direct-playable
+      expect(candidates.hasDirectPlay, isTrue,
+          reason: 'H.264/AAC/MP4 test video should have DIRECT_PLAY candidate');
+
+      // Should also have a TRANSCODE fallback
+      expect(candidates.hasTranscode, isTrue,
+          reason: 'Should always have TRANSCODE fallback candidate');
+
+      // Verify file ID is returned
+      expect(candidates.fileId, isNotEmpty,
+          reason: 'Candidates should include fileId');
+
+      // Verify metadata
+      expect(candidates.metadata, isNotNull,
+          reason: 'Candidates should include metadata');
+      expect(candidates.metadata!.duration, isNotNull,
+          reason: 'Metadata should include duration');
+      expect(candidates.metadata!.duration!, greaterThan(0),
+          reason: 'Duration should be positive');
+
+      // Verify each candidate has required fields
+      for (final candidate in candidates.candidates) {
+        expect(candidate.strategy, isNotEmpty,
+            reason: 'Candidate should have a strategy');
+        expect(candidate.mime, isNotEmpty,
+            reason: 'Candidate should have a mime type');
+        expect(candidate.container, isNotEmpty,
+            reason: 'Candidate should have a container');
+        debugPrint(
+            '[P2P Streaming Test] Candidate: ${candidate.strategy} - ${candidate.mime}');
+      }
+
+      // Also test with "file" content type
+      final fileCandidates = await streaming.fetchStreamingCandidates(
+        contentType: 'file',
+        id: fileId,
+      );
+      expect(fileCandidates, isNotNull,
+          reason: 'Should also work with "file" content type');
+      expect(fileCandidates!.candidates.length, candidates.candidates.length,
+          reason: 'File and movie candidates should match');
+
+      // Stop app
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(milliseconds: 100));
+
+      debugPrint(
+          '[P2P Streaming Test] Streaming candidates query test passed!');
+    });
+
+    testWidgets('Direct file streaming works via HTTP',
+        (WidgetTester tester) async {
+      debugPrint('[P2P Streaming Test] Starting direct file streaming test');
+
+      // Launch the app
+      await tester.pumpWidget(
+        const ProviderScope(
+          child: MyApp(),
+        ),
+      );
+
+      // Complete pairing
+      await performPairing(tester);
+
+      // Get streaming helper
+      final streaming = StreamingTestHelper.fromEnvironment();
+      await streaming.initialize();
+
+      // Get test media file ID
+      final fileId = await streaming.getTestMediaFileId();
+      if (fileId == null) {
+        debugPrint(
+            '[P2P Streaming Test] Skipping direct streaming test: no media file found');
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump(const Duration(milliseconds: 100));
+        return;
+      }
+      debugPrint('[P2P Streaming Test] Test media file ID: $fileId');
+
+      // Verify direct file stream endpoint works (HTTP path)
+      final directStreamOk = await streaming.verifyDirectFileStream(fileId);
+      expect(directStreamOk, isTrue,
+          reason: 'Direct file stream endpoint should return 200 or 206');
+      debugPrint(
+          '[P2P Streaming Test] Direct file stream endpoint is accessible');
+
+      // Verify the full URL is also accessible via verifyUrlAccessible
+      final directUrl = streaming.getDirectStreamUrl(fileId);
+      final urlOk = await streaming.verifyUrlAccessible(directUrl);
+      expect(urlOk, isTrue, reason: 'Direct stream URL should be accessible');
+      debugPrint('[P2P Streaming Test] Direct stream URL verified: $directUrl');
+
+      // Stop app
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(milliseconds: 100));
+
+      debugPrint('[P2P Streaming Test] Direct file streaming test passed!');
     });
 
     testWidgets('Player can navigate to video and start playback',

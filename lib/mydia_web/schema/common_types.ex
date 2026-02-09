@@ -258,6 +258,38 @@ defmodule MydiaWeb.Schema.CommonTypes do
     field :success, non_null(:boolean), description: "Whether the cancellation succeeded"
   end
 
+  @desc "A streaming candidate option"
+  object :streaming_candidate do
+    field :strategy, non_null(:streaming_candidate_strategy), description: "Streaming strategy"
+    field :mime, non_null(:string), description: "Full MIME type with codecs parameter"
+    field :container, non_null(:string), description: "Container format (mp4, ts, mkv, etc.)"
+    field :video_codec, :string, description: "RFC 6381 video codec string"
+    field :audio_codec, :string, description: "RFC 6381 audio codec string"
+  end
+
+  @desc "Metadata about the source media file"
+  object :streaming_metadata do
+    field :duration, :float, description: "Duration in seconds"
+    field :width, :integer, description: "Video width in pixels"
+    field :height, :integer, description: "Video height in pixels"
+    field :bitrate, :integer, description: "Bitrate in bits per second"
+    field :resolution, :string, description: "Resolution label (e.g., 1080p)"
+    field :hdr_format, :string, description: "HDR format if applicable"
+    field :original_codec, :string, description: "Original video codec"
+    field :original_audio_codec, :string, description: "Original audio codec"
+    field :container, :string, description: "Original container format"
+  end
+
+  @desc "Result of streaming candidates query"
+  object :streaming_candidates_result do
+    field :file_id, non_null(:id), description: "The resolved media file ID"
+
+    field :candidates, non_null(list_of(non_null(:streaming_candidate))),
+      description: "Prioritized list of streaming options"
+
+    field :metadata, non_null(:streaming_metadata), description: "Source file metadata"
+  end
+
   @desc "A subtitle track available for a media file"
   object :subtitle_track do
     @desc "Track identifier (integer for embedded, UUID for external)"

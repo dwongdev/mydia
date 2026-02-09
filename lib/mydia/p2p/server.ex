@@ -382,39 +382,86 @@ defmodule Mydia.P2p.Server do
   defp handle_hls_stream(resource, stream_id, req) do
     # Verify auth token
     case verify_hls_auth(req.auth_token) do
-      {:ok, _user} ->
-        # Look up the session by session_id
-        case lookup_hls_session(req.session_id) do
-          {:ok, pid, session_info} ->
-            # Wait for the session to be ready (FFmpeg has created initial files)
-            case HlsSession.await_ready(pid, 30_000) do
-              :ok ->
-                # Build the file path
-                file_path = Path.join(session_info.temp_dir, req.path)
-
-                # Security check: ensure path is within temp_dir
-                case validate_path(file_path, session_info.temp_dir) do
-                  :ok ->
-                    stream_hls_file(resource, stream_id, file_path, req)
-
-                  {:error, reason} ->
-                    Logger.warning("HLS path validation failed: #{inspect(reason)}")
-                    send_hls_error(resource, stream_id, 403, "Forbidden")
-                end
-
-              {:error, :timeout} ->
-                Logger.warning("HLS session #{req.session_id} not ready after timeout")
-                send_hls_error(resource, stream_id, 503, "Transcoding not ready")
-            end
-
-          {:error, :not_found} ->
-            Logger.warning("HLS session not found: #{req.session_id}")
-            send_hls_error(resource, stream_id, 404, "Session not found")
+      {:ok, user} ->
+        if String.starts_with?(req.session_id, "direct:") do
+          file_id = String.replace_prefix(req.session_id, "direct:", "")
+          handle_direct_stream(resource, stream_id, file_id, user, req)
+        else
+          handle_hls_session_stream(resource, stream_id, req)
         end
 
       {:error, _reason} ->
         Logger.warning("HLS auth failed")
         send_hls_error(resource, stream_id, 401, "Unauthorized")
+    end
+  end
+
+  defp handle_hls_session_stream(resource, stream_id, req) do
+    # Look up the session by session_id
+    case lookup_hls_session(req.session_id) do
+      {:ok, pid, session_info} ->
+        # Wait for the session to be ready (FFmpeg has created initial files)
+        case HlsSession.await_ready(pid, 30_000) do
+          :ok ->
+            # Build the file path
+            file_path = Path.join(session_info.temp_dir, req.path)
+
+            # Security check: ensure path is within temp_dir
+            case validate_path(file_path, session_info.temp_dir) do
+              :ok ->
+                stream_hls_file(resource, stream_id, file_path, req)
+
+              {:error, reason} ->
+                Logger.warning("HLS path validation failed: #{inspect(reason)}")
+                send_hls_error(resource, stream_id, 403, "Forbidden")
+            end
+
+          {:error, :timeout} ->
+            Logger.warning("HLS session #{req.session_id} not ready after timeout")
+            send_hls_error(resource, stream_id, 503, "Transcoding not ready")
+        end
+
+      {:error, :not_found} ->
+        Logger.warning("HLS session not found: #{req.session_id}")
+        send_hls_error(resource, stream_id, 404, "Session not found")
+    end
+  end
+
+  defp handle_direct_stream(resource, stream_id, file_id, user, req) do
+    Logger.info("P2P Direct stream request for file_id=#{file_id}")
+
+    try do
+      media_file = Mydia.Library.get_media_file!(file_id, preload: [:library_path])
+
+      case Mydia.Library.MediaFile.absolute_path(media_file) do
+        nil ->
+          Logger.warning("Direct stream: cannot resolve path for file #{file_id}")
+          send_hls_error(resource, stream_id, 404, "File path not found")
+
+        absolute_path ->
+          if File.exists?(absolute_path) do
+            # Start a direct play session for tracking
+            case Mydia.Streaming.HlsSessionSupervisor.start_direct_session(
+                   media_file.id,
+                   user.id
+                 ) do
+              {:ok, pid} ->
+                Mydia.Streaming.DirectPlaySession.heartbeat(pid)
+
+              _ ->
+                :ok
+            end
+
+            stream_hls_file(resource, stream_id, absolute_path, req)
+          else
+            Logger.warning("Direct stream: file not found at #{absolute_path}")
+            send_hls_error(resource, stream_id, 404, "File not found on disk")
+          end
+      end
+    rescue
+      Ecto.NoResultsError ->
+        Logger.warning("Direct stream: media file #{file_id} not found in database")
+        send_hls_error(resource, stream_id, 404, "Media file not found")
     end
   end
 
@@ -500,7 +547,12 @@ defmodule Mydia.P2p.Server do
       ".m3u8" -> "application/vnd.apple.mpegurl"
       ".ts" -> "video/mp2t"
       ".mp4" -> "video/mp4"
+      ".m4v" -> "video/mp4"
       ".m4s" -> "video/iso.segment"
+      ".mkv" -> "video/x-matroska"
+      ".avi" -> "video/x-msvideo"
+      ".mov" -> "video/quicktime"
+      ".webm" -> "video/webm"
       ".vtt" -> "text/vtt"
       _ -> "application/octet-stream"
     end

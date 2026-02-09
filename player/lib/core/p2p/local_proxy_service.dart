@@ -92,6 +92,17 @@ class LocalProxyService {
     return 'http://127.0.0.1:${_server!.port}/hls/$sessionId/';
   }
 
+  /// Build a direct stream URL for a media file.
+  ///
+  /// This uses the P2P HLS protocol with a "direct:" session ID prefix
+  /// to stream the raw file without HLS transcoding.
+  String buildDirectStreamUrl(String fileId) {
+    if (_server == null) {
+      throw StateError('LocalProxyService is not started');
+    }
+    return 'http://127.0.0.1:${_server!.port}/direct/$fileId/stream';
+  }
+
   // Handle incoming HTTP requests
   Future<void> _handleRequest(HttpRequest request) async {
     final path = request.uri.path;
@@ -99,8 +110,11 @@ class LocalProxyService {
     debugPrint('[LocalProxy] ${request.method} $path');
 
     // Parse HLS request: /hls/{session_id}/{path...}
+    // or direct stream request: /direct/{file_id}/stream
     if (path.startsWith('/hls/')) {
       await _handleHlsRequest(request);
+    } else if (path.startsWith('/direct/')) {
+      await _handleDirectRequest(request);
     } else {
       request.response.statusCode = HttpStatus.notFound;
       _setCorsHeaders(request.response);
@@ -116,7 +130,8 @@ class LocalProxyService {
       if (pathParts.length < 2) {
         request.response.statusCode = HttpStatus.badRequest;
         _setCorsHeaders(request.response);
-        request.response.write('Invalid HLS path format. Expected: /hls/{session_id}/{path}');
+        request.response.write(
+            'Invalid HLS path format. Expected: /hls/{session_id}/{path}');
         await request.response.close();
         return;
       }
@@ -150,7 +165,8 @@ class LocalProxyService {
         rangeEnd = range.$2;
       }
 
-      debugPrint('[LocalProxy] HLS request: session=$sessionId, path=$hlsPath, range=$rangeStart-$rangeEnd');
+      debugPrint(
+          '[LocalProxy] HLS request: session=$sessionId, path=$hlsPath, range=$rangeStart-$rangeEnd');
 
       // Forward to P2P
       final response = await _p2p.sendHlsRequest(
@@ -166,17 +182,20 @@ class LocalProxyService {
       request.response.statusCode = response.header.status;
 
       // Set response headers
-      request.response.headers.contentType = ContentType.parse(response.header.contentType);
+      request.response.headers.contentType =
+          ContentType.parse(response.header.contentType);
       final payloadLength = response.data.length;
       final headerLength = response.header.contentLength.toInt();
       request.response.headers.contentLength =
           headerLength == payloadLength ? headerLength : payloadLength;
 
       if (response.header.contentRange != null) {
-        request.response.headers.set('Content-Range', response.header.contentRange!);
+        request.response.headers
+            .set('Content-Range', response.header.contentRange!);
       }
       if (response.header.cacheControl != null) {
-        request.response.headers.set('Cache-Control', response.header.cacheControl!);
+        request.response.headers
+            .set('Cache-Control', response.header.cacheControl!);
       }
 
       // Allow CORS for local playback
@@ -186,10 +205,109 @@ class LocalProxyService {
       request.response.add(response.data);
       await request.response.close();
 
-      debugPrint('[LocalProxy] Served ${response.data.length} bytes for $hlsPath');
-
+      debugPrint(
+          '[LocalProxy] Served ${response.data.length} bytes for $hlsPath');
     } catch (e, stack) {
       debugPrint('[LocalProxy] Error handling HLS request: $e');
+      debugPrint('[LocalProxy] Stack: $stack');
+
+      try {
+        request.response.statusCode = HttpStatus.internalServerError;
+        _setCorsHeaders(request.response);
+        request.response.write('Error: $e');
+      } catch (_) {
+        // Response may already be started or closed, best-effort cleanup below.
+      } finally {
+        await request.response.close();
+      }
+    }
+  }
+
+  Future<void> _handleDirectRequest(HttpRequest request) async {
+    try {
+      // Parse path: /direct/{file_id}/stream
+      final pathParts =
+          request.uri.path.substring('/direct/'.length).split('/');
+      if (pathParts.length < 2) {
+        request.response.statusCode = HttpStatus.badRequest;
+        _setCorsHeaders(request.response);
+        request.response.write(
+            'Invalid direct path format. Expected: /direct/{file_id}/stream');
+        await request.response.close();
+        return;
+      }
+
+      final fileId = pathParts[0];
+
+      if (fileId.isEmpty) {
+        request.response.statusCode = HttpStatus.badRequest;
+        _setCorsHeaders(request.response);
+        request.response.write('File ID is required');
+        await request.response.close();
+        return;
+      }
+
+      if (_targetPeer == null) {
+        request.response.statusCode = HttpStatus.serviceUnavailable;
+        _setCorsHeaders(request.response);
+        request.response.write('No target peer configured');
+        await request.response.close();
+        return;
+      }
+
+      // Parse Range header for seeking support
+      int? rangeStart;
+      int? rangeEnd;
+      final rangeHeader = request.headers.value('Range');
+      if (rangeHeader != null) {
+        final range = _parseRangeHeader(rangeHeader);
+        rangeStart = range.$1;
+        rangeEnd = range.$2;
+      }
+
+      debugPrint(
+          '[LocalProxy] Direct request: fileId=$fileId, range=$rangeStart-$rangeEnd');
+
+      // Forward to P2P using "direct:{fileId}" as the session ID convention
+      final response = await _p2p.sendHlsRequest(
+        peer: _targetPeer!,
+        sessionId: 'direct:$fileId',
+        path: 'stream',
+        rangeStart: rangeStart,
+        rangeEnd: rangeEnd,
+        authToken: _authToken,
+      );
+
+      // Set response status
+      request.response.statusCode = response.header.status;
+
+      // Set response headers
+      request.response.headers.contentType =
+          ContentType.parse(response.header.contentType);
+      final payloadLength = response.data.length;
+      final headerLength = response.header.contentLength.toInt();
+      request.response.headers.contentLength =
+          headerLength == payloadLength ? headerLength : payloadLength;
+
+      if (response.header.contentRange != null) {
+        request.response.headers
+            .set('Content-Range', response.header.contentRange!);
+      }
+
+      // Direct streams support range requests
+      request.response.headers.set('Accept-Ranges', 'bytes');
+
+      // Allow CORS for local playback
+      _setCorsHeaders(request.response);
+
+      // Write response body
+      request.response.add(response.data);
+      await request.response.close();
+
+      debugPrint(
+          '[LocalProxy] Served ${response.data.length} bytes for direct:$fileId');
+    } catch (e, stack) {
+      debugPrint('[LocalProxy] Error handling direct request: $e');
       debugPrint('[LocalProxy] Stack: $stack');
 
       try {
@@ -217,7 +335,8 @@ class LocalProxyService {
 
     final start = int.tryParse(match.group(1) ?? '');
     final endStr = match.group(2);
-    final end = endStr != null && endStr.isNotEmpty ? int.tryParse(endStr) : null;
+    final end =
+        endStr != null && endStr.isNotEmpty ? int.tryParse(endStr) : null;
 
     return (start, end);
   }

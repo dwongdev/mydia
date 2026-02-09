@@ -9,8 +9,53 @@ defmodule MydiaWeb.Schema.Resolvers.StreamingResolver do
   require Logger
 
   alias Mydia.Library
+  alias Mydia.Streaming.Candidates
   alias Mydia.Streaming.HlsSessionSupervisor
   alias Mydia.Streaming.HlsSession
+
+  @doc """
+  Returns streaming candidates for a media item.
+
+  This allows P2P clients to determine the optimal streaming strategy
+  before initiating playback.
+  """
+  def streaming_candidates(_parent, %{content_type: content_type, id: id}, %{context: context}) do
+    case context[:current_user] do
+      nil ->
+        {:error, "Authentication required"}
+
+      _user ->
+        case Candidates.resolve_media_file(content_type, id) do
+          {:ok, media_file} ->
+            media_file = Candidates.ensure_codec_info(media_file)
+            candidates = Candidates.build_streaming_candidates(media_file)
+            metadata = Candidates.build_metadata_response(media_file)
+
+            # Convert string strategies to atoms for the GraphQL enum
+            candidates =
+              Enum.map(candidates, fn candidate ->
+                %{candidate | strategy: strategy_to_atom(candidate.strategy)}
+              end)
+
+            {:ok, %{file_id: media_file.id, candidates: candidates, metadata: metadata}}
+
+          {:error, :not_found} ->
+            {:error, "#{content_type} not found"}
+
+          {:error, :no_media_files} ->
+            {:error, "No media files available"}
+
+          {:error, :invalid_content_type} ->
+            {:error, "Invalid content type. Use 'movie', 'episode', or 'file'"}
+        end
+    end
+  end
+
+  defp strategy_to_atom("DIRECT_PLAY"), do: :direct_play
+  defp strategy_to_atom("REMUX"), do: :remux
+  defp strategy_to_atom("HLS_COPY"), do: :hls_copy
+  defp strategy_to_atom("TRANSCODE"), do: :transcode
+  defp strategy_to_atom(other), do: String.downcase(other) |> String.to_existing_atom()
 
   @doc """
   Starts an HLS streaming session for a media file.

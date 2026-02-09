@@ -32,6 +32,7 @@ defmodule MydiaWeb.Schema do
     import_fields(:api_key_queries)
     import_fields(:device_queries)
     import_fields(:remote_access_queries)
+    import_fields(:streaming_queries)
   end
 
   mutation do

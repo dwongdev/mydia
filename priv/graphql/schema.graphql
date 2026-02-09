@@ -46,6 +46,12 @@ type RootQueryType {
 
   "List all devices for the current user"
   devices: [RemoteDevice]
+
+  "Get remote access \/ P2P connection status"
+  remoteAccessStatus: RemoteAccessStatus
+
+  "Get streaming candidates for a media item"
+  streamingCandidates(contentType: String!, id: ID!): StreamingCandidatesResult
 }
 
 type RootMutationType {
@@ -749,6 +755,18 @@ type ClaimCode {
   expiresAt: DateTime!
 }
 
+"Remote access \/ P2P connection status"
+type RemoteAccessStatus {
+  "Whether remote access is enabled and running"
+  enabled: Boolean!
+
+  "The node's endpoint address for sharing"
+  endpointAddr: String
+
+  "Number of connected peers"
+  connectedPeers: Int!
+}
+
 "Result of starting a streaming session"
 type StreamingSessionResult {
   "The HLS session identifier"
@@ -807,6 +825,66 @@ type DownloadJobStatus {
 type CancelDownloadResult {
   "Whether the cancellation succeeded"
   success: Boolean!
+}
+
+"A streaming candidate option"
+type StreamingCandidate {
+  "Streaming strategy"
+  strategy: StreamingCandidateStrategy!
+
+  "Full MIME type with codecs parameter"
+  mime: String!
+
+  "Container format (mp4, ts, mkv, etc.)"
+  container: String!
+
+  "RFC 6381 video codec string"
+  videoCodec: String
+
+  "RFC 6381 audio codec string"
+  audioCodec: String
+}
+
+"Metadata about the source media file"
+type StreamingMetadata {
+  "Duration in seconds"
+  duration: Float
+
+  "Video width in pixels"
+  width: Int
+
+  "Video height in pixels"
+  height: Int
+
+  "Bitrate in bits per second"
+  bitrate: Int
+
+  "Resolution label (e.g., 1080p)"
+  resolution: String
+
+  "HDR format if applicable"
+  hdrFormat: String
+
+  "Original video codec"
+  originalCodec: String
+
+  "Original audio codec"
+  originalAudioCodec: String
+
+  "Original container format"
+  container: String
+}
+
+"Result of streaming candidates query"
+type StreamingCandidatesResult {
+  "The resolved media file ID"
+  fileId: ID!
+
+  "Prioritized list of streaming options"
+  candidates: [StreamingCandidate!]!
+
+  "Source file metadata"
+  metadata: StreamingMetadata!
 }
 
 "A subtitle track available for a media file"
@@ -938,6 +1016,21 @@ enum StreamingStrategy {
   HLS_COPY
 
   "Full transcoding to HLS"
+  TRANSCODE
+}
+
+"Streaming candidate strategy (includes all possible strategies)"
+enum StreamingCandidateStrategy {
+  "Direct file playback (no processing)"
+  DIRECT_PLAY
+
+  "Container remux (no re-encoding)"
+  REMUX
+
+  "HLS with stream copy"
+  HLS_COPY
+
+  "Full transcoding"
   TRANSCODE
 }
 

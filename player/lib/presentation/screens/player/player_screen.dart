@@ -38,6 +38,7 @@ import '../../../graphql/queries/episode_detail.graphql.dart';
 import '../../../graphql/queries/season_episodes.graphql.dart';
 import '../../../graphql/mutations/start_streaming_session.graphql.dart';
 import '../../../graphql/mutations/end_streaming_session.graphql.dart';
+import '../../../graphql/queries/streaming_candidates.graphql.dart';
 import '../../../graphql/schema.graphql.dart';
 import '../../../core/p2p/local_proxy_service.dart';
 
@@ -135,13 +136,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
       // Check for downloaded content first (before any network operations)
       final downloadManager = await ref.read(downloadManagerProvider.future);
-      final downloadedMedia = downloadManager.getDownloadedMediaById(widget.mediaId);
+      final downloadedMedia =
+          downloadManager.getDownloadedMediaById(widget.mediaId);
 
       // In offline mode, only downloaded content can be played
       if (isOfflineMode) {
         if (downloadedMedia == null || kIsWeb) {
           setState(() {
-            _error = 'This content is not available offline. Download it first to watch without a connection.';
+            _error =
+                'This content is not available offline. Download it first to watch without a connection.';
             _isLoading = false;
           });
           return;
@@ -149,7 +152,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
         if (!await file_utils.fileExists(downloadedMedia.filePath)) {
           setState(() {
-            _error = 'Downloaded file not found. Please re-download the content.';
+            _error =
+                'Downloaded file not found. Please re-download the content.';
             _isLoading = false;
           });
           return;
@@ -181,7 +185,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       // Check if we're in P2P mode
       final connectionState = ref.read(conn.connectionProvider);
       if (connectionState.isP2PMode) {
-        debugPrint('[PlayerScreen] Detected P2P mode, initializing P2P playback');
+        debugPrint(
+            '[PlayerScreen] Detected P2P mode, initializing P2P playback');
         _isP2PMode = true;
         await _initializeP2PPlayback(connectionState, graphqlClient, token);
         return;
@@ -192,7 +197,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       _authToken = token;
 
       // Get media token service for media access
-      final mediaTokenService = await ref.read(asyncMediaTokenServiceProvider.future);
+      final mediaTokenService =
+          await ref.read(asyncMediaTokenServiceProvider.future);
 
       // Ensure media token is valid and refreshed if needed
       await mediaTokenService.ensureValidToken();
@@ -239,10 +245,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           mediaToken: mediaToken,
         );
 
-        debugPrint('Initializing video player with URL: $streamUrl (strategy: ${strategy.value})');
+        debugPrint(
+            'Initializing video player with URL: $streamUrl (strategy: ${strategy.value})');
 
         // For HLS strategies, follow redirect and wait for playlist to be ready
-        if (strategy == StreamingStrategy.hlsCopy || strategy == StreamingStrategy.transcode) {
+        if (strategy == StreamingStrategy.hlsCopy ||
+            strategy == StreamingStrategy.transcode) {
           if (mounted) {
             setState(() {
               _loadingMessage = 'Starting stream...';
@@ -348,7 +356,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       }
 
       // Subtitle tracks are now extracted from GraphQL in _fetchProgressAndEpisodes
-      debugPrint('Loaded ${_subtitleTracks.length} subtitle tracks from GraphQL');
+      debugPrint(
+          'Loaded ${_subtitleTracks.length} subtitle tracks from GraphQL');
     } catch (e) {
       debugPrint('Error initializing player: $e');
       if (mounted) {
@@ -361,6 +370,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   /// Initialize P2P playback using iroh and local proxy.
+  ///
+  /// Uses the candidates API to determine the optimal strategy:
+  /// - Direct play (DIRECT_PLAY/REMUX/HLS_COPY on native): stream raw file over P2P
+  /// - Transcode: fall back to HLS transcoding over P2P
   Future<void> _initializeP2PPlayback(
     conn.ConnectionState connectionState,
     GraphQLClient graphqlClient,
@@ -389,121 +402,39 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         authToken: token,
       );
 
-      debugPrint('[PlayerScreen] Local proxy started on port ${localProxyService.port}');
+      debugPrint(
+          '[PlayerScreen] Local proxy started on port ${localProxyService.port}');
 
-      // Start streaming session via GraphQL
+      // Fetch streaming candidates to determine optimal strategy
       if (mounted) {
         setState(() {
-          _loadingMessage = 'Starting stream...';
+          _loadingMessage = 'Checking file compatibility...';
         });
       }
 
-      // Determine streaming strategy
-      final strategy = StreamingStrategyService.getOptimalStrategy();
-      final graphqlStrategy = strategy == StreamingStrategy.hlsCopy
-          ? Enum$StreamingStrategy.HLS_COPY
-          : Enum$StreamingStrategy.TRANSCODE;
-
-      final result = await graphqlClient.mutate(
-        MutationOptions(
-          document: documentNodeMutationStartStreamingSession,
-          variables: Variables$Mutation$StartStreamingSession(
-            fileId: widget.fileId,
-            strategy: graphqlStrategy,
-          ).toJson(),
-        ),
+      final contentType = widget.mediaType == 'movie' ? 'movie' : 'episode';
+      final candidatesResult = await _fetchStreamingCandidates(
+        graphqlClient,
+        contentType,
+        widget.mediaId,
       );
 
-      if (result.hasException) {
-        throw Exception('Failed to start streaming session: ${result.exception}');
-      }
-
-      final sessionData = Mutation$StartStreamingSession.fromJson(result.data!);
-      final sessionResult = sessionData.startStreamingSession;
-      if (sessionResult == null) {
-        throw Exception('No session data returned from server');
-      }
-
-      _hlsSessionId = sessionResult.sessionId;
-      debugPrint('[PlayerScreen] P2P HLS session started: $_hlsSessionId');
-
-      // Set total duration if provided
-      if (sessionResult.duration != null) {
-        _totalDuration = Duration(
-          milliseconds: (sessionResult.duration! * 1000).round(),
+      if (candidatesResult != null &&
+          _canDirectPlay(candidatesResult.candidates)) {
+        // Direct play: stream the raw file over P2P (no HLS session needed)
+        await _initializeP2PDirectPlayback(
+          localProxyService,
+          graphqlClient,
+          candidatesResult,
         );
-        DurationOverride.value = _totalDuration;
-        debugPrint('[PlayerScreen] Total duration from server: $_totalDuration');
-      }
-
-      // Build HLS URL via local proxy
-      final hlsUrl = localProxyService.buildHlsUrl(_hlsSessionId!);
-      debugPrint('[PlayerScreen] P2P HLS URL: $hlsUrl');
-
-      // Wait for playlist to be ready
-      await _waitForP2PPlaylist(hlsUrl);
-
-      // Initialize progress service
-      _progressService = ProgressService(graphqlClient);
-
-      // Fetch saved progress and episode list for TV shows
-      await _fetchProgressAndEpisodes(graphqlClient);
-
-      // Create media_kit player
-      _player = Player();
-      _videoController = VideoController(_player!);
-
-      // Open media with media_kit (no auth headers needed for local proxy)
-      await _player!.open(
-        Media(hlsUrl),
-        play: false,
-      );
-
-      // Wait for player to be ready
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      // Check if we should show resume dialog
-      final duration = _player!.state.duration.inSeconds;
-      final savedPosition = _savedPositionSeconds;
-      if (mounted &&
-          savedPosition != null &&
-          savedPosition > _minResumeThresholdSeconds &&
-          duration > 0) {
-        final shouldResume = await showResumeDialog(
-          context,
-          savedPosition,
-          duration,
+      } else {
+        // Fall back to HLS transcoding over P2P
+        debugPrint('[PlayerScreen] Using HLS fallback for P2P playback');
+        await _initializeP2PHlsPlayback(
+          localProxyService,
+          graphqlClient,
         );
-
-        if (shouldResume == true) {
-          await _player!.seek(Duration(seconds: savedPosition));
-        }
       }
-
-      // Start playback
-      await _player!.play();
-
-      // Start progress tracking
-      if (widget.mediaType == 'movie') {
-        _progressService!.startMovieSync(_player!, widget.mediaId);
-      } else if (widget.mediaType == 'episode') {
-        _progressService!.startEpisodeSync(_player!, widget.mediaId);
-      }
-
-      // Listen for playback completion
-      await _positionSubscription?.cancel();
-      _positionSubscription = _player!.stream.position.listen((_) {
-        _onPlaybackProgress();
-      });
-
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _loadingMessage = null;
-        });
-      }
-
-      debugPrint('[PlayerScreen] P2P playback initialized successfully');
     } catch (e) {
       debugPrint('[PlayerScreen] Error initializing P2P playback: $e');
       if (mounted) {
@@ -514,6 +445,264 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         });
       }
     }
+  }
+
+  /// Check if the first candidate supports direct play on native.
+  ///
+  /// On native desktop, FFmpeg handles virtually all codecs/containers,
+  /// so DIRECT_PLAY, REMUX, and HLS_COPY are all direct-playable.
+  bool _canDirectPlay(
+    List<Query$StreamingCandidates$streamingCandidates$candidates> candidates,
+  ) {
+    if (candidates.isEmpty) return false;
+
+    final first = candidates.first;
+    // On native desktop, FFmpeg can handle any format directly
+    return first.strategy == Enum$StreamingCandidateStrategy.DIRECT_PLAY ||
+        first.strategy == Enum$StreamingCandidateStrategy.REMUX ||
+        first.strategy == Enum$StreamingCandidateStrategy.HLS_COPY;
+  }
+
+  /// Fetch streaming candidates from the server via GraphQL.
+  Future<Query$StreamingCandidates$streamingCandidates?>
+      _fetchStreamingCandidates(
+    GraphQLClient graphqlClient,
+    String contentType,
+    String id,
+  ) async {
+    try {
+      final result = await graphqlClient.query(
+        QueryOptions(
+          document: documentNodeQueryStreamingCandidates,
+          variables: Variables$Query$StreamingCandidates(
+            contentType: contentType,
+            id: id,
+          ).toJson(),
+        ),
+      );
+
+      if (result.hasException) {
+        debugPrint(
+            '[PlayerScreen] Failed to fetch candidates: ${result.exception}');
+        return null;
+      }
+
+      final data = Query$StreamingCandidates.fromJson(result.data!);
+      return data.streamingCandidates;
+    } catch (e) {
+      debugPrint('[PlayerScreen] Error fetching streaming candidates: $e');
+      return null;
+    }
+  }
+
+  /// Initialize direct P2P playback (no HLS transcoding).
+  ///
+  /// Streams the raw file over the P2P connection via the local proxy.
+  Future<void> _initializeP2PDirectPlayback(
+    LocalProxyService localProxyService,
+    GraphQLClient graphqlClient,
+    Query$StreamingCandidates$streamingCandidates candidatesResult,
+  ) async {
+    if (mounted) {
+      setState(() {
+        _loadingMessage = 'Starting direct playback...';
+      });
+    }
+
+    final fileId = candidatesResult.fileId;
+    debugPrint('[PlayerScreen] P2P direct play for file_id=$fileId');
+
+    // Set total duration from candidates metadata
+    final duration = candidatesResult.metadata.duration;
+    if (duration != null) {
+      _totalDuration = Duration(
+        milliseconds: (duration * 1000).round(),
+      );
+      DurationOverride.value = _totalDuration;
+      debugPrint(
+          '[PlayerScreen] Total duration from candidates: $_totalDuration');
+    }
+
+    // Build direct stream URL via local proxy
+    // No HLS session ID needed — the "direct:{fileId}" convention handles it
+    final directUrl = localProxyService.buildDirectStreamUrl(fileId);
+    debugPrint('[PlayerScreen] P2P direct URL: $directUrl');
+
+    // Initialize progress service
+    _progressService = ProgressService(graphqlClient);
+
+    // Fetch saved progress and episode list for TV shows
+    await _fetchProgressAndEpisodes(graphqlClient);
+
+    // Create media_kit player
+    _player = Player();
+    _videoController = VideoController(_player!);
+
+    // Open media with media_kit (no auth headers needed for local proxy)
+    await _player!.open(
+      Media(directUrl),
+      play: false,
+    );
+
+    // Wait for player to be ready
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // Check if we should show resume dialog
+    final playerDuration = _player!.state.duration.inSeconds;
+    final savedPosition = _savedPositionSeconds;
+    if (mounted &&
+        savedPosition != null &&
+        savedPosition > _minResumeThresholdSeconds &&
+        playerDuration > 0) {
+      final shouldResume = await showResumeDialog(
+        context,
+        savedPosition,
+        playerDuration,
+      );
+
+      if (shouldResume == true) {
+        await _player!.seek(Duration(seconds: savedPosition));
+      }
+    }
+
+    // Start playback
+    await _player!.play();
+
+    // Start progress tracking
+    if (widget.mediaType == 'movie') {
+      _progressService!.startMovieSync(_player!, widget.mediaId);
+    } else if (widget.mediaType == 'episode') {
+      _progressService!.startEpisodeSync(_player!, widget.mediaId);
+    }
+
+    // Listen for playback completion
+    await _positionSubscription?.cancel();
+    _positionSubscription = _player!.stream.position.listen((_) {
+      _onPlaybackProgress();
+    });
+
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        _loadingMessage = null;
+      });
+    }
+
+    debugPrint('[PlayerScreen] P2P direct playback initialized successfully');
+  }
+
+  /// Initialize HLS P2P playback (transcoding fallback).
+  Future<void> _initializeP2PHlsPlayback(
+    LocalProxyService localProxyService,
+    GraphQLClient graphqlClient,
+  ) async {
+    if (mounted) {
+      setState(() {
+        _loadingMessage = 'Starting stream...';
+      });
+    }
+
+    // Start HLS streaming session via GraphQL
+    final result = await graphqlClient.mutate(
+      MutationOptions(
+        document: documentNodeMutationStartStreamingSession,
+        variables: Variables$Mutation$StartStreamingSession(
+          fileId: widget.fileId,
+          strategy: Enum$StreamingStrategy.TRANSCODE,
+        ).toJson(),
+      ),
+    );
+
+    if (result.hasException) {
+      throw Exception('Failed to start streaming session: ${result.exception}');
+    }
+
+    final sessionData = Mutation$StartStreamingSession.fromJson(result.data!);
+    final sessionResult = sessionData.startStreamingSession;
+    if (sessionResult == null) {
+      throw Exception('No session data returned from server');
+    }
+
+    _hlsSessionId = sessionResult.sessionId;
+    debugPrint('[PlayerScreen] P2P HLS session started: $_hlsSessionId');
+
+    // Set total duration if provided
+    if (sessionResult.duration != null) {
+      _totalDuration = Duration(
+        milliseconds: (sessionResult.duration! * 1000).round(),
+      );
+      DurationOverride.value = _totalDuration;
+      debugPrint('[PlayerScreen] Total duration from server: $_totalDuration');
+    }
+
+    // Build HLS URL via local proxy
+    final hlsUrl = localProxyService.buildHlsUrl(_hlsSessionId!);
+    debugPrint('[PlayerScreen] P2P HLS URL: $hlsUrl');
+
+    // Wait for playlist to be ready
+    await _waitForP2PPlaylist(hlsUrl);
+
+    // Initialize progress service
+    _progressService = ProgressService(graphqlClient);
+
+    // Fetch saved progress and episode list for TV shows
+    await _fetchProgressAndEpisodes(graphqlClient);
+
+    // Create media_kit player
+    _player = Player();
+    _videoController = VideoController(_player!);
+
+    // Open media with media_kit (no auth headers needed for local proxy)
+    await _player!.open(
+      Media(hlsUrl),
+      play: false,
+    );
+
+    // Wait for player to be ready
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // Check if we should show resume dialog
+    final duration = _player!.state.duration.inSeconds;
+    final savedPosition = _savedPositionSeconds;
+    if (mounted &&
+        savedPosition != null &&
+        savedPosition > _minResumeThresholdSeconds &&
+        duration > 0) {
+      final shouldResume = await showResumeDialog(
+        context,
+        savedPosition,
+        duration,
+      );
+
+      if (shouldResume == true) {
+        await _player!.seek(Duration(seconds: savedPosition));
+      }
+    }
+
+    // Start playback
+    await _player!.play();
+
+    // Start progress tracking
+    if (widget.mediaType == 'movie') {
+      _progressService!.startMovieSync(_player!, widget.mediaId);
+    } else if (widget.mediaType == 'episode') {
+      _progressService!.startEpisodeSync(_player!, widget.mediaId);
+    }
+
+    // Listen for playback completion
+    await _positionSubscription?.cancel();
+    _positionSubscription = _player!.stream.position.listen((_) {
+      _onPlaybackProgress();
+    });
+
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        _loadingMessage = null;
+      });
+    }
+
+    debugPrint('[PlayerScreen] P2P HLS playback initialized successfully');
   }
 
   /// Wait for P2P HLS playlist to be ready with enough segments.
@@ -535,37 +724,44 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
           if (segmentCount >= minSegments) {
             if (i > 0) {
-              debugPrint('[PlayerScreen] P2P playlist ready after ${i + 1} attempt(s) with $segmentCount segments');
+              debugPrint(
+                  '[PlayerScreen] P2P playlist ready after ${i + 1} attempt(s) with $segmentCount segments');
             }
             return;
           }
 
           final percentage = (segmentCount / minSegments * 100).round();
-          debugPrint('[PlayerScreen] P2P playlist has $segmentCount/$minSegments segments ($percentage%)');
+          debugPrint(
+              '[PlayerScreen] P2P playlist has $segmentCount/$minSegments segments ($percentage%)');
           if (mounted) {
             setState(() {
               _loadingMessage = 'Preparing stream... $percentage%';
             });
           }
         } else {
-          debugPrint('[PlayerScreen] P2P playlist not ready (${response.statusCode}), retrying...');
+          debugPrint(
+              '[PlayerScreen] P2P playlist not ready (${response.statusCode}), retrying...');
           if (mounted) {
             setState(() {
-              _loadingMessage = 'Starting transcoding... (${i + 1}/$maxRetries)';
+              _loadingMessage =
+                  'Starting transcoding... (${i + 1}/$maxRetries)';
             });
           }
         }
 
         // Exponential backoff with max cap
         final delay = Duration(
-          milliseconds: (baseDelay.inMilliseconds * (1.5 * i + 1)).clamp(
-            baseDelay.inMilliseconds,
-            maxDelay.inMilliseconds,
-          ).toInt(),
+          milliseconds: (baseDelay.inMilliseconds * (1.5 * i + 1))
+              .clamp(
+                baseDelay.inMilliseconds,
+                maxDelay.inMilliseconds,
+              )
+              .toInt(),
         );
         await Future.delayed(delay);
       } catch (e) {
-        debugPrint('[PlayerScreen] Error checking P2P playlist (attempt ${i + 1}/$maxRetries): $e');
+        debugPrint(
+            '[PlayerScreen] Error checking P2P playlist (attempt ${i + 1}/$maxRetries): $e');
         if (mounted) {
           setState(() {
             _loadingMessage = 'Starting transcoding... (${i + 1}/$maxRetries)';
@@ -573,10 +769,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         }
 
         final delay = Duration(
-          milliseconds: (baseDelay.inMilliseconds * (1.5 * i + 1)).clamp(
-            baseDelay.inMilliseconds,
-            maxDelay.inMilliseconds,
-          ).toInt(),
+          milliseconds: (baseDelay.inMilliseconds * (1.5 * i + 1))
+              .clamp(
+                baseDelay.inMilliseconds,
+                maxDelay.inMilliseconds,
+              )
+              .toInt(),
         );
         await Future.delayed(delay);
       }
@@ -654,7 +852,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         final result = await client.query(
           QueryOptions(
             document: documentNodeQueryEpisodeDetail,
-            variables: Variables$Query$EpisodeDetail(id: widget.mediaId).toJson(),
+            variables:
+                Variables$Query$EpisodeDetail(id: widget.mediaId).toJson(),
           ),
         );
 
@@ -690,7 +889,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               .whereType<Fragment$MediaFileFragment$subtitles>()
               .map((sub) => app_models.SubtitleTrack.fromGraphQL(sub))
               .toList();
-          debugPrint('Extracted ${_subtitleTracks.length} subtitle tracks from GraphQL');
+          debugPrint(
+              'Extracted ${_subtitleTracks.length} subtitle tracks from GraphQL');
         }
         break;
       }
@@ -712,11 +912,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       );
 
       if (result.data != null) {
-        final episodes = Query$SeasonEpisodes.fromJson(result.data!).seasonEpisodes;
+        final episodes =
+            Query$SeasonEpisodes.fromJson(result.data!).seasonEpisodes;
         if (episodes != null && mounted) {
           setState(() {
-            _seasonEpisodes = episodes.whereType<Query$SeasonEpisodes$seasonEpisodes>().toList();
-            _currentEpisodeIndex = _seasonEpisodes?.indexWhere((ep) => ep.id == widget.mediaId);
+            _seasonEpisodes = episodes
+                .whereType<Query$SeasonEpisodes$seasonEpisodes>()
+                .toList();
+            _currentEpisodeIndex =
+                _seasonEpisodes?.indexWhere((ep) => ep.id == widget.mediaId);
           });
         }
       }
@@ -849,7 +1053,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   /// Get the HLS playlist URL from the stream endpoint.
   /// On web, uses JSON response (browsers can't reliably follow redirects).
   /// On native, follows redirects manually.
-  Future<String?> _getHlsPlaylistUrl(String streamUrl, Map<String, String> headers) async {
+  Future<String?> _getHlsPlaylistUrl(
+      String streamUrl, Map<String, String> headers) async {
     try {
       final client = http.Client();
       try {
@@ -870,7 +1075,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             // Extract total duration from server (HLS live playlists don't include it)
             final durationSeconds = json['duration'] as num?;
             if (durationSeconds != null) {
-              _totalDuration = Duration(milliseconds: (durationSeconds * 1000).round());
+              _totalDuration =
+                  Duration(milliseconds: (durationSeconds * 1000).round());
               DurationOverride.value = _totalDuration;
               debugPrint('Total duration from server: $_totalDuration');
             }
@@ -883,7 +1089,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               return hlsPath;
             }
           }
-          debugPrint('Failed to get HLS URL from JSON response: ${response.statusCode}');
+          debugPrint(
+              'Failed to get HLS URL from JSON response: ${response.statusCode}');
           return null;
         } else {
           // On native, follow redirects manually
@@ -906,8 +1113,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               currentUrl = '${uri.scheme}://${uri.host}:${uri.port}$location';
             } else if (!location.startsWith('http')) {
               final uri = Uri.parse(currentUrl);
-              final basePath = uri.path.substring(0, uri.path.lastIndexOf('/') + 1);
-              currentUrl = '${uri.scheme}://${uri.host}:${uri.port}$basePath$location';
+              final basePath =
+                  uri.path.substring(0, uri.path.lastIndexOf('/') + 1);
+              currentUrl =
+                  '${uri.scheme}://${uri.host}:${uri.port}$basePath$location';
             } else {
               currentUrl = location;
             }
@@ -954,37 +1163,44 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
           if (segmentCount >= minSegments) {
             if (i > 0) {
-              debugPrint('Playlist ready after ${i + 1} attempt(s) with $segmentCount segments');
+              debugPrint(
+                  'Playlist ready after ${i + 1} attempt(s) with $segmentCount segments');
             }
             return;
           }
 
           final percentage = (segmentCount / minSegments * 100).round();
-          debugPrint('Playlist has $segmentCount/$minSegments segments ($percentage%), waiting for more...');
+          debugPrint(
+              'Playlist has $segmentCount/$minSegments segments ($percentage%), waiting for more...');
           if (mounted) {
             setState(() {
               _loadingMessage = 'Preparing stream... $percentage%';
             });
           }
         } else {
-          debugPrint('Playlist not ready (${response.statusCode}), retrying...');
+          debugPrint(
+              'Playlist not ready (${response.statusCode}), retrying...');
           if (mounted) {
             setState(() {
-              _loadingMessage = 'Starting transcoding... (${i + 1}/$maxRetries)';
+              _loadingMessage =
+                  'Starting transcoding... (${i + 1}/$maxRetries)';
             });
           }
         }
 
         // Exponential backoff with max cap
         final delay = Duration(
-          milliseconds: (baseDelay.inMilliseconds * (1.5 * i + 1)).clamp(
-            baseDelay.inMilliseconds,
-            maxDelay.inMilliseconds,
-          ).toInt(),
+          milliseconds: (baseDelay.inMilliseconds * (1.5 * i + 1))
+              .clamp(
+                baseDelay.inMilliseconds,
+                maxDelay.inMilliseconds,
+              )
+              .toInt(),
         );
         await Future.delayed(delay);
       } catch (e) {
-        debugPrint('Error checking playlist (attempt ${i + 1}/$maxRetries): $e');
+        debugPrint(
+            'Error checking playlist (attempt ${i + 1}/$maxRetries): $e');
         if (mounted) {
           setState(() {
             _loadingMessage = 'Starting transcoding... (${i + 1}/$maxRetries)';
@@ -992,10 +1208,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         }
 
         final delay = Duration(
-          milliseconds: (baseDelay.inMilliseconds * (1.5 * i + 1)).clamp(
-            baseDelay.inMilliseconds,
-            maxDelay.inMilliseconds,
-          ).toInt(),
+          milliseconds: (baseDelay.inMilliseconds * (1.5 * i + 1))
+              .clamp(
+                baseDelay.inMilliseconds,
+                maxDelay.inMilliseconds,
+              )
+              .toInt(),
         );
         await Future.delayed(delay);
       }
@@ -1004,7 +1222,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     throw Exception('Playlist not ready after maximum retry attempts');
   }
 
-  Future<void> _navigateToEpisode(String episodeId, String fileId, String title) async {
+  Future<void> _navigateToEpisode(
+      String episodeId, String fileId, String title) async {
     // Save current progress before navigating
     await _saveProgress();
 
@@ -1043,48 +1262,61 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     return null;
   }
 
-  /// Terminate the HLS session on the server.
+  /// Terminate the HLS session on the server and clean up P2P resources.
   /// This stops FFmpeg and cleans up server-side resources.
   Future<void> _terminateHlsSession() async {
     final sessionId = _hlsSessionId;
     final token = _authToken;
 
-    if (sessionId == null || token == null) {
-      return;
-    }
-
-    debugPrint('Terminating HLS session: $sessionId (P2P: $_isP2PMode)');
-
-    try {
-      if (_isP2PMode) {
-        // Use GraphQL mutation for P2P mode
-        final graphqlClient = await ref.read(asyncGraphqlClientProvider.future);
-        final result = await graphqlClient.mutate(
-          MutationOptions(
-            document: documentNodeMutationEndStreamingSession,
-            variables: Variables$Mutation$EndStreamingSession(
-              sessionId: sessionId,
-            ).toJson(),
-          ),
-        );
-
-        if (result.hasException) {
-          debugPrint('Failed to terminate HLS session via GraphQL: ${result.exception}');
-        } else {
-          debugPrint('HLS session terminated successfully via GraphQL');
-        }
-
-        // Stop local proxy service
+    if (_isP2PMode) {
+      // In P2P mode, always stop the local proxy
+      try {
         final localProxyService = ref.read(localProxyServiceProvider);
         await localProxyService.stop();
         debugPrint('Local proxy stopped');
-      } else {
-        // Use HTTP DELETE for direct mode
-        final serverUrl = _serverUrl;
-        if (serverUrl == null) {
-          return;
-        }
+      } catch (e) {
+        debugPrint('Error stopping local proxy: $e');
+      }
 
+      // Only terminate HLS session if one was started (not for direct play)
+      if (sessionId != null && token != null) {
+        debugPrint('Terminating P2P HLS session: $sessionId');
+        try {
+          final graphqlClient =
+              await ref.read(asyncGraphqlClientProvider.future);
+          final result = await graphqlClient.mutate(
+            MutationOptions(
+              document: documentNodeMutationEndStreamingSession,
+              variables: Variables$Mutation$EndStreamingSession(
+                sessionId: sessionId,
+              ).toJson(),
+            ),
+          );
+
+          if (result.hasException) {
+            debugPrint(
+                'Failed to terminate HLS session via GraphQL: ${result.exception}');
+          } else {
+            debugPrint('HLS session terminated successfully via GraphQL');
+          }
+        } catch (e) {
+          debugPrint('Error terminating HLS session: $e');
+        }
+      }
+    } else {
+      // Non-P2P mode: use HTTP DELETE
+      if (sessionId == null || token == null) {
+        return;
+      }
+
+      final serverUrl = _serverUrl;
+      if (serverUrl == null) {
+        return;
+      }
+
+      debugPrint('Terminating HLS session: $sessionId');
+
+      try {
         final response = await http.delete(
           Uri.parse('$serverUrl/api/v1/hls/$sessionId'),
           headers: {'Authorization': 'Bearer $token'},
@@ -1095,9 +1327,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         } else {
           debugPrint('Failed to terminate HLS session: ${response.statusCode}');
         }
+      } catch (e) {
+        debugPrint('Error terminating HLS session: $e');
       }
-    } catch (e) {
-      debugPrint('Error terminating HLS session: $e');
     }
   }
 
@@ -1206,7 +1438,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         // Seek backward 10 seconds
         final currentPosition = player.state.position;
         final newPosition = currentPosition - const Duration(seconds: 10);
-        final targetPosition = newPosition < Duration.zero ? Duration.zero : newPosition;
+        final targetPosition =
+            newPosition < Duration.zero ? Duration.zero : newPosition;
         player.seek(targetPosition);
         return KeyEventResult.handled;
 
@@ -1481,14 +1714,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         children: [
           if (hasPrevious)
             IconButton(
-              icon: const Icon(Icons.skip_previous, color: Colors.white, size: 32),
+              icon: const Icon(Icons.skip_previous,
+                  color: Colors.white, size: 32),
               onPressed: () {
                 final prevEpisode = _seasonEpisodes![_currentEpisodeIndex! - 1];
                 final files = prevEpisode.files;
                 if (files != null && files.isNotEmpty) {
                   final firstFile = files.first;
                   if (firstFile != null) {
-                    final title = 'S${prevEpisode.seasonNumber}E${prevEpisode.episodeNumber}${prevEpisode.title != null ? ' - ${prevEpisode.title}' : ''}';
+                    final title =
+                        'S${prevEpisode.seasonNumber}E${prevEpisode.episodeNumber}${prevEpisode.title != null ? ' - ${prevEpisode.title}' : ''}';
                     _navigateToEpisode(prevEpisode.id, firstFile.id, title);
                   }
                 }
@@ -1509,7 +1744,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 if (files != null && files.isNotEmpty) {
                   final firstFile = files.first;
                   if (firstFile != null) {
-                    final title = 'S${nextEpisode.seasonNumber}E${nextEpisode.episodeNumber}${nextEpisode.title != null ? ' - ${nextEpisode.title}' : ''}';
+                    final title =
+                        'S${nextEpisode.seasonNumber}E${nextEpisode.episodeNumber}${nextEpisode.title != null ? ' - ${nextEpisode.title}' : ''}';
                     _navigateToEpisode(nextEpisode.id, firstFile.id, title);
                   }
                 }
@@ -1635,7 +1871,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     try {
       // Get media token service for media access
-      final mediaTokenService = await ref.read(asyncMediaTokenServiceProvider.future);
+      final mediaTokenService =
+          await ref.read(asyncMediaTokenServiceProvider.future);
       await mediaTokenService.ensureValidToken();
       final mediaToken = await mediaTokenService.getToken();
 
@@ -1766,7 +2003,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       value: progress.clamp(0.0, 1.0),
                       onChanged: (value) async {
                         final newPosition = Duration(
-                          seconds: (value * mediaInfo.duration.inSeconds).round(),
+                          seconds:
+                              (value * mediaInfo.duration.inSeconds).round(),
                         );
                         await castService.seek(newPosition);
                       },
@@ -1780,15 +2018,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                         children: [
                           Text(
                             _formatDuration(mediaInfo.position),
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: Colors.grey[400],
-                                ),
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: Colors.grey[400],
+                                    ),
                           ),
                           Text(
                             _formatDuration(mediaInfo.duration),
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: Colors.grey[400],
-                                ),
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: Colors.grey[400],
+                                    ),
                           ),
                         ],
                       ),
@@ -1805,7 +2045,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       icon: const Icon(Icons.replay_10, color: Colors.white),
                       iconSize: 40,
                       onPressed: () async {
-                        final newPosition = mediaInfo.position - const Duration(seconds: 10);
+                        final newPosition =
+                            mediaInfo.position - const Duration(seconds: 10);
                         await castService.seek(
                           newPosition.isNegative ? Duration.zero : newPosition,
                         );
@@ -1825,7 +2066,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     else
                       IconButton(
                         icon: Icon(
-                          isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                          isPlaying
+                              ? Icons.pause_circle_filled
+                              : Icons.play_circle_filled,
                           color: Colors.white,
                         ),
                         iconSize: 64,
@@ -1843,7 +2086,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       icon: const Icon(Icons.forward_10, color: Colors.white),
                       iconSize: 40,
                       onPressed: () async {
-                        final newPosition = mediaInfo.position + const Duration(seconds: 10);
+                        final newPosition =
+                            mediaInfo.position + const Duration(seconds: 10);
                         final maxPosition = mediaInfo.duration;
                         await castService.seek(
                           newPosition > maxPosition ? maxPosition : newPosition,

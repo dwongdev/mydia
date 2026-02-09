@@ -217,9 +217,8 @@ class StreamingTestHelper {
     Duration retryDelay = const Duration(seconds: 1),
   }) async {
     // First get the playlist
-    final playlistUrl = baseUrl.endsWith('.m3u8')
-        ? baseUrl
-        : '$baseUrl/index.m3u8';
+    final playlistUrl =
+        baseUrl.endsWith('.m3u8') ? baseUrl : '$baseUrl/index.m3u8';
 
     for (var i = 0; i < maxRetries; i++) {
       try {
@@ -230,7 +229,8 @@ class StreamingTestHelper {
           final playlistText = response.body;
 
           // Extract first segment URL
-          final segmentMatch = RegExp(r'segment_\d+\.ts').firstMatch(playlistText);
+          final segmentMatch =
+              RegExp(r'segment_\d+\.ts').firstMatch(playlistText);
           if (segmentMatch != null) {
             final segmentName = segmentMatch.group(0);
             final segmentUrl = baseUrl.endsWith('.m3u8')
@@ -360,6 +360,98 @@ class StreamingTestHelper {
     // Return null — callers use this only for optional debug output.
     return null;
   }
+
+  /// Fetch streaming candidates for a media item via GraphQL.
+  ///
+  /// Returns candidates with strategies (DIRECT_PLAY, REMUX, HLS_COPY, TRANSCODE)
+  /// and file metadata (duration, width, height).
+  Future<StreamingCandidatesResult?> fetchStreamingCandidates({
+    required String contentType,
+    required String id,
+  }) async {
+    const query = r'''
+      query StreamingCandidates($contentType: String!, $id: ID!) {
+        streamingCandidates(contentType: $contentType, id: $id) {
+          fileId
+          candidates {
+            strategy
+            mime
+            container
+            videoCodec
+            audioCodec
+          }
+          metadata {
+            duration
+            width
+            height
+          }
+        }
+      }
+    ''';
+
+    try {
+      final response = await _api.graphqlRequest(query, {
+        'contentType': contentType,
+        'id': id,
+      });
+
+      if (response['errors'] != null) {
+        final errors = response['errors'] as List;
+        throw Exception(
+            'Streaming candidates query failed: ${errors.first['message']}');
+      }
+
+      final data = response['data']['streamingCandidates'];
+      if (data == null) return null;
+
+      final candidates = (data['candidates'] as List)
+          .map((c) => StreamingCandidate(
+                strategy: c['strategy'] as String,
+                mime: c['mime'] as String,
+                container: c['container'] as String,
+                videoCodec: c['videoCodec'] as String?,
+                audioCodec: c['audioCodec'] as String?,
+              ))
+          .toList();
+
+      final metadata = data['metadata'] as Map<String, dynamic>?;
+
+      return StreamingCandidatesResult(
+        fileId: data['fileId'] as String,
+        candidates: candidates,
+        metadata: metadata != null
+            ? StreamingMetadata(
+                duration: (metadata['duration'] as num?)?.toDouble(),
+                width: metadata['width'] as int?,
+                height: metadata['height'] as int?,
+              )
+            : null,
+      );
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Verify that a direct file stream endpoint returns valid content.
+  ///
+  /// Tests GET /api/v1/stream/file/:fileId and checks for HTTP 200/206.
+  Future<bool> verifyDirectFileStream(String fileId) async {
+    final url = '$_mydiaUrl/api/v1/stream/file/$fileId';
+    try {
+      final request = http.Request('GET', Uri.parse(url));
+      request.headers.addAll(_authHeaders);
+      // Request only the first 1KB to avoid downloading the entire file
+      request.headers['Range'] = 'bytes=0-1023';
+
+      final streamedResponse = await request.send();
+      final statusCode = streamedResponse.statusCode;
+
+      // 200 (full content) or 206 (partial content) are both valid
+      return statusCode == 200 || statusCode == 206;
+    } catch (e) {
+      return false;
+    }
+  }
 }
 
 /// Information about a streaming session.
@@ -381,6 +473,74 @@ class StreamingSession {
   @override
   String toString() {
     return 'StreamingSession(sessionId: $sessionId, hlsUrl: $hlsUrl, duration: $duration)';
+  }
+}
+
+/// Result of the streaming candidates query.
+class StreamingCandidatesResult {
+  final String fileId;
+  final List<StreamingCandidate> candidates;
+  final StreamingMetadata? metadata;
+
+  StreamingCandidatesResult({
+    required this.fileId,
+    required this.candidates,
+    this.metadata,
+  });
+
+  /// Whether any candidate supports direct play.
+  bool get hasDirectPlay => candidates.any((c) => c.strategy == 'DIRECT_PLAY');
+
+  /// Whether any candidate supports HLS copy.
+  bool get hasHlsCopy => candidates.any((c) => c.strategy == 'HLS_COPY');
+
+  /// Whether any candidate supports transcoding.
+  bool get hasTranscode => candidates.any((c) => c.strategy == 'TRANSCODE');
+
+  @override
+  String toString() {
+    final strategies = candidates.map((c) => c.strategy).join(', ');
+    return 'StreamingCandidatesResult(fileId: $fileId, strategies: [$strategies])';
+  }
+}
+
+/// A single streaming candidate with strategy and codec info.
+class StreamingCandidate {
+  final String strategy;
+  final String mime;
+  final String container;
+  final String? videoCodec;
+  final String? audioCodec;
+
+  StreamingCandidate({
+    required this.strategy,
+    required this.mime,
+    required this.container,
+    this.videoCodec,
+    this.audioCodec,
+  });
+
+  @override
+  String toString() {
+    return 'StreamingCandidate(strategy: $strategy, mime: $mime, container: $container)';
+  }
+}
+
+/// Metadata about a media file from the candidates query.
+class StreamingMetadata {
+  final double? duration;
+  final int? width;
+  final int? height;
+
+  StreamingMetadata({
+    this.duration,
+    this.width,
+    this.height,
+  });
+
+  @override
+  String toString() {
+    return 'StreamingMetadata(duration: $duration, width: $width, height: $height)';
   }
 }
 

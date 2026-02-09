@@ -5,8 +5,7 @@ defmodule MydiaWeb.Api.StreamController do
   alias Mydia.Library.MediaFile
 
   alias Mydia.Streaming.{
-    Codec,
-    CodecString,
+    Candidates,
     Compatibility,
     FfmpegRemuxer,
     HlsSession,
@@ -137,49 +136,16 @@ defmodule MydiaWeb.Api.StreamController do
       }
   """
   def candidates(conn, %{"content_type" => content_type, "id" => id}) do
-    result =
-      case content_type do
-        "movie" ->
-          try do
-            media_item =
-              Mydia.Media.get_media_item!(id, preload: [media_files: :library_path])
-
-            case media_item.media_files do
-              [media_file | _] -> {:ok, media_file}
-              [] -> {:error, :no_media_files}
-            end
-          rescue
-            Ecto.NoResultsError -> {:error, :not_found}
-          end
-
-        "episode" ->
-          try do
-            episode = Mydia.Media.get_episode!(id, preload: [media_files: :library_path])
-
-            case episode.media_files do
-              [media_file | _] -> {:ok, media_file}
-              [] -> {:error, :no_media_files}
-            end
-          rescue
-            Ecto.NoResultsError -> {:error, :not_found}
-          end
-
-        "file" ->
-          # Direct media file access by ID
-          try do
-            media_file = Library.get_media_file!(id, preload: [:library_path])
-            {:ok, media_file}
-          rescue
-            Ecto.NoResultsError -> {:error, :not_found}
-          end
-
-        _ ->
-          {:error, :invalid_content_type}
-      end
-
-    case result do
+    case Candidates.resolve_media_file(content_type, id) do
       {:ok, media_file} ->
-        candidates_response(conn, media_file)
+        media_file = Candidates.ensure_codec_info(media_file)
+        candidates = Candidates.build_streaming_candidates(media_file)
+        metadata = Candidates.build_metadata_response(media_file)
+
+        json(conn, %{
+          candidates: candidates,
+          metadata: metadata
+        })
 
       {:error, :not_found} ->
         conn
@@ -196,104 +162,6 @@ defmodule MydiaWeb.Api.StreamController do
         |> put_status(:bad_request)
         |> json(%{error: "Invalid content type. Use 'movie', 'episode', or 'file'"})
     end
-  end
-
-  defp candidates_response(conn, media_file) do
-    # Ensure we have codec info (may need to extract on-the-fly)
-    absolute_path = MediaFile.absolute_path(media_file)
-
-    media_file =
-      if absolute_path && File.exists?(absolute_path) do
-        maybe_extract_codec_info(media_file, absolute_path)
-      else
-        media_file
-      end
-
-    # Generate streaming candidates
-    candidates = build_streaming_candidates(media_file)
-
-    # Build metadata response
-    metadata = build_metadata_response(media_file)
-
-    json(conn, %{
-      candidates: candidates,
-      metadata: metadata
-    })
-  end
-
-  defp build_streaming_candidates(media_file) do
-    compatibility = Compatibility.check_compatibility(media_file)
-    metadata = media_file.metadata || %{}
-    # Use the same container detection as compatibility check
-    container = Compatibility.get_container_format(media_file)
-
-    # Generate RFC 6381 codec strings
-    video_codec_str = CodecString.video_codec_string(media_file.codec, metadata)
-    audio_codec_str = CodecString.audio_codec_string(media_file.audio_codec, metadata)
-
-    # Get codec variants for browser testing
-    video_variants = CodecString.video_codec_variants(media_file.codec, metadata)
-
-    # Build prioritized candidate list based on compatibility
-    case compatibility do
-      :direct_play ->
-        # File can be played directly - offer direct play plus transcode fallback
-        [
-          build_candidate("DIRECT_PLAY", container, video_codec_str, audio_codec_str),
-          # Always include transcode fallback in case direct play fails
-          build_candidate("TRANSCODE", "ts", "avc1.640028", "mp4a.40.2")
-        ]
-
-      :needs_remux ->
-        # Codecs are compatible, just need container conversion to fMP4
-        [
-          build_candidate("REMUX", "mp4", video_codec_str, audio_codec_str),
-          build_candidate("HLS_COPY", "ts", video_codec_str, audio_codec_str),
-          build_candidate("TRANSCODE", "ts", "avc1.640028", "mp4a.40.2")
-        ]
-
-      :needs_transcoding ->
-        # Build candidates for browsers that might support the codec natively
-        # (e.g., Safari with HEVC) plus transcode fallback
-        native_candidates =
-          Enum.map(video_variants, fn video_variant ->
-            build_candidate("HLS_COPY", "ts", video_variant, audio_codec_str)
-          end)
-
-        # Add transcode fallback (always H.264 + AAC which all browsers support)
-        transcode_candidate =
-          build_candidate("TRANSCODE", "ts", "avc1.640028", "mp4a.40.2")
-
-        native_candidates ++ [transcode_candidate]
-    end
-  end
-
-  defp build_candidate(strategy, container, video_codec, audio_codec) do
-    mime = CodecString.build_mime_type(container, video_codec, audio_codec)
-
-    %{
-      strategy: strategy,
-      mime: mime,
-      container: container,
-      video_codec: video_codec,
-      audio_codec: audio_codec
-    }
-  end
-
-  defp build_metadata_response(media_file) do
-    metadata = media_file.metadata || %{}
-
-    %{
-      duration: metadata["duration"],
-      width: metadata["width"],
-      height: metadata["height"],
-      bitrate: media_file.bitrate,
-      resolution: media_file.resolution,
-      hdr_format: media_file.hdr_format,
-      original_codec: media_file.codec,
-      original_audio_codec: media_file.audio_codec,
-      container: metadata["container"]
-    }
   end
 
   # Main streaming function that handles a media file
@@ -316,7 +184,7 @@ defmodule MydiaWeb.Api.StreamController do
         # Verify file exists on disk
         if File.exists?(absolute_path) do
           # If codec info is missing, try to extract it on-the-fly
-          media_file = maybe_extract_codec_info(media_file, absolute_path)
+          media_file = Candidates.ensure_codec_info(media_file)
           route_stream(conn, media_file, absolute_path)
         else
           Logger.warning(
@@ -329,91 +197,6 @@ defmodule MydiaWeb.Api.StreamController do
         end
     end
   end
-
-  # Extract codec info on-the-fly if missing from database
-  defp maybe_extract_codec_info(%MediaFile{codec: nil} = media_file, absolute_path) do
-    Logger.info("Codec info missing for #{media_file.id}, extracting via FFprobe...")
-
-    case Mydia.Library.FileAnalyzer.analyze(absolute_path) do
-      {:ok, analysis} ->
-        # Update the struct with extracted codec info (in-memory only for now)
-        # We use the raw codec_name from FFprobe for compatibility checks
-        # Also update metadata with container format and duration for compatibility checks
-        updated_metadata =
-          (media_file.metadata || %{})
-          |> Map.put("container", analysis.container)
-          |> maybe_put_duration(analysis.duration)
-
-        updated = %{
-          media_file
-          | codec: Codec.normalize_video_codec(analysis.codec),
-            audio_codec: Codec.normalize_audio_codec(analysis.audio_codec),
-            metadata: updated_metadata
-        }
-
-        Logger.info(
-          "Extracted codec info: video=#{inspect(updated.codec)}, audio=#{inspect(updated.audio_codec)}, container=#{inspect(analysis.container)}, duration=#{inspect(analysis.duration)}"
-        )
-
-        # Also update in database for future requests
-        spawn(fn ->
-          Library.update_media_file_scan(media_file, %{
-            codec: updated.codec,
-            audio_codec: updated.audio_codec,
-            resolution: analysis.resolution,
-            bitrate: analysis.bitrate,
-            metadata: updated_metadata
-          })
-        end)
-
-        updated
-
-      {:error, reason} ->
-        Logger.warning("Failed to extract codec info for #{media_file.id}: #{inspect(reason)}")
-        media_file
-    end
-  end
-
-  # Extract fresh duration if missing from metadata (needed for remuxing/transcoding)
-  defp maybe_extract_codec_info(media_file, absolute_path) do
-    # Even if codec info exists, we need to ensure duration is present for proper playback
-    case get_in(media_file.metadata || %{}, ["duration"]) do
-      nil ->
-        # Duration is missing - probe the file to get fresh duration
-        Logger.info("Duration missing for #{media_file.id}, extracting via FFprobe...")
-        extract_duration_only(media_file, absolute_path)
-
-      _duration ->
-        # Duration already present
-        media_file
-    end
-  end
-
-  # Extract only duration when other codec info is already present
-  defp extract_duration_only(media_file, absolute_path) do
-    case Mydia.Library.ThumbnailGenerator.get_duration(absolute_path) do
-      {:ok, duration} ->
-        updated_metadata =
-          (media_file.metadata || %{})
-          |> Map.put("duration", duration)
-
-        Logger.info("Extracted duration: #{duration}s for #{media_file.id}")
-
-        # Update in database for future requests
-        spawn(fn ->
-          Library.update_media_file_scan(media_file, %{metadata: updated_metadata})
-        end)
-
-        %{media_file | metadata: updated_metadata}
-
-      {:error, reason} ->
-        Logger.warning("Failed to extract duration for #{media_file.id}: #{inspect(reason)}")
-        media_file
-    end
-  end
-
-  defp maybe_put_duration(metadata, nil), do: metadata
-  defp maybe_put_duration(metadata, duration), do: Map.put(metadata, "duration", duration)
 
   # Routes to appropriate streaming method based on client-selected strategy
   # or falls back to auto-detection for backward compatibility

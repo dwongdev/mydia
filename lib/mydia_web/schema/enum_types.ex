@@ -62,4 +62,12 @@ defmodule MydiaWeb.Schema.EnumTypes do
     value(:hls_copy, description: "HLS with stream copy (no transcoding)")
     value(:transcode, description: "Full transcoding to HLS")
   end
+
+  @desc "Streaming candidate strategy (includes all possible strategies)"
+  enum :streaming_candidate_strategy do
+    value(:direct_play, description: "Direct file playback (no processing)")
+    value(:remux, description: "Container remux (no re-encoding)")
+    value(:hls_copy, description: "HLS with stream copy")
+    value(:transcode, description: "Full transcoding")
+  end
 end

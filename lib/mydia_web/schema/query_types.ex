@@ -9,6 +9,7 @@ defmodule MydiaWeb.Schema.QueryTypes do
   alias MydiaWeb.Schema.Resolvers.DiscoveryResolver
   alias MydiaWeb.Schema.Resolvers.SearchResolver
   alias MydiaWeb.Schema.Resolvers.ApiKeyResolver
+  alias MydiaWeb.Schema.Resolvers.StreamingResolver
 
   # Node interface for global node resolution with hierarchical navigation
   interface :node do
@@ -111,6 +112,16 @@ defmodule MydiaWeb.Schema.QueryTypes do
     @desc "Get remote access / P2P connection status"
     field :remote_access_status, :remote_access_status do
       resolve(&MydiaWeb.Schema.Resolvers.RemoteAccessResolver.status/3)
+    end
+  end
+
+  # Streaming queries - for candidate-based streaming decisions
+  object :streaming_queries do
+    @desc "Get streaming candidates for a media item"
+    field :streaming_candidates, :streaming_candidates_result do
+      arg(:content_type, non_null(:string))
+      arg(:id, non_null(:id))
+      resolve(&StreamingResolver.streaming_candidates/3)
     end
   end
 

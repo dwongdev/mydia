@@ -24,6 +24,14 @@ class LocalProxyService {
   final P2pService _p2p;
   HttpServer? _server;
 
+  /// Maximum bytes per P2P range request (4 MB).
+  ///
+  /// Without this cap, the Rust bridge collects ALL streaming chunks into
+  /// memory before returning to Dart, which hangs indefinitely (and OOMs)
+  /// for large media files. By capping each request to 4 MB the player
+  /// receives data quickly and issues follow-up Range requests as needed.
+  static const _maxRangeSize = 4 * 1024 * 1024;
+
   /// The peer ID to send HLS requests to
   String? _targetPeer;
 
@@ -255,14 +263,28 @@ class LocalProxyService {
         return;
       }
 
-      // Parse Range header for seeking support
-      int? rangeStart;
+      // Parse Range header and cap to _maxRangeSize so the Rust bridge
+      // doesn't try to buffer an entire multi-GB file in memory.
+      int rangeStart;
       int? rangeEnd;
       final rangeHeader = request.headers.value('Range');
       if (rangeHeader != null) {
         final range = _parseRangeHeader(rangeHeader);
-        rangeStart = range.$1;
+        rangeStart = range.$1 ?? 0;
         rangeEnd = range.$2;
+
+        // Suffix ranges (bytes=-N) are always small; leave them alone.
+        // For all other cases, cap the window to _maxRangeSize.
+        if (rangeEnd == null) {
+          // Open-ended range: bytes=N-
+          rangeEnd = rangeStart + _maxRangeSize - 1;
+        } else if (rangeEnd - rangeStart + 1 > _maxRangeSize) {
+          rangeEnd = rangeStart + _maxRangeSize - 1;
+        }
+      } else {
+        // No Range header at all — request the first chunk.
+        rangeStart = 0;
+        rangeEnd = _maxRangeSize - 1;
       }
 
       debugPrint(

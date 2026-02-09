@@ -116,10 +116,10 @@ defmodule Mydia.Streaming.HlsSessionSupervisor do
 
     case DynamicSupervisor.start_child(__MODULE__, child_spec) do
       {:ok, pid} ->
-        {:ok, pid}
+        {:ok, pid, :started}
 
       {:error, {:already_started, pid}} ->
-        {:ok, pid}
+        {:ok, pid, :existing}
 
       error ->
         error

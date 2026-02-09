@@ -386,7 +386,7 @@ defmodule MydiaWeb.Api.StreamController do
     case get_user_id(conn) do
       {:ok, user_id} ->
         case HlsSessionSupervisor.start_direct_session(media_file.id, user_id) do
-          {:ok, pid} ->
+          {:ok, pid, _status} ->
             DirectPlaySession.heartbeat(pid)
 
           error ->

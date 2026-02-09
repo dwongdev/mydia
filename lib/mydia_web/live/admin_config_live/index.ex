@@ -276,6 +276,19 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     {:noreply, socket}
   end
 
+  # Ignore library scan messages (started, progress, completed, failed)
+  # that are broadcast on the "library_scanner" topic but not relevant here
+  @impl true
+  def handle_info({event, _}, socket)
+      when event in [
+             :library_scan_started,
+             :library_scan_progress,
+             :library_scan_completed,
+             :library_scan_failed
+           ] do
+    {:noreply, socket}
+  end
+
   @impl true
   def handle_event("change_tab", %{"tab" => tab}, socket) do
     {:noreply, push_patch(socket, to: ~p"/admin/config?tab=#{tab}")}

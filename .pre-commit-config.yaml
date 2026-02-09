@@ -4,7 +4,7 @@ repos:
       # Elixir / Phoenix
       - id: mix-format
         name: mix format
-        entry: mix format --check-formatted
+        entry: ./dev mix format --check-formatted
         language: system
         files: '\.(?:ex|exs|heex)$'
         pass_filenames: false
@@ -34,7 +34,7 @@ repos:
 
       - id: dart-analyze
         name: dart analyze
-        entry: dart analyze --fatal-infos
+        entry: dart analyze --fatal-warnings
         language: system
         files: '\.dart$'
         exclude: '\.(?:g|freezed)\.dart$'

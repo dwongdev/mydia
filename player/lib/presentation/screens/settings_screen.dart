@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../core/connection/connection_diagnostics_provider.dart';
 import '../../core/connection/connection_provider.dart';
 import '../../core/graphql/graphql_provider.dart';
 import '../../core/update/update_provider.dart';

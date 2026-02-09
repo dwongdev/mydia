@@ -135,7 +135,7 @@ class UpdateNotifier extends Notifier<UpdateState> {
     state = state.copyWith(isApplying: true, downloadProgress: 0.0, clearError: true);
 
     try {
-      await _platformUpdater!.applyUpdate(
+      await _platformUpdater.applyUpdate(
         update,
         onProgress: (progress) {
           state = state.copyWith(downloadProgress: progress);

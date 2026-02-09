@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:player/main.dart';
-import 'package:player/src/rust/frb_generated.dart';
+import 'package:player/app.dart';
+import 'package:player/native/frb_generated.dart'
+    if (dart.library.js_interop) 'package:player/native/frb_stub.dart';
 import 'package:integration_test/integration_test.dart';
 
 void main() {

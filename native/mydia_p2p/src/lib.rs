@@ -2,11 +2,16 @@
 //!
 //! Provides Erlang/Elixir interop for the p2p networking functionality.
 
-use rustler::{Env, LocalPid, ResourceArc, Term, OwnedEnv, Encoder, NifStruct, NifTaggedEnum};
-use mydia_p2p_core::{Host, Event, MydiaRequest, MydiaResponse, PairingResponse, GraphQLResponse, HlsResponseHeader, HostConfig, LogLevel, BlobDownloadResponse};
-use std::thread;
+use mydia_p2p_core::{
+    BlobDownloadResponse, Event, GraphQLResponse, HlsResponseHeader, Host, HostConfig, LogLevel,
+    MydiaRequest, MydiaResponse, PairingResponse,
+};
+use rustler::{
+    Binary, Encoder, Env, LocalPid, NifStruct, NifTaggedEnum, OwnedEnv, ResourceArc, Term,
+};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use std::thread;
 
 mod atoms {
     rustler::atoms! {
@@ -19,10 +24,8 @@ struct HostResource {
     host: Host,
 }
 
-fn load(env: Env, _info: Term) -> bool {
-    let _ = rustler::resource!(HostResource, env);
-    true
-}
+#[rustler::resource_impl]
+impl rustler::Resource for HostResource {}
 
 /// Start the p2p host with configuration.
 /// relay_url: Custom relay URL for NAT traversal (uses default relays if None).
@@ -30,21 +33,28 @@ fn load(env: Env, _info: Term) -> bool {
 /// keypair_path: Path to store/load the node's keypair for persistent identity.
 /// Returns (resource, node_id_string).
 #[rustler::nif]
-fn start_host(relay_url: Option<String>, bind_port: Option<u16>, keypair_path: Option<String>) -> Result<(ResourceArc<HostResource>, String), rustler::Error> {
+fn start_host<'a>(
+    env: Env<'a>,
+    relay_url: Option<String>,
+    bind_port: Option<u16>,
+    keypair_path: Option<String>,
+) -> Term<'a> {
     let config = HostConfig {
         relay_url,
         bind_port,
         keypair_path,
-        ..Default::default()
     };
     let (host, node_id_str) = Host::new(config);
-    let resource = HostResource { host };
-    Ok((ResourceArc::new(resource), node_id_str))
+    let resource = ResourceArc::new(HostResource { host });
+    (resource, node_id_str).encode(env)
 }
 
 /// Dial a peer using their EndpointAddr JSON.
 #[rustler::nif(schedule = "DirtyIo")]
-fn dial(resource: ResourceArc<HostResource>, endpoint_addr_json: String) -> Result<String, rustler::Error> {
+fn dial(
+    resource: ResourceArc<HostResource>,
+    endpoint_addr_json: String,
+) -> Result<String, rustler::Error> {
     match resource.host.dial(endpoint_addr_json) {
         Ok(_) => Ok("ok".to_string()),
         Err(e) => Err(rustler::Error::Term(Box::new(e))),
@@ -169,7 +179,11 @@ enum ElixirResponse {
 
 /// Send a response to an incoming request.
 #[rustler::nif(schedule = "DirtyIo")]
-fn send_response(resource: ResourceArc<HostResource>, request_id: String, response: ElixirResponse) -> Result<String, rustler::Error> {
+fn send_response(
+    resource: ResourceArc<HostResource>,
+    request_id: String,
+    response: ElixirResponse,
+) -> Result<String, rustler::Error> {
     let core_response = match response {
         ElixirResponse::Pairing(r) => MydiaResponse::Pairing(PairingResponse {
             success: r.success,
@@ -203,7 +217,13 @@ fn send_response(resource: ResourceArc<HostResource>, request_id: String, respon
 /// Read a file chunk and send it as a response.
 /// This is done in a separate thread to avoid blocking the NIF.
 #[rustler::nif]
-fn respond_with_file_chunk(resource: ResourceArc<HostResource>, request_id: String, file_path: String, offset: u64, length: u32) -> Result<String, rustler::Error> {
+fn respond_with_file_chunk(
+    resource: ResourceArc<HostResource>,
+    request_id: String,
+    file_path: String,
+    offset: u64,
+    length: u32,
+) -> Result<String, rustler::Error> {
     let resource_clone = resource.clone();
 
     thread::spawn(move || {
@@ -216,13 +236,13 @@ fn respond_with_file_chunk(resource: ResourceArc<HostResource>, request_id: Stri
                             buffer.truncate(n);
                             MydiaResponse::MediaChunk(buffer)
                         }
-                        Err(e) => MydiaResponse::Error(format!("Read error: {}", e))
+                        Err(e) => MydiaResponse::Error(format!("Read error: {}", e)),
                     }
                 } else {
                     MydiaResponse::Error("Seek error".to_string())
                 }
             }
-            Err(e) => MydiaResponse::Error(format!("File open error: {}", e))
+            Err(e) => MydiaResponse::Error(format!("File open error: {}", e)),
         };
 
         let _ = resource_clone.host.send_response(request_id, response);
@@ -235,7 +255,11 @@ fn respond_with_file_chunk(resource: ResourceArc<HostResource>, request_id: Stri
 /// Must be called before any send_hls_chunk calls.
 /// Uses DirtyIo scheduler because blocking_send/blocking_recv block the thread.
 #[rustler::nif(schedule = "DirtyIo")]
-fn send_hls_header(resource: ResourceArc<HostResource>, stream_id: String, header: ElixirHlsResponseHeader) -> Result<String, rustler::Error> {
+fn send_hls_header(
+    resource: ResourceArc<HostResource>,
+    stream_id: String,
+    header: ElixirHlsResponseHeader,
+) -> Result<String, rustler::Error> {
     let core_header = HlsResponseHeader {
         status: header.status,
         content_type: header.content_type,
@@ -254,8 +278,15 @@ fn send_hls_header(resource: ResourceArc<HostResource>, stream_id: String, heade
 /// Must be called after send_hls_header and before finish_hls_stream.
 /// Uses DirtyIo scheduler because blocking_send/blocking_recv block the thread.
 #[rustler::nif(schedule = "DirtyIo")]
-fn send_hls_chunk(resource: ResourceArc<HostResource>, stream_id: String, data: Vec<u8>) -> Result<String, rustler::Error> {
-    match resource.host.send_hls_chunk(stream_id, data) {
+fn send_hls_chunk(
+    resource: ResourceArc<HostResource>,
+    stream_id: String,
+    data: Binary,
+) -> Result<String, rustler::Error> {
+    match resource
+        .host
+        .send_hls_chunk(stream_id, data.as_slice().to_vec())
+    {
         Ok(_) => Ok("ok".to_string()),
         Err(e) => Err(rustler::Error::Term(Box::new(e))),
     }
@@ -265,7 +296,10 @@ fn send_hls_chunk(resource: ResourceArc<HostResource>, stream_id: String, data: 
 /// Must be called after all chunks have been sent.
 /// Uses DirtyIo scheduler because blocking_send/blocking_recv block the thread.
 #[rustler::nif(schedule = "DirtyIo")]
-fn finish_hls_stream(resource: ResourceArc<HostResource>, stream_id: String) -> Result<String, rustler::Error> {
+fn finish_hls_stream(
+    resource: ResourceArc<HostResource>,
+    stream_id: String,
+) -> Result<String, rustler::Error> {
     match resource.host.finish_hls_stream(stream_id) {
         Ok(_) => Ok("ok".to_string()),
         Err(e) => Err(rustler::Error::Term(Box::new(e))),
@@ -288,12 +322,22 @@ fn create_blob_ticket(file_path: String, filename: String) -> Result<String, rus
     // Open and read the file
     let file = match File::open(&file_path) {
         Ok(f) => f,
-        Err(e) => return Err(rustler::Error::Term(Box::new(format!("Failed to open file: {}", e)))),
+        Err(e) => {
+            return Err(rustler::Error::Term(Box::new(format!(
+                "Failed to open file: {}",
+                e
+            ))))
+        }
     };
 
     let metadata = match file.metadata() {
         Ok(m) => m,
-        Err(e) => return Err(rustler::Error::Term(Box::new(format!("Failed to get metadata: {}", e)))),
+        Err(e) => {
+            return Err(rustler::Error::Term(Box::new(format!(
+                "Failed to get metadata: {}",
+                e
+            ))))
+        }
     };
 
     let file_size = metadata.len();
@@ -307,7 +351,12 @@ fn create_blob_ticket(file_path: String, filename: String) -> Result<String, rus
         let bytes_read = match reader.read(&mut buffer) {
             Ok(0) => break,
             Ok(n) => n,
-            Err(e) => return Err(rustler::Error::Term(Box::new(format!("Failed to read file: {}", e)))),
+            Err(e) => {
+                return Err(rustler::Error::Term(Box::new(format!(
+                    "Failed to read file: {}",
+                    e
+                ))))
+            }
         };
         hasher.update(&buffer[..bytes_read]);
     }
@@ -328,7 +377,11 @@ fn create_blob_ticket(file_path: String, filename: String) -> Result<String, rus
 /// Start listening for events and forward them to the given Elixir process.
 #[rustler::nif]
 #[allow(unused_variables)]
-fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid) -> Result<String, rustler::Error> {
+fn start_listening(
+    env: Env,
+    resource: ResourceArc<HostResource>,
+    pid: LocalPid,
+) -> Result<String, rustler::Error> {
     let host = &resource.host;
     let event_rx = host.event_rx.clone();
 
@@ -336,89 +389,117 @@ fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid)
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let mut rx = event_rx.lock().await;
-            loop {
-                if let Some(event) = rx.recv().await {
-                    let mut msg_env = OwnedEnv::new();
-                    let _ = msg_env.send_and_clear(&pid, |env| {
-                        match event {
-                            Event::Connected(peer_id) => {
-                                (atoms::ok(), "peer_connected", peer_id).encode(env)
-                            }
-                            Event::Disconnected(peer_id) => {
-                                (atoms::ok(), "peer_disconnected", peer_id).encode(env)
-                            }
-                            Event::RequestReceived { peer: _, request, request_id } => {
-                                match request {
-                                    MydiaRequest::Pairing(req) => {
-                                        let elixir_req = ElixirPairingRequest {
-                                            claim_code: req.claim_code,
-                                            device_name: req.device_name,
-                                            device_type: req.device_type,
-                                            device_os: req.device_os,
-                                        };
-                                        (atoms::ok(), "request_received", "pairing", request_id, elixir_req).encode(env)
-                                    },
-                                    MydiaRequest::ReadMedia(req) => {
-                                        let elixir_req = ElixirReadMediaRequest {
-                                            file_path: req.file_path,
-                                            offset: req.offset,
-                                            length: req.length,
-                                        };
-                                        (atoms::ok(), "request_received", "read_media", request_id, elixir_req).encode(env)
-                                    },
-                                    MydiaRequest::GraphQL(req) => {
-                                        let elixir_req = ElixirGraphQLRequest {
-                                            query: req.query,
-                                            variables: req.variables,
-                                            operation_name: req.operation_name,
-                                            auth_token: req.auth_token,
-                                        };
-                                        (atoms::ok(), "request_received", "graphql", request_id, elixir_req).encode(env)
-                                    },
-                                    MydiaRequest::BlobDownload(req) => {
-                                        let elixir_req = ElixirBlobDownloadRequest {
-                                            job_id: req.job_id,
-                                            auth_token: req.auth_token,
-                                        };
-                                        (atoms::ok(), "request_received", "blob_download", request_id, elixir_req).encode(env)
-                                    },
-                                    MydiaRequest::Ping => {
-                                        (atoms::ok(), "request_received", "ping", request_id).encode(env)
-                                    }
-                                    _ => (atoms::ok(), "unknown_request").encode(env)
-                                }
-                            }
-                            Event::HlsStreamRequest { peer: _, request, stream_id } => {
-                                let elixir_req = ElixirHlsRequest {
-                                    session_id: request.session_id,
-                                    path: request.path,
-                                    range_start: request.range_start,
-                                    range_end: request.range_end,
-                                    auth_token: request.auth_token,
-                                };
-                                (atoms::ok(), "hls_stream", stream_id, elixir_req).encode(env)
-                            }
-                            Event::RelayConnected => {
-                                (atoms::ok(), "relay_connected").encode(env)
-                            }
-                            Event::Ready { node_addr } => {
-                                (atoms::ok(), "ready", node_addr).encode(env)
-                            }
-                            Event::Log { level, target, message } => {
-                                let level_str = match level {
-                                    LogLevel::Trace => "trace",
-                                    LogLevel::Debug => "debug",
-                                    LogLevel::Info => "info",
-                                    LogLevel::Warn => "warn",
-                                    LogLevel::Error => "error",
-                                };
-                                (atoms::ok(), "log", level_str, target, message).encode(env)
-                            }
+            while let Some(event) = rx.recv().await {
+                let mut msg_env = OwnedEnv::new();
+                let _ = msg_env.send_and_clear(&pid, |env| match event {
+                    Event::Connected(peer_id) => {
+                        (atoms::ok(), "peer_connected", peer_id).encode(env)
+                    }
+                    Event::Disconnected(peer_id) => {
+                        (atoms::ok(), "peer_disconnected", peer_id).encode(env)
+                    }
+                    Event::RequestReceived {
+                        peer: _,
+                        request,
+                        request_id,
+                    } => match request {
+                        MydiaRequest::Pairing(req) => {
+                            let elixir_req = ElixirPairingRequest {
+                                claim_code: req.claim_code,
+                                device_name: req.device_name,
+                                device_type: req.device_type,
+                                device_os: req.device_os,
+                            };
+                            (
+                                atoms::ok(),
+                                "request_received",
+                                "pairing",
+                                request_id,
+                                elixir_req,
+                            )
+                                .encode(env)
                         }
-                    });
-                } else {
-                    break;
-                }
+                        MydiaRequest::ReadMedia(req) => {
+                            let elixir_req = ElixirReadMediaRequest {
+                                file_path: req.file_path,
+                                offset: req.offset,
+                                length: req.length,
+                            };
+                            (
+                                atoms::ok(),
+                                "request_received",
+                                "read_media",
+                                request_id,
+                                elixir_req,
+                            )
+                                .encode(env)
+                        }
+                        MydiaRequest::GraphQL(req) => {
+                            let elixir_req = ElixirGraphQLRequest {
+                                query: req.query,
+                                variables: req.variables,
+                                operation_name: req.operation_name,
+                                auth_token: req.auth_token,
+                            };
+                            (
+                                atoms::ok(),
+                                "request_received",
+                                "graphql",
+                                request_id,
+                                elixir_req,
+                            )
+                                .encode(env)
+                        }
+                        MydiaRequest::BlobDownload(req) => {
+                            let elixir_req = ElixirBlobDownloadRequest {
+                                job_id: req.job_id,
+                                auth_token: req.auth_token,
+                            };
+                            (
+                                atoms::ok(),
+                                "request_received",
+                                "blob_download",
+                                request_id,
+                                elixir_req,
+                            )
+                                .encode(env)
+                        }
+                        MydiaRequest::Ping => {
+                            (atoms::ok(), "request_received", "ping", request_id).encode(env)
+                        }
+                        _ => (atoms::ok(), "unknown_request").encode(env),
+                    },
+                    Event::HlsStreamRequest {
+                        peer: _,
+                        request,
+                        stream_id,
+                    } => {
+                        let elixir_req = ElixirHlsRequest {
+                            session_id: request.session_id,
+                            path: request.path,
+                            range_start: request.range_start,
+                            range_end: request.range_end,
+                            auth_token: request.auth_token,
+                        };
+                        (atoms::ok(), "hls_stream", stream_id, elixir_req).encode(env)
+                    }
+                    Event::RelayConnected => (atoms::ok(), "relay_connected").encode(env),
+                    Event::Ready { node_addr } => (atoms::ok(), "ready", node_addr).encode(env),
+                    Event::Log {
+                        level,
+                        target,
+                        message,
+                    } => {
+                        let level_str = match level {
+                            LogLevel::Trace => "trace",
+                            LogLevel::Debug => "debug",
+                            LogLevel::Info => "info",
+                            LogLevel::Warn => "warn",
+                            LogLevel::Error => "error",
+                        };
+                        (atoms::ok(), "log", level_str, target, message).encode(env)
+                    }
+                });
             }
         });
     });
@@ -426,4 +507,4 @@ fn start_listening(env: Env, resource: ResourceArc<HostResource>, pid: LocalPid)
     Ok("ok".to_string())
 }
 
-rustler::init!("Elixir.Mydia.P2p", load = load);
+rustler::init!("Elixir.Mydia.P2p");

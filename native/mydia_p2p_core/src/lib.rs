@@ -4,16 +4,16 @@
 //! NAT traversal and QUIC-based connections.
 
 use iroh::{
-    Endpoint, EndpointAddr, EndpointId, RelayConfig, RelayMap, RelayMode,
-    RelayUrl, SecretKey, Watcher,
-    endpoint::{Connection, ConnectionType, SendStream},
+    endpoint::{Connection, SendStream},
+    Endpoint, EndpointAddr, EndpointId, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey,
+    Watcher,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
-use std::sync::OnceLock;
 
 // Protocol identifier for mydia connections
 const ALPN: &[u8] = b"/mydia/1.0.0";
@@ -48,17 +48,17 @@ pub struct ReadMediaRequest {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GraphQLRequest {
     pub query: String,
-    pub variables: Option<String>,      // JSON-encoded
+    pub variables: Option<String>, // JSON-encoded
     pub operation_name: Option<String>,
-    pub auth_token: Option<String>,     // Access token for authorization
+    pub auth_token: Option<String>, // Access token for authorization
 }
 
 /// HLS request for streaming manifests and segments over P2P
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct HlsRequest {
     pub session_id: String,
-    pub path: String,                   // "index.m3u8" or "segment_001.ts"
-    pub range_start: Option<u64>,       // For HTTP Range requests
+    pub path: String,             // "index.m3u8" or "segment_001.ts"
+    pub range_start: Option<u64>, // For HTTP Range requests
     pub range_end: Option<u64>,
     pub auth_token: Option<String>,
 }
@@ -69,7 +69,7 @@ pub struct HlsResponseHeader {
     pub status: u16,
     pub content_type: String,
     pub content_length: u64,
-    pub content_range: Option<String>,  // e.g., "bytes 0-1023/4096"
+    pub content_range: Option<String>, // e.g., "bytes 0-1023/4096"
     pub cache_control: Option<String>,
 }
 
@@ -249,13 +249,21 @@ pub enum PeerConnectionType {
     None,
 }
 
-impl From<ConnectionType> for PeerConnectionType {
-    fn from(ct: ConnectionType) -> Self {
-        match ct {
-            ConnectionType::Direct(_) => PeerConnectionType::Direct,
-            ConnectionType::Relay(_) => PeerConnectionType::Relay,
-            ConnectionType::Mixed(_, _) => PeerConnectionType::Mixed,
-            ConnectionType::None => PeerConnectionType::None,
+impl PeerConnectionType {
+    /// Determine connection type from a Connection's paths
+    fn from_connection(conn: &Connection) -> Self {
+        let mut paths = conn.paths();
+        let paths_list = paths.get();
+        if paths_list.is_empty() {
+            return PeerConnectionType::None;
+        }
+        let has_relay = paths_list.iter().any(|p| p.is_relay());
+        let has_direct = paths_list.iter().any(|p| p.is_ip());
+        match (has_direct, has_relay) {
+            (true, true) => PeerConnectionType::Mixed,
+            (true, false) => PeerConnectionType::Direct,
+            (false, true) => PeerConnectionType::Relay,
+            (false, false) => PeerConnectionType::None,
         }
     }
 }
@@ -445,7 +453,11 @@ impl Host {
     /// Get this node's address as JSON for sharing
     pub fn get_node_addr(&self) -> String {
         let (tx, rx) = oneshot::channel();
-        if self.cmd_tx.blocking_send(Command::GetNodeAddr { reply: tx }).is_err() {
+        if self
+            .cmd_tx
+            .blocking_send(Command::GetNodeAddr { reply: tx })
+            .is_err()
+        {
             return String::new();
         }
         rx.blocking_recv().unwrap_or_default()
@@ -497,7 +509,11 @@ impl Host {
     /// Get network statistics
     pub fn get_network_stats(&self) -> NetworkStats {
         let (tx, rx) = oneshot::channel();
-        if self.cmd_tx.blocking_send(Command::GetNetworkStats { reply: tx }).is_err() {
+        if self
+            .cmd_tx
+            .blocking_send(Command::GetNetworkStats { reply: tx })
+            .is_err()
+        {
             return NetworkStats::default();
         }
         rx.blocking_recv().unwrap_or_default()
@@ -510,7 +526,11 @@ impl Host {
 
     /// Send an HLS response header for a streaming request.
     /// Must be called before any send_hls_chunk calls.
-    pub fn send_hls_header(&self, stream_id: String, header: HlsResponseHeader) -> Result<(), String> {
+    pub fn send_hls_header(
+        &self,
+        stream_id: String,
+        header: HlsResponseHeader,
+    ) -> Result<(), String> {
         let (tx, rx) = oneshot::channel();
         self.cmd_tx
             .blocking_send(Command::SendHlsHeader {
@@ -594,22 +614,26 @@ async fn run_event_loop(
     // Configure relay
     if let Some(relay_url) = &config.relay_url {
         if let Ok(url) = relay_url.parse::<RelayUrl>() {
-            builder = builder.relay_mode(RelayMode::Custom(
-                RelayMap::from(RelayConfig {
-                    url,
-                    quic: None,
-                })
-            ));
+            builder = builder.relay_mode(RelayMode::Custom(RelayMap::from(RelayConfig {
+                url,
+                quic: None,
+            })));
         }
     }
 
     // Configure bind port
     if let Some(port) = config.bind_port {
         if port > 0 {
-            builder = builder.bind_addr_v4(std::net::SocketAddrV4::new(
+            match builder.bind_addr(std::net::SocketAddrV4::new(
                 std::net::Ipv4Addr::UNSPECIFIED,
                 port,
-            ));
+            )) {
+                Ok(b) => builder = b,
+                Err(e) => {
+                    tracing::error!("Failed to set bind address: {}", e);
+                    return;
+                }
+            }
         }
     }
 
@@ -649,7 +673,11 @@ async fn run_event_loop(
     // Get endpoint address and emit Ready event
     let addr = endpoint.addr();
     let addr_json = endpoint_addr_to_json(&addr);
-    let _ = event_tx.send(Event::Ready { node_addr: addr_json }).await;
+    let _ = event_tx
+        .send(Event::Ready {
+            node_addr: addr_json,
+        })
+        .await;
 
     loop {
         tokio::select! {
@@ -733,18 +761,10 @@ async fn run_event_loop(
                         // Get connection type for the first connected peer
                         let peer_connection_type = if let Some((peer_key, conn)) = connected_peers.iter().next() {
                             let peer_id = conn.remote_id();
-                            tracing::info!("GetNetworkStats: checking conn_type for peer {} (key={})", peer_id, peer_key);
-                            match endpoint.conn_type(peer_id) {
-                                Some(mut watcher) => {
-                                    let ct = watcher.get();
-                                    tracing::info!("GetNetworkStats: conn_type for {} = {:?}", peer_id, ct);
-                                    ct.into()
-                                }
-                                None => {
-                                    tracing::info!("GetNetworkStats: conn_type returned None for {}", peer_id);
-                                    PeerConnectionType::None
-                                }
-                            }
+                            tracing::info!("GetNetworkStats: checking paths for peer {} (key={})", peer_id, peer_key);
+                            let ct = PeerConnectionType::from_connection(conn);
+                            tracing::info!("GetNetworkStats: connection type for {} = {:?}", peer_id, ct);
+                            ct
                         } else {
                             tracing::info!("GetNetworkStats: no connected peers (map len={})", connected_peers.len());
                             PeerConnectionType::None
@@ -920,7 +940,11 @@ async fn handle_connection(
                 // For HLS streaming requests, store the send stream and emit event
                 if let MydiaRequest::HlsStream(hls_request) = request {
                     let stream_id = request_id.clone();
-                    tracing::debug!("HLS stream request: session={}, path={}", hls_request.session_id, hls_request.path);
+                    tracing::debug!(
+                        "HLS stream request: session={}, path={}",
+                        hls_request.session_id,
+                        hls_request.path
+                    );
 
                     // Store the send stream for later use
                     {
@@ -972,11 +996,15 @@ async fn handle_connection(
                             }
                         }
                         Ok(Err(_)) => {
-                            tracing::warn!("Response channel closed for request {}", request_id_clone);
+                            tracing::warn!(
+                                "Response channel closed for request {}",
+                                request_id_clone
+                            );
                         }
                         Err(_) => {
                             tracing::warn!("Response timeout for request {}", request_id_clone);
-                            let error_response = MydiaResponse::Error("Request timeout".to_string());
+                            let error_response =
+                                MydiaResponse::Error("Request timeout".to_string());
                             if let Ok(response_data) = serde_cbor::to_vec(&error_response) {
                                 let _ = send.write_all(&response_data).await;
                                 let _ = send.finish();

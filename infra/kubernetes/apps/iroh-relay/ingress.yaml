@@ -11,17 +11,16 @@ spec:
   secretName: iroh-relay-tls-secret
 ---
 apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+kind: IngressRouteTCP
 metadata:
   name: iroh-relay
   namespace: iroh-relay
 spec:
   entryPoints: [websecure]
   routes:
-    - kind: Rule
-      match: Host(`p2p.mydia.dev`)
+    - match: HostSNI(`p2p.mydia.dev`)
       services:
         - name: iroh-relay
           port: 443
   tls:
-    secretName: iroh-relay-tls-secret
+    passthrough: true

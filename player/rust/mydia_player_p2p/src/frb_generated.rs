@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -116803829;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1482817765;
 
 // Section: executor
 
@@ -94,77 +94,6 @@ fn wire__crate__P2PHost_dial_impl(
                             crate::P2pHost::dial(&*api_that_guard, api_endpoint_addr_json)?;
                         Ok(output_ok)
                     })(),
-                )
-            }
-        },
-    )
-}
-fn wire__crate__P2PHost_download_blob_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "P2PHost_download_blob",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_that = <RustOpaqueMoi<
-                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<P2pHost>,
-            >>::sse_decode(&mut deserializer);
-            let api_peer = <String>::sse_decode(&mut deserializer);
-            let api_ticket_json = <String>::sse_decode(&mut deserializer);
-            let api_output_path = <String>::sse_decode(&mut deserializer);
-            let api_auth_token = <Option<String>>::sse_decode(&mut deserializer);
-            let api_sink =
-                <StreamSink<String, flutter_rust_bridge::for_generated::SseCodec>>::sse_decode(
-                    &mut deserializer,
-                );
-            deserializer.end();
-            move |context| async move {
-                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
-                    (move || async move {
-                        let mut api_that_guard = None;
-                        let decode_indices_ =
-                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
-                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
-                                    &api_that, 0, false,
-                                )],
-                            );
-                        for i in decode_indices_ {
-                            match i {
-                                0 => {
-                                    api_that_guard =
-                                        Some(api_that.lockable_decode_async_ref().await)
-                                }
-                                _ => unreachable!(),
-                            }
-                        }
-                        let api_that_guard = api_that_guard.unwrap();
-                        let output_ok = crate::P2pHost::download_blob(
-                            &*api_that_guard,
-                            api_peer,
-                            api_ticket_json,
-                            api_output_path,
-                            api_auth_token,
-                            api_sink,
-                        )
-                        .await?;
-                        Ok(output_ok)
-                    })()
-                    .await,
                 )
             }
         },
@@ -349,68 +278,6 @@ fn wire__crate__P2PHost_init_impl(
         },
     )
 }
-fn wire__crate__P2PHost_request_blob_download_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "P2PHost_request_blob_download",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_that = <RustOpaqueMoi<
-                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<P2pHost>,
-            >>::sse_decode(&mut deserializer);
-            let api_peer = <String>::sse_decode(&mut deserializer);
-            let api_req = <crate::FlutterBlobDownloadRequest>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| async move {
-                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
-                    (move || async move {
-                        let mut api_that_guard = None;
-                        let decode_indices_ =
-                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
-                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
-                                    &api_that, 0, false,
-                                )],
-                            );
-                        for i in decode_indices_ {
-                            match i {
-                                0 => {
-                                    api_that_guard =
-                                        Some(api_that.lockable_decode_async_ref().await)
-                                }
-                                _ => unreachable!(),
-                            }
-                        }
-                        let api_that_guard = api_that_guard.unwrap();
-                        let output_ok = crate::P2pHost::request_blob_download(
-                            &*api_that_guard,
-                            api_peer,
-                            api_req,
-                        )
-                        .await?;
-                        Ok(output_ok)
-                    })()
-                    .await,
-                )
-            }
-        },
-    )
-}
 fn wire__crate__P2PHost_send_graphql_request_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -527,6 +394,68 @@ fn wire__crate__P2PHost_send_hls_request_impl(
                         Ok(output_ok)
                     })()
                     .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__P2PHost_send_hls_request_streaming_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "P2PHost_send_hls_request_streaming",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<P2pHost>,
+            >>::sse_decode(&mut deserializer);
+            let api_peer = <String>::sse_decode(&mut deserializer);
+            let api_req = <crate::FlutterHlsRequest>::sse_decode(&mut deserializer);
+            let api_sink = <StreamSink<
+                crate::FlutterHlsStreamEvent,
+                flutter_rust_bridge::for_generated::SseCodec,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::P2pHost::send_hls_request_streaming(
+                            &*api_that_guard,
+                            api_peer,
+                            api_req,
+                            api_sink,
+                        )?;
+                        Ok(output_ok)
+                    })(),
                 )
             }
         },
@@ -671,6 +600,16 @@ impl SseDecode for StreamSink<String, flutter_rust_bridge::for_generated::SseCod
     }
 }
 
+impl SseDecode
+    for StreamSink<crate::FlutterHlsStreamEvent, flutter_rust_bridge::for_generated::SseCodec>
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <String>::sse_decode(deserializer);
+        return StreamSink::deserialize(inner);
+    }
+}
+
 impl SseDecode for String {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -683,36 +622,6 @@ impl SseDecode for bool {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         deserializer.cursor.read_u8().unwrap() != 0
-    }
-}
-
-impl SseDecode for crate::FlutterBlobDownloadRequest {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_jobId = <String>::sse_decode(deserializer);
-        let mut var_authToken = <Option<String>>::sse_decode(deserializer);
-        return crate::FlutterBlobDownloadRequest {
-            job_id: var_jobId,
-            auth_token: var_authToken,
-        };
-    }
-}
-
-impl SseDecode for crate::FlutterBlobDownloadResponse {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_success = <bool>::sse_decode(deserializer);
-        let mut var_ticket = <Option<String>>::sse_decode(deserializer);
-        let mut var_filename = <Option<String>>::sse_decode(deserializer);
-        let mut var_fileSize = <Option<u64>>::sse_decode(deserializer);
-        let mut var_error = <Option<String>>::sse_decode(deserializer);
-        return crate::FlutterBlobDownloadResponse {
-            success: var_success,
-            ticket: var_ticket,
-            filename: var_filename,
-            file_size: var_fileSize,
-            error: var_error,
-        };
     }
 }
 
@@ -803,6 +712,33 @@ impl SseDecode for crate::FlutterHlsResponseHeader {
             content_range: var_contentRange,
             cache_control: var_cacheControl,
         };
+    }
+}
+
+impl SseDecode for crate::FlutterHlsStreamEvent {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_field0 = <crate::FlutterHlsResponseHeader>::sse_decode(deserializer);
+                return crate::FlutterHlsStreamEvent::Header(var_field0);
+            }
+            1 => {
+                let mut var_field0 = <Vec<u8>>::sse_decode(deserializer);
+                return crate::FlutterHlsStreamEvent::Chunk(var_field0);
+            }
+            2 => {
+                return crate::FlutterHlsStreamEvent::End;
+            }
+            3 => {
+                let mut var_field0 = <String>::sse_decode(deserializer);
+                return crate::FlutterHlsStreamEvent::Error(var_field0);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
     }
 }
 
@@ -963,13 +899,14 @@ fn pde_ffi_dispatcher_primary_impl(
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
         1 => wire__crate__P2PHost_dial_impl(port, ptr, rust_vec_len, data_len),
-        2 => wire__crate__P2PHost_download_blob_impl(port, ptr, rust_vec_len, data_len),
-        3 => wire__crate__P2PHost_event_stream_impl(port, ptr, rust_vec_len, data_len),
-        7 => wire__crate__P2PHost_request_blob_download_impl(port, ptr, rust_vec_len, data_len),
-        8 => wire__crate__P2PHost_send_graphql_request_impl(port, ptr, rust_vec_len, data_len),
-        9 => wire__crate__P2PHost_send_hls_request_impl(port, ptr, rust_vec_len, data_len),
-        10 => wire__crate__P2PHost_send_pairing_request_impl(port, ptr, rust_vec_len, data_len),
-        11 => wire__crate__init_app_impl(port, ptr, rust_vec_len, data_len),
+        2 => wire__crate__P2PHost_event_stream_impl(port, ptr, rust_vec_len, data_len),
+        6 => wire__crate__P2PHost_send_graphql_request_impl(port, ptr, rust_vec_len, data_len),
+        7 => wire__crate__P2PHost_send_hls_request_impl(port, ptr, rust_vec_len, data_len),
+        8 => {
+            wire__crate__P2PHost_send_hls_request_streaming_impl(port, ptr, rust_vec_len, data_len)
+        }
+        9 => wire__crate__P2PHost_send_pairing_request_impl(port, ptr, rust_vec_len, data_len),
+        10 => wire__crate__init_app_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -982,9 +919,9 @@ fn pde_ffi_dispatcher_sync_impl(
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        4 => wire__crate__P2PHost_get_network_stats_impl(ptr, rust_vec_len, data_len),
-        5 => wire__crate__P2PHost_get_node_addr_impl(ptr, rust_vec_len, data_len),
-        6 => wire__crate__P2PHost_init_impl(ptr, rust_vec_len, data_len),
+        3 => wire__crate__P2PHost_get_network_stats_impl(ptr, rust_vec_len, data_len),
+        4 => wire__crate__P2PHost_get_node_addr_impl(ptr, rust_vec_len, data_len),
+        5 => wire__crate__P2PHost_init_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -1006,51 +943,6 @@ impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<P2pHost>> for P2pHost {
     }
 }
 
-// Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::FlutterBlobDownloadRequest {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.job_id.into_into_dart().into_dart(),
-            self.auth_token.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::FlutterBlobDownloadRequest
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::FlutterBlobDownloadRequest>
-    for crate::FlutterBlobDownloadRequest
-{
-    fn into_into_dart(self) -> crate::FlutterBlobDownloadRequest {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::FlutterBlobDownloadResponse {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.success.into_into_dart().into_dart(),
-            self.ticket.into_into_dart().into_dart(),
-            self.filename.into_into_dart().into_dart(),
-            self.file_size.into_into_dart().into_dart(),
-            self.error.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::FlutterBlobDownloadResponse
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::FlutterBlobDownloadResponse>
-    for crate::FlutterBlobDownloadResponse
-{
-    fn into_into_dart(self) -> crate::FlutterBlobDownloadResponse {
-        self
-    }
-}
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::FlutterConnectionType {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
@@ -1169,6 +1061,34 @@ impl flutter_rust_bridge::IntoIntoDart<crate::FlutterHlsResponseHeader>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::FlutterHlsStreamEvent {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            crate::FlutterHlsStreamEvent::Header(field0) => {
+                [0.into_dart(), field0.into_into_dart().into_dart()].into_dart()
+            }
+            crate::FlutterHlsStreamEvent::Chunk(field0) => {
+                [1.into_dart(), field0.into_into_dart().into_dart()].into_dart()
+            }
+            crate::FlutterHlsStreamEvent::End => [2.into_dart()].into_dart(),
+            crate::FlutterHlsStreamEvent::Error(field0) => {
+                [3.into_dart(), field0.into_into_dart().into_dart()].into_dart()
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::FlutterHlsStreamEvent {}
+impl flutter_rust_bridge::IntoIntoDart<crate::FlutterHlsStreamEvent>
+    for crate::FlutterHlsStreamEvent
+{
+    fn into_into_dart(self) -> crate::FlutterHlsStreamEvent {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::FlutterNetworkStats {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -1259,6 +1179,15 @@ impl SseEncode for StreamSink<String, flutter_rust_bridge::for_generated::SseCod
     }
 }
 
+impl SseEncode
+    for StreamSink<crate::FlutterHlsStreamEvent, flutter_rust_bridge::for_generated::SseCodec>
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        unimplemented!("")
+    }
+}
+
 impl SseEncode for String {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -1270,25 +1199,6 @@ impl SseEncode for bool {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         serializer.cursor.write_u8(self as _).unwrap();
-    }
-}
-
-impl SseEncode for crate::FlutterBlobDownloadRequest {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.job_id, serializer);
-        <Option<String>>::sse_encode(self.auth_token, serializer);
-    }
-}
-
-impl SseEncode for crate::FlutterBlobDownloadResponse {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <bool>::sse_encode(self.success, serializer);
-        <Option<String>>::sse_encode(self.ticket, serializer);
-        <Option<String>>::sse_encode(self.filename, serializer);
-        <Option<u64>>::sse_encode(self.file_size, serializer);
-        <Option<String>>::sse_encode(self.error, serializer);
     }
 }
 
@@ -1355,6 +1265,32 @@ impl SseEncode for crate::FlutterHlsResponseHeader {
         <u64>::sse_encode(self.content_length, serializer);
         <Option<String>>::sse_encode(self.content_range, serializer);
         <Option<String>>::sse_encode(self.cache_control, serializer);
+    }
+}
+
+impl SseEncode for crate::FlutterHlsStreamEvent {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {
+            crate::FlutterHlsStreamEvent::Header(field0) => {
+                <i32>::sse_encode(0, serializer);
+                <crate::FlutterHlsResponseHeader>::sse_encode(field0, serializer);
+            }
+            crate::FlutterHlsStreamEvent::Chunk(field0) => {
+                <i32>::sse_encode(1, serializer);
+                <Vec<u8>>::sse_encode(field0, serializer);
+            }
+            crate::FlutterHlsStreamEvent::End => {
+                <i32>::sse_encode(2, serializer);
+            }
+            crate::FlutterHlsStreamEvent::Error(field0) => {
+                <i32>::sse_encode(3, serializer);
+                <String>::sse_encode(field0, serializer);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
     }
 }
 

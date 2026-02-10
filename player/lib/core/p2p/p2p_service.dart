@@ -517,95 +517,33 @@ class P2pService {
     return await _host!.sendHlsRequest(peer: normalized.nodeId, req: req);
   }
 
-  /// Request a blob download ticket from the server for a transcode job.
-  ///
-  /// This returns a ticket containing file metadata that can be used to
-  /// download the file with [downloadBlob].
-  ///
-  /// Returns a map with:
-  /// - `success`: bool
-  /// - `ticket`: String? - JSON ticket to pass to downloadBlob
-  /// - `filename`: String? - Suggested filename for the download
-  /// - `fileSize`: int? - Size of the file in bytes
-  /// - `error`: String? - Error message if failed
-  Future<Map<String, dynamic>> requestBlobDownload({
+  /// Send a streaming HLS request to the server over P2P.
+  /// Returns a stream of FlutterHlsStreamEvent (Header, Chunk, End, Error).
+  Stream<FlutterHlsStreamEvent> sendHlsRequestStreaming({
     required String peer,
-    required String jobId,
+    required String sessionId,
+    required String path,
+    int? rangeStart,
+    int? rangeEnd,
     String? authToken,
-  }) async {
+  }) async* {
     if (_host == null) throw Exception("P2P host not initialized");
 
     final normalized = await _normalizePeerForRequest(peer);
 
-    debugPrint('[P2P] Requesting blob download ticket for job: $jobId');
+    debugPrint(
+      '[P2P] Sending streaming HLS request to ${normalized.nodeId} for $sessionId/$path',
+    );
 
-    final req = FlutterBlobDownloadRequest(
-      jobId: jobId,
+    final req = FlutterHlsRequest(
+      sessionId: sessionId,
+      path: path,
+      rangeStart: rangeStart != null ? BigInt.from(rangeStart) : null,
+      rangeEnd: rangeEnd != null ? BigInt.from(rangeEnd) : null,
       authToken: authToken,
     );
 
-    final res =
-        await _host!.requestBlobDownload(peer: normalized.nodeId, req: req);
-
-    return {
-      'success': res.success,
-      'ticket': res.ticket,
-      'filename': res.filename,
-      'fileSize': res.fileSize?.toInt(),
-      'error': res.error,
-    };
-  }
-
-  /// Download a file using a blob ticket over P2P.
-  ///
-  /// [ticket] - The ticket JSON from [requestBlobDownload]
-  /// [outputPath] - Where to save the downloaded file
-  /// [authToken] - Auth token for the request
-  /// [onProgress] - Optional callback for progress updates
-  ///
-  /// Progress callback receives: downloaded bytes, total bytes
-  Future<void> downloadBlob({
-    required String peer,
-    required String ticket,
-    required String outputPath,
-    String? authToken,
-    void Function(int downloaded, int total)? onProgress,
-  }) async {
-    if (_host == null) throw Exception("P2P host not initialized");
-
-    final normalized = await _normalizePeerForRequest(peer);
-
-    debugPrint('[P2P] Starting blob download to: $outputPath');
-
-    // The download_blob method streams progress updates as JSON strings
-    final stream = _host!.downloadBlob(
-      peer: normalized.nodeId,
-      ticketJson: ticket,
-      outputPath: outputPath,
-      authToken: authToken,
-    );
-
-    await for (final progressJson in stream) {
-      final progress = _decodeJson(progressJson);
-      if (progress == null) continue;
-
-      final type = progress['type'] as String?;
-      switch (type) {
-        case 'started':
-          debugPrint(
-              '[P2P] Download started, total size: ${progress["total_size"]} bytes');
-        case 'progress':
-          final downloaded = progress['downloaded'] as int;
-          final total = progress['total'] as int;
-          onProgress?.call(downloaded, total);
-        case 'completed':
-          debugPrint('[P2P] Download completed: ${progress["file_path"]}');
-        case 'failed':
-          final error = progress['error'] as String?;
-          debugPrint('[P2P] Download failed: $error');
-          throw Exception(error ?? 'Download failed');
-      }
-    }
+    yield* _host!.sendHlsRequestStreaming(peer: normalized.nodeId, req: req);
   }
 
   /// Reset the P2P host for re-initialization.

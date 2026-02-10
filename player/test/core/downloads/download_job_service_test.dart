@@ -14,7 +14,7 @@ void main() {
   group('DownloadJobService', () {
     late MockClient mockHttpClient;
     late MockMediaTokenService mockMediaTokenService;
-    late DownloadJobService service;
+    late HttpDownloadJobService service;
 
     const baseUrl = 'https://example.com';
     const authToken = 'test-auth-token';
@@ -22,7 +22,7 @@ void main() {
     setUp(() {
       mockHttpClient = MockClient();
       mockMediaTokenService = MockMediaTokenService();
-      service = DownloadJobService(
+      service = HttpDownloadJobService(
         baseUrl: baseUrl,
         authToken: authToken,
         mediaTokenService: mockMediaTokenService,
@@ -56,8 +56,8 @@ void main() {
         when(mockHttpClient.get(
           Uri.parse('$baseUrl/api/v1/download/movie/999/options'),
           headers: anyNamed('headers'),
-        )).thenAnswer((_) async => http.Response(
-            jsonEncode({'error': 'Media not found'}), 404));
+        )).thenAnswer((_) async =>
+            http.Response(jsonEncode({'error': 'Media not found'}), 404));
 
         expect(
           () => service.getOptions('movie', '999'),
@@ -97,8 +97,8 @@ void main() {
           Uri.parse('$baseUrl/api/v1/download/movie/123/prepare'),
           headers: anyNamed('headers'),
           body: anyNamed('body'),
-        )).thenAnswer((_) async => http.Response(
-            jsonEncode({'error': 'Invalid resolution'}), 400));
+        )).thenAnswer((_) async =>
+            http.Response(jsonEncode({'error': 'Invalid resolution'}), 400));
 
         expect(
           () => service.prepareDownload(
@@ -136,8 +136,8 @@ void main() {
         when(mockHttpClient.get(
           Uri.parse('$baseUrl/api/v1/download/job/missing/status'),
           headers: anyNamed('headers'),
-        )).thenAnswer((_) async => http.Response(
-            jsonEncode({'error': 'Job not found'}), 404));
+        )).thenAnswer((_) async =>
+            http.Response(jsonEncode({'error': 'Job not found'}), 404));
 
         expect(
           () => service.getJobStatus('missing'),
@@ -152,8 +152,8 @@ void main() {
         when(mockHttpClient.delete(
           Uri.parse('$baseUrl/api/v1/download/job/job-123'),
           headers: anyNamed('headers'),
-        )).thenAnswer((_) async => http.Response(
-            jsonEncode({'status': 'cancelled'}), 200));
+        )).thenAnswer((_) async =>
+            http.Response(jsonEncode({'status': 'cancelled'}), 200));
 
         await service.cancelJob('job-123');
 
@@ -167,8 +167,8 @@ void main() {
         when(mockHttpClient.delete(
           Uri.parse('$baseUrl/api/v1/download/job/missing'),
           headers: anyNamed('headers'),
-        )).thenAnswer((_) async => http.Response(
-            jsonEncode({'error': 'Job not found'}), 404));
+        )).thenAnswer((_) async =>
+            http.Response(jsonEncode({'error': 'Job not found'}), 404));
 
         expect(
           () => service.cancelJob('missing'),
@@ -217,10 +217,12 @@ void main() {
       const option2 = DownloadOption(resolution: '720p', estimatedSize: 1536);
       expect(option2.formattedSize, equals('1.5 KB'));
 
-      const option3 = DownloadOption(resolution: '480p', estimatedSize: 2097152);
+      const option3 =
+          DownloadOption(resolution: '480p', estimatedSize: 2097152);
       expect(option3.formattedSize, equals('2.0 MB'));
 
-      const option4 = DownloadOption(resolution: '1080p', estimatedSize: 5368709120);
+      const option4 =
+          DownloadOption(resolution: '1080p', estimatedSize: 5368709120);
       expect(option4.formattedSize, equals('5.00 GB'));
     });
   });

@@ -5,26 +5,28 @@ import '../../graphql/mutations/download_options.graphql.dart';
 import '../../graphql/mutations/prepare_download.graphql.dart';
 import '../../graphql/mutations/download_job_status.graphql.dart';
 import '../../graphql/mutations/cancel_download_job.graphql.dart';
+import '../p2p/local_proxy_service.dart';
 import '../p2p/p2p_service.dart';
 import 'download_job_service.dart';
 
 /// P2P-aware download job service that uses GraphQL over P2P.
 ///
-/// This class provides the same interface as [DownloadJobService] but
-/// routes all requests through the P2P network instead of HTTP.
-///
-/// Uses the same GraphQL mutations as the regular GraphQL client,
-/// ensuring consistency between HTTP and P2P transports.
-class P2pDownloadJobService {
+/// This class implements [DownloadJobService] and routes all job management
+/// requests through the P2P network via GraphQL. File downloads are served
+/// through the local HTTP proxy, making them compatible with Dio/Range requests.
+class P2pDownloadJobService implements DownloadJobService {
   final P2pService _p2pService;
+  final LocalProxyService _localProxy;
   final String _serverNodeAddr;
   final String _authToken;
 
   P2pDownloadJobService({
     required P2pService p2pService,
+    required LocalProxyService localProxy,
     required String serverNodeAddr,
     required String authToken,
   })  : _p2pService = p2pService,
+        _localProxy = localProxy,
         _serverNodeAddr = serverNodeAddr,
         _authToken = authToken;
 
@@ -39,13 +41,9 @@ class P2pDownloadJobService {
   static final String _cancelDownloadJobQuery =
       printNode(documentNodeMutationCancelDownloadJob);
 
-  /// Get available download quality options for a media item.
-  ///
-  /// [contentType] must be either "movie" or "episode"
-  /// [id] is the media item ID (movie ID or episode ID)
-  ///
-  /// Returns a list of available quality options with estimated file sizes.
-  Future<DownloadOptionsResponse> getOptions(String contentType, String id) async {
+  @override
+  Future<DownloadOptionsResponse> getOptions(
+      String contentType, String id) async {
     final variables = {
       'contentType': contentType,
       'id': id,
@@ -76,13 +74,7 @@ class P2pDownloadJobService {
     return DownloadOptionsResponse(options: options);
   }
 
-  /// Prepare a download by creating a transcode job.
-  ///
-  /// [contentType] must be either "movie" or "episode"
-  /// [id] is the media item ID (movie ID or episode ID)
-  /// [resolution] is the desired quality (e.g., "1080p", "720p", "480p")
-  ///
-  /// Returns the job status including job ID for tracking.
+  @override
   Future<DownloadJobStatus> prepareDownload({
     required String contentType,
     required String id,
@@ -104,7 +96,8 @@ class P2pDownloadJobService {
 
     final prepareData = result['prepareDownload'] as Map<String, dynamic>?;
     if (prepareData == null) {
-      throw DownloadServiceException('Failed to prepare download', statusCode: 500);
+      throw DownloadServiceException('Failed to prepare download',
+          statusCode: 500);
     }
 
     return DownloadJobStatus(
@@ -116,11 +109,7 @@ class P2pDownloadJobService {
     );
   }
 
-  /// Get the current status of a transcode job.
-  ///
-  /// [jobId] is the unique job identifier returned from prepareDownload.
-  ///
-  /// Returns the current job status including progress, status, and any errors.
+  @override
   Future<DownloadJobStatus> getJobStatus(String jobId) async {
     final variables = {
       'jobId': jobId,
@@ -148,11 +137,7 @@ class P2pDownloadJobService {
     );
   }
 
-  /// Cancel a transcode job.
-  ///
-  /// [jobId] is the unique job identifier to cancel.
-  ///
-  /// This will stop the transcode process and delete the job record.
+  @override
   Future<void> cancelJob(String jobId) async {
     final variables = {
       'jobId': jobId,
@@ -172,50 +157,12 @@ class P2pDownloadJobService {
     }
   }
 
-  /// Request a blob download ticket for a completed transcode job.
-  ///
-  /// [jobId] is the unique job identifier.
-  ///
-  /// Returns a map containing:
-  /// - `ticket`: JSON string to pass to downloadBlob
-  /// - `filename`: Suggested filename
-  /// - `fileSize`: Size in bytes
-  Future<Map<String, dynamic>> requestBlobTicket(String jobId) async {
-    final result = await _p2pService.requestBlobDownload(
-      peer: _serverNodeAddr,
-      jobId: jobId,
-      authToken: _authToken,
-    );
-
-    if (result['success'] != true) {
-      throw DownloadServiceException(
-        result['error'] as String? ?? 'Failed to get download ticket',
-        statusCode: 500,
-      );
+  @override
+  Future<String> getDownloadUrl(String jobId) async {
+    final port = _localProxy.port;
+    if (port == 0) {
+      throw StateError('Local proxy is not running');
     }
-
-    return result;
+    return 'http://127.0.0.1:$port/download/$jobId/file';
   }
-
-  /// Download a file using a blob ticket over P2P.
-  ///
-  /// [ticket] - The ticket JSON from [requestBlobTicket]
-  /// [outputPath] - Where to save the downloaded file
-  /// [onProgress] - Optional callback for progress updates (downloaded, total)
-  Future<void> downloadBlob({
-    required String ticket,
-    required String outputPath,
-    void Function(int downloaded, int total)? onProgress,
-  }) async {
-    await _p2pService.downloadBlob(
-      peer: _serverNodeAddr,
-      ticket: ticket,
-      outputPath: outputPath,
-      authToken: _authToken,
-      onProgress: onProgress,
-    );
-  }
-
-  /// Whether this service supports P2P blob download.
-  bool get supportsBlobDownload => true;
 }

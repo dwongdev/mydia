@@ -102,11 +102,6 @@ class _WebDownloadService implements DownloadService {
   }
 
   @override
-  void setP2PJobService(dynamic p2pJobService) {
-    // No-op on web
-  }
-
-  @override
   Stream<DownloadTask> get progressStream => _progressController.stream;
 
   @override
@@ -145,8 +140,19 @@ class _WebDownloadService implements DownloadService {
     required MediaType mediaType,
     String? posterUrl,
     required Future<String> Function(String jobId) getDownloadUrl,
-    required Future<({String jobId, String status, double progress, int? fileSize})> Function() prepareDownload,
-    required Future<({String status, double progress, int? fileSize, String? error})> Function(String jobId) getJobStatus,
+    required Future<
+                ({String jobId, String status, double progress, int? fileSize})>
+            Function()
+        prepareDownload,
+    required Future<
+                ({
+                  String status,
+                  double progress,
+                  int? fileSize,
+                  String? error
+                })>
+            Function(String jobId)
+        getJobStatus,
     Future<void> Function(String jobId)? cancelJob,
     String? overview,
     int? runtime,

@@ -34,16 +34,15 @@ class SettingsScreen extends ConsumerWidget {
     );
 
     if (confirmed == true && context.mounted) {
-      // Use the auth state provider's logout method
-      await ref.read(authStateProvider.notifier).logout();
-
-      // Clear settings
+      // Clear settings and connection state BEFORE changing auth state,
+      // since auth state change triggers router redirect which unmounts this widget.
       final settingsService = ref.read(settingsServiceProvider);
       await settingsService.clearSettings();
+      await ref.read(connectionProvider.notifier).clear();
 
-      if (context.mounted) {
-        context.go('/login');
-      }
+      // Logout last - this sets auth state to unauthenticated which triggers
+      // the router redirect to /login. No explicit context.go() needed.
+      await ref.read(authStateProvider.notifier).logout();
     }
   }
 
@@ -161,7 +160,6 @@ class _ConnectionDiagnosticsTile extends ConsumerStatefulWidget {
 
 class _ConnectionDiagnosticsTileState
     extends ConsumerState<_ConnectionDiagnosticsTile> {
-
   @override
   Widget build(BuildContext context) {
     // Watch connection provider directly for live status
@@ -234,7 +232,8 @@ class _VersionTile extends ConsumerWidget {
     return ListTile(
       leading: const Icon(Icons.info_outline),
       title: const Text('Mydia Player'),
-      subtitle: Text(version.isNotEmpty ? 'Version $version' : 'Media streaming client'),
+      subtitle: Text(
+          version.isNotEmpty ? 'Version $version' : 'Media streaming client'),
     );
   }
 }

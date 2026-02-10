@@ -219,8 +219,7 @@ class EpisodeDetailScreen extends ConsumerWidget {
 
   Widget _buildHeroSection(BuildContext context, EpisodeDetail episode) {
     // Use episode thumbnail if available, otherwise fall back to show backdrop
-    final imageUrl =
-        episode.thumbnailUrl ?? episode.show.artwork.backdropUrl;
+    final imageUrl = episode.thumbnailUrl ?? episode.show.artwork.backdropUrl;
 
     return SliverAppBar(
       expandedHeight: 300,
@@ -463,8 +462,10 @@ class EpisodeDetailScreen extends ConsumerWidget {
                   );
 
                   if (selectedResolution != null && context.mounted) {
-                    final downloadService = ref.read(downloadJobServiceProvider);
-                    final downloadManager = await ref.read(downloadManagerProvider.future);
+                    final downloadService =
+                        ref.read(unifiedDownloadJobServiceProvider);
+                    final downloadManager =
+                        await ref.read(downloadManagerProvider.future);
 
                     if (downloadService != null) {
                       try {
@@ -489,7 +490,8 @@ class EpisodeDetailScreen extends ConsumerWidget {
                             return await downloadService.getDownloadUrl(jobId);
                           },
                           prepareDownload: () async {
-                            final status = await downloadService.prepareDownload(
+                            final status =
+                                await downloadService.prepareDownload(
                               contentType: 'episode',
                               id: episode.id,
                               resolution: selectedResolution,

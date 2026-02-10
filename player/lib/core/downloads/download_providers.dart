@@ -30,15 +30,11 @@ Future<DownloadService> downloadManager(Ref ref) async {
   final service = getDownloadService();
   service.setDatabase(database);
 
-  // Inject job service if available (for resuming progressive downloads)
-  final jobService = ref.watch(downloadJobServiceProvider);
+  // Inject unified job service (works for both HTTP and P2P modes)
+  final jobService = ref.watch(unifiedDownloadJobServiceProvider);
   if (jobService != null) {
     service.setJobService(jobService);
   }
-
-  // Inject P2P job service if available (for P2P mode downloads)
-  final p2pJobService = ref.watch(p2pDownloadJobServiceProvider);
-  service.setP2PJobService(p2pJobService);
 
   ref.onDispose(() {
     service.dispose();
@@ -67,8 +63,12 @@ Stream<List<DownloadTask>> downloadQueue(Ref ref) async* {
 
 /// Returns only active tasks (not failed, completed, or cancelled).
 List<DownloadTask> _getActiveTasks(DownloadDatabase database) {
-  return database.getAllTasks()
-      .where((t) => t.status != 'failed' && t.status != 'completed' && t.status != 'cancelled')
+  return database
+      .getAllTasks()
+      .where((t) =>
+          t.status != 'failed' &&
+          t.status != 'completed' &&
+          t.status != 'cancelled')
       .toList();
 }
 
@@ -137,9 +137,7 @@ Stream<List<DownloadTask>> failedDownloads(Ref ref) async* {
 }
 
 List<DownloadTask> _getFailedTasks(DownloadDatabase database) {
-  return database.getAllTasks()
-      .where((t) => t.status == 'failed')
-      .toList()
+  return database.getAllTasks().where((t) => t.status == 'failed').toList()
     ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 }
 

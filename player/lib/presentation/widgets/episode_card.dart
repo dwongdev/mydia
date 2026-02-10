@@ -66,7 +66,8 @@ class _EpisodeCardState extends ConsumerState<EpisodeCard>
 
   @override
   Widget build(BuildContext context) {
-    final isDownloadedAsync = ref.watch(isMediaDownloadedProvider(widget.episode.id));
+    final isDownloadedAsync =
+        ref.watch(isMediaDownloadedProvider(widget.episode.id));
     final isDownloaded = isDownloadedAsync.value ?? false;
 
     return MouseRegion(
@@ -127,7 +128,10 @@ class _EpisodeCardState extends ConsumerState<EpisodeCard>
                             const SizedBox(height: 6),
                             Text(
                               widget.episode.title,
-                              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleSmall
+                                  ?.copyWith(
                                     fontWeight: FontWeight.w600,
                                   ),
                               maxLines: 2,
@@ -137,7 +141,10 @@ class _EpisodeCardState extends ConsumerState<EpisodeCard>
                               const SizedBox(height: 6),
                               Text(
                                 widget.episode.overview!,
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
                                       color: AppColors.textSecondary,
                                       height: 1.4,
                                     ),
@@ -450,7 +457,7 @@ class _EpisodeCardState extends ConsumerState<EpisodeCard>
       );
 
       if (selectedResolution != null && context.mounted) {
-        final downloadService = ref.read(downloadJobServiceProvider);
+        final downloadService = ref.read(unifiedDownloadJobServiceProvider);
         final downloadManager = await ref.read(downloadManagerProvider.future);
 
         if (downloadService != null) {

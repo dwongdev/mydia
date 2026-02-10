@@ -153,14 +153,14 @@ class MovieDetailScreen extends ConsumerWidget {
                               .textTheme
                               .headlineMedium
                               ?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                shadows: [
-                                  Shadow(
-                                    color: Colors.black.withOpacity(0.8),
-                                    blurRadius: 8,
-                                  ),
-                                ],
+                            fontWeight: FontWeight.bold,
+                            shadows: [
+                              Shadow(
+                                color: Colors.black.withOpacity(0.8),
+                                blurRadius: 8,
                               ),
+                            ],
+                          ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -171,14 +171,14 @@ class MovieDetailScreen extends ConsumerWidget {
                           movie.yearDisplay,
                           style:
                               Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    color: AppColors.textPrimary,
-                                    shadows: [
-                                      Shadow(
-                                        color: Colors.black.withOpacity(0.8),
-                                        blurRadius: 8,
-                                      ),
-                                    ],
-                                  ),
+                            color: AppColors.textPrimary,
+                            shadows: [
+                              Shadow(
+                                color: Colors.black.withOpacity(0.8),
+                                blurRadius: 8,
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ],
@@ -297,8 +297,10 @@ class MovieDetailScreen extends ConsumerWidget {
                 );
 
                 if (selectedResolution != null && context.mounted) {
-                  final downloadService = ref.read(downloadJobServiceProvider);
-                  final downloadManager = await ref.read(downloadManagerProvider.future);
+                  final downloadService =
+                      ref.read(unifiedDownloadJobServiceProvider);
+                  final downloadManager =
+                      await ref.read(downloadManagerProvider.future);
 
                   if (downloadService != null) {
                     try {
@@ -385,9 +387,8 @@ class MovieDetailScreen extends ConsumerWidget {
 
   Widget _buildFavoriteButton(WidgetRef ref, movie) {
     return IconButton(
-      onPressed: () => ref
-          .read(movieDetailControllerProvider(id).notifier)
-          .toggleFavorite(),
+      onPressed: () =>
+          ref.read(movieDetailControllerProvider(id).notifier).toggleFavorite(),
       icon: Icon(
         movie.isFavorite ? Icons.favorite : Icons.favorite_border,
         color: movie.isFavorite ? AppColors.error : Colors.white,

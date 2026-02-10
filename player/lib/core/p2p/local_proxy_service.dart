@@ -3,6 +3,12 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:player/core/p2p/p2p_service.dart';
+import 'package:player/native/lib.dart'
+    show
+        FlutterHlsStreamEvent_Header,
+        FlutterHlsStreamEvent_Chunk,
+        FlutterHlsStreamEvent_End,
+        FlutterHlsStreamEvent_Error;
 
 final localProxyServiceProvider = Provider<LocalProxyService>((ref) {
   final p2p = ref.watch(p2pServiceProvider);
@@ -20,17 +26,12 @@ final localProxyServiceProvider = Provider<LocalProxyService>((ref) {
 /// URL Format: /hls/{session_id}/{path}
 /// Example: /hls/abc123/index.m3u8
 /// Example: /hls/abc123/segment_001.ts
+///
+/// Direct stream: /direct/{file_id}/stream
+/// Download: /download/{job_id}/file
 class LocalProxyService {
   final P2pService _p2p;
   HttpServer? _server;
-
-  /// Maximum bytes per P2P range request (4 MB).
-  ///
-  /// Without this cap, the Rust bridge collects ALL streaming chunks into
-  /// memory before returning to Dart, which hangs indefinitely (and OOMs)
-  /// for large media files. By capping each request to 4 MB the player
-  /// receives data quickly and issues follow-up Range requests as needed.
-  static const _maxRangeSize = 4 * 1024 * 1024;
 
   /// The peer ID to send HLS requests to
   String? _targetPeer;
@@ -111,18 +112,29 @@ class LocalProxyService {
     return 'http://127.0.0.1:${_server!.port}/direct/$fileId/stream';
   }
 
+  /// Build a download URL for a completed transcode job.
+  ///
+  /// Uses the P2P HLS protocol with a "download:" session ID prefix
+  /// to proxy the transcoded file download.
+  String buildDownloadUrl(String jobId) {
+    if (_server == null) {
+      throw StateError('LocalProxyService is not started');
+    }
+    return 'http://127.0.0.1:${_server!.port}/download/$jobId/file';
+  }
+
   // Handle incoming HTTP requests
   Future<void> _handleRequest(HttpRequest request) async {
     final path = request.uri.path;
 
     debugPrint('[LocalProxy] ${request.method} $path');
 
-    // Parse HLS request: /hls/{session_id}/{path...}
-    // or direct stream request: /direct/{file_id}/stream
     if (path.startsWith('/hls/')) {
       await _handleHlsRequest(request);
     } else if (path.startsWith('/direct/')) {
       await _handleDirectRequest(request);
+    } else if (path.startsWith('/download/')) {
+      await _handleDownloadRequest(request);
     } else {
       request.response.statusCode = HttpStatus.notFound;
       _setCorsHeaders(request.response);
@@ -255,79 +267,12 @@ class LocalProxyService {
         return;
       }
 
-      if (_targetPeer == null) {
-        request.response.statusCode = HttpStatus.serviceUnavailable;
-        _setCorsHeaders(request.response);
-        request.response.write('No target peer configured');
-        await request.response.close();
-        return;
-      }
-
-      // Parse Range header and cap to _maxRangeSize so the Rust bridge
-      // doesn't try to buffer an entire multi-GB file in memory.
-      int rangeStart;
-      int? rangeEnd;
-      final rangeHeader = request.headers.value('Range');
-      if (rangeHeader != null) {
-        final range = _parseRangeHeader(rangeHeader);
-        rangeStart = range.$1 ?? 0;
-        rangeEnd = range.$2;
-
-        // Suffix ranges (bytes=-N) are always small; leave them alone.
-        // For all other cases, cap the window to _maxRangeSize.
-        if (rangeEnd == null) {
-          // Open-ended range: bytes=N-
-          rangeEnd = rangeStart + _maxRangeSize - 1;
-        } else if (rangeEnd - rangeStart + 1 > _maxRangeSize) {
-          rangeEnd = rangeStart + _maxRangeSize - 1;
-        }
-      } else {
-        // No Range header at all — request the first chunk.
-        rangeStart = 0;
-        rangeEnd = _maxRangeSize - 1;
-      }
-
-      debugPrint(
-          '[LocalProxy] Direct request: fileId=$fileId, range=$rangeStart-$rangeEnd');
-
-      // Forward to P2P using "direct:{fileId}" as the session ID convention
-      final response = await _p2p.sendHlsRequest(
-        peer: _targetPeer!,
+      await _forwardRangeRequest(
+        request: request,
         sessionId: 'direct:$fileId',
         path: 'stream',
-        rangeStart: rangeStart,
-        rangeEnd: rangeEnd,
-        authToken: _authToken,
+        logLabel: 'direct:$fileId',
       );
-
-      // Set response status
-      request.response.statusCode = response.header.status;
-
-      // Set response headers
-      request.response.headers.contentType =
-          ContentType.parse(response.header.contentType);
-      final payloadLength = response.data.length;
-      final headerLength = response.header.contentLength.toInt();
-      request.response.headers.contentLength =
-          headerLength == payloadLength ? headerLength : payloadLength;
-
-      if (response.header.contentRange != null) {
-        request.response.headers
-            .set('Content-Range', response.header.contentRange!);
-      }
-
-      // Direct streams support range requests
-      request.response.headers.set('Accept-Ranges', 'bytes');
-
-      // Allow CORS for local playback
-      _setCorsHeaders(request.response);
-
-      // Write response body
-      request.response.add(response.data);
-      await request.response.close();
-
-      debugPrint(
-          '[LocalProxy] Served ${response.data.length} bytes for direct:$fileId');
     } catch (e, stack) {
       debugPrint('[LocalProxy] Error handling direct request: $e');
       debugPrint('[LocalProxy] Stack: $stack');
@@ -342,6 +287,153 @@ class LocalProxyService {
         await request.response.close();
       }
     }
+  }
+
+  Future<void> _handleDownloadRequest(HttpRequest request) async {
+    try {
+      // Parse path: /download/{job_id}/file
+      final pathParts =
+          request.uri.path.substring('/download/'.length).split('/');
+      if (pathParts.length < 2) {
+        request.response.statusCode = HttpStatus.badRequest;
+        _setCorsHeaders(request.response);
+        request.response.write(
+            'Invalid download path format. Expected: /download/{job_id}/file');
+        await request.response.close();
+        return;
+      }
+
+      final jobId = pathParts[0];
+
+      if (jobId.isEmpty) {
+        request.response.statusCode = HttpStatus.badRequest;
+        _setCorsHeaders(request.response);
+        request.response.write('Job ID is required');
+        await request.response.close();
+        return;
+      }
+
+      await _forwardRangeRequest(
+        request: request,
+        sessionId: 'download:$jobId',
+        path: 'file',
+        logLabel: 'download:$jobId',
+      );
+    } catch (e, stack) {
+      debugPrint('[LocalProxy] Error handling download request: $e');
+      debugPrint('[LocalProxy] Stack: $stack');
+
+      try {
+        request.response.statusCode = HttpStatus.internalServerError;
+        _setCorsHeaders(request.response);
+        request.response.write('Error: $e');
+      } catch (_) {
+        // Response may already be started or closed, best-effort cleanup below.
+      } finally {
+        await request.response.close();
+      }
+    }
+  }
+
+  /// Shared logic for streaming range requests via P2P.
+  ///
+  /// Sends a single P2P streaming request for the entire range and pipes
+  /// chunks directly to the HTTP response as they arrive from QUIC. This
+  /// eliminates per-sub-request overhead (QUIC stream setup, CBOR, auth,
+  /// file stat) and lets QUIC congestion control ramp up within one stream.
+  Future<void> _forwardRangeRequest({
+    required HttpRequest request,
+    required String sessionId,
+    required String path,
+    required String logLabel,
+  }) async {
+    if (_targetPeer == null) {
+      request.response.statusCode = HttpStatus.serviceUnavailable;
+      _setCorsHeaders(request.response);
+      request.response.write('No target peer configured');
+      await request.response.close();
+      return;
+    }
+
+    // Parse the client's Range header.
+    int? rangeStart;
+    int? rangeEnd;
+    final rangeHeader = request.headers.value('Range');
+    if (rangeHeader != null) {
+      final range = _parseRangeHeader(rangeHeader);
+      rangeStart = range.$1;
+      rangeEnd = range.$2;
+    }
+
+    debugPrint('[LocalProxy] P2P stream $logLabel range=$rangeStart-$rangeEnd');
+
+    var bytesServed = 0;
+    var headersSent = false;
+
+    try {
+      final stream = _p2p.sendHlsRequestStreaming(
+        peer: _targetPeer!,
+        sessionId: sessionId,
+        path: path,
+        rangeStart: rangeStart,
+        rangeEnd: rangeEnd,
+        authToken: _authToken,
+      );
+
+      await for (final event in stream) {
+        switch (event) {
+          case FlutterHlsStreamEvent_Header(:final field0):
+            final header = field0;
+            request.response.statusCode = header.status;
+            request.response.headers.contentType =
+                ContentType.parse(header.contentType);
+            request.response.headers.contentLength =
+                header.contentLength.toInt();
+            if (header.contentRange != null) {
+              request.response.headers
+                  .set('Content-Range', header.contentRange!);
+            }
+            if (header.cacheControl != null) {
+              request.response.headers
+                  .set('Cache-Control', header.cacheControl!);
+            }
+            request.response.headers.set('Accept-Ranges', 'bytes');
+            _setCorsHeaders(request.response);
+            headersSent = true;
+
+          case FlutterHlsStreamEvent_Chunk(:final field0):
+            request.response.add(field0);
+            bytesServed += field0.length;
+
+          case FlutterHlsStreamEvent_End():
+            break;
+
+          case FlutterHlsStreamEvent_Error(:final field0):
+            if (!headersSent) {
+              request.response.statusCode = HttpStatus.badGateway;
+              _setCorsHeaders(request.response);
+              request.response.write('P2P error: $field0');
+            }
+            debugPrint('[LocalProxy] P2P stream error for $logLabel: $field0');
+        }
+      }
+    } catch (e) {
+      // Client likely closed the connection (seek / stop).
+      debugPrint('[LocalProxy] Stream interrupted for $logLabel: $e');
+      if (!headersSent) {
+        try {
+          request.response.statusCode = HttpStatus.internalServerError;
+          _setCorsHeaders(request.response);
+          request.response.write('Error: $e');
+        } catch (_) {}
+      }
+    }
+
+    try {
+      await request.response.close();
+    } catch (_) {}
+
+    debugPrint('[LocalProxy] Served $bytesServed bytes for $logLabel');
   }
 
   void _setCorsHeaders(HttpResponse response) {

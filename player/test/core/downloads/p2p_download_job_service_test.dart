@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:player/core/downloads/download_job_service.dart';
 import 'package:player/core/downloads/p2p_download_job_service.dart';
+import 'package:player/core/p2p/local_proxy_service.dart';
 import 'package:player/core/p2p/p2p_service.dart';
 import 'package:player/domain/models/download_option.dart';
 
@@ -20,43 +21,10 @@ class GraphqlCall {
   });
 }
 
-class BlobRequestCall {
-  final String peer;
-  final String jobId;
-  final String? authToken;
-
-  const BlobRequestCall({
-    required this.peer,
-    required this.jobId,
-    required this.authToken,
-  });
-}
-
-class BlobDownloadCall {
-  final String peer;
-  final String ticket;
-  final String outputPath;
-  final String? authToken;
-
-  const BlobDownloadCall({
-    required this.peer,
-    required this.ticket,
-    required this.outputPath,
-    required this.authToken,
-  });
-}
-
 class FakeP2pService extends P2pService {
   GraphqlCall? lastGraphqlCall;
-  BlobRequestCall? lastBlobRequestCall;
-  BlobDownloadCall? lastBlobDownloadCall;
 
   Future<Map<String, dynamic>> Function(GraphqlCall call)? onGraphql;
-  Future<Map<String, dynamic>> Function(BlobRequestCall call)? onRequestBlob;
-  Future<void> Function(
-    BlobDownloadCall call,
-    void Function(int downloaded, int total)? onProgress,
-  )? onDownloadBlob;
 
   @override
   Future<Map<String, dynamic>> sendGraphQLRequest({
@@ -83,58 +51,21 @@ class FakeP2pService extends P2pService {
 
     return handler(call);
   }
+}
+
+class FakeLocalProxyService extends LocalProxyService {
+  final int fakePort;
+
+  FakeLocalProxyService({this.fakePort = 12345}) : super(FakeP2pService());
 
   @override
-  Future<Map<String, dynamic>> requestBlobDownload({
-    required String peer,
-    required String jobId,
-    String? authToken,
-  }) async {
-    final call = BlobRequestCall(
-      peer: peer,
-      jobId: jobId,
-      authToken: authToken,
-    );
-
-    lastBlobRequestCall = call;
-
-    final handler = onRequestBlob;
-    if (handler == null) {
-      throw Exception('Blob request handler not configured');
-    }
-
-    return handler(call);
-  }
-
-  @override
-  Future<void> downloadBlob({
-    required String peer,
-    required String ticket,
-    required String outputPath,
-    String? authToken,
-    void Function(int downloaded, int total)? onProgress,
-  }) async {
-    final call = BlobDownloadCall(
-      peer: peer,
-      ticket: ticket,
-      outputPath: outputPath,
-      authToken: authToken,
-    );
-
-    lastBlobDownloadCall = call;
-
-    final handler = onDownloadBlob;
-    if (handler == null) {
-      throw Exception('Blob download handler not configured');
-    }
-
-    await handler(call, onProgress);
-  }
+  int get port => fakePort;
 }
 
 void main() {
   group('P2pDownloadJobService', () {
     late FakeP2pService p2p;
+    late FakeLocalProxyService localProxy;
     late P2pDownloadJobService service;
 
     const serverNodeAddr = 'server-node-addr';
@@ -142,14 +73,17 @@ void main() {
 
     setUp(() {
       p2p = FakeP2pService();
+      localProxy = FakeLocalProxyService();
       service = P2pDownloadJobService(
         p2pService: p2p,
+        localProxy: localProxy,
         serverNodeAddr: serverNodeAddr,
         authToken: authToken,
       );
     });
 
-    test('getOptions returns options and sends expected GraphQL request', () async {
+    test('getOptions returns options and sends expected GraphQL request',
+        () async {
       p2p.onGraphql = (_) async => {
             'downloadOptions': [
               {
@@ -181,7 +115,8 @@ void main() {
       expect(call.query, contains('downloadOptions'));
     });
 
-    test('getOptions throws DownloadServiceException when response is missing options',
+    test(
+        'getOptions throws DownloadServiceException when response is missing options',
         () async {
       p2p.onGraphql = (_) async => {'downloadOptions': null};
 
@@ -224,7 +159,8 @@ void main() {
       );
     });
 
-    test('prepareDownload throws when response is missing prepareDownload', () async {
+    test('prepareDownload throws when response is missing prepareDownload',
+        () async {
       p2p.onGraphql = (_) async => {'prepareDownload': null};
 
       expect(
@@ -300,68 +236,9 @@ void main() {
       );
     });
 
-    test('requestBlobTicket returns ticket metadata', () async {
-      p2p.onRequestBlob = (_) async => {
-            'success': true,
-            'ticket': '{"hash":"abc"}',
-            'filename': 'movie.mp4',
-            'fileSize': 999,
-          };
-
-      final result = await service.requestBlobTicket('job-blob-1');
-
-      expect(result['success'], isTrue);
-      expect(result['ticket'], equals('{"hash":"abc"}'));
-      expect(result['filename'], equals('movie.mp4'));
-      expect(result['fileSize'], equals(999));
-
-      final call = p2p.lastBlobRequestCall;
-      expect(call, isNotNull);
-      expect(call!.peer, equals(serverNodeAddr));
-      expect(call.jobId, equals('job-blob-1'));
-      expect(call.authToken, equals(authToken));
-    });
-
-    test('requestBlobTicket throws on failed ticket response', () async {
-      p2p.onRequestBlob = (_) async => {
-            'success': false,
-            'error': 'ticket generation failed',
-          };
-
-      expect(
-        () => service.requestBlobTicket('job-blob-1'),
-        throwsA(isA<DownloadServiceException>()
-            .having((e) => e.statusCode, 'statusCode', 500)
-            .having((e) => e.message, 'message', 'ticket generation failed')),
-      );
-    });
-
-    test('downloadBlob forwards peer/auth and relays progress callback', () async {
-      final progress = <(int, int)>[];
-
-      p2p.onDownloadBlob = (_, onProgress) async {
-        onProgress?.call(128, 1024);
-        onProgress?.call(1024, 1024);
-      };
-
-      await service.downloadBlob(
-        ticket: '{"hash":"abc"}',
-        outputPath: '/tmp/movie.mp4',
-        onProgress: (downloaded, total) => progress.add((downloaded, total)),
-      );
-
-      final call = p2p.lastBlobDownloadCall;
-      expect(call, isNotNull);
-      expect(call!.peer, equals(serverNodeAddr));
-      expect(call.ticket, equals('{"hash":"abc"}'));
-      expect(call.outputPath, equals('/tmp/movie.mp4'));
-      expect(call.authToken, equals(authToken));
-
-      expect(progress, equals([(128, 1024), (1024, 1024)]));
-    });
-
-    test('supportsBlobDownload is true', () {
-      expect(service.supportsBlobDownload, isTrue);
+    test('getDownloadUrl returns local proxy URL', () async {
+      final url = await service.getDownloadUrl('job-42');
+      expect(url, equals('http://127.0.0.1:12345/download/job-42/file'));
     });
   });
 }

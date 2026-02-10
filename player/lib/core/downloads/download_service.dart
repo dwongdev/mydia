@@ -61,11 +61,8 @@ abstract class DownloadService {
 
   /// Set the job service for managing progressive downloads.
   /// This is optional but required for resuming interrupted progressive downloads.
-  void setJobService(dynamic jobService); // Dynamic to avoid circular imports in interface
-
-  /// Set the P2P job service for P2P mode downloads.
-  /// When set, progressive downloads will use P2P blob download instead of HTTP.
-  void setP2PJobService(dynamic p2pJobService); // Dynamic to avoid circular imports
+  void setJobService(
+      dynamic jobService); // Dynamic to avoid circular imports in interface
 
   Stream<DownloadTask> get progressStream;
 
@@ -113,8 +110,19 @@ abstract class DownloadService {
     required MediaType mediaType,
     String? posterUrl,
     required Future<String> Function(String jobId) getDownloadUrl,
-    required Future<({String jobId, String status, double progress, int? fileSize})> Function() prepareDownload,
-    required Future<({String status, double progress, int? fileSize, String? error})> Function(String jobId) getJobStatus,
+    required Future<
+                ({String jobId, String status, double progress, int? fileSize})>
+            Function()
+        prepareDownload,
+    required Future<
+                ({
+                  String status,
+                  double progress,
+                  int? fileSize,
+                  String? error
+                })>
+            Function(String jobId)
+        getJobStatus,
     Future<void> Function(String jobId)? cancelJob,
     String? overview,
     int? runtime,

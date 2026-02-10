@@ -13,13 +13,11 @@ import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../domain/models/download.dart';
-import '../../domain/models/download_option.dart';
 import '../../domain/models/download_settings.dart';
 import '../../domain/models/storage_settings.dart';
 import 'background_download_service.dart';
 import 'download_service.dart';
 import 'download_job_service.dart';
-import 'p2p_download_job_service.dart';
 
 /// Whether to use background downloads (true on mobile, false on desktop).
 bool get _useBackgroundDownloader => Platform.isIOS || Platform.isAndroid;
@@ -201,12 +199,9 @@ class _NativeDownloadService implements DownloadService {
   BackgroundDownloadService? _backgroundService;
   StreamSubscription<DownloadTask>? _backgroundProgressSubscription;
   bool _backgroundServiceInitialized = false;
-  
+
   // Job service for resuming progressive downloads
   DownloadJobService? _jobService;
-
-  // P2P job service for P2P mode downloads
-  P2pDownloadJobService? _p2pJobService;
 
   // Queue management
   int _maxConcurrentDownloads = 2;
@@ -225,48 +220,50 @@ class _NativeDownloadService implements DownloadService {
   /// Get the number of currently active downloads.
   int getActiveDownloadCount() {
     if (_database == null) return 0;
-    return _database!.getAllTasks().where((t) =>
-        t.status == 'downloading' || t.status == 'transcoding').length;
+    return _database!
+        .getAllTasks()
+        .where((t) => t.status == 'downloading' || t.status == 'transcoding')
+        .length;
   }
 
-   /// Check if there are available download slots.
-   bool hasAvailableSlots() {
-     return getActiveDownloadCount() < _maxConcurrentDownloads;
-   }
- 
-   /// Reap any tasks whose cancel tokens were already cancelled but DB not updated.
-   Future<void> _reapCancelledTokens() async {
-     if (_database == null) return;
- 
-     final cancelledIds = _cancelTokens.entries
-         .where((entry) => entry.value.isCancelled)
-         .map((entry) => entry.key)
-         .toList();
- 
-     for (final id in cancelledIds) {
-       _cancelTokens.remove(id);
-       _pausedTasks.remove(id);
- 
-       final task = _database!.getTask(id);
-       if (task != null) {
-         final cancelledTask = task.copyWith(
-           status: 'cancelled',
-           error: 'Cancelled by user',
-         );
-         await _database!.saveTask(cancelledTask);
-         _progressController.add(cancelledTask);
- 
-         if (cancelledTask.filePath != null) {
-           final file = File(cancelledTask.filePath!);
-           if (await file.exists()) {
-             await file.delete();
-           }
-         }
-       }
-     }
-   }
- 
-   /// Process the download queue and start next queued downloads if slots available.
+  /// Check if there are available download slots.
+  bool hasAvailableSlots() {
+    return getActiveDownloadCount() < _maxConcurrentDownloads;
+  }
+
+  /// Reap any tasks whose cancel tokens were already cancelled but DB not updated.
+  Future<void> _reapCancelledTokens() async {
+    if (_database == null) return;
+
+    final cancelledIds = _cancelTokens.entries
+        .where((entry) => entry.value.isCancelled)
+        .map((entry) => entry.key)
+        .toList();
+
+    for (final id in cancelledIds) {
+      _cancelTokens.remove(id);
+      _pausedTasks.remove(id);
+
+      final task = _database!.getTask(id);
+      if (task != null) {
+        final cancelledTask = task.copyWith(
+          status: 'cancelled',
+          error: 'Cancelled by user',
+        );
+        await _database!.saveTask(cancelledTask);
+        _progressController.add(cancelledTask);
+
+        if (cancelledTask.filePath != null) {
+          final file = File(cancelledTask.filePath!);
+          if (await file.exists()) {
+            await file.delete();
+          }
+        }
+      }
+    }
+  }
+
+  /// Process the download queue and start next queued downloads if slots available.
 
   Future<void> _processQueue() async {
     if (_database == null || !_autoStartQueued) return;
@@ -276,12 +273,11 @@ class _NativeDownloadService implements DownloadService {
 
     while (hasAvailableSlots()) {
       // Get queued tasks sorted by creation date (FIFO)
-      final queuedTasks = _database!.getAllTasks()
+      final queuedTasks = _database!
+          .getAllTasks()
           .where((t) => t.status == 'queued' || t.status == 'transcoding')
           .toList()
         ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
-
-
 
       if (queuedTasks.isEmpty) break;
 
@@ -334,43 +330,12 @@ class _NativeDownloadService implements DownloadService {
     }
   }
 
-  /// Set the P2P job service for P2P mode downloads.
-  ///
-  /// When set, progressive downloads will use P2P blob download instead of HTTP.
-  @override
-  void setP2PJobService(dynamic p2pJobService) {
-    if (p2pJobService != null && p2pJobService is! P2pDownloadJobService) {
-      return;
-    }
-    _p2pJobService = p2pJobService as P2pDownloadJobService?;
-    if (_p2pJobService != null && _database != null) {
-      _resumeTranscodingTasksP2P();
-    }
-  }
-
-  /// Whether P2P download mode is active.
-  bool get isP2PMode => _p2pJobService != null;
-
-  /// Resume tasks that were interrupted during transcoding using P2P.
-  Future<void> _resumeTranscodingTasksP2P() async {
-    if (_database == null || _p2pJobService == null) return;
-
-    final transcodingTasks = _database!.getAllTasks()
-        .where((t) => t.status == 'transcoding' && t.transcodeJobId != null);
-
-    for (final task in transcodingTasks) {
-      // Check if already being tracked
-      if (_cancelTokens.containsKey(task.id)) continue;
-
-      _startProgressiveDownloadTaskP2P(task);
-    }
-  }
-
   /// Resume tasks that were interrupted during transcoding.
   Future<void> _resumeTranscodingTasks() async {
     if (_database == null || _jobService == null) return;
 
-    final transcodingTasks = _database!.getAllTasks()
+    final transcodingTasks = _database!
+        .getAllTasks()
         .where((t) => t.status == 'transcoding' && t.transcodeJobId != null);
 
     for (final task in transcodingTasks) {
@@ -457,7 +422,8 @@ class _NativeDownloadService implements DownloadService {
 
       // Get all valid file paths from completed downloads
       final downloadedMedia = _database!.getAllMedia();
-      final validCompletedPaths = downloadedMedia.map((m) => m.filePath).toSet();
+      final validCompletedPaths =
+          downloadedMedia.map((m) => m.filePath).toSet();
 
       // Get all file paths from active/pending downloads
       final activeTasks = _database!.getAllTasks().where((t) =>
@@ -466,8 +432,10 @@ class _NativeDownloadService implements DownloadService {
           t.status == 'pending' ||
           t.status == 'queued' ||
           t.status == 'paused');
-      final activeTaskPaths =
-          activeTasks.where((t) => t.filePath != null).map((t) => t.filePath!).toSet();
+      final activeTaskPaths = activeTasks
+          .where((t) => t.filePath != null)
+          .map((t) => t.filePath!)
+          .toSet();
 
       // Combine all valid paths
       final validPaths = {...validCompletedPaths, ...activeTaskPaths};
@@ -598,8 +566,19 @@ class _NativeDownloadService implements DownloadService {
     required MediaType mediaType,
     String? posterUrl,
     required Future<String> Function(String jobId) getDownloadUrl,
-    required Future<({String jobId, String status, double progress, int? fileSize})> Function() prepareDownload,
-    required Future<({String status, double progress, int? fileSize, String? error})> Function(String jobId) getJobStatus,
+    required Future<
+                ({String jobId, String status, double progress, int? fileSize})>
+            Function()
+        prepareDownload,
+    required Future<
+                ({
+                  String status,
+                  double progress,
+                  int? fileSize,
+                  String? error
+                })>
+            Function(String jobId)
+        getJobStatus,
     Future<void> Function(String jobId)? cancelJob,
     String? overview,
     int? runtime,
@@ -706,16 +685,11 @@ class _NativeDownloadService implements DownloadService {
     }
 
     // Start the progressive download process
-    // Use P2P blob download when in P2P mode
-    if (isP2PMode) {
-      _startProgressiveDownloadTaskP2P(task);
-    } else {
-      _startProgressiveDownloadTask(
-        task,
-        getDownloadUrl: getDownloadUrl,
-        getJobStatus: getJobStatus,
-      );
-    }
+    _startProgressiveDownloadTask(
+      task,
+      getDownloadUrl: getDownloadUrl,
+      getJobStatus: getJobStatus,
+    );
 
     return task;
   }
@@ -723,7 +697,15 @@ class _NativeDownloadService implements DownloadService {
   Future<void> _startProgressiveDownloadTask(
     DownloadTask task, {
     required Future<String> Function(String jobId) getDownloadUrl,
-    required Future<({String status, double progress, int? fileSize, String? error})> Function(String jobId) getJobStatus,
+    required Future<
+                ({
+                  String status,
+                  double progress,
+                  int? fileSize,
+                  String? error
+                })>
+            Function(String jobId)
+        getJobStatus,
   }) async {
     if (_database == null) return;
     if (task.transcodeJobId == null) return;
@@ -893,33 +875,35 @@ class _NativeDownloadService implements DownloadService {
           final currentFileSize = await file.length();
           downloadedBytes = currentFileSize;
 
-      if (transcodeComplete && lastKnownFileSize != null && currentFileSize >= lastKnownFileSize) {
-        downloadComplete = true;
-      } else if (!transcodeComplete) {
-        // Still transcoding, wait a bit then check for more data
-        await Future.delayed(const Duration(seconds: 2));
-      } else if (response.statusCode == 206) {
-        // Partial content received, continue downloading
-        await Future.delayed(const Duration(milliseconds: 500));
+          if (transcodeComplete &&
+              lastKnownFileSize != null &&
+              currentFileSize >= lastKnownFileSize) {
+            downloadComplete = true;
+          } else if (!transcodeComplete) {
+            // Still transcoding, wait a bit then check for more data
+            await Future.delayed(const Duration(seconds: 2));
+          } else if (response.statusCode == 206) {
+            // Partial content received, continue downloading
+            await Future.delayed(const Duration(milliseconds: 500));
+          }
+        } on DioException catch (e) {
+          if (e.type == DioExceptionType.cancel) {
+            // Cancelled - cleanup is handled by cancelDownload
+            return;
+          }
+          // For other errors during progressive download, retry after delay
+          if (!transcodeComplete) {
+            await Future.delayed(const Duration(seconds: 2));
+            continue;
+          }
+          rethrow;
+        }
       }
-    } on DioException catch (e) {
-      if (e.type == DioExceptionType.cancel) {
-        // Cancelled - cleanup is handled by cancelDownload
+
+      // Final cancellation check - cleanup is handled by cancelDownload
+      if (cancelToken.isCancelled) {
         return;
       }
-      // For other errors during progressive download, retry after delay
-      if (!transcodeComplete) {
-        await Future.delayed(const Duration(seconds: 2));
-        continue;
-      }
-      rethrow;
-    }
-  }
-
-  // Final cancellation check - cleanup is handled by cancelDownload
-  if (cancelToken.isCancelled) {
-    return;
-  }
 
       // Download complete
       final downloadedFileSize = await file.length();
@@ -957,168 +941,6 @@ class _NativeDownloadService implements DownloadService {
       _cancelTokens.remove(task.id);
       _pausedTasks.remove(task.id);
       _cancelJobCallbacks.remove(task.id);
-      _processQueue();
-    } catch (e) {
-      final errorTask = updatedTask.copyWith(
-        status: 'failed',
-        error: e.toString(),
-      );
-      await _database!.saveTask(errorTask);
-      _progressController.add(errorTask);
-      _cancelTokens.remove(task.id);
-      _pausedTasks.remove(task.id);
-      _cancelJobCallbacks.remove(task.id);
-      _processQueue();
-    }
-  }
-
-  /// Start a progressive download task using P2P blob download.
-  ///
-  /// This method uses the P2P service for both job status polling and
-  /// file download, avoiding HTTP entirely.
-  Future<void> _startProgressiveDownloadTaskP2P(DownloadTask task) async {
-    if (_database == null) return;
-    if (_p2pJobService == null) {
-      throw StateError('P2P job service not available');
-    }
-    if (task.transcodeJobId == null) return;
-
-    final jobId = task.transcodeJobId!;
-    final p2pService = _p2pJobService!;
-
-    // Keep a local reference to the cancel token so we can check it even
-    // after _cancelAndCleanupTask removes it from the map.
-    final cancelToken = CancelToken();
-    _cancelTokens[task.id] = cancelToken;
-    _pausedTasks[task.id] = false;
-
-    DownloadTask updatedTask = task;
-
-    try {
-      final downloadDir = await _getDownloadDirectory();
-      final fileName = _generateFileName(task);
-      final filePath = '$downloadDir/$fileName';
-
-      updatedTask = task.copyWith(filePath: filePath);
-      await _database!.saveTask(updatedTask);
-
-      // Phase 1: Wait for transcoding to complete
-      bool transcodeComplete = updatedTask.transcodeProgress >= 1.0;
-      int? lastKnownFileSize;
-
-      while (!transcodeComplete && !cancelToken.isCancelled) {
-        // Check if cancelled
-        if (cancelToken.isCancelled) {
-          break;
-        }
-
-        if (_pausedTasks[task.id] == true) {
-          await Future.delayed(const Duration(seconds: 1));
-          continue;
-        }
-
-        final status = await p2pService.getJobStatus(jobId);
-
-        if (status.error != null) {
-          throw Exception('Transcode failed: ${status.error}');
-        }
-
-        updatedTask = updatedTask.copyWith(
-          transcodeProgress: status.progress,
-          fileSize: status.currentFileSize ?? updatedTask.fileSize,
-          status: status.status == DownloadJobStatusType.ready ? 'downloading' : 'transcoding',
-        );
-        await _database!.saveTask(updatedTask);
-        _progressController.add(updatedTask);
-
-        if (status.status == DownloadJobStatusType.ready) {
-          transcodeComplete = true;
-          lastKnownFileSize = status.currentFileSize;
-        } else {
-          await Future.delayed(const Duration(seconds: 2));
-        }
-      }
-
-      if (cancelToken.isCancelled) {
-        return;
-      }
-
-      // Phase 2: Request blob download ticket
-      updatedTask = updatedTask.copyWith(
-        status: 'downloading',
-        fileSize: lastKnownFileSize ?? updatedTask.fileSize,
-      );
-      await _database!.saveTask(updatedTask);
-      _progressController.add(updatedTask);
-
-      final ticketResult = await p2pService.requestBlobTicket(jobId);
-      final ticket = ticketResult['ticket'] as String;
-      final fileSize = ticketResult['fileSize'] as int? ?? lastKnownFileSize;
-
-      updatedTask = updatedTask.copyWith(fileSize: fileSize);
-      await _database!.saveTask(updatedTask);
-
-      // Phase 3: Download via P2P blob download
-      await p2pService.downloadBlob(
-        ticket: ticket,
-        outputPath: filePath,
-        onProgress: (downloaded, total) async {
-          if (cancelToken.isCancelled) {
-            // P2P download cannot be cancelled mid-stream currently.
-            // The download will complete but we'll clean up after.
-            return;
-          }
-
-          final downloadProgress = total > 0 ? downloaded / total : 0.0;
-          updatedTask = updatedTask.copyWith(
-            downloadProgress: downloadProgress.clamp(0.0, 1.0),
-            progress: updatedTask.combinedProgress,
-            downloadedBytes: downloaded,
-          );
-          await _database!.saveTask(updatedTask);
-          _progressController.add(updatedTask);
-        },
-      );
-
-      // Check if cancelled during download - clean up and exit
-      if (cancelToken.isCancelled) {
-        final file = File(filePath);
-        if (await file.exists()) {
-          try {
-            await file.delete();
-          } catch (_) {}
-        }
-        // The _cancelAndCleanupTask method will have already updated the DB
-        _cancelTokens.remove(task.id);
-        _pausedTasks.remove(task.id);
-        _cancelJobCallbacks.remove(task.id);
-        _processQueue();
-        return;
-      }
-
-      // Download complete
-      final file = File(filePath);
-      final downloadedFileSize = await file.length();
-      updatedTask = updatedTask.copyWith(
-        status: 'completed',
-        progress: 1.0,
-        transcodeProgress: 1.0,
-        downloadProgress: 1.0,
-        fileSize: downloadedFileSize,
-        completedAt: DateTime.now(),
-      );
-      await _database!.saveTask(updatedTask);
-
-      // Save to downloaded media
-      final media = DownloadedMedia.fromTask(updatedTask);
-      await _database!.saveMedia(media);
-
-      _progressController.add(updatedTask);
-      _cancelTokens.remove(task.id);
-      _pausedTasks.remove(task.id);
-      _cancelJobCallbacks.remove(task.id);
-
-      // Process queue to start next download
       _processQueue();
     } catch (e) {
       final errorTask = updatedTask.copyWith(
@@ -1304,7 +1126,8 @@ class _NativeDownloadService implements DownloadService {
   /// - Partial files are deleted
   /// - Database is updated
   /// - Queue is processed
-  Future<void> _cancelAndCleanupTask(String taskId, {bool processQueue = true}) async {
+  Future<void> _cancelAndCleanupTask(String taskId,
+      {bool processQueue = true}) async {
     if (_database == null) return;
 
     final task = _database!.getTask(taskId);
@@ -1318,22 +1141,19 @@ class _NativeDownloadService implements DownloadService {
 
     // 2. Cancel server-side transcode job for progressive downloads
     if (task != null && task.isProgressive && task.transcodeJobId != null) {
-      if (isP2PMode && _p2pJobService != null) {
-        // Use P2P service to cancel the job in P2P mode
+      // Try the stored callback first, then fall back to the job service
+      final cancelCallback = _cancelJobCallbacks[taskId];
+      if (cancelCallback != null) {
         try {
-          await _p2pJobService!.cancelJob(task.transcodeJobId!);
+          await cancelCallback(task.transcodeJobId!);
         } catch (_) {
           // Ignore errors when cancelling server job - it may have already completed
         }
-      } else {
-        // Use the stored callback for HTTP mode
-        final cancelCallback = _cancelJobCallbacks[taskId];
-        if (cancelCallback != null) {
-          try {
-            await cancelCallback(task.transcodeJobId!);
-          } catch (_) {
-            // Ignore errors when cancelling server job - it may have already completed
-          }
+      } else if (_jobService != null) {
+        try {
+          await _jobService!.cancelJob(task.transcodeJobId!);
+        } catch (_) {
+          // Ignore errors when cancelling server job - it may have already completed
         }
       }
     }
@@ -1420,8 +1240,7 @@ class _NativeDownloadService implements DownloadService {
     await _database!.deleteMedia(media.id);
 
     // Also remove any associated tasks
-    final tasks =
-        _database!.getAllTasks().where((t) => t.mediaId == mediaId);
+    final tasks = _database!.getAllTasks().where((t) => t.mediaId == mediaId);
     for (final task in tasks) {
       await _database!.deleteTask(task.id);
     }

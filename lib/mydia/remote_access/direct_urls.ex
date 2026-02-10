@@ -30,6 +30,58 @@ defmodule Mydia.RemoteAccess.DirectUrls do
   @http_timeout_ms 3_000
 
   @doc """
+  Detects all available IP addresses (local + public) as raw tuples.
+
+  Returns a list of `{a, b, c, d}` IPv4 tuples suitable for pairing with
+  an arbitrary port. This is used to enrich iroh's EndpointAddr with
+  additional direct IP paths.
+
+  Filters out loopback, link-local, and Docker bridge addresses.
+
+  ## Examples
+
+      iex> DirectUrls.detect_all_ips()
+      [{192, 168, 1, 100}, {10, 0, 0, 5}]
+
+  """
+  def detect_all_ips do
+    local_ips = detect_local_ips()
+
+    public_ips =
+      case detect_public_ip() do
+        {:ok, ip_string} ->
+          case parse_ip_string(ip_string) do
+            {:ok, ip_tuple} -> [ip_tuple]
+            {:error, _} -> []
+          end
+
+        {:error, _} ->
+          []
+      end
+
+    (local_ips ++ public_ips)
+    |> Enum.uniq()
+  end
+
+  @doc """
+  Detects local network IP addresses as raw tuples.
+
+  Scans network interfaces and returns valid IPv4 tuples, filtering out
+  loopback, link-local, and Docker bridge addresses.
+  """
+  def detect_local_ips do
+    case :inet.getifaddrs() do
+      {:ok, interfaces} ->
+        interfaces
+        |> extract_ip_addresses()
+        |> Enum.filter(&valid_ip?/1)
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  @doc """
   Detects all available direct URLs for the instance.
 
   Returns a list of URLs that clients can use to connect directly to this instance.

@@ -9,6 +9,7 @@ defmodule Mydia.P2p.Server do
   require Logger
 
   alias Mydia.P2p
+  alias Mydia.RemoteAccess.DirectUrls
   alias Mydia.RemoteAccess.Pairing
   alias Mydia.Streaming.HlsSession
   alias MydiaWeb.Schema.Middleware.Logging, as: GraphQLLogging
@@ -148,7 +149,7 @@ defmodule Mydia.P2p.Server do
 
   def handle_call(:get_node_addr, _from, state) do
     node_addr = P2p.get_node_addr(state.resource)
-    {:reply, node_addr, state}
+    {:reply, enrich_node_addr(node_addr), state}
   end
 
   def handle_call(:status, _from, state) do
@@ -210,8 +211,9 @@ defmodule Mydia.P2p.Server do
 
   def handle_info({:ok, "ready", node_addr}, state) do
     Logger.info("P2P Event: Ready with address")
-    Logger.debug("Node address: #{node_addr}")
-    state = %{state | node_addr: node_addr}
+    enriched = enrich_node_addr(node_addr)
+    Logger.debug("Node address: #{enriched}")
+    state = %{state | node_addr: enriched}
     {:noreply, state}
   end
 
@@ -356,19 +358,6 @@ defmodule Mydia.P2p.Server do
     {:noreply, state}
   end
 
-  def handle_info({:ok, "request_received", "blob_download", request_id, req}, state) do
-    Logger.info("P2P Request: Blob download for job #{req.job_id}")
-
-    # Spawn a task to handle the blob ticket creation so we don't block the GenServer
-    resource = state.resource
-
-    Task.start(fn ->
-      handle_blob_download(resource, request_id, req)
-    end)
-
-    {:noreply, state}
-  end
-
   # Handle Rust/iroh log messages
   def handle_info({:ok, "log", level, target, message}, state) do
     # Forward Rust logs to Elixir Logger with appropriate level
@@ -392,9 +381,6 @@ defmodule Mydia.P2p.Server do
   end
 
   # HLS streaming handler
-
-  # Chunk size for streaming (32KB)
-  @hls_chunk_size 32 * 1024
 
   defp handle_hls_stream(resource, stream_id, req) do
     # Verify auth token
@@ -637,9 +623,11 @@ defmodule Mydia.P2p.Server do
 
     case P2p.send_hls_header(resource, stream_id, header) do
       "ok" ->
-        # Stream the file in chunks
-        stream_file_chunks(resource, stream_id, file_path, 0, file_size)
-        P2p.finish_hls_stream(resource, stream_id)
+        # Stream the file directly from Rust (zero-copy, no per-chunk NIF overhead)
+        case P2p.stream_file_range(resource, stream_id, file_path, 0, file_size) do
+          "ok" -> :ok
+          {:error, reason} -> Logger.error("Failed to stream file: #{inspect(reason)}")
+        end
 
       {:error, reason} ->
         Logger.error("Failed to send HLS header: #{inspect(reason)}")
@@ -667,55 +655,14 @@ defmodule Mydia.P2p.Server do
 
     case P2p.send_hls_header(resource, stream_id, header) do
       "ok" ->
-        # Stream the file portion in chunks
-        stream_file_chunks(resource, stream_id, file_path, range_start, content_length)
-        P2p.finish_hls_stream(resource, stream_id)
+        # Stream the file range directly from Rust (zero-copy, no per-chunk NIF overhead)
+        case P2p.stream_file_range(resource, stream_id, file_path, range_start, content_length) do
+          "ok" -> :ok
+          {:error, reason} -> Logger.error("Failed to stream file range: #{inspect(reason)}")
+        end
 
       {:error, reason} ->
         Logger.error("Failed to send HLS header: #{inspect(reason)}")
-    end
-  end
-
-  defp stream_file_chunks(resource, stream_id, file_path, offset, remaining) do
-    case File.open(file_path, [:read, :binary]) do
-      {:ok, file} ->
-        try do
-          # Seek to offset
-          {:ok, _} = :file.position(file, offset)
-
-          # Stream chunks
-          do_stream_chunks(resource, stream_id, file, remaining)
-        after
-          File.close(file)
-        end
-
-      {:error, reason} ->
-        Logger.error("Failed to open file for streaming: #{inspect(reason)}")
-    end
-  end
-
-  defp do_stream_chunks(_resource, _stream_id, _file, remaining) when remaining <= 0 do
-    :ok
-  end
-
-  defp do_stream_chunks(resource, stream_id, file, remaining) do
-    bytes_to_read = min(@hls_chunk_size, remaining)
-
-    case IO.binread(file, bytes_to_read) do
-      data when is_binary(data) ->
-        case P2p.send_hls_chunk(resource, stream_id, data) do
-          "ok" ->
-            do_stream_chunks(resource, stream_id, file, remaining - byte_size(data))
-
-          {:error, reason} ->
-            Logger.error("Failed to send HLS chunk: #{inspect(reason)}")
-        end
-
-      :eof ->
-        :ok
-
-      {:error, reason} ->
-        Logger.error("Failed to read file chunk: #{inspect(reason)}")
     end
   end
 
@@ -826,6 +773,87 @@ defmodule Mydia.P2p.Server do
     encode_json(serializable_errors)
   end
 
+  # Enrich a node_addr JSON with additional direct IP addresses detected from
+  # network interfaces and public IP services. This gives iroh more paths to
+  # attempt direct connections, which is especially useful in Docker or NAT
+  # environments where iroh's auto-detection may miss IPs.
+  defp enrich_node_addr(nil), do: nil
+
+  defp enrich_node_addr(node_addr_json) when is_binary(node_addr_json) do
+    with {:ok, %{"id" => id, "addrs" => addrs}} when is_list(addrs) <-
+           Jason.decode(node_addr_json),
+         {:ok, iroh_port} <- extract_iroh_port(addrs) do
+      existing_ips = extract_existing_ips(addrs)
+      detected_ips = DirectUrls.detect_all_ips()
+
+      new_ip_entries =
+        detected_ips
+        |> Enum.reject(fn ip -> MapSet.member?(existing_ips, ip) end)
+        |> Enum.map(fn {a, b, c, d} -> %{"Ip" => "#{a}.#{b}.#{c}.#{d}:#{iroh_port}"} end)
+
+      if new_ip_entries == [] do
+        node_addr_json
+      else
+        enriched = %{"id" => id, "addrs" => addrs ++ new_ip_entries}
+
+        Logger.info(
+          "Enriched node_addr with #{length(new_ip_entries)} additional IP(s): #{Enum.map_join(new_ip_entries, ", ", & &1["Ip"])}"
+        )
+
+        Jason.encode!(enriched)
+      end
+    else
+      _ -> node_addr_json
+    end
+  end
+
+  # Extract the iroh QUIC port from existing Ip entries in the addrs list.
+  # Returns {:ok, port} from the first Ip entry, or :error if none found.
+  defp extract_iroh_port(addrs) do
+    Enum.find_value(addrs, :error, fn
+      %{"Ip" => ip_port} ->
+        case String.split(ip_port, ":") do
+          [_ip, port_str] ->
+            case Integer.parse(port_str) do
+              {port, ""} -> {:ok, port}
+              _ -> nil
+            end
+
+          _ ->
+            nil
+        end
+
+      _ ->
+        nil
+    end)
+  end
+
+  # Extract existing IP tuples from addrs for deduplication.
+  defp extract_existing_ips(addrs) do
+    addrs
+    |> Enum.flat_map(fn
+      %{"Ip" => ip_port} ->
+        case String.split(ip_port, ":") do
+          [ip_str, _port] ->
+            case ip_str |> String.to_charlist() |> :inet.parse_address() do
+              {:ok, {a, b, c, d} = tuple}
+              when is_integer(a) and is_integer(b) and is_integer(c) and is_integer(d) ->
+                [tuple]
+
+              _ ->
+                []
+            end
+
+          _ ->
+            []
+        end
+
+      _ ->
+        []
+    end)
+    |> MapSet.new()
+  end
+
   # Extract the relay URL from the node_addr JSON
   # The node_addr is a JSON object like:
   # {"id": "...", "addrs": [{"Relay": "https://..."}, {"Ip": "1.2.3.4:5678"}]}
@@ -845,44 +873,12 @@ defmodule Mydia.P2p.Server do
     end
   end
 
-  # Blob download handler
-
-  defp handle_blob_download(resource, request_id, req) do
-    # Verify auth token
-    case verify_blob_auth(req.auth_token) do
-      {:ok, _user} ->
-        # Look up the transcode job by job_id
-        case lookup_transcode_job(req.job_id) do
-          {:ok, job} ->
-            create_and_send_blob_ticket(resource, request_id, job)
-
-          {:error, :not_found} ->
-            Logger.warning("Blob download: Job not found: #{req.job_id}")
-            send_blob_error(resource, request_id, "Job not found")
-
-          {:error, :not_ready} ->
-            Logger.warning("Blob download: Job not ready: #{req.job_id}")
-            send_blob_error(resource, request_id, "Job not ready")
-        end
-
-      {:error, _reason} ->
-        Logger.warning("Blob download: Auth failed")
-        send_blob_error(resource, request_id, "Unauthorized")
-    end
-  end
-
-  defp verify_blob_auth(nil), do: {:error, :no_token}
-
-  defp verify_blob_auth(auth_token) when is_binary(auth_token) do
-    Mydia.Auth.Guardian.verify_token(auth_token)
-  end
-
   defp lookup_transcode_job(job_id) do
     alias Mydia.Downloads.TranscodeJob
     alias Mydia.Repo
 
-    # Look up the transcode job by ID, preloading related media for filename generation
-    case Repo.get(TranscodeJob, job_id) |> Repo.preload(media_file: [:movie, episode: :show]) do
+    # Look up the transcode job by ID
+    case Repo.get(TranscodeJob, job_id) do
       nil ->
         {:error, :not_found}
 
@@ -895,78 +891,4 @@ defmodule Mydia.P2p.Server do
         end
     end
   end
-
-  defp create_and_send_blob_ticket(resource, request_id, job) do
-    # Generate a filename from the job
-    filename = generate_download_filename(job)
-
-    # Create the blob ticket using the NIF
-    case P2p.create_blob_ticket(job.output_path, filename) do
-      ticket when is_binary(ticket) ->
-        # Parse the ticket to add job_id and get file_size
-        {:ok, ticket_data} = Jason.decode(ticket)
-        file_size = Map.get(ticket_data, "file_size")
-        ticket_data = Map.put(ticket_data, "job_id", job.id)
-        ticket = Jason.encode!(ticket_data)
-
-        response = %P2p.BlobDownloadResponse{
-          success: true,
-          ticket: ticket,
-          filename: filename,
-          file_size: file_size,
-          error: nil
-        }
-
-        P2p.send_response(resource, request_id, {:blob_download, response})
-
-      {:error, reason} ->
-        Logger.error("Failed to create blob ticket: #{inspect(reason)}")
-        send_blob_error(resource, request_id, "Failed to create download ticket")
-    end
-  end
-
-  defp send_blob_error(resource, request_id, error_message) do
-    response = %P2p.BlobDownloadResponse{
-      success: false,
-      ticket: nil,
-      filename: nil,
-      file_size: nil,
-      error: error_message
-    }
-
-    P2p.send_response(resource, request_id, {:blob_download, response})
-  end
-
-  defp generate_download_filename(job) do
-    # Generate a sensible filename based on the job content
-    # Format: Title_Resolution.mp4
-    # Job has media_file which may have movie or episode association
-    base_name =
-      case job.media_file do
-        %{movie: %{title: title}} when not is_nil(title) ->
-          sanitize_filename(title)
-
-        %{episode: %{show: %{name: show_name}, season_number: season, episode_number: ep}}
-        when not is_nil(show_name) ->
-          "#{sanitize_filename(show_name)}_S#{pad_number(season)}E#{pad_number(ep)}"
-
-        _ ->
-          "download"
-      end
-
-    resolution = job.resolution || "unknown"
-    "#{base_name}_#{resolution}.mp4"
-  end
-
-  defp sanitize_filename(name) do
-    name
-    |> String.replace(~r/[^\w\s-]/, "")
-    |> String.replace(~r/\s+/, "_")
-    |> String.slice(0, 100)
-  end
-
-  defp pad_number(num) when is_integer(num),
-    do: String.pad_leading(Integer.to_string(num), 2, "0")
-
-  defp pad_number(_), do: "00"
 end

@@ -9,8 +9,6 @@ use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey,
     Watcher,
 };
-#[cfg(feature = "dns-over-https")]
-use iroh_relay::dns::DnsProtocol;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -29,7 +27,6 @@ pub enum MydiaRequest {
     ReadMedia(ReadMediaRequest),
     GraphQL(GraphQLRequest),
     HlsStream(HlsRequest),
-    BlobDownload(BlobDownloadRequest),
     Custom(Vec<u8>),
 }
 
@@ -76,40 +73,6 @@ pub struct HlsResponseHeader {
     pub cache_control: Option<String>,
 }
 
-/// Request to download a file as an iroh-blob
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct BlobDownloadRequest {
-    pub job_id: String,
-    pub auth_token: Option<String>,
-}
-
-/// Response with blob ticket for downloading
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct BlobDownloadResponse {
-    pub success: bool,
-    /// The iroh-blobs ticket as a serialized string
-    pub ticket: Option<String>,
-    /// Original filename for the downloaded file
-    pub filename: Option<String>,
-    /// File size in bytes
-    pub file_size: Option<u64>,
-    /// Error message if failed
-    pub error: Option<String>,
-}
-
-/// Progress event for blob downloads
-#[derive(Debug, Clone)]
-pub enum BlobDownloadProgress {
-    /// Download started with total size
-    Started { total_size: u64 },
-    /// Progress update with bytes downloaded
-    Progress { downloaded: u64, total: u64 },
-    /// Download completed with file path
-    Completed { file_path: String },
-    /// Download failed with error
-    Failed { error: String },
-}
-
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GraphQLResponse {
     pub data: Option<String>,   // JSON-encoded
@@ -123,7 +86,6 @@ pub enum MydiaResponse {
     MediaChunk(Vec<u8>),
     GraphQL(GraphQLResponse),
     HlsHeader(HlsResponseHeader),
-    BlobDownload(BlobDownloadResponse),
     Custom(Vec<u8>),
     Error(String),
 }
@@ -174,6 +136,13 @@ enum Command {
     },
     FinishHlsStream {
         stream_id: String,
+        reply: oneshot::Sender<Result<(), String>>,
+    },
+    StreamFileRange {
+        stream_id: String,
+        file_path: String,
+        offset: u64,
+        length: u64,
         reply: oneshot::Sender<Result<(), String>>,
     },
     SendHlsRequest {
@@ -590,6 +559,29 @@ impl Host {
         rx.blocking_recv().map_err(|_| "recv_failed".to_string())?
     }
 
+    /// Stream a file range directly to a QUIC stream.
+    /// Reads the file in Rust and writes length-prefixed chunks, avoiding per-chunk NIF overhead.
+    /// The stream is finished automatically after all data is written.
+    pub fn stream_file_range(
+        &self,
+        stream_id: String,
+        file_path: String,
+        offset: u64,
+        length: u64,
+    ) -> Result<(), String> {
+        let (tx, rx) = oneshot::channel();
+        self.cmd_tx
+            .blocking_send(Command::StreamFileRange {
+                stream_id,
+                file_path,
+                offset,
+                length,
+                reply: tx,
+            })
+            .map_err(|_| "send_failed".to_string())?;
+        rx.blocking_recv().map_err(|_| "recv_failed".to_string())?
+    }
+
     /// Send an HLS streaming request to a peer (client-side).
     /// Returns a streaming response with header and chunk receiver.
     pub async fn send_hls_request(
@@ -610,6 +602,49 @@ impl Host {
     }
 }
 
+/// Clone-able handle for sending HLS requests from spawned threads.
+///
+/// Wraps a cloned `cmd_tx` so callers can issue `SendHlsRequest` commands
+/// without access to the private `Command` enum.
+#[derive(Clone)]
+pub struct HlsRequester {
+    cmd_tx: mpsc::Sender<Command>,
+}
+
+impl HlsRequester {
+    /// Send an HLS streaming request to a peer.
+    /// Returns a streaming response with header and chunk receiver.
+    pub async fn send_hls_request(
+        &self,
+        node_id: String,
+        request: HlsRequest,
+    ) -> Result<HlsStreamResponse, String> {
+        let (tx, rx) = oneshot::channel();
+        self.cmd_tx
+            .send(Command::SendHlsRequest {
+                node_id,
+                request,
+                reply: tx,
+            })
+            .await
+            .map_err(|_| "send_failed".to_string())?;
+        rx.await.map_err(|_| "recv_failed".to_string())?
+    }
+}
+
+impl Host {
+    /// Create a clone-able HLS requester handle.
+    ///
+    /// The returned `HlsRequester` can be moved into spawned threads and
+    /// used to issue streaming HLS requests without holding a reference
+    /// to the `Host`.
+    pub fn hls_requester(&self) -> HlsRequester {
+        HlsRequester {
+            cmd_tx: self.cmd_tx.clone(),
+        }
+    }
+}
+
 /// Shared state for pending responses
 struct SharedState {
     pending_responses: HashMap<String, oneshot::Sender<MydiaResponse>>,
@@ -617,21 +652,9 @@ struct SharedState {
     hls_streams: HashMap<String, SendStream>,
 }
 
-/// Create a DNS resolver, using DNS-over-HTTPS when the feature is enabled.
-/// This is needed on Android where raw UDP/TCP DNS sockets are blocked by SELinux.
+/// Create a DNS resolver using the system default.
 fn create_dns_resolver() -> DnsResolver {
-    #[cfg(feature = "dns-over-https")]
-    {
-        tracing::info!("Using DNS-over-HTTPS resolver");
-        DnsResolver::builder()
-            .with_nameserver("8.8.8.8:443".parse().unwrap(), DnsProtocol::Https)
-            .with_nameserver("1.1.1.1:443".parse().unwrap(), DnsProtocol::Https)
-            .build()
-    }
-    #[cfg(not(feature = "dns-over-https"))]
-    {
-        DnsResolver::default()
-    }
+    DnsResolver::default()
 }
 
 /// Main event loop that runs in a background thread
@@ -841,9 +864,9 @@ async fn run_event_loop(
                                         // Write length prefix (4 bytes) then header
                                         let len = header_data.len() as u32;
                                         let len_bytes = len.to_be_bytes();
-                                        if let Err(e) = send.write(&len_bytes).await {
+                                        if let Err(e) = send.write_all(&len_bytes).await {
                                             Err(format!("Failed to write header length: {}", e))
-                                        } else if let Err(e) = send.write(&header_data).await {
+                                        } else if let Err(e) = send.write_all(&header_data).await {
                                             Err(format!("Failed to write header: {}", e))
                                         } else {
                                             Ok(())
@@ -864,9 +887,9 @@ async fn run_event_loop(
                                 // Write chunk length (4 bytes) then data
                                 let len = data.len() as u32;
                                 let len_bytes = len.to_be_bytes();
-                                if let Err(e) = send.write(&len_bytes).await {
+                                if let Err(e) = send.write_all(&len_bytes).await {
                                     Err(format!("Failed to write chunk length: {}", e))
-                                } else if let Err(e) = send.write(&data).await {
+                                } else if let Err(e) = send.write_all(&data).await {
                                     Err(format!("Failed to write chunk: {}", e))
                                 } else {
                                     Ok(())
@@ -883,7 +906,7 @@ async fn run_event_loop(
                             if let Some(mut send) = state.hls_streams.remove(&stream_id) {
                                 // Write zero-length terminator
                                 let zero_bytes = [0u8; 4];
-                                if let Err(e) = send.write(&zero_bytes).await {
+                                if let Err(e) = send.write_all(&zero_bytes).await {
                                     Err(format!("Failed to write terminator: {}", e))
                                 } else if let Err(e) = send.finish() {
                                     Err(format!("Failed to finish stream: {}", e))
@@ -896,6 +919,25 @@ async fn run_event_loop(
                             }
                         };
                         let _ = reply.send(result);
+                    }
+                    Command::StreamFileRange { stream_id, file_path, offset, length, reply } => {
+                        // Remove the SendStream from hls_streams so we own it exclusively
+                        let send_stream = {
+                            let mut state = shared_state.lock().await;
+                            state.hls_streams.remove(&stream_id)
+                        };
+                        match send_stream {
+                            Some(send) => {
+                                // Spawn a task to stream the file data
+                                tokio::spawn(async move {
+                                    let result = stream_file_to_quic(send, &file_path, offset, length).await;
+                                    let _ = reply.send(result);
+                                });
+                            }
+                            None => {
+                                let _ = reply.send(Err(format!("HLS stream not found: {}", stream_id)));
+                            }
+                        }
                     }
                     Command::SendHlsRequest { node_id, request, reply } => {
                         let result = handle_send_hls_request(&connected_peers, &node_id, request).await;
@@ -992,6 +1034,87 @@ async fn monitor_connection_type(
             }
         }
     }
+}
+
+/// Stream a file range to a QUIC SendStream with length-prefixed chunks.
+/// Uses a bounded channel pipeline: blocking reader → async QUIC writer.
+/// Memory usage is bounded at ~4MB regardless of file size.
+async fn stream_file_to_quic(
+    mut send: SendStream,
+    file_path: &str,
+    offset: u64,
+    length: u64,
+) -> Result<(), String> {
+    const CHUNK_SIZE: usize = 1024 * 1024; // 1 MB
+    const CHANNEL_CAPACITY: usize = 4; // Bound memory at ~4MB
+
+    let (chunk_tx, mut chunk_rx) = mpsc::channel::<Vec<u8>>(CHANNEL_CAPACITY);
+
+    // Blocking reader task: reads file in 1MB chunks and sends via bounded channel
+    let file_path = file_path.to_string();
+    tokio::task::spawn_blocking(move || {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut file = match std::fs::File::open(&file_path) {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::error!("File open error: {}", e);
+                return;
+            }
+        };
+        if let Err(e) = file.seek(SeekFrom::Start(offset)) {
+            tracing::error!("Seek error: {}", e);
+            return;
+        }
+
+        let mut remaining = length as usize;
+        while remaining > 0 {
+            let to_read = std::cmp::min(CHUNK_SIZE, remaining);
+            let mut buf = vec![0u8; to_read];
+            match file.read_exact(&mut buf) {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!("Read error: {}", e);
+                    return;
+                }
+            }
+            remaining -= to_read;
+            // Blocking send — back-pressures when channel is full
+            if chunk_tx.blocking_send(buf).is_err() {
+                // Receiver dropped (QUIC write failed or stream cancelled)
+                tracing::debug!("stream_file_to_quic: receiver dropped, stopping read");
+                return;
+            }
+        }
+        // chunk_tx is dropped here, signalling end of data
+    });
+
+    // Async QUIC writer: receives chunks and writes length-prefixed data
+    while let Some(chunk) = chunk_rx.recv().await {
+        let len = chunk.len() as u32;
+        let len_bytes = len.to_be_bytes();
+        send.write_all(&len_bytes)
+            .await
+            .map_err(|e| format!("Failed to write chunk length: {}", e))?;
+        send.write_all(&chunk)
+            .await
+            .map_err(|e| format!("Failed to write chunk data: {}", e))?;
+    }
+
+    // Write zero-length terminator and finish
+    let zero_bytes = [0u8; 4];
+    send.write_all(&zero_bytes)
+        .await
+        .map_err(|e| format!("Failed to write terminator: {}", e))?;
+    send.finish()
+        .map_err(|e| format!("Failed to finish stream: {}", e))?;
+
+    tracing::debug!(
+        "stream_file_to_quic completed: {} bytes from offset {}",
+        length,
+        offset
+    );
+
+    Ok(())
 }
 
 /// Handle incoming streams from a peer connection
@@ -1407,42 +1530,4 @@ mod tests {
         assert_eq!(response, decoded);
     }
 
-    #[test]
-    fn test_blob_download_request_serialization() {
-        let request = MydiaRequest::BlobDownload(BlobDownloadRequest {
-            job_id: "job_123".to_string(),
-            auth_token: Some("token_abc".to_string()),
-        });
-        let data = serde_cbor::to_vec(&request).unwrap();
-        let decoded: MydiaRequest = serde_cbor::from_slice(&data).unwrap();
-        assert_eq!(request, decoded);
-    }
-
-    #[test]
-    fn test_blob_download_response_serialization() {
-        let response = MydiaResponse::BlobDownload(BlobDownloadResponse {
-            success: true,
-            ticket: Some("blob_ticket_xyz".to_string()),
-            filename: Some("movie.mp4".to_string()),
-            file_size: Some(1024 * 1024 * 100),
-            error: None,
-        });
-        let data = serde_cbor::to_vec(&response).unwrap();
-        let decoded: MydiaResponse = serde_cbor::from_slice(&data).unwrap();
-        assert_eq!(response, decoded);
-    }
-
-    #[test]
-    fn test_blob_download_response_error_serialization() {
-        let response = MydiaResponse::BlobDownload(BlobDownloadResponse {
-            success: false,
-            ticket: None,
-            filename: None,
-            file_size: None,
-            error: Some("Job not found".to_string()),
-        });
-        let data = serde_cbor::to_vec(&response).unwrap();
-        let decoded: MydiaResponse = serde_cbor::from_slice(&data).unwrap();
-        assert_eq!(response, decoded);
-    }
 }

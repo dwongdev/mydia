@@ -3,8 +3,8 @@
 //! Provides Erlang/Elixir interop for the p2p networking functionality.
 
 use mydia_p2p_core::{
-    BlobDownloadResponse, Event, GraphQLResponse, HlsResponseHeader, Host, HostConfig, LogLevel,
-    MydiaRequest, MydiaResponse, PairingResponse,
+    Event, GraphQLResponse, HlsResponseHeader, Host, HostConfig, LogLevel, MydiaRequest,
+    MydiaResponse, PairingResponse,
 };
 use rustler::{
     Binary, Encoder, Env, LocalPid, NifStruct, NifTaggedEnum, OwnedEnv, ResourceArc, Term,
@@ -153,29 +153,11 @@ struct ElixirHlsResponseHeader {
     pub cache_control: Option<String>,
 }
 
-#[derive(NifStruct)]
-#[module = "Mydia.P2p.BlobDownloadRequest"]
-struct ElixirBlobDownloadRequest {
-    pub job_id: String,
-    pub auth_token: Option<String>,
-}
-
-#[derive(NifStruct)]
-#[module = "Mydia.P2p.BlobDownloadResponse"]
-struct ElixirBlobDownloadResponse {
-    pub success: bool,
-    pub ticket: Option<String>,
-    pub filename: Option<String>,
-    pub file_size: Option<u64>,
-    pub error: Option<String>,
-}
-
 #[derive(NifTaggedEnum)]
 enum ElixirResponse {
     Pairing(ElixirPairingResponse),
     MediaChunk(Vec<u8>),
     Graphql(ElixirGraphQLResponse),
-    BlobDownload(ElixirBlobDownloadResponse),
     Error(String),
 }
 
@@ -199,13 +181,6 @@ fn send_response(
         ElixirResponse::Graphql(r) => MydiaResponse::GraphQL(GraphQLResponse {
             data: r.data,
             errors: r.errors,
-        }),
-        ElixirResponse::BlobDownload(r) => MydiaResponse::BlobDownload(BlobDownloadResponse {
-            success: r.success,
-            ticket: r.ticket,
-            filename: r.filename,
-            file_size: r.file_size,
-            error: r.error,
         }),
         ElixirResponse::Error(e) => MydiaResponse::Error(e),
     };
@@ -308,72 +283,25 @@ fn finish_hls_stream(
     }
 }
 
-/// Create a blob ticket from a file for P2P download.
-///
-/// This computes the content hash and creates a ticket that clients can use
-/// to verify and download the file. The file is served via HLS streaming.
-///
-/// Returns a JSON ticket containing:
-/// - hash: BLAKE3 hash of the file content
-/// - file_size: size in bytes
-/// - filename: original filename
-#[rustler::nif(schedule = "DirtyCpu")]
-fn create_blob_ticket(file_path: String, filename: String) -> Result<String, rustler::Error> {
-    use std::io::BufReader;
-
-    // Open and read the file
-    let file = match File::open(&file_path) {
-        Ok(f) => f,
-        Err(e) => {
-            return Err(rustler::Error::Term(Box::new(format!(
-                "Failed to open file: {}",
-                e
-            ))))
-        }
-    };
-
-    let metadata = match file.metadata() {
-        Ok(m) => m,
-        Err(e) => {
-            return Err(rustler::Error::Term(Box::new(format!(
-                "Failed to get metadata: {}",
-                e
-            ))))
-        }
-    };
-
-    let file_size = metadata.len();
-
-    // Compute BLAKE3 hash (matching iroh-blobs which uses BLAKE3)
-    let mut reader = BufReader::new(file);
-    let mut hasher = blake3::Hasher::new();
-    let mut buffer = [0u8; 64 * 1024]; // 64KB buffer
-
-    loop {
-        let bytes_read = match reader.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(n) => n,
-            Err(e) => {
-                return Err(rustler::Error::Term(Box::new(format!(
-                    "Failed to read file: {}",
-                    e
-                ))))
-            }
-        };
-        hasher.update(&buffer[..bytes_read]);
+/// Stream a file range directly to a QUIC stream.
+/// Reads the file in Rust and writes length-prefixed chunks, avoiding per-chunk NIF overhead.
+/// The stream is finished automatically after all data is written.
+/// Uses DirtyIo scheduler because blocking_send/blocking_recv block the thread.
+#[rustler::nif(schedule = "DirtyIo")]
+fn stream_file_range(
+    resource: ResourceArc<HostResource>,
+    stream_id: String,
+    file_path: String,
+    offset: u64,
+    length: u64,
+) -> Result<String, rustler::Error> {
+    match resource
+        .host
+        .stream_file_range(stream_id, file_path, offset, length)
+    {
+        Ok(_) => Ok("ok".to_string()),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
     }
-
-    let hash = hasher.finalize();
-
-    // Create a JSON ticket
-    let ticket = serde_json::json!({
-        "hash": hash.to_string(),
-        "file_size": file_size,
-        "filename": filename,
-        "file_path": file_path,
-    });
-
-    Ok(ticket.to_string())
 }
 
 /// Start listening for events and forward them to the given Elixir process.
@@ -464,20 +392,6 @@ fn start_listening(
                                 atoms::ok(),
                                 "request_received",
                                 "graphql",
-                                request_id,
-                                elixir_req,
-                            )
-                                .encode(env)
-                        }
-                        MydiaRequest::BlobDownload(req) => {
-                            let elixir_req = ElixirBlobDownloadRequest {
-                                job_id: req.job_id,
-                                auth_token: req.auth_token,
-                            };
-                            (
-                                atoms::ok(),
-                                "request_received",
-                                "blob_download",
                                 request_id,
                                 elixir_req,
                             )

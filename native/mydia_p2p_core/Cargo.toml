@@ -3,15 +3,9 @@ name = "mydia_p2p_core"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-default = []
-dns-over-https = ["iroh-relay"]
-
 [dependencies]
 # Iroh for p2p networking (QUIC-based, simpler than libp2p)
 iroh = "0.96"
-iroh-blobs = "0.98"
-iroh-relay = { version = "0.96", optional = true }
 
 # Async runtime
 tokio = { version = "1.49", features = ["rt-multi-thread", "sync", "macros", "time", "io-util"] }

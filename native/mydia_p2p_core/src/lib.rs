@@ -4,11 +4,13 @@
 //! NAT traversal and QUIC-based connections.
 
 use iroh::{
+    defaults::prod as default_relays,
     dns::DnsResolver,
     endpoint::{Connection, SendStream},
     Endpoint, EndpointAddr, EndpointId, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey,
     Watcher,
 };
+use iroh_relay::RelayQuicConfig;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -676,10 +678,19 @@ async fn run_event_loop(
     // Configure relay
     if let Some(relay_url) = &config.relay_url {
         if let Ok(url) = relay_url.parse::<RelayUrl>() {
-            builder = builder.relay_mode(RelayMode::Custom(RelayMap::from(RelayConfig {
+            // Custom relay with QUIC enabled
+            let custom = RelayConfig {
                 url,
-                quic: None,
-            })));
+                quic: Some(RelayQuicConfig::default()),
+            };
+            // Combine with iroh's default production relays for fallback
+            let relay_map = RelayMap::from_iter([
+                custom,
+                default_relays::default_na_east_relay(),
+                default_relays::default_eu_relay(),
+                default_relays::default_ap_relay(),
+            ]);
+            builder = builder.relay_mode(RelayMode::Custom(relay_map));
         }
     }
 
@@ -1045,59 +1056,86 @@ async fn stream_file_to_quic(
     offset: u64,
     length: u64,
 ) -> Result<(), String> {
+    use std::time::Instant;
+
     const CHUNK_SIZE: usize = 1024 * 1024; // 1 MB
     const CHANNEL_CAPACITY: usize = 4; // Bound memory at ~4MB
 
+    let t0 = Instant::now();
     let (chunk_tx, mut chunk_rx) = mpsc::channel::<Vec<u8>>(CHANNEL_CAPACITY);
 
     // Blocking reader task: reads file in 1MB chunks and sends via bounded channel
-    let file_path = file_path.to_string();
-    tokio::task::spawn_blocking(move || {
+    let file_path_owned = file_path.to_string();
+    let reader_handle = tokio::task::spawn_blocking(move || {
         use std::io::{Read, Seek, SeekFrom};
-        let mut file = match std::fs::File::open(&file_path) {
+        let mut file = match std::fs::File::open(&file_path_owned) {
             Ok(f) => f,
             Err(e) => {
                 tracing::error!("File open error: {}", e);
-                return;
+                return (0u64, 0u64, 0u32); // io_ms, backpressure_ms, chunks
             }
         };
         if let Err(e) = file.seek(SeekFrom::Start(offset)) {
             tracing::error!("Seek error: {}", e);
-            return;
+            return (0u64, 0u64, 0u32);
         }
 
         let mut remaining = length as usize;
+        let mut io_nanos: u64 = 0;
+        let mut backpressure_nanos: u64 = 0;
+        let mut chunk_count: u32 = 0;
+
         while remaining > 0 {
             let to_read = std::cmp::min(CHUNK_SIZE, remaining);
             let mut buf = vec![0u8; to_read];
+
+            let io_start = Instant::now();
             match file.read_exact(&mut buf) {
                 Ok(_) => {}
                 Err(e) => {
                     tracing::error!("Read error: {}", e);
-                    return;
+                    return (io_nanos / 1_000_000, backpressure_nanos / 1_000_000, chunk_count);
                 }
             }
+            io_nanos += io_start.elapsed().as_nanos() as u64;
+
             remaining -= to_read;
+            chunk_count += 1;
+
             // Blocking send — back-pressures when channel is full
+            let bp_start = Instant::now();
             if chunk_tx.blocking_send(buf).is_err() {
                 // Receiver dropped (QUIC write failed or stream cancelled)
                 tracing::debug!("stream_file_to_quic: receiver dropped, stopping read");
-                return;
+                return (io_nanos / 1_000_000, backpressure_nanos / 1_000_000, chunk_count);
             }
+            backpressure_nanos += bp_start.elapsed().as_nanos() as u64;
         }
         // chunk_tx is dropped here, signalling end of data
+        (io_nanos / 1_000_000, backpressure_nanos / 1_000_000, chunk_count)
     });
 
     // Async QUIC writer: receives chunks and writes length-prefixed data
+    let mut quic_write_nanos: u64 = 0;
+    let mut total_bytes: u64 = 0;
+    let mut write_chunks: u32 = 0;
+
     while let Some(chunk) = chunk_rx.recv().await {
+        let chunk_len = chunk.len() as u64;
         let len = chunk.len() as u32;
         let len_bytes = len.to_be_bytes();
+
+        let w_start = Instant::now();
         send.write_all(&len_bytes)
             .await
             .map_err(|e| format!("Failed to write chunk length: {}", e))?;
         send.write_all(&chunk)
             .await
             .map_err(|e| format!("Failed to write chunk data: {}", e))?;
+        quic_write_nanos += w_start.elapsed().as_nanos() as u64;
+
+        total_bytes += chunk_len;
+        write_chunks += 1;
     }
 
     // Write zero-length terminator and finish
@@ -1108,10 +1146,28 @@ async fn stream_file_to_quic(
     send.finish()
         .map_err(|e| format!("Failed to finish stream: {}", e))?;
 
-    tracing::debug!(
-        "stream_file_to_quic completed: {} bytes from offset {}",
-        length,
-        offset
+    let total_ms = t0.elapsed().as_millis() as u64;
+    let quic_write_ms = quic_write_nanos / 1_000_000;
+
+    // Get reader metrics (should be done by now since chunk_rx is exhausted)
+    let (io_ms, backpressure_ms, _reader_chunks) = reader_handle.await.unwrap_or((0, 0, 0));
+
+    let throughput_mbps = if total_ms > 0 {
+        (total_bytes as f64 * 8.0) / (total_ms as f64 * 1000.0) // Mbps
+    } else {
+        0.0
+    };
+
+    tracing::info!(
+        "p2p_metrics_server: stream_complete bytes={} chunks={} total_ms={} io_ms={} backpressure_ms={} quic_write_ms={} throughput_mbps={:.2} path={}",
+        total_bytes,
+        write_chunks,
+        total_ms,
+        io_ms,
+        backpressure_ms,
+        quic_write_ms,
+        throughput_mbps,
+        file_path
     );
 
     Ok(())
@@ -1128,6 +1184,7 @@ async fn handle_connection(
         match conn.accept_bi().await {
             Ok((send, mut recv)) => {
                 let request_id = uuid::Uuid::new_v4().to_string();
+                let t0 = std::time::Instant::now();
 
                 // Read the request
                 let data = match recv.read_to_end(64 * 1024).await {
@@ -1137,6 +1194,7 @@ async fn handle_connection(
                         continue;
                     }
                 };
+                let request_read_ms = t0.elapsed().as_millis() as u64;
 
                 let request: MydiaRequest = match serde_cbor::from_slice(&data) {
                     Ok(req) => req,
@@ -1145,6 +1203,7 @@ async fn handle_connection(
                         continue;
                     }
                 };
+                let decode_ms = t0.elapsed().as_millis() as u64 - request_read_ms;
 
                 tracing::debug!("Received request from {}: {:?}", peer_id, request);
 
@@ -1162,11 +1221,6 @@ async fn handle_connection(
                 // For HLS streaming requests, store the send stream and emit event
                 if let MydiaRequest::HlsStream(hls_request) = request {
                     let stream_id = request_id.clone();
-                    tracing::debug!(
-                        "HLS stream request: session={}, path={}",
-                        hls_request.session_id,
-                        hls_request.path
-                    );
 
                     // Store the send stream for later use
                     {
@@ -1178,10 +1232,20 @@ async fn handle_connection(
                     let _ = event_tx
                         .send(Event::HlsStreamRequest {
                             peer: peer_id.clone(),
-                            request: hls_request,
+                            request: hls_request.clone(),
                             stream_id,
                         })
                         .await;
+                    let event_emitted_ms = t0.elapsed().as_millis() as u64;
+
+                    tracing::info!(
+                        "p2p_metrics_server: request_intake request_read_ms={} decode_ms={} event_emitted_ms={} session={} path={}",
+                        request_read_ms,
+                        decode_ms,
+                        event_emitted_ms,
+                        hls_request.session_id,
+                        hls_request.path
+                    );
 
                     continue;
                 }
@@ -1304,6 +1368,12 @@ async fn handle_send_hls_request(
     node_id: &str,
     request: HlsRequest,
 ) -> Result<HlsStreamResponse, String> {
+    use std::time::Instant;
+    let t0 = Instant::now();
+
+    let session_id = request.session_id.clone();
+    let path = request.path.clone();
+
     // Handle both bare node ID and full EndpointAddr JSON
     let actual_node_id = if node_id.starts_with('{') {
         match endpoint_addr_from_json(node_id) {
@@ -1318,11 +1388,14 @@ async fn handle_send_hls_request(
         .get(&actual_node_id)
         .ok_or_else(|| format!("Not connected to peer: {}", actual_node_id))?;
 
+    let connection_type = PeerConnectionType::from_connection(conn);
+
     // Open a bidirectional stream
     let (mut send, mut recv) = conn
         .open_bi()
         .await
         .map_err(|e| format!("Failed to open stream: {}", e))?;
+    let open_bi_ms = t0.elapsed().as_millis() as u64;
 
     // Send the request
     let request = MydiaRequest::HlsStream(request);
@@ -1335,6 +1408,7 @@ async fn handle_send_hls_request(
 
     send.finish()
         .map_err(|e| format!("Failed to finish send: {}", e))?;
+    let request_sent_ms = t0.elapsed().as_millis() as u64;
 
     // Read the header (length-prefixed)
     let mut len_buf = [0u8; 4];
@@ -1360,12 +1434,30 @@ async fn handle_send_hls_request(
         MydiaResponse::Error(e) => return Err(format!("Server error: {}", e)),
         _ => return Err("Unexpected response type".to_string()),
     };
+    let header_received_ms = t0.elapsed().as_millis() as u64;
+
+    tracing::info!(
+        "p2p_metrics: hls_request open_bi_ms={} request_sent_ms={} header_received_ms={} status={} content_length={} connection_type={} session={} path={}",
+        open_bi_ms,
+        request_sent_ms,
+        header_received_ms,
+        header.status,
+        header.content_length,
+        connection_type.as_str(),
+        session_id,
+        path
+    );
 
     // Create a channel for streaming chunks
     let (chunk_tx, chunk_rx) = mpsc::channel::<Vec<u8>>(16);
+    let content_length = header.content_length;
 
     // Spawn a task to read chunks and send them through the channel
     tokio::spawn(async move {
+        let mut total_bytes: u64 = 0;
+        let mut chunk_count: u32 = 0;
+        let transfer_start = Instant::now();
+
         loop {
             // Read chunk length
             let mut len_buf = [0u8; 4];
@@ -1377,7 +1469,6 @@ async fn handle_send_hls_request(
 
             // Zero length indicates end of stream
             if chunk_len == 0 {
-                tracing::debug!("HLS stream end marker received");
                 break;
             }
 
@@ -1388,12 +1479,36 @@ async fn handle_send_hls_request(
                 break;
             }
 
+            total_bytes += chunk_len as u64;
+            chunk_count += 1;
+
             // Send chunk through channel
             if chunk_tx.send(chunk_data).await.is_err() {
                 tracing::debug!("HLS chunk receiver dropped");
                 break;
             }
         }
+
+        let transfer_ms = transfer_start.elapsed().as_millis() as u64;
+        let total_ms = t0.elapsed().as_millis() as u64;
+        let throughput_mbps = if transfer_ms > 0 {
+            (total_bytes as f64 * 8.0) / (transfer_ms as f64 * 1000.0)
+        } else {
+            0.0
+        };
+
+        tracing::info!(
+            "p2p_metrics: transfer_complete total_ms={} transfer_ms={} bytes={} content_length={} chunks={} throughput_mbps={:.2} connection_type={} session={} path={}",
+            total_ms,
+            transfer_ms,
+            total_bytes,
+            content_length,
+            chunk_count,
+            throughput_mbps,
+            connection_type.as_str(),
+            session_id,
+            path
+        );
     });
 
     Ok(HlsStreamResponse { header, chunk_rx })

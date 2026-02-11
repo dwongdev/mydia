@@ -1645,6 +1645,7 @@ dependencies = [
  "anyhow",
  "futures",
  "iroh",
+ "iroh-relay",
  "rand",
  "serde",
  "serde_cbor",

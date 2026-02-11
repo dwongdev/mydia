@@ -3,7 +3,7 @@ defmodule MydiaWeb.Schema.Resolvers.DiscoveryResolver do
   Resolvers for discovery-related GraphQL queries (home screen rails).
   """
 
-  alias Mydia.{Media, Playback}
+  alias Mydia.{Library, Media, Playback}
 
   @tmdb_image_base "https://image.tmdb.org/t/p/original"
 
@@ -42,7 +42,7 @@ defmodule MydiaWeb.Schema.Resolvers.DiscoveryResolver do
     thirty_days_ago = DateTime.utc_now() |> DateTime.add(-30, :day)
 
     # Build query options
-    opts = [preload: [], added_since: thirty_days_ago]
+    opts = [preload: [], added_since: thirty_days_ago, has_files: true]
 
     opts =
       if types do
@@ -81,7 +81,7 @@ defmodule MydiaWeb.Schema.Resolvers.DiscoveryResolver do
 
       user ->
         # Get all TV shows with in-progress episodes
-        tv_shows = Media.list_media_items(type: "tv_show")
+        tv_shows = Media.list_media_items(type: "tv_show", has_files: true)
 
         all_items =
           tv_shows
@@ -142,16 +142,22 @@ defmodule MydiaWeb.Schema.Resolvers.DiscoveryResolver do
        when not is_nil(media_item_id) do
     media_item = Media.get_media_item!(media_item_id)
 
-    %{
-      id: media_item.id,
-      type: String.to_atom(media_item.type),
-      title: media_item.title,
-      artwork: build_artwork(media_item),
-      progress: format_progress(progress),
-      show_title: nil,
-      season_number: nil,
-      episode_number: nil
-    }
+    case Library.get_media_files_for_item(media_item_id) do
+      [] ->
+        nil
+
+      _files ->
+        %{
+          id: media_item.id,
+          type: String.to_atom(media_item.type),
+          title: media_item.title,
+          artwork: build_artwork(media_item),
+          progress: format_progress(progress),
+          show_title: nil,
+          season_number: nil,
+          episode_number: nil
+        }
+    end
   rescue
     Ecto.NoResultsError -> nil
   end
@@ -159,19 +165,26 @@ defmodule MydiaWeb.Schema.Resolvers.DiscoveryResolver do
   defp build_continue_watching_item(%{episode_id: episode_id} = progress, _user_id)
        when not is_nil(episode_id) do
     episode = Media.get_episode!(episode_id)
-    show = Media.get_media_item!(episode.media_item_id)
 
-    %{
-      id: episode.id,
-      type: :episode,
-      title: episode.title || "Episode #{episode.episode_number}",
-      artwork: build_episode_artwork(episode, show),
-      progress: format_progress(progress),
-      show_id: show.id,
-      show_title: show.title,
-      season_number: episode.season_number,
-      episode_number: episode.episode_number
-    }
+    case Library.get_media_files_for_episode(episode_id) do
+      [] ->
+        nil
+
+      _files ->
+        show = Media.get_media_item!(episode.media_item_id)
+
+        %{
+          id: episode.id,
+          type: :episode,
+          title: episode.title || "Episode #{episode.episode_number}",
+          artwork: build_episode_artwork(episode, show),
+          progress: format_progress(progress),
+          show_id: show.id,
+          show_title: show.title,
+          season_number: episode.season_number,
+          episode_number: episode.episode_number
+        }
+    end
   rescue
     Ecto.NoResultsError -> nil
   end

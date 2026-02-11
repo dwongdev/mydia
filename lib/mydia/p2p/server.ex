@@ -44,9 +44,8 @@ defmodule Mydia.P2p.Server do
   end
 
   def init(_) do
-    # Use iroh's built-in default public relays (pass nil)
-    # Can be overridden via IROH_RELAY_URL env var if needed
-    relay_url = System.get_env("IROH_RELAY_URL")
+    # Default to our own relay; override via IROH_RELAY_URL env var
+    relay_url = System.get_env("IROH_RELAY_URL", "https://cae1-1.relay.mydia.dev")
 
     # Get bind_port from config (required for hole punching in Docker)
     bind_port = Application.get_env(:mydia, :p2p_bind_port)
@@ -71,9 +70,7 @@ defmodule Mydia.P2p.Server do
     # Start the host - NIF returns {resource, node_id} directly (raises on error)
     {resource, node_id} = P2p.start_host(relay_url, bind_port, keypair_path)
 
-    Logger.info(
-      "P2P Host started with NodeID: #{node_id}, relay: #{relay_url || "(iroh defaults)"}"
-    )
+    Logger.info("P2P Host started with NodeID: #{node_id}, relay: #{relay_url}")
 
     Logger.info("P2P Host using persistent keypair at #{keypair_path}")
 
@@ -350,9 +347,17 @@ defmodule Mydia.P2p.Server do
   def handle_info({:ok, "hls_stream", stream_id, req}, state) do
     Logger.debug("P2P Request: HLS stream session=#{req.session_id} path=#{req.path}")
 
+    resource = state.resource
+
     # Spawn a task to handle the streaming so we don't block the GenServer
     Task.start(fn ->
-      handle_hls_stream(state.resource, stream_id, req)
+      t0 = System.monotonic_time(:millisecond)
+      handle_hls_stream(resource, stream_id, req)
+      elapsed = System.monotonic_time(:millisecond) - t0
+
+      Logger.info(
+        "p2p_metrics_elixir: handler_complete total_ms=#{elapsed} session=#{req.session_id} path=#{req.path}"
+      )
     end)
 
     {:noreply, state}
@@ -383,9 +388,17 @@ defmodule Mydia.P2p.Server do
   # HLS streaming handler
 
   defp handle_hls_stream(resource, stream_id, req) do
+    t0 = System.monotonic_time(:millisecond)
+
     # Verify auth token
     case verify_hls_auth(req.auth_token) do
       {:ok, user} ->
+        auth_ms = System.monotonic_time(:millisecond) - t0
+
+        Logger.info(
+          "p2p_metrics_elixir: auth_complete auth_ms=#{auth_ms} session=#{req.session_id} path=#{req.path}"
+        )
+
         cond do
           String.starts_with?(req.session_id, "direct:") ->
             file_id = String.replace_prefix(req.session_id, "direct:", "")
@@ -400,7 +413,8 @@ defmodule Mydia.P2p.Server do
         end
 
       {:error, _reason} ->
-        Logger.warning("HLS auth failed")
+        auth_ms = System.monotonic_time(:millisecond) - t0
+        Logger.warning("HLS auth failed (auth_ms=#{auth_ms})")
         send_hls_error(resource, stream_id, 401, "Unauthorized")
     end
   end
@@ -542,8 +556,12 @@ defmodule Mydia.P2p.Server do
   end
 
   defp do_stream_hls_file(resource, stream_id, file_path, req) do
+    t0 = System.monotonic_time(:millisecond)
+
     case File.stat(file_path) do
       {:ok, %File.Stat{size: file_size}} ->
+        file_stat_ms = System.monotonic_time(:millisecond) - t0
+
         # Determine content type
         content_type = hls_content_type(file_path)
         basename = Path.basename(file_path)
@@ -554,7 +572,11 @@ defmodule Mydia.P2p.Server do
             # Full file request
             send_full_hls_file(resource, stream_id, file_path, file_size, content_type)
 
-            Logger.info("P2P stream: path=#{basename}, bytes=#{file_size}/#{file_size}")
+            stream_ms = System.monotonic_time(:millisecond) - t0
+
+            Logger.info(
+              "p2p_metrics_elixir: file_stream file_stat_ms=#{file_stat_ms} stream_ms=#{stream_ms} bytes=#{file_size} path=#{basename} session=#{req.session_id}"
+            )
 
           {:partial, range_start, range_end, content_length} ->
             # Partial content (206)
@@ -569,8 +591,10 @@ defmodule Mydia.P2p.Server do
               content_type
             )
 
+            stream_ms = System.monotonic_time(:millisecond) - t0
+
             Logger.info(
-              "P2P stream: path=#{basename}, range=#{range_start}-#{range_end}, bytes=#{content_length}/#{file_size}"
+              "p2p_metrics_elixir: file_stream file_stat_ms=#{file_stat_ms} stream_ms=#{stream_ms} bytes=#{content_length}/#{file_size} range=#{range_start}-#{range_end} path=#{basename} session=#{req.session_id}"
             )
         end
 
@@ -612,6 +636,8 @@ defmodule Mydia.P2p.Server do
   end
 
   defp send_full_hls_file(resource, stream_id, file_path, file_size, content_type) do
+    t0 = System.monotonic_time(:millisecond)
+
     # Send header
     header = %P2p.HlsResponseHeader{
       status: 200,
@@ -623,10 +649,19 @@ defmodule Mydia.P2p.Server do
 
     case P2p.send_hls_header(resource, stream_id, header) do
       "ok" ->
+        send_header_ms = System.monotonic_time(:millisecond) - t0
+
         # Stream the file directly from Rust (zero-copy, no per-chunk NIF overhead)
         case P2p.stream_file_range(resource, stream_id, file_path, 0, file_size) do
-          "ok" -> :ok
-          {:error, reason} -> Logger.error("Failed to stream file: #{inspect(reason)}")
+          "ok" ->
+            stream_file_range_ms = System.monotonic_time(:millisecond) - t0 - send_header_ms
+
+            Logger.info(
+              "p2p_metrics_elixir: nif_breakdown send_header_ms=#{send_header_ms} stream_file_range_ms=#{stream_file_range_ms} bytes=#{file_size} path=#{Path.basename(file_path)}"
+            )
+
+          {:error, reason} ->
+            Logger.error("Failed to stream file: #{inspect(reason)}")
         end
 
       {:error, reason} ->
@@ -644,6 +679,8 @@ defmodule Mydia.P2p.Server do
          content_length,
          content_type
        ) do
+    t0 = System.monotonic_time(:millisecond)
+
     # Send header with 206 status
     header = %P2p.HlsResponseHeader{
       status: 206,
@@ -655,10 +692,19 @@ defmodule Mydia.P2p.Server do
 
     case P2p.send_hls_header(resource, stream_id, header) do
       "ok" ->
+        send_header_ms = System.monotonic_time(:millisecond) - t0
+
         # Stream the file range directly from Rust (zero-copy, no per-chunk NIF overhead)
         case P2p.stream_file_range(resource, stream_id, file_path, range_start, content_length) do
-          "ok" -> :ok
-          {:error, reason} -> Logger.error("Failed to stream file range: #{inspect(reason)}")
+          "ok" ->
+            stream_file_range_ms = System.monotonic_time(:millisecond) - t0 - send_header_ms
+
+            Logger.info(
+              "p2p_metrics_elixir: nif_breakdown send_header_ms=#{send_header_ms} stream_file_range_ms=#{stream_file_range_ms} bytes=#{content_length} path=#{Path.basename(file_path)}"
+            )
+
+          {:error, reason} ->
+            Logger.error("Failed to stream file range: #{inspect(reason)}")
         end
 
       {:error, reason} ->

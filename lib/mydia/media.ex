@@ -1365,9 +1365,36 @@ defmodule Mydia.Media do
       {:order_by, field}, query when field in [:title, :year, :inserted_at] ->
         order_by(query, [m], asc: ^field)
 
+      {:has_files, true}, query ->
+        filter_by_has_files(query)
+
       _other, query ->
         query
     end)
+  end
+
+  # Filter media items to only those that have at least one media file.
+  # Movies: direct media_file association via media_item_id
+  # TV Shows: indirect via episodes that have media files
+  defp filter_by_has_files(query) do
+    movie_subquery =
+      from mf in Mydia.Library.MediaFile,
+        where: not is_nil(mf.media_item_id),
+        select: mf.media_item_id,
+        distinct: true
+
+    episode_subquery =
+      from mf in Mydia.Library.MediaFile,
+        join: e in Episode,
+        on: mf.episode_id == e.id,
+        select: e.media_item_id,
+        distinct: true
+
+    where(
+      query,
+      [m],
+      m.id in subquery(movie_subquery) or m.id in subquery(episode_subquery)
+    )
   end
 
   # Filter media items by library path type using a subquery

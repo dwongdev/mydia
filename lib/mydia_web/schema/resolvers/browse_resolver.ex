@@ -71,7 +71,8 @@ defmodule MydiaWeb.Schema.Resolvers.BrowseResolver do
     # Build query options
     opts = [
       type: "movie",
-      preload: [:quality_profile]
+      preload: [:quality_profile],
+      has_files: true
     ]
 
     opts = if category, do: Keyword.put(opts, :category, to_string(category)), else: opts
@@ -113,7 +114,8 @@ defmodule MydiaWeb.Schema.Resolvers.BrowseResolver do
     # Build query options
     opts = [
       type: "tv_show",
-      preload: [:quality_profile]
+      preload: [:quality_profile],
+      has_files: true
     ]
 
     opts = if category, do: Keyword.put(opts, :category, to_string(category)), else: opts

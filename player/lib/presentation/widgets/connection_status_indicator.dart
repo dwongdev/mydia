@@ -25,7 +25,7 @@ class ConnectionStatusBadge extends ConsumerWidget {
 
     // Get color and label based on connection type
     final (Color statusColor, String label) = isP2P
-        ? _getP2PStatusInfo(p2pStatus.peerConnectionType)
+        ? _getP2PStatusInfo(p2pStatus)
         : (Colors.green, 'Direct');
 
     return Container(
@@ -60,12 +60,14 @@ class ConnectionStatusBadge extends ConsumerWidget {
   }
 
   /// Get the color and label for P2P connection based on type
-  (Color, String) _getP2PStatusInfo(P2pConnectionType connectionType) {
-    return switch (connectionType) {
+  (Color, String) _getP2PStatusInfo(P2pStatus status) {
+    return switch (status.peerConnectionType) {
       P2pConnectionType.direct => (Colors.green, 'P2P (Direct)'),
       P2pConnectionType.relay => (Colors.orange, 'P2P (Relay)'),
       P2pConnectionType.mixed => (Colors.blue, 'P2P (Mixed)'),
-      P2pConnectionType.none => (Colors.blue, 'P2P'),
+      P2pConnectionType.none => status.isInitialized
+          ? (Colors.amber, 'Reconnecting...')
+          : (Colors.blue, 'P2P'),
     };
   }
 }
@@ -89,8 +91,7 @@ class ConnectionStatusTile extends ConsumerWidget {
     Color statusColor;
 
     if (isP2P) {
-      final (color, transportDetail) =
-          _getP2PTransportInfo(p2pStatus.peerConnectionType);
+      final (color, transportDetail) = _getP2PTransportInfo(p2pStatus);
       subtitle = transportDetail;
       icon = Icons.hub_outlined;
       statusColor = color;
@@ -147,8 +148,8 @@ class ConnectionStatusTile extends ConsumerWidget {
     );
   }
 
-  (Color, String) _getP2PTransportInfo(P2pConnectionType connectionType) {
-    return switch (connectionType) {
+  (Color, String) _getP2PTransportInfo(P2pStatus status) {
+    return switch (status.peerConnectionType) {
       P2pConnectionType.direct => (
           Colors.green,
           'Direct peer-to-peer connection',
@@ -161,7 +162,9 @@ class ConnectionStatusTile extends ConsumerWidget {
           Colors.blue,
           'Using both relay and direct paths',
         ),
-      P2pConnectionType.none => (Colors.blue, 'Connecting via P2P mesh...'),
+      P2pConnectionType.none => status.isInitialized
+          ? (Colors.amber, 'Reconnecting to peer...')
+          : (Colors.blue, 'Connecting via P2P mesh...'),
     };
   }
 }

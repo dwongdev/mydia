@@ -9,11 +9,16 @@ import '../../core/connection/connection_provider.dart';
 import '../../core/downloads/download_service.dart' show isDownloadSupported;
 import '../../core/graphql/graphql_provider.dart';
 import '../../core/layout/breakpoints.dart';
+import '../../core/p2p/p2p_service.dart';
 import '../../core/theme/colors.dart';
 import 'offline_banner.dart';
 
 /// Connection status badge for the settings icon.
-/// Shows green for direct connection, blue for P2P connection.
+/// Reflects actual P2P connection state with color-coded dot:
+/// - Green: direct mode or P2P direct connection
+/// - Blue: P2P mixed connection
+/// - Orange: P2P relay connection
+/// - Amber pulsing: P2P reconnecting (none)
 class _ConnectionStatusBadge extends ConsumerWidget {
   const _ConnectionStatusBadge();
 
@@ -21,9 +26,28 @@ class _ConnectionStatusBadge extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final connectionState = ref.watch(connectionProvider);
     final isP2P = connectionState.isP2PMode;
-    final color = isP2P ? Colors.blue : Colors.green;
-    final tooltip = isP2P ? 'Connected via P2P' : 'Direct connection';
 
+    if (!isP2P) {
+      return _buildDot(Colors.green, 'Direct connection');
+    }
+
+    final p2pStatus = ref.watch(p2pStatusNotifierProvider);
+    final (color, tooltip) = switch (p2pStatus.peerConnectionType) {
+      P2pConnectionType.direct => (Colors.green, 'P2P: Direct'),
+      P2pConnectionType.mixed => (Colors.blue, 'P2P: Mixed'),
+      P2pConnectionType.relay => (Colors.orange, 'P2P: Via relay'),
+      P2pConnectionType.none => (Colors.amber, 'P2P: Reconnecting...'),
+    };
+
+    if (p2pStatus.peerConnectionType == P2pConnectionType.none &&
+        p2pStatus.isInitialized) {
+      return _PulsingDot(color: color, tooltip: tooltip);
+    }
+
+    return _buildDot(color, tooltip);
+  }
+
+  Widget _buildDot(Color color, String tooltip) {
     return Tooltip(
       message: tooltip,
       child: Container(
@@ -44,6 +68,72 @@ class _ConnectionStatusBadge extends ConsumerWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// An amber pulsing dot indicating reconnection in progress.
+class _PulsingDot extends StatefulWidget {
+  final Color color;
+  final String tooltip;
+
+  const _PulsingDot({required this.color, required this.tooltip});
+
+  @override
+  State<_PulsingDot> createState() => _PulsingDotState();
+}
+
+class _PulsingDotState extends State<_PulsingDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 1200),
+      vsync: this,
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: widget.tooltip,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          final opacity = 0.4 + (_controller.value * 0.6);
+          return Opacity(
+            opacity: opacity,
+            child: Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: widget.color,
+                border: Border.all(
+                  color: AppColors.surface,
+                  width: 1.5,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: widget.color.withValues(alpha: 0.4),
+                    blurRadius: 4,
+                    spreadRadius: 1,
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }

@@ -66,7 +66,8 @@ class SeriesDownloadsScreen extends ConsumerWidget {
                         ),
                   ),
                   const SizedBox(height: 8),
-                  ...showQueue.map((task) => _buildQueueItem(context, ref, task)),
+                  ...showQueue
+                      .map((task) => _buildQueueItem(context, ref, task)),
                   const SizedBox(height: 24),
                 ],
                 if (showDownloads.isNotEmpty) ...[
@@ -78,13 +79,14 @@ class SeriesDownloadsScreen extends ConsumerWidget {
                         ),
                   ),
                   const SizedBox(height: 8),
-                  ...showDownloads.map((media) => _buildDownloadedItem(context, ref, media)),
+                  ...showDownloads.map(
+                      (media) => _buildDownloadedItem(context, ref, media)),
                 ],
                 if (showQueue.isEmpty && showDownloads.isEmpty)
-                   const Padding(
-                       padding: EdgeInsets.all(32),
-                       child: Center(child: Text("No episodes found")),
-                   ),
+                  const Padding(
+                    padding: EdgeInsets.all(32),
+                    child: Center(child: Text("No episodes found")),
+                  ),
               ]),
             ),
           ),
@@ -100,12 +102,12 @@ class SeriesDownloadsScreen extends ConsumerWidget {
       backgroundColor: AppColors.background,
       flexibleSpace: FlexibleSpaceBar(
         title: Text(
-            showTitle,
-            style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                shadows: [Shadow(color: Colors.black, blurRadius: 4)],
-            ),
+          showTitle,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            shadows: [Shadow(color: Colors.black, blurRadius: 4)],
+          ),
         ),
         background: Stack(
           fit: StackFit.expand,
@@ -114,12 +116,14 @@ class SeriesDownloadsScreen extends ConsumerWidget {
               CachedNetworkImage(
                 imageUrl: backdropUrl!,
                 fit: BoxFit.cover,
-                placeholder: (context, url) => Container(color: AppColors.surface),
-                errorWidget: (context, url, error) => Container(color: AppColors.surface),
+                placeholder: (context, url) =>
+                    Container(color: AppColors.surface),
+                errorWidget: (context, url, error) =>
+                    Container(color: AppColors.surface),
               )
             else
               Container(color: AppColors.surface),
-            
+
             // Gradient
             Container(
               decoration: BoxDecoration(
@@ -140,7 +144,8 @@ class SeriesDownloadsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildQueueItem(BuildContext context, WidgetRef ref, DownloadTask task) {
+  Widget _buildQueueItem(
+      BuildContext context, WidgetRef ref, DownloadTask task) {
     final progress = task.isProgressive ? task.combinedProgress : task.progress;
 
     return Container(
@@ -169,21 +174,21 @@ class SeriesDownloadsScreen extends ConsumerWidget {
                       ),
                     ),
                     if (task.title.isNotEmpty)
-                        Text(
-                          task.title,
-                          style: TextStyle(
-                            color: AppColors.textSecondary,
-                            fontSize: 14,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                      Text(
+                        task.title,
+                        style: TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 14,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                   ],
                 ),
               ),
               IconButton(
                 onPressed: () async {
-                   _showCancelDialog(context, ref, task);
+                  _showCancelDialog(context, ref, task);
                 },
                 icon: const Icon(Icons.close_rounded),
                 color: AppColors.textSecondary,
@@ -218,12 +223,56 @@ class SeriesDownloadsScreen extends ConsumerWidget {
               ),
             ],
           ),
+          if (task.downloadStatus == DownloadStatus.downloading ||
+              task.downloadStatus == DownloadStatus.transcoding) ...[
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  task.progressBytesDisplay ?? task.fileSizeDisplay,
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 11,
+                  ),
+                ),
+                Consumer(
+                  builder: (context, ref, _) {
+                    final speedAsync = ref.watch(downloadSpeedInfoProvider);
+                    return speedAsync.when(
+                      data: (speedMap) {
+                        final info = speedMap[task.id];
+                        if (info == null || info.bytesPerSecond <= 0) {
+                          return const SizedBox.shrink();
+                        }
+                        final parts = <String>[];
+                        parts.add(info.speedDisplay);
+                        if (info.etaDisplay.isNotEmpty) {
+                          parts.add(info.etaDisplay);
+                        }
+                        return Text(
+                          parts.join(' \u00B7 '),
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 11,
+                          ),
+                        );
+                      },
+                      loading: () => const SizedBox.shrink(),
+                      error: (_, __) => const SizedBox.shrink(),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildDownloadedItem(BuildContext context, WidgetRef ref, DownloadedMedia media) {
+  Widget _buildDownloadedItem(
+      BuildContext context, WidgetRef ref, DownloadedMedia media) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -233,13 +282,13 @@ class SeriesDownloadsScreen extends ConsumerWidget {
       child: ListTile(
         contentPadding: const EdgeInsets.all(12),
         leading: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.play_arrow, color: AppColors.primary),
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: AppColors.primary.withValues(alpha: 0.1),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.play_arrow, color: AppColors.primary),
         ),
         title: Text(
           'S${media.seasonNumber?.toString().padLeft(2, '0')}E${media.episodeNumber?.toString().padLeft(2, '0')}',
@@ -251,14 +300,16 @@ class SeriesDownloadsScreen extends ConsumerWidget {
           overflow: TextOverflow.ellipsis,
         ),
         trailing: IconButton(
-          icon: const Icon(Icons.delete_outline_rounded, color: AppColors.error),
+          icon:
+              const Icon(Icons.delete_outline_rounded, color: AppColors.error),
           onPressed: () async {
             final confirm = await showDialog<bool>(
               context: context,
               builder: (context) => AlertDialog(
                 backgroundColor: AppColors.surface,
                 title: const Text('Delete Episode'),
-                content: Text('Delete S${media.seasonNumber}E${media.episodeNumber}?'),
+                content: Text(
+                    'Delete S${media.seasonNumber}E${media.episodeNumber}?'),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(false),
@@ -266,7 +317,8 @@ class SeriesDownloadsScreen extends ConsumerWidget {
                   ),
                   FilledButton(
                     onPressed: () => Navigator.of(context).pop(true),
-                    style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+                    style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.error),
                     child: const Text('Delete'),
                   ),
                 ],
@@ -280,40 +332,42 @@ class SeriesDownloadsScreen extends ConsumerWidget {
           },
         ),
         onTap: () {
-            context.push(
-              '/player/episode/${media.mediaId}?fileId=offline&title=${Uri.encodeComponent(media.title)}&showId=$showId&seasonNumber=${media.seasonNumber}',
-            );
+          context.push(
+            '/player/episode/${media.mediaId}?fileId=offline&title=${Uri.encodeComponent(media.title)}&showId=$showId&seasonNumber=${media.seasonNumber}',
+          );
         },
       ),
     );
   }
-  
-  Future<void> _showCancelDialog(BuildContext context, WidgetRef ref, DownloadTask task) async {
-      final manager = await ref.read(downloadManagerProvider.future);
-      
-      if (!context.mounted) return;
-      
-      showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-              backgroundColor: AppColors.surface,
-              title: const Text('Cancel Download?'),
-              content: Text('Stop downloading this episode?'),
-              actions: [
-                  TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Keep', style: TextStyle(color: AppColors.textSecondary)),
-                  ),
-                  FilledButton(
-                      onPressed: () {
-                          manager.cancelDownload(task.id);
-                          Navigator.pop(context);
-                      },
-                      style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-                      child: const Text('Cancel Download'),
-                  ),
-              ],
+
+  Future<void> _showCancelDialog(
+      BuildContext context, WidgetRef ref, DownloadTask task) async {
+    final manager = await ref.read(downloadManagerProvider.future);
+
+    if (!context.mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Cancel Download?'),
+        content: Text('Stop downloading this episode?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Keep',
+                style: TextStyle(color: AppColors.textSecondary)),
           ),
-      );
+          FilledButton(
+            onPressed: () {
+              manager.cancelDownload(task.id);
+              Navigator.pop(context);
+            },
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Cancel Download'),
+          ),
+        ],
+      ),
+    );
   }
 }

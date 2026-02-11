@@ -155,15 +155,16 @@ fn wire__crate__P2PHost_event_stream_impl(
     )
 }
 fn wire__crate__P2PHost_get_network_stats_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
     data_len_: i32,
-) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
             debug_name: "P2PHost_get_network_stats",
-            port: None,
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
         },
         move || {
             let message = unsafe {
@@ -179,38 +180,41 @@ fn wire__crate__P2PHost_get_network_stats_impl(
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<P2pHost>,
             >>::sse_decode(&mut deserializer);
             deserializer.end();
-            transform_result_sse::<_, ()>((move || {
-                let mut api_that_guard = None;
-                let decode_indices_ =
-                    flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
-                        flutter_rust_bridge::for_generated::LockableOrderInfo::new(
-                            &api_that, 0, false,
-                        ),
-                    ]);
-                for i in decode_indices_ {
-                    match i {
-                        0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
-                        _ => unreachable!(),
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
                     }
-                }
-                let api_that_guard = api_that_guard.unwrap();
-                let output_ok =
-                    Result::<_, ()>::Ok(crate::P2pHost::get_network_stats(&*api_that_guard))?;
-                Ok(output_ok)
-            })())
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok =
+                        Result::<_, ()>::Ok(crate::P2pHost::get_network_stats(&*api_that_guard))?;
+                    Ok(output_ok)
+                })())
+            }
         },
     )
 }
 fn wire__crate__P2PHost_get_node_addr_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
     data_len_: i32,
-) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
             debug_name: "P2PHost_get_node_addr",
-            port: None,
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
         },
         move || {
             let message = unsafe {
@@ -226,25 +230,27 @@ fn wire__crate__P2PHost_get_node_addr_impl(
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<P2pHost>,
             >>::sse_decode(&mut deserializer);
             deserializer.end();
-            transform_result_sse::<_, ()>((move || {
-                let mut api_that_guard = None;
-                let decode_indices_ =
-                    flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
-                        flutter_rust_bridge::for_generated::LockableOrderInfo::new(
-                            &api_that, 0, false,
-                        ),
-                    ]);
-                for i in decode_indices_ {
-                    match i {
-                        0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
-                        _ => unreachable!(),
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
                     }
-                }
-                let api_that_guard = api_that_guard.unwrap();
-                let output_ok =
-                    Result::<_, ()>::Ok(crate::P2pHost::get_node_addr(&*api_that_guard))?;
-                Ok(output_ok)
-            })())
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok =
+                        Result::<_, ()>::Ok(crate::P2pHost::get_node_addr(&*api_that_guard))?;
+                    Ok(output_ok)
+                })())
+            }
         },
     )
 }
@@ -900,6 +906,8 @@ fn pde_ffi_dispatcher_primary_impl(
     match func_id {
         1 => wire__crate__P2PHost_dial_impl(port, ptr, rust_vec_len, data_len),
         2 => wire__crate__P2PHost_event_stream_impl(port, ptr, rust_vec_len, data_len),
+        3 => wire__crate__P2PHost_get_network_stats_impl(port, ptr, rust_vec_len, data_len),
+        4 => wire__crate__P2PHost_get_node_addr_impl(port, ptr, rust_vec_len, data_len),
         6 => wire__crate__P2PHost_send_graphql_request_impl(port, ptr, rust_vec_len, data_len),
         7 => wire__crate__P2PHost_send_hls_request_impl(port, ptr, rust_vec_len, data_len),
         8 => {
@@ -919,8 +927,6 @@ fn pde_ffi_dispatcher_sync_impl(
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        3 => wire__crate__P2PHost_get_network_stats_impl(ptr, rust_vec_len, data_len),
-        4 => wire__crate__P2PHost_get_node_addr_impl(ptr, rust_vec_len, data_len),
         5 => wire__crate__P2PHost_init_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }

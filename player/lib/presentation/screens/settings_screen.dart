@@ -8,6 +8,7 @@ import '../../core/connection/connection_provider.dart';
 import '../../core/graphql/graphql_provider.dart';
 import '../../core/update/update_provider.dart';
 import '../../core/update/updaters/macos_updater.dart';
+import '../widgets/connection_status_indicator.dart';
 import '../widgets/update_tile.dart';
 import 'settings/settings_controller.dart';
 
@@ -107,133 +108,20 @@ class SettingsScreen extends ConsumerWidget {
 
             // Connection section
             const _SectionHeader(title: 'Connection'),
-            const _ConnectionDiagnosticsTile(),
+            const ConnectionStatusTile(),
             const Divider(),
 
-            // Updates section (desktop only)
-            if (!kIsWeb) ...[
+            // Updates section (desktop only, not Android)
+            if (!kIsWeb && !Platform.isAndroid) ...[
               const _SectionHeader(title: 'Updates'),
               // On macOS, Sparkle manages update notifications natively
               if (!Platform.isMacOS) const UpdateTile(),
               const _CheckForUpdatesTile(),
               const Divider(),
             ],
-
-            // About section
-            const _SectionHeader(title: 'About'),
-            const _VersionTile(),
           ],
         ),
       ),
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  final String title;
-
-  const _SectionHeader({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-              fontWeight: FontWeight.bold,
-            ),
-      ),
-    );
-  }
-}
-
-/// Expandable tile showing connection status and diagnostics.
-class _ConnectionDiagnosticsTile extends ConsumerStatefulWidget {
-  const _ConnectionDiagnosticsTile();
-
-  @override
-  ConsumerState<_ConnectionDiagnosticsTile> createState() =>
-      _ConnectionDiagnosticsTileState();
-}
-
-class _ConnectionDiagnosticsTileState
-    extends ConsumerState<_ConnectionDiagnosticsTile> {
-  @override
-  Widget build(BuildContext context) {
-    // Watch connection provider directly for live status
-    final connectionState = ref.watch(connectionProvider);
-
-    // Determine status display from live connection state
-    final isP2P = connectionState.isP2PMode;
-
-    IconData icon;
-    Color statusColor;
-    String statusText;
-    String subtitle;
-
-    if (isP2P) {
-      icon = Icons.hub_outlined;
-      statusColor = Colors.blue;
-      statusText = 'P2P';
-      subtitle = 'Connected via P2P mesh';
-    } else {
-      icon = Icons.wifi;
-      statusColor = Colors.green;
-      statusText = 'Direct';
-      subtitle = 'Direct connection to server';
-    }
-
-    return Column(
-      children: [
-        ListTile(
-          leading: Icon(icon, color: statusColor),
-          title: Row(
-            children: [
-              const Text('Status'),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: statusColor.withValues(alpha: 0.3),
-                  ),
-                ),
-                child: Text(
-                  statusText,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: statusColor,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          subtitle: Text(subtitle),
-        ),
-      ],
-    );
-  }
-}
-
-/// Tile showing the current app version.
-class _VersionTile extends ConsumerWidget {
-  const _VersionTile();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final updateState = ref.watch(updateProvider);
-    final version = updateState.currentVersion;
-
-    return ListTile(
-      leading: const Icon(Icons.info_outline),
-      title: const Text('Mydia Player'),
-      subtitle: Text(
-          version.isNotEmpty ? 'Version $version' : 'Media streaming client'),
     );
   }
 }
@@ -271,6 +159,26 @@ class _CheckForUpdatesTile extends ConsumerWidget {
       onTap: updateState.isChecking
           ? null
           : () => ref.read(updateProvider.notifier).checkForUpdate(),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+
+  const _SectionHeader({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Text(
+        title,
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: Theme.of(context).colorScheme.primary,
+              fontWeight: FontWeight.bold,
+            ),
+      ),
     );
   }
 }

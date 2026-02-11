@@ -20,7 +20,8 @@ class ConnectionStatusBadge extends ConsumerWidget {
     final p2pStatus = ref.watch(p2pStatusNotifierProvider);
     final isP2P = connectionState.isP2PMode;
 
-    debugPrint('[ConnectionStatusBadge] build: isP2P=$isP2P, peerConnectionType=${p2pStatus.peerConnectionType}');
+    debugPrint(
+        '[ConnectionStatusBadge] build: isP2P=$isP2P, peerConnectionType=${p2pStatus.peerConnectionType}');
 
     // Get color and label based on connection type
     final (Color statusColor, String label) = isP2P
@@ -70,6 +71,9 @@ class ConnectionStatusBadge extends ConsumerWidget {
 }
 
 /// A list tile showing connection status with more details.
+///
+/// In direct mode, shows a simple tile. In P2P mode, shows additional
+/// relay/peer details in a grouped card below the main status.
 class ConnectionStatusTile extends ConsumerWidget {
   const ConnectionStatusTile({super.key});
 
@@ -78,6 +82,7 @@ class ConnectionStatusTile extends ConsumerWidget {
     final connectionState = ref.watch(connectionProvider);
     final p2pStatus = ref.watch(p2pStatusNotifierProvider);
     final isP2P = connectionState.isP2PMode;
+    final theme = Theme.of(context);
 
     String subtitle;
     IconData icon;
@@ -95,35 +100,126 @@ class ConnectionStatusTile extends ConsumerWidget {
       statusColor = Colors.green;
     }
 
-    return ListTile(
-      leading: Icon(icon, color: statusColor),
-      title: const Row(
-        children: [
-          Text('Connection'),
-          SizedBox(width: 8),
-          ConnectionStatusBadge(),
-        ],
-      ),
-      subtitle: Text(subtitle),
+    return Column(
+      children: [
+        ListTile(
+          leading: Icon(icon, color: statusColor),
+          title: const Text('Connection'),
+          subtitle: Text(subtitle),
+          trailing: const ConnectionStatusBadge(),
+        ),
+        if (isP2P)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Container(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Column(
+                children: [
+                  _DetailRow(
+                    label: 'Relay',
+                    value: p2pStatus.isRelayConnected
+                        ? 'Connected'
+                        : 'Disconnected',
+                    dotColor: p2pStatus.isRelayConnected
+                        ? Colors.green
+                        : Colors.orange,
+                  ),
+                  if (p2pStatus.relayUrl != null)
+                    _DetailRow(
+                      label: 'Server',
+                      value: p2pStatus.relayUrl!,
+                      muted: true,
+                    ),
+                  if (p2pStatus.connectedPeersCount > 0)
+                    _DetailRow(
+                      label: 'Peers',
+                      value: '${p2pStatus.connectedPeersCount} connected',
+                    ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 
-  /// Get the color and transport details for P2P connection type
   (Color, String) _getP2PTransportInfo(P2pConnectionType connectionType) {
     return switch (connectionType) {
       P2pConnectionType.direct => (
           Colors.green,
-          'Direct peer-to-peer connection'
+          'Direct peer-to-peer connection',
         ),
       P2pConnectionType.relay => (
           Colors.orange,
-          'Connected via relay server'
+          'Connected via relay server',
         ),
       P2pConnectionType.mixed => (
           Colors.blue,
-          'Using both relay and direct paths'
+          'Using both relay and direct paths',
         ),
       P2pConnectionType.none => (Colors.blue, 'Connecting via P2P mesh...'),
     };
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? dotColor;
+  final bool muted;
+
+  const _DetailRow({
+    required this.label,
+    required this.value,
+    this.dotColor,
+    this.muted = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final valueColor = muted
+        ? theme.colorScheme.onSurface.withValues(alpha: 0.5)
+        : theme.colorScheme.onSurface.withValues(alpha: 0.8);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 52,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+              ),
+            ),
+          ),
+          if (dotColor != null) ...[
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: dotColor,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 6),
+          ],
+          Flexible(
+            child: Text(
+              value,
+              style: TextStyle(fontSize: 12, color: valueColor),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

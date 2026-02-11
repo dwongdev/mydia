@@ -37,11 +37,12 @@ class DownloadsScreen extends ConsumerWidget {
       for (final task in downloadQueueAsync.value!) {
         final isEpisode = task.mediaType == 'episode';
         final key = getGroupKey(isEpisode, task.showId, task.mediaId);
-        
+
         if (!items.containsKey(key)) {
           items[key] = DownloadGroup(
             id: key,
-            title: isEpisode ? (task.showTitle ?? 'Unknown Series') : task.title,
+            title:
+                isEpisode ? (task.showTitle ?? 'Unknown Series') : task.title,
             posterUrl: isEpisode ? task.showPosterUrl : task.posterUrl,
             backdropUrl: task.backdropUrl,
             type: isEpisode ? GroupType.series : GroupType.movie,
@@ -50,7 +51,7 @@ class DownloadsScreen extends ConsumerWidget {
         }
         items[key]!.activeTasks.add(task);
         if (task.createdAt.isAfter(items[key]!.updatedAt)) {
-            items[key]!.updatedAt = task.createdAt;
+          items[key]!.updatedAt = task.createdAt;
         }
       }
     }
@@ -62,9 +63,10 @@ class DownloadsScreen extends ConsumerWidget {
         final key = getGroupKey(isEpisode, media.showId, media.mediaId);
 
         if (!items.containsKey(key)) {
-           items[key] = DownloadGroup(
+          items[key] = DownloadGroup(
             id: key,
-            title: isEpisode ? (media.showTitle ?? 'Unknown Series') : media.title,
+            title:
+                isEpisode ? (media.showTitle ?? 'Unknown Series') : media.title,
             posterUrl: isEpisode ? media.showPosterUrl : media.posterUrl,
             backdropUrl: media.backdropUrl,
             type: isEpisode ? GroupType.series : GroupType.movie,
@@ -73,11 +75,11 @@ class DownloadsScreen extends ConsumerWidget {
         }
         items[key]!.downloads.add(media);
         if (media.downloadedAt.isAfter(items[key]!.updatedAt)) {
-            items[key]!.updatedAt = media.downloadedAt;
+          items[key]!.updatedAt = media.downloadedAt;
         }
       }
     }
-    
+
     final sortedItems = items.values.toList()
       ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
@@ -113,19 +115,21 @@ class DownloadsScreen extends ConsumerWidget {
           ),
 
           // Main Grid
-          if (sortedItems.isEmpty && !downloadQueueAsync.isLoading && !downloadedMediaAsync.isLoading)
-             SliverFillRemaining(
-                child: _buildEmptyState(context),
-             )
+          if (sortedItems.isEmpty &&
+              !downloadQueueAsync.isLoading &&
+              !downloadedMediaAsync.isLoading)
+            SliverFillRemaining(
+              child: _buildEmptyState(context),
+            )
           else
             SliverPadding(
               padding: const EdgeInsets.all(16),
               sliver: SliverGrid(
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3, // Adjust based on screen size ideally
-                  childAspectRatio: 2 / 3,
+                  crossAxisCount: 3,
+                  childAspectRatio: 0.48,
                   crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
+                  mainAxisSpacing: 16,
                 ),
                 delegate: SliverChildBuilderDelegate(
                   (context, index) {
@@ -135,7 +139,7 @@ class DownloadsScreen extends ConsumerWidget {
                 ),
               ),
             ),
-            
+
           // Bottom padding
           const SliverToBoxAdapter(child: SizedBox(height: 100)),
         ],
@@ -143,7 +147,8 @@ class DownloadsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildFailedSection(BuildContext context, WidgetRef ref, List<DownloadTask> failed) {
+  Widget _buildFailedSection(
+      BuildContext context, WidgetRef ref, List<DownloadTask> failed) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -170,11 +175,11 @@ class DownloadsScreen extends ConsumerWidget {
             scrollDirection: Axis.horizontal,
             itemCount: failed.length,
             itemBuilder: (context, index) {
-               return Container(
-                 width: 300,
-                 margin: const EdgeInsets.only(right: 12),
-                 child: _buildFailedDownloadCard(context, ref, failed[index]),
-               );
+              return Container(
+                width: 300,
+                margin: const EdgeInsets.only(right: 12),
+                child: _buildFailedDownloadCard(context, ref, failed[index]),
+              );
             },
           ),
         ),
@@ -182,195 +187,242 @@ class DownloadsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildGridItem(BuildContext context, WidgetRef ref, DownloadGroup group) {
-    // Determine active status
+  Widget _buildGridItem(
+      BuildContext context, WidgetRef ref, DownloadGroup group) {
     final isActive = group.activeTasks.isNotEmpty;
-    
-    // Calculate progress (use the first active task for display)
+
     double progress = 0.0;
     if (isActive) {
-        final task = group.activeTasks.first;
-        progress = task.isProgressive ? task.combinedProgress : task.progress;
+      final task = group.activeTasks.first;
+      progress = task.isProgressive ? task.combinedProgress : task.progress;
     }
 
     return GestureDetector(
       onTap: () async {
         if (group.type == GroupType.series) {
-            // Open Series Screen (Folder-like navigation)
-            Navigator.of(context).push(
-                MaterialPageRoute(
-                    builder: (context) => SeriesDownloadsScreen(
-                        showId: group.id,
-                        showTitle: group.title,
-                        showPosterUrl: group.posterUrl,
-                        backdropUrl: group.backdropUrl,
-                    ),
-                ),
-            );
-        } else {
-            // Movie
-            if (isActive) {
-                // Active Movie Download -> Cancel Confirm
-                final task = group.activeTasks.first;
-                _showCancelDialog(context, ref, task);
-            } else if (group.downloads.isNotEmpty) {
-                // Downloaded Movie -> Play directly
-                final media = group.downloads.first;
-                context.push(
-                  '/player/movie/${media.mediaId}?fileId=offline&title=${Uri.encodeComponent(media.title)}',
-                );
-            }
-        }
-      },
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // Poster
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: group.posterUrl != null
-                ? CachedNetworkImage(
-                    imageUrl: group.posterUrl!,
-                    fit: BoxFit.cover,
-                    cacheManager: PosterCacheManager(),
-                    placeholder: (_, __) => Container(color: AppColors.surfaceVariant),
-                    errorWidget: (_, __, ___) => Container(
-                        color: AppColors.surfaceVariant,
-                        child: const Icon(Icons.movie, color: AppColors.textSecondary),
-                    ),
-                  )
-                : Container(
-                    color: AppColors.surfaceVariant,
-                    child: const Icon(Icons.movie, color: AppColors.textSecondary),
-                  ),
-          ),
-          
-          // Gradient Overlay
-          Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.transparent,
-                  Colors.black.withOpacity(0.7),
-                ],
-                stops: const [0.6, 1.0],
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => SeriesDownloadsScreen(
+                showId: group.id,
+                showTitle: group.title,
+                showPosterUrl: group.posterUrl,
+                backdropUrl: group.backdropUrl,
               ),
             ),
+          );
+        } else {
+          if (isActive) {
+            final task = group.activeTasks.first;
+            _showCancelDialog(context, ref, task);
+          } else if (group.downloads.isNotEmpty) {
+            final media = group.downloads.first;
+            context.push(
+              '/player/movie/${media.mediaId}?fileId=offline&title=${Uri.encodeComponent(media.title)}',
+            );
+          }
+        }
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Poster area
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // Poster image
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: group.posterUrl != null
+                      ? CachedNetworkImage(
+                          imageUrl: group.posterUrl!,
+                          fit: BoxFit.cover,
+                          cacheManager: PosterCacheManager(),
+                          placeholder: (_, __) =>
+                              Container(color: AppColors.surfaceVariant),
+                          errorWidget: (_, __, ___) => Container(
+                            color: AppColors.surfaceVariant,
+                            child: const Icon(Icons.movie,
+                                color: AppColors.textSecondary),
+                          ),
+                        )
+                      : Container(
+                          color: AppColors.surfaceVariant,
+                          child: const Icon(Icons.movie,
+                              color: AppColors.textSecondary),
+                        ),
+                ),
+
+                // Active overlay + progress ring
+                if (isActive) ...[
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  Center(
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        SizedBox(
+                          width: 48,
+                          height: 48,
+                          child: CircularProgressIndicator(
+                            value: progress,
+                            color: AppColors.primary,
+                            backgroundColor:
+                                Colors.white.withValues(alpha: 0.15),
+                            strokeWidth: 4,
+                            strokeCap: StrokeCap.round,
+                          ),
+                        ),
+                        Text(
+                          '${(progress * 100).toStringAsFixed(0)}%',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
+                // Series episode count badge
+                if (group.type == GroupType.series && !isActive)
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.7),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '${group.downloads.length + group.activeTasks.length}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
 
-          // Active Overlay (Darken)
-          if (isActive)
-            Container(
-                decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.5),
-                    borderRadius: BorderRadius.circular(12),
+          // Info area below poster
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Title
+                Text(
+                  group.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-            ),
-          
-          // Progress Bar
-          if (isActive)
-             Center(
-                 child: Stack(
-                     alignment: Alignment.center,
-                     children: [
-                         SizedBox(
-                             width: 48,
-                             height: 48,
-                             child: CircularProgressIndicator(
-                                 value: progress,
-                                 color: AppColors.primary,
-                                 backgroundColor: Colors.white.withOpacity(0.2),
-                                 strokeWidth: 4,
-                             ),
-                         ),
-                         Text(
-                             '${(progress * 100).toStringAsFixed(0)}%',
-                             style: const TextStyle(
-                                 color: Colors.white,
-                                 fontSize: 12,
-                                 fontWeight: FontWeight.bold,
-                                 shadows: [Shadow(blurRadius: 2, color: Colors.black)],
-                             ),
-                         ),
-                     ],
-                 ),
-             ),
 
-          // Series Indicator (if not downloading)
-          if (group.type == GroupType.series && !isActive)
-             Positioned(
-                 top: 8,
-                 right: 8,
-                 child: Container(
-                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                     decoration: BoxDecoration(
-                         color: Colors.black.withOpacity(0.7),
-                         borderRadius: BorderRadius.circular(4),
-                     ),
-                     child: Text(
-                         '${group.downloads.length + group.activeTasks.length}',
-                         style: const TextStyle(
-                             color: Colors.white,
-                             fontSize: 10,
-                             fontWeight: FontWeight.bold,
-                         ),
-                     ),
-                 ),
-             ),
-             
-          // Title (Bottom)
-          Positioned(
-             left: 8,
-             right: 8,
-             bottom: 8,
-             child: Text(
-                 group.title,
-                 maxLines: 2,
-                 overflow: TextOverflow.ellipsis,
-                 textAlign: TextAlign.center,
-                 style: const TextStyle(
-                     color: Colors.white,
-                     fontSize: 12,
-                     fontWeight: FontWeight.w600,
-                     shadows: [Shadow(blurRadius: 4, color: Colors.black)],
-                 ),
-             ),
+                // Download stats (only when active)
+                if (isActive)
+                  Builder(
+                    builder: (context) {
+                      final task = group.activeTasks.first;
+                      final bytesText =
+                          task.progressBytesDisplay ?? task.fileSizeDisplay;
+
+                      return Consumer(
+                        builder: (context, ref, _) {
+                          final speedAsync =
+                              ref.watch(downloadSpeedInfoProvider);
+                          String? speedText;
+                          speedAsync.when(
+                            data: (speedMap) {
+                              final info = speedMap[task.id];
+                              if (info != null && info.bytesPerSecond > 0) {
+                                speedText = info.speedDisplay;
+                              }
+                            },
+                            loading: () {},
+                            error: (_, __) {},
+                          );
+
+                          final parts = <String>[bytesText];
+                          if (speedText != null) parts.add(speedText!);
+
+                          return Text(
+                            parts.join(' \u00B7 '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 10,
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+
+                // File size for completed downloads
+                if (!isActive && group.downloads.isNotEmpty)
+                  Text(
+                    group.type == GroupType.series
+                        ? '${group.downloads.length} episode${group.downloads.length == 1 ? '' : 's'}'
+                        : group.downloads.first.fileSizeDisplay,
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 10,
+                    ),
+                  ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _showCancelDialog(BuildContext context, WidgetRef ref, DownloadTask task) async {
-      final manager = await ref.read(downloadManagerProvider.future);
-      
-      if (!context.mounted) return;
-      
-      showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-              backgroundColor: AppColors.surface,
-              title: const Text('Cancel Download?'),
-              content: Text('Stop downloading "${task.title}"?'),
-              actions: [
-                  TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Keep', style: TextStyle(color: AppColors.textSecondary)),
-                  ),
-                  FilledButton(
-                      onPressed: () {
-                          manager.cancelDownload(task.id);
-                          Navigator.pop(context);
-                      },
-                      style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-                      child: const Text('Cancel Download'),
-                  ),
-              ],
+  Future<void> _showCancelDialog(
+      BuildContext context, WidgetRef ref, DownloadTask task) async {
+    final manager = await ref.read(downloadManagerProvider.future);
+
+    if (!context.mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Cancel Download?'),
+        content: Text('Stop downloading "${task.title}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Keep',
+                style: TextStyle(color: AppColors.textSecondary)),
           ),
-      );
+          FilledButton(
+            onPressed: () {
+              manager.cancelDownload(task.id);
+              Navigator.pop(context);
+            },
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Cancel Download'),
+          ),
+        ],
+      ),
+    );
   }
 
   PreferredSizeWidget _buildAppBar(BuildContext context) {
@@ -396,13 +448,11 @@ class DownloadsScreen extends ConsumerWidget {
                       const SizedBox(width: 10),
                       Text(
                         'Downloads',
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineSmall
-                            ?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: -0.3,
-                            ),
+                        style:
+                            Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: -0.3,
+                                ),
                       ),
                     ],
                   ),
@@ -415,12 +465,17 @@ class DownloadsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildStorageHeader(BuildContext context, WidgetRef ref, StorageQuotaStatus status) {
+  Widget _buildStorageHeader(
+      BuildContext context, WidgetRef ref, StorageQuotaStatus status) {
     // Determine colors based on status
     final isWarning = status.isWarningExceeded;
     final isFull = status.isFull;
-    final iconColor = isFull ? AppColors.error : (isWarning ? AppColors.warning : AppColors.primary);
-    final progressColor = isFull ? AppColors.error : (isWarning ? AppColors.warning : AppColors.primary);
+    final iconColor = isFull
+        ? AppColors.error
+        : (isWarning ? AppColors.warning : AppColors.primary);
+    final progressColor = isFull
+        ? AppColors.error
+        : (isWarning ? AppColors.warning : AppColors.primary);
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -436,7 +491,9 @@ class DownloadsScreen extends ConsumerWidget {
         ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isWarning ? iconColor.withValues(alpha: 0.5) : AppColors.divider.withValues(alpha: 0.3),
+          color: isWarning
+              ? iconColor.withValues(alpha: 0.5)
+              : AppColors.divider.withValues(alpha: 0.3),
         ),
       ),
       child: Column(
@@ -451,7 +508,11 @@ class DownloadsScreen extends ConsumerWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
-                  isFull ? Icons.storage_rounded : (isWarning ? Icons.warning_amber_rounded : Icons.storage_rounded),
+                  isFull
+                      ? Icons.storage_rounded
+                      : (isWarning
+                          ? Icons.warning_amber_rounded
+                          : Icons.storage_rounded),
                   color: iconColor,
                   size: 28,
                 ),
@@ -472,9 +533,10 @@ class DownloadsScreen extends ConsumerWidget {
                       status.settings.hasLimit
                           ? '${status.usedDisplay} / ${status.maxDisplay}'
                           : status.usedDisplay,
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                      style:
+                          Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
                     ),
                   ],
                 ),
@@ -516,7 +578,8 @@ class DownloadsScreen extends ConsumerWidget {
     );
   }
 
-  void _showStorageSettings(BuildContext context, WidgetRef ref, StorageQuotaStatus status) {
+  void _showStorageSettings(
+      BuildContext context, WidgetRef ref, StorageQuotaStatus status) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -591,50 +654,53 @@ class DownloadsScreen extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-            Row(
-                children: [
-                    const Icon(Icons.error, color: AppColors.error, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(
-                        child: Text(
-                            task.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                    ),
-                ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-                'Failed',
-                style: TextStyle(color: AppColors.error, fontSize: 12),
-            ),
-            const Spacer(),
-            Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                    TextButton(
-                        onPressed: () async {
-                            final manager = await ref.read(downloadManagerProvider.future);
-                            await manager.cancelDownload(task.id);
-                        },
-                        child: const Text('Dismiss', style: TextStyle(fontSize: 12)),
-                    ),
-                    FilledButton(
-                        onPressed: () async {
-                            final manager = await ref.read(downloadManagerProvider.future);
-                            await manager.retryDownload(task.id);
-                        },
-                        style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-                            backgroundColor: AppColors.primary,
-                            minimumSize: const Size(0, 32),
-                        ),
-                        child: const Text('Retry', style: TextStyle(fontSize: 12)),
-                    ),
-                ],
-            ),
+          Row(
+            children: [
+              const Icon(Icons.error, color: AppColors.error, size: 16),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  task.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Failed',
+            style: TextStyle(color: AppColors.error, fontSize: 12),
+          ),
+          const Spacer(),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () async {
+                  final manager =
+                      await ref.read(downloadManagerProvider.future);
+                  await manager.cancelDownload(task.id);
+                },
+                child: const Text('Dismiss', style: TextStyle(fontSize: 12)),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  final manager =
+                      await ref.read(downloadManagerProvider.future);
+                  await manager.retryDownload(task.id);
+                },
+                style: FilledButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                  backgroundColor: AppColors.primary,
+                  minimumSize: const Size(0, 32),
+                ),
+                child: const Text('Retry', style: TextStyle(fontSize: 12)),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -652,7 +718,8 @@ class _StorageSettingsSheet extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<_StorageSettingsSheet> createState() => _StorageSettingsSheetState();
+  ConsumerState<_StorageSettingsSheet> createState() =>
+      _StorageSettingsSheetState();
 }
 
 class _StorageSettingsSheetState extends ConsumerState<_StorageSettingsSheet> {
@@ -749,7 +816,8 @@ class _StorageSettingsSheetState extends ConsumerState<_StorageSettingsSheet> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel', style: TextStyle(color: AppColors.textSecondary)),
+            child: const Text('Cancel',
+                style: TextStyle(color: AppColors.textSecondary)),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
@@ -767,7 +835,9 @@ class _StorageSettingsSheetState extends ConsumerState<_StorageSettingsSheet> {
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Freed ${StorageSettings.formatBytes(freedBytes)}')),
+          SnackBar(
+              content:
+                  Text('Freed ${StorageSettings.formatBytes(freedBytes)}')),
         );
         Navigator.of(context).pop();
       }
@@ -796,12 +866,16 @@ class _StorageSettingsSheetState extends ConsumerState<_StorageSettingsSheet> {
                   color: AppColors.primary.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.settings_rounded, color: AppColors.primary, size: 20),
+                child: const Icon(Icons.settings_rounded,
+                    color: AppColors.primary, size: 20),
               ),
               const SizedBox(width: 12),
               Text(
                 'Storage Settings',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.bold),
               ),
             ],
           ),
@@ -810,7 +884,10 @@ class _StorageSettingsSheetState extends ConsumerState<_StorageSettingsSheet> {
           // Storage limit dropdown
           Text(
             'Maximum Storage',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+            style: Theme.of(context)
+                .textTheme
+                .titleSmall
+                ?.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 8),
           Container(
@@ -822,9 +899,12 @@ class _StorageSettingsSheetState extends ConsumerState<_StorageSettingsSheet> {
             child: DropdownButtonHideUnderline(
               child: DropdownButton<int?>(
                 isExpanded: true,
-                value: _limitOptions.contains(_selectedLimit) ? _selectedLimit : null,
+                value: _limitOptions.contains(_selectedLimit)
+                    ? _selectedLimit
+                    : null,
                 items: _limitOptions.map((limit) {
-                  final isCurrentlyUsed = limit != null && widget.currentUsage > limit;
+                  final isCurrentlyUsed =
+                      limit != null && widget.currentUsage > limit;
                   return DropdownMenuItem(
                     value: limit,
                     child: Row(
@@ -849,13 +929,16 @@ class _StorageSettingsSheetState extends ConsumerState<_StorageSettingsSheet> {
               ),
             ),
           ),
-          
+
           const SizedBox(height: 16),
-          
+
           // Concurrent downloads
           Text(
             'Concurrent Downloads',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+            style: Theme.of(context)
+                .textTheme
+                .titleSmall
+                ?.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 8),
           Container(
@@ -882,16 +965,19 @@ class _StorageSettingsSheetState extends ConsumerState<_StorageSettingsSheet> {
               ),
             ),
           ),
-          
+
           const SizedBox(height: 16),
-          
+
           // Auto start switch
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
                 'Auto Start Downloads',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w600),
               ),
               Switch(
                 value: _autoStartQueued,
@@ -902,18 +988,22 @@ class _StorageSettingsSheetState extends ConsumerState<_StorageSettingsSheet> {
           ),
 
           const SizedBox(height: 16),
-          
+
           // Auto cleanup switch
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
                 'Auto Cleanup',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w600),
               ),
               Switch(
                 value: _autoCleanupEnabled,
-                onChanged: (value) => setState(() => _autoCleanupEnabled = value),
+                onChanged: (value) =>
+                    setState(() => _autoCleanupEnabled = value),
                 activeColor: AppColors.primary,
               ),
             ],
@@ -923,7 +1013,10 @@ class _StorageSettingsSheetState extends ConsumerState<_StorageSettingsSheet> {
             const SizedBox(height: 16),
             Text(
               'Cleanup Policy',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+              style: Theme.of(context)
+                  .textTheme
+                  .titleSmall
+                  ?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
             Container(
@@ -962,7 +1055,8 @@ class _StorageSettingsSheetState extends ConsumerState<_StorageSettingsSheet> {
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     side: BorderSide(color: AppColors.error),
                     foregroundColor: AppColors.error,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
                   ),
                   child: const Text('Clean Up Now'),
                 ),
@@ -974,7 +1068,8 @@ class _StorageSettingsSheetState extends ConsumerState<_StorageSettingsSheet> {
                   style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     backgroundColor: AppColors.primary,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
                   ),
                   child: const Text('Save'),
                 ),

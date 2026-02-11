@@ -2,10 +2,34 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../domain/models/download.dart';
 import 'download_service.dart';
+import 'download_speed_tracker.dart';
 
 import 'download_job_providers.dart';
 
 part 'download_providers.g.dart';
+
+/// Speed and ETA info for a single download task.
+class DownloadSpeedInfo {
+  final double bytesPerSecond;
+  final Duration? eta;
+
+  const DownloadSpeedInfo({required this.bytesPerSecond, this.eta});
+
+  String get speedDisplay {
+    if (bytesPerSecond <= 0) return '';
+    return '${DownloadTask.formatBytes(bytesPerSecond.round())}/s';
+  }
+
+  String get etaDisplay {
+    if (eta == null) return '';
+    final totalSeconds = eta!.inSeconds;
+    if (totalSeconds < 60) return '${totalSeconds}s left';
+    if (totalSeconds < 3600) return '${(totalSeconds / 60).ceil()}m left';
+    final hours = totalSeconds ~/ 3600;
+    final mins = (totalSeconds % 3600) ~/ 60;
+    return '${hours}h ${mins}m left';
+  }
+}
 
 /// Whether downloads are supported on the current platform.
 /// Returns false on web, true on native platforms.
@@ -159,4 +183,31 @@ Future<DownloadedMedia?> getDownloadedMediaById(Ref ref, String mediaId) async {
 
   final manager = await ref.watch(downloadManagerProvider.future);
   return manager.getDownloadedMediaById(mediaId);
+}
+
+/// Provides speed info for all active downloads, updated on each progress event.
+/// Accumulates speed data across tasks so each emission contains all known speeds.
+@riverpod
+Stream<Map<String, DownloadSpeedInfo>> downloadSpeedInfo(Ref ref) async* {
+  final manager = await ref.watch(downloadManagerProvider.future);
+  final tracker = DownloadSpeedTracker.instance;
+  final speedMap = <String, DownloadSpeedInfo>{};
+
+  yield speedMap;
+
+  await for (final task in manager.progressStream) {
+    if (task.status != 'downloading' && task.status != 'transcoding') {
+      // Remove finished tasks from the map
+      speedMap.remove(task.id);
+      continue;
+    }
+
+    final speed = tracker.getSpeedBytesPerSecond(task.id);
+    final eta = task.fileSize != null && task.fileSize! > 0
+        ? tracker.getEta(task.id, task.fileSize!)
+        : null;
+
+    speedMap[task.id] = DownloadSpeedInfo(bytesPerSecond: speed, eta: eta);
+    yield Map.of(speedMap);
+  }
 }

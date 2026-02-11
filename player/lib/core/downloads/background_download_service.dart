@@ -8,6 +8,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:background_downloader/background_downloader.dart' as bg;
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../domain/models/download.dart' as models;
@@ -278,16 +279,36 @@ class BackgroundDownloadService {
   /// Handle task progress updates from background_downloader.
   void _onTaskProgress(bg.TaskProgressUpdate update) {
     final taskId = _bgTaskIdToTaskId[update.task.taskId];
+    debugPrint('[BgService] _onTaskProgress: bgTaskId=${update.task.taskId} '
+        'mappedTaskId=$taskId progress=${update.progress} '
+        'expectedFileSize=${update.expectedFileSize}');
     if (taskId == null) return;
 
     final task = _taskIdToDownloadTask[taskId];
-    if (task == null) return;
+    if (task == null) {
+      debugPrint(
+          '[BgService] _onTaskProgress: task not found in map for $taskId');
+      return;
+    }
 
     final progress = update.progress;
+    final expectedSize = update.expectedFileSize;
+
+    // Use expected size from background_downloader, or fall back to task's fileSize
+    final effectiveSize = expectedSize > 0 ? expectedSize : task.fileSize;
+    final downloadedBytes = effectiveSize != null && effectiveSize > 0
+        ? (progress * effectiveSize).round()
+        : null;
+
+    debugPrint('[BgService] _onTaskProgress: effectiveSize=$effectiveSize '
+        'downloadedBytes=$downloadedBytes');
+
     final updatedTask = task.copyWith(
       progress: progress,
       downloadProgress: progress,
       status: 'downloading',
+      fileSize: expectedSize > 0 ? expectedSize : null,
+      downloadedBytes: downloadedBytes,
     );
 
     _taskIdToDownloadTask[taskId] = updatedTask;

@@ -5,12 +5,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:player/native/lib.dart';
 
-/// Custom iroh relay URL from dart-define (optional).
-/// If empty, iroh uses its built-in default public relays.
+/// Default iroh relay URL (our own relay).
+/// Can be overridden at build time via dart-define IROH_RELAY_URL.
+const _defaultRelayUrl = 'https://cae1-1.relay.mydia.dev';
 const _customIrohRelayUrl = String.fromEnvironment('IROH_RELAY_URL');
 
-/// Display placeholder for when using iroh's default relays
-const defaultRelayUrl = '(iroh default relays)';
+/// Display placeholder for when using the default relay
+const defaultRelayUrl = _defaultRelayUrl;
 
 /// Provider for the P2pService
 final p2pServiceProvider = Provider<P2pService>((ref) {
@@ -138,6 +139,10 @@ class P2pService {
   String? _nodeId;
   final Set<String> _connectedPeers = {};
 
+  // Cached status fields - updated from P2P events to avoid sync FFI calls
+  P2pConnectionType _currentConnectionType = P2pConnectionType.none;
+  String? _cachedRelayUrl;
+
   // Stream of P2P status updates
   final _statusController = StreamController<P2pStatus>.broadcast();
   Stream<P2pStatus> get onStatusChanged => _statusController.stream;
@@ -158,11 +163,9 @@ class P2pService {
   /// This node's ID (PublicKey string)
   String? get nodeId => _nodeId;
 
-  /// Current P2P status
+  /// Current P2P status (built from cached event data, no FFI calls)
   P2pStatus get status {
-    // Get relay URL from network stats (preferred) or extract from nodeAddr (fallback)
     final relayUrl = _getEffectiveRelayUrl();
-    // Get connection type from network stats
     final peerConnectionType = _getPeerConnectionType();
     return P2pStatus(
       isInitialized: _isInitialized,
@@ -174,19 +177,19 @@ class P2pService {
     );
   }
 
-  /// Get the peer connection type from network stats
+  /// Get the peer connection type from cached event data (no FFI call)
   P2pConnectionType _getPeerConnectionType() {
-    if (_host == null) return P2pConnectionType.none;
-    final stats = _host!.getNetworkStats();
-    final result = switch (stats.peerConnectionType) {
-      FlutterConnectionType.direct => P2pConnectionType.direct,
-      FlutterConnectionType.relay => P2pConnectionType.relay,
-      FlutterConnectionType.mixed => P2pConnectionType.mixed,
-      FlutterConnectionType.none => P2pConnectionType.none,
+    return _currentConnectionType;
+  }
+
+  /// Parse a connection type string from Rust events into a P2pConnectionType
+  static P2pConnectionType _parseConnectionType(String connectionType) {
+    return switch (connectionType) {
+      'direct' => P2pConnectionType.direct,
+      'relay' => P2pConnectionType.relay,
+      'mixed' => P2pConnectionType.mixed,
+      _ => P2pConnectionType.none,
     };
-    debugPrint(
-        '[P2P] _getPeerConnectionType: ${stats.peerConnectionType} -> $result');
-    return result;
   }
 
   /// The custom relay URL passed during initialization (null if using iroh defaults)
@@ -195,26 +198,9 @@ class P2pService {
   /// Get the active relay URL (null before initialization)
   String? get activeRelayUrl => _getEffectiveRelayUrl();
 
-  /// Get the effective relay URL from network stats or by extracting from nodeAddr
+  /// Get the effective relay URL from cached event data (no FFI call)
   String? _getEffectiveRelayUrl() {
-    // Try to get from network stats first (most accurate)
-    if (_host != null) {
-      final stats = _host!.getNetworkStats();
-      if (stats.relayUrl != null) {
-        return stats.relayUrl;
-      }
-    }
-
-    // Fallback: extract from nodeAddr JSON (same logic as Elixir)
-    if (_nodeAddr != null) {
-      final extracted = _extractRelayUrlFromNodeAddr(_nodeAddr!);
-      if (extracted != null) {
-        return extracted;
-      }
-    }
-
-    // Last resort: return custom relay URL if set
-    return _customRelayUrl;
+    return _cachedRelayUrl ?? _customRelayUrl;
   }
 
   /// Extract the relay URL from a nodeAddr JSON string.
@@ -241,19 +227,21 @@ class P2pService {
 
   /// Initialize the P2P host.
   ///
-  /// [relayUrl] - Optional custom iroh relay URL. If not provided and no
-  /// IROH_RELAY_URL env is set, iroh uses its built-in default public relays.
+  /// [relayUrl] - Optional custom iroh relay URL. If not provided, uses
+  /// the build-time IROH_RELAY_URL or falls back to [_defaultRelayUrl].
   Future<void> initialize({String? relayUrl}) async {
     if (_isInitialized) return;
 
-    // Use provided URL, or custom from env, or null (iroh defaults)
+    // Use provided URL, or custom from env, or our default relay
     final effectiveRelayUrl = relayUrl ??
-        (_customIrohRelayUrl.isNotEmpty ? _customIrohRelayUrl : null);
+        (_customIrohRelayUrl.isNotEmpty
+            ? _customIrohRelayUrl
+            : _defaultRelayUrl);
     _customRelayUrl = effectiveRelayUrl;
 
     try {
       debugPrint(
-          '[P2P] Initializing iroh-based P2P Host with relay: ${effectiveRelayUrl ?? "(iroh defaults)"}');
+          '[P2P] Initializing iroh-based P2P Host with relay: $effectiveRelayUrl');
 
       // Initialize Host via FRB - returns (P2PHost, String)
       final (host, nodeId) = P2PHost.init(relayUrl: effectiveRelayUrl);
@@ -273,6 +261,7 @@ class P2pService {
           final connectionType = parts.length > 1 ? parts[1] : 'unknown';
           debugPrint('[P2P] Peer connected: $peerId ($connectionType)');
           _connectedPeers.add(peerId);
+          _currentConnectionType = _parseConnectionType(connectionType);
           _peerConnectedController.add(peerId);
           _emitStatus();
         } else if (event.startsWith('connection_type_changed:')) {
@@ -282,10 +271,14 @@ class P2pService {
           final connectionType = parts.length > 1 ? parts[1] : 'unknown';
           debugPrint(
               '[P2P] Connection type changed: $peerId -> $connectionType');
+          _currentConnectionType = _parseConnectionType(connectionType);
           _emitStatus();
         } else if (event.startsWith('disconnected:')) {
           final peerId = event.substring('disconnected:'.length);
           _connectedPeers.remove(peerId);
+          if (_connectedPeers.isEmpty) {
+            _currentConnectionType = P2pConnectionType.none;
+          }
           _emitStatus();
         } else if (event == 'relay_connected') {
           debugPrint('[P2P] Connected to relay');
@@ -295,6 +288,7 @@ class P2pService {
           final nodeAddrJson = event.substring('ready:'.length);
           debugPrint('[P2P] Node ready with addr: $nodeAddrJson');
           _nodeAddr = nodeAddrJson;
+          _cachedRelayUrl = _extractRelayUrlFromNodeAddr(nodeAddrJson);
           _emitStatus();
         }
       });
@@ -302,8 +296,8 @@ class P2pService {
       _isInitialized = true;
       _emitStatus();
 
-      // Get initial node address
-      _nodeAddr = _host!.getNodeAddr();
+      // Get initial node address (async FFI call, runs on worker thread)
+      _nodeAddr = await _host!.getNodeAddr();
       debugPrint('[P2P] Initial node addr: $_nodeAddr');
     } catch (e) {
       debugPrint('[P2P] Failed to initialize: $e');
@@ -374,9 +368,9 @@ class P2pService {
   }
 
   /// Get this node's EndpointAddr as JSON for sharing.
-  String? getNodeAddr() {
+  Future<String?> getNodeAddr() async {
     if (_host == null) return null;
-    return _host!.getNodeAddr();
+    return await _host!.getNodeAddr();
   }
 
   /// Send a pairing request to a specific peer.
@@ -414,9 +408,9 @@ class P2pService {
   }
 
   /// Get network statistics
-  FlutterNetworkStats? getNetworkStats() {
+  Future<FlutterNetworkStats?> getNetworkStats() async {
     if (_host == null) return null;
-    return _host!.getNetworkStats();
+    return await _host!.getNetworkStats();
   }
 
   /// Send a GraphQL request to the server over P2P.
@@ -500,11 +494,9 @@ class P2pService {
   }) async {
     if (_host == null) throw Exception("P2P host not initialized");
 
+    final sw = Stopwatch()..start();
     final normalized = await _normalizePeerForRequest(peer);
-
-    debugPrint(
-      '[P2P] Sending HLS request to ${normalized.nodeId} for $sessionId/$path',
-    );
+    final normalizeMs = sw.elapsedMilliseconds;
 
     final req = FlutterHlsRequest(
       sessionId: sessionId,
@@ -514,7 +506,16 @@ class P2pService {
       authToken: authToken,
     );
 
-    return await _host!.sendHlsRequest(peer: normalized.nodeId, req: req);
+    final result =
+        await _host!.sendHlsRequest(peer: normalized.nodeId, req: req);
+    final totalMs = sw.elapsedMilliseconds;
+    final ffiMs = totalMs - normalizeMs;
+
+    debugPrint(
+      '[p2p_metrics_dart] sendHlsRequest normalize_ms=$normalizeMs ffi_ms=$ffiMs total_ms=$totalMs bytes=${result.data.length} session=$sessionId path=$path',
+    );
+
+    return result;
   }
 
   /// Send a streaming HLS request to the server over P2P.
@@ -529,10 +530,12 @@ class P2pService {
   }) async* {
     if (_host == null) throw Exception("P2P host not initialized");
 
+    final sw = Stopwatch()..start();
     final normalized = await _normalizePeerForRequest(peer);
+    final normalizeMs = sw.elapsedMilliseconds;
 
     debugPrint(
-      '[P2P] Sending streaming HLS request to ${normalized.nodeId} for $sessionId/$path',
+      '[p2p_metrics_dart] sendHlsRequestStreaming normalize_ms=$normalizeMs session=$sessionId path=$path',
     );
 
     final req = FlutterHlsRequest(
@@ -555,6 +558,8 @@ class P2pService {
     _nodeAddr = null;
     _nodeId = null;
     _customRelayUrl = null;
+    _currentConnectionType = P2pConnectionType.none;
+    _cachedRelayUrl = null;
     _connectedPeers.clear();
     _emitStatus();
   }

@@ -165,7 +165,6 @@ impl P2pHost {
     }
 
     /// Get this node's EndpointAddr as JSON for sharing.
-    #[frb(sync)]
     pub fn get_node_addr(&self) -> String {
         self.inner.get_node_addr()
     }
@@ -308,7 +307,6 @@ impl P2pHost {
     }
 
     /// Get network statistics.
-    #[frb(sync)]
     pub fn get_network_stats(&self) -> FlutterNetworkStats {
         let stats = self.inner.get_network_stats();
         log::info!("Network stats: connected_peers={}, relay_connected={}, relay_url={:?}, peer_conn_type={:?}",

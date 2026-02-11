@@ -9,6 +9,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -18,6 +19,7 @@ import '../../domain/models/storage_settings.dart';
 import 'background_download_service.dart';
 import 'download_service.dart';
 import 'download_job_service.dart';
+import 'download_speed_tracker.dart';
 
 /// Whether to use background downloads (true on mobile, false on desktop).
 bool get _useBackgroundDownloader => Platform.isIOS || Platform.isAndroid;
@@ -188,6 +190,7 @@ class _NativeDownloadService implements DownloadService {
     receiveTimeout: const Duration(minutes: 30),
     sendTimeout: const Duration(minutes: 30),
   ));
+  final _speedTracker = DownloadSpeedTracker.instance;
   final Map<String, CancelToken> _cancelTokens = {};
   final Map<String, bool> _pausedTasks = {};
   // Track cancellation callbacks for progressive downloads (to cancel server jobs)
@@ -366,17 +369,35 @@ class _NativeDownloadService implements DownloadService {
     await _backgroundService!.initialize();
 
     // Listen to background download progress and forward to our stream
+    debugPrint('[NativeService] Setting up background progress subscription');
     _backgroundProgressSubscription =
         _backgroundService!.progressStream.listen((task) {
+      debugPrint(
+          '[NativeService] Received bg progress: ${task.id} status=${task.status} progress=${task.progress}');
       _onBackgroundProgress(task);
     });
 
     _backgroundServiceInitialized = true;
+    debugPrint('[NativeService] Background service initialized');
   }
 
   /// Handle progress updates from background download service.
   void _onBackgroundProgress(DownloadTask task) {
     if (_database == null) return;
+
+    // Feed speed tracker with bytes from the task (or estimate from progress)
+    if (task.status == 'downloading') {
+      final bytes = task.downloadedBytes ??
+          (task.fileSize != null && task.fileSize! > 0
+              ? (task.progress * task.fileSize!).round()
+              : null);
+      debugPrint(
+          '[BgProgress] ${task.id}: status=${task.status} progress=${task.progress} '
+          'downloadedBytes=${task.downloadedBytes} fileSize=${task.fileSize} estimatedBytes=$bytes');
+      if (bytes != null && bytes > 0) {
+        _speedTracker.recordProgress(task.id, bytes);
+      }
+    }
 
     // Update the task in our database
     _database!.saveTask(task);
@@ -385,10 +406,12 @@ class _NativeDownloadService implements DownloadService {
     if (task.status == 'completed' && task.filePath != null) {
       final media = DownloadedMedia.fromTask(task);
       _database!.saveMedia(media);
+      _speedTracker.clearTask(task.id);
 
       // Process queue to start next download
       _processQueue();
     } else if (task.status == 'failed' || task.status == 'cancelled') {
+      _speedTracker.clearTask(task.id);
       // Process queue on failure/cancel too
       _processQueue();
     }
@@ -784,16 +807,24 @@ class _NativeDownloadService implements DownloadService {
       // On mobile, use background download service for the file download
       // This allows downloads to continue when app is backgrounded
       if (_useBackgroundDownloader && transcodeComplete) {
+        debugPrint(
+            '[NativeService] Handing off to background service: ${task.id}');
         try {
           await _initializeBackgroundService();
           await _backgroundService!.startDownload(updatedTask);
           _cancelTokens.remove(task.id);
           _pausedTasks.remove(task.id);
+          debugPrint('[NativeService] Handoff complete, returning');
           return; // Background service will handle the rest
         } catch (e) {
+          debugPrint(
+              '[NativeService] Background service handoff failed: $e, falling back to Dio');
           // Fallback to foreground download if background service fails
           // Continue to foreground download logic below
         }
+      } else {
+        debugPrint(
+            '[NativeService] Using Dio download: useBackground=$_useBackgroundDownloader transcodeComplete=$transcodeComplete');
       }
 
       // Progressive download loop - handles the case where file is still growing
@@ -865,6 +896,7 @@ class _NativeDownloadService implements DownloadService {
                   progress: updatedTask.combinedProgress,
                   downloadedBytes: actualReceived,
                 );
+                _speedTracker.recordProgress(task.id, actualReceived);
                 await _database!.saveTask(updatedTask);
                 _progressController.add(updatedTask);
               }
@@ -925,6 +957,7 @@ class _NativeDownloadService implements DownloadService {
       _cancelTokens.remove(task.id);
       _pausedTasks.remove(task.id);
       _cancelJobCallbacks.remove(task.id);
+      _speedTracker.clearTask(task.id);
 
       // Process queue to start next download
       _processQueue();
@@ -941,6 +974,7 @@ class _NativeDownloadService implements DownloadService {
       _cancelTokens.remove(task.id);
       _pausedTasks.remove(task.id);
       _cancelJobCallbacks.remove(task.id);
+      _speedTracker.clearTask(task.id);
       _processQueue();
     } catch (e) {
       final errorTask = updatedTask.copyWith(
@@ -952,6 +986,7 @@ class _NativeDownloadService implements DownloadService {
       _cancelTokens.remove(task.id);
       _pausedTasks.remove(task.id);
       _cancelJobCallbacks.remove(task.id);
+      _speedTracker.clearTask(task.id);
       _processQueue();
     }
   }
@@ -997,7 +1032,9 @@ class _NativeDownloadService implements DownloadService {
             updatedTask = updatedTask.copyWith(
               progress: progress,
               fileSize: total,
+              downloadedBytes: received,
             );
+            _speedTracker.recordProgress(task.id, received);
             await _database!.saveTask(updatedTask);
             _progressController.add(updatedTask);
           }
@@ -1021,6 +1058,7 @@ class _NativeDownloadService implements DownloadService {
 
       _progressController.add(updatedTask);
       _cancelTokens.remove(task.id);
+      _speedTracker.clearTask(task.id);
 
       // Process queue to start next download
       _processQueue();
@@ -1036,6 +1074,7 @@ class _NativeDownloadService implements DownloadService {
       await _database!.saveTask(updatedTask);
       _progressController.add(updatedTask);
       _cancelTokens.remove(task.id);
+      _speedTracker.clearTask(task.id);
 
       // Process queue even on failure/cancel
       _processQueue();
@@ -1047,6 +1086,7 @@ class _NativeDownloadService implements DownloadService {
       await _database!.saveTask(errorTask);
       _progressController.add(errorTask);
       _cancelTokens.remove(task.id);
+      _speedTracker.clearTask(task.id);
 
       // Process queue even on error
       _processQueue();
@@ -1159,8 +1199,9 @@ class _NativeDownloadService implements DownloadService {
     }
     _cancelJobCallbacks.remove(taskId);
 
-    // 3. Remove from paused tracking
+    // 3. Remove from paused tracking and speed tracker
     _pausedTasks.remove(taskId);
+    _speedTracker.clearTask(taskId);
 
     // 4. Update database and notify listeners
     if (task != null) {

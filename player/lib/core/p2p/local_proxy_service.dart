@@ -144,6 +144,7 @@ class LocalProxyService {
   }
 
   Future<void> _handleHlsRequest(HttpRequest request) async {
+    final sw = Stopwatch()..start();
     try {
       // Parse path: /hls/{session_id}/{path...}
       final pathParts = request.uri.path.substring('/hls/'.length).split('/');
@@ -185,6 +186,8 @@ class LocalProxyService {
         rangeEnd = range.$2;
       }
 
+      final proxySetupMs = sw.elapsedMilliseconds;
+
       debugPrint(
           '[LocalProxy] HLS request: session=$sessionId, path=$hlsPath, range=$rangeStart-$rangeEnd');
 
@@ -197,6 +200,7 @@ class LocalProxyService {
         rangeEnd: rangeEnd,
         authToken: _authToken,
       );
+      final p2pRequestMs = sw.elapsedMilliseconds;
 
       // Set response status
       request.response.statusCode = response.header.status;
@@ -225,8 +229,9 @@ class LocalProxyService {
       request.response.add(response.data);
       await request.response.close();
 
+      final totalMs = sw.elapsedMilliseconds;
       debugPrint(
-          '[LocalProxy] Served ${response.data.length} bytes for $hlsPath');
+          '[p2p_metrics_dart] hls_request proxy_setup_ms=$proxySetupMs p2p_request_ms=$p2pRequestMs total_ms=$totalMs bytes=$payloadLength session=$sessionId path=$hlsPath');
     } catch (e, stack) {
       debugPrint('[LocalProxy] Error handling HLS request: $e');
       debugPrint('[LocalProxy] Stack: $stack');
@@ -347,6 +352,8 @@ class LocalProxyService {
     required String path,
     required String logLabel,
   }) async {
+    final sw = Stopwatch()..start();
+
     if (_targetPeer == null) {
       request.response.statusCode = HttpStatus.serviceUnavailable;
       _setCorsHeaders(request.response);
@@ -368,7 +375,10 @@ class LocalProxyService {
     debugPrint('[LocalProxy] P2P stream $logLabel range=$rangeStart-$rangeEnd');
 
     var bytesServed = 0;
+    var chunkCount = 0;
     var headersSent = false;
+    int? firstHeaderMs;
+    int? firstChunkMs;
 
     try {
       final stream = _p2p.sendHlsRequestStreaming(
@@ -383,6 +393,7 @@ class LocalProxyService {
       await for (final event in stream) {
         switch (event) {
           case FlutterHlsStreamEvent_Header(:final field0):
+            firstHeaderMs = sw.elapsedMilliseconds;
             final header = field0;
             request.response.statusCode = header.status;
             request.response.headers.contentType =
@@ -402,8 +413,10 @@ class LocalProxyService {
             headersSent = true;
 
           case FlutterHlsStreamEvent_Chunk(:final field0):
+            firstChunkMs ??= sw.elapsedMilliseconds;
             request.response.add(field0);
             bytesServed += field0.length;
+            chunkCount++;
 
           case FlutterHlsStreamEvent_End():
             break;
@@ -433,7 +446,12 @@ class LocalProxyService {
       await request.response.close();
     } catch (_) {}
 
-    debugPrint('[LocalProxy] Served $bytesServed bytes for $logLabel');
+    final totalMs = sw.elapsedMilliseconds;
+    final throughputMbps = totalMs > 0
+        ? (bytesServed * 8.0 / (totalMs * 1000.0)).toStringAsFixed(2)
+        : '0.00';
+    debugPrint(
+        '[p2p_metrics_dart] range_stream first_header_ms=$firstHeaderMs first_chunk_ms=$firstChunkMs total_ms=$totalMs bytes=$bytesServed chunks=$chunkCount throughput_mbps=$throughputMbps session=$sessionId path=$path');
   }
 
   void _setCorsHeaders(HttpResponse response) {

@@ -2,7 +2,6 @@ import 'package:hive_ce/hive.dart';
 
 part 'download.g.dart';
 
-
 enum DownloadStatus {
   pending,
   downloading,
@@ -10,8 +9,10 @@ enum DownloadStatus {
   failed,
   paused,
   cancelled,
+
   /// Transcoding in progress on server
   transcoding,
+
   /// Queued waiting for download slot
   queued,
 }
@@ -303,15 +304,33 @@ class DownloadTask {
     );
   }
 
-  String get fileSizeDisplay {
-    if (fileSize == null) return 'Unknown size';
-    final bytes = fileSize!;
+  static String formatBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
     if (bytes < 1024 * 1024 * 1024) {
       return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     }
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+  }
+
+  String get fileSizeDisplay {
+    if (fileSize == null) return 'Unknown size';
+    return formatBytes(fileSize!);
+  }
+
+  /// Returns e.g. "245.0 MB / 1.2 GB" or null if data is unavailable.
+  /// Falls back to estimating bytes from progress * fileSize.
+  String? get progressBytesDisplay {
+    final bytes = downloadedBytes ??
+        (fileSize != null && fileSize! > 0 && progress > 0
+            ? (progress * fileSize!).round()
+            : null);
+    if (bytes == null || bytes <= 0) return null;
+    final downloaded = formatBytes(bytes);
+    if (fileSize != null && fileSize! > 0) {
+      return '$downloaded / ${formatBytes(fileSize!)}';
+    }
+    return downloaded;
   }
 
   String get progressDisplay {
@@ -423,15 +442,7 @@ class DownloadedMedia {
     return mediaType == 'episode' ? MediaType.episode : MediaType.movie;
   }
 
-  String get fileSizeDisplay {
-    final bytes = fileSize;
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    }
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
-  }
+  String get fileSizeDisplay => DownloadTask.formatBytes(fileSize);
 
   factory DownloadedMedia.fromTask(DownloadTask task) {
     return DownloadedMedia(

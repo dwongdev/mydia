@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -23,13 +22,15 @@ import '../../../core/cast/cast_providers.dart';
 import '../../../core/downloads/download_providers.dart';
 import '../../widgets/resume_dialog.dart';
 import '../../widgets/subtitle_track_selector.dart';
-import '../../widgets/track_settings_overlay.dart';
+import '../../widgets/audio_track_selector.dart';
 import '../../widgets/hls_quality_selector.dart';
+import '../../widgets/track_settings_overlay.dart';
 import '../../widgets/gesture_controls.dart';
 import '../../widgets/cast_device_picker.dart';
-import '../../widgets/airplay_button.dart';
+import '../../widgets/video_controls/glass_container.dart';
 import '../../widgets/video_controls/glassmorphic_video_controls.dart';
 import '../../widgets/up_next_overlay.dart';
+import '../../../domain/models/audio_track.dart' as app_models_audio;
 import '../../../domain/models/subtitle_track.dart' as app_models;
 import '../../../domain/models/cast_device.dart';
 import '../../../graphql/fragments/media_file_fragment.graphql.dart';
@@ -83,14 +84,21 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   // Track selection state
   List<app_models.SubtitleTrack> _subtitleTracks = [];
   app_models.SubtitleTrack? _selectedSubtitleTrack;
+  List<app_models_audio.AudioTrack> _audioTracks = [];
+  app_models_audio.AudioTrack? _selectedAudioTrack;
+
+  // Mapping from app model track IDs to media_kit track objects
+  Map<String, AudioTrack> _mediaKitAudioTrackMap = {};
+  Map<String, SubtitleTrack> _mediaKitSubtitleTrackMap = {};
+
+  // Whether current playback is direct play (vs HLS)
+  bool _isDirectPlay = false;
 
   // HLS quality selection (web only)
   HlsQualityLevel _selectedQuality = HlsQualityLevel.auto;
 
   // HLS session tracking for cleanup
   String? _hlsSessionId;
-  String? _serverUrl;
-  String? _authToken;
 
   // Total duration from server (for HLS streams where playlist duration is incomplete)
   Duration? _totalDuration;
@@ -99,15 +107,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   final FocusNode _focusNode = FocusNode();
   DateTime? _lastClickTime;
 
+  // Controls overlay visibility (synced with video controls)
+  bool _controlsVisible = true;
+
   // Auto-play next episode state
   bool _showUpNext = false;
   int _autoPlayCountdown = 10;
   bool _autoPlayCancelled = false;
   Timer? _upNextTimer;
   static const _autoPlayCountdownDuration = 10;
-
-  // P2P mode state
-  bool _isP2PMode = false;
 
   @override
   void initState() {
@@ -173,10 +181,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       }
 
       // Online mode - initialize network services
-      // Wait for auth to be ready using async provider
       final graphqlClient = await ref.read(asyncGraphqlClientProvider.future);
 
-      // Get server URL and token (they should be available now since client is ready)
+      // Get server URL and token
       final serverUrl = await ref.read(serverUrlProvider.future);
       final token = await ref.read(authTokenProvider.future);
 
@@ -190,26 +197,31 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         return;
       }
 
-      // Check if we're in P2P mode
+      // Check connection mode
       final connectionState = ref.read(conn.connectionProvider);
-      if (connectionState.isP2PMode) {
-        debugPrint(
-            '[PlayerScreen] Detected P2P mode, initializing P2P playback');
-        _isP2PMode = true;
-        await _initializeP2PPlayback(connectionState, graphqlClient, token);
-        return;
+      final isP2PMode = connectionState.isP2PMode;
+
+      // Start local proxy if P2P
+      if (isP2PMode) {
+        final serverNodeAddr = connectionState.serverNodeAddr;
+        if (serverNodeAddr == null) {
+          throw Exception(
+              'Server node address not available for P2P connection');
+        }
+
+        if (mounted) {
+          setState(() {
+            _loadingMessage = 'Connecting via P2P...';
+          });
+        }
+
+        final proxy = ref.read(localProxyServiceProvider);
+        await proxy.start(
+          targetPeer: serverNodeAddr,
+          authToken: token,
+        );
+        debugPrint('[PlayerScreen] Local proxy started on port ${proxy.port}');
       }
-
-      // Store for session cleanup
-      _serverUrl = serverUrl;
-      _authToken = token;
-
-      // Get media token service for media access
-      final mediaTokenService =
-          await ref.read(asyncMediaTokenServiceProvider.future);
-
-      // Ensure media token is valid and refreshed if needed
-      await mediaTokenService.ensureValidToken();
 
       // Initialize progress service
       _progressService = ProgressService(graphqlClient);
@@ -217,201 +229,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       // Fetch saved progress and episode list for TV shows
       await _fetchProgressAndEpisodes(graphqlClient);
 
-      // Create media_kit player
-      _player = Player();
-      _videoController = VideoController(_player!);
-
-      String mediaSource;
-      Map<String, String> httpHeaders = {};
-
+      // Check for downloaded content playable from local file
       if (downloadedMedia != null && !kIsWeb) {
-        // Use local file for offline playback (not supported on web)
         if (await file_utils.fileExists(downloadedMedia.filePath)) {
           debugPrint('Playing from local file: ${downloadedMedia.filePath}');
-          mediaSource = downloadedMedia.filePath;
-        } else {
-          // File doesn't exist, fall back to streaming
-          debugPrint('Downloaded file not found, falling back to streaming');
-          final streamUrl =
-              '$serverUrl/api/v1/stream/file/${widget.fileId}?strategy=DIRECT_PLAY';
-          mediaSource = streamUrl;
-          httpHeaders = {
-            'Authorization': 'Bearer $token',
-          };
+          await _openPlayerAndStart(downloadedMedia.filePath, {});
+          return;
         }
-      } else {
-        // Determine optimal streaming strategy based on platform
-        final strategy = StreamingStrategyService.getOptimalStrategy();
-
-        // Get media token for URL (if available)
-        final mediaToken = await mediaTokenService.getToken();
-
-        final streamUrl = StreamingStrategyService.buildStreamUrl(
-          serverUrl: serverUrl,
-          fileId: widget.fileId,
-          strategy: strategy,
-          mediaToken: mediaToken,
-        );
-
-        debugPrint(
-            'Initializing video player with URL: $streamUrl (strategy: ${strategy.value})');
-
-        // For HLS strategies, follow redirect and wait for playlist to be ready
-        if (strategy == StreamingStrategy.hlsCopy ||
-            strategy == StreamingStrategy.transcode) {
-          if (mounted) {
-            setState(() {
-              _loadingMessage = 'Starting stream...';
-            });
-          }
-
-          // Get the HLS playlist URL from the server
-          final hlsUrl = await _getHlsPlaylistUrl(
-            streamUrl,
-            mediaToken != null ? {} : {'Authorization': 'Bearer $token'},
-          );
-
-          if (hlsUrl != null && hlsUrl.contains('.m3u8')) {
-            debugPrint('HLS playlist URL: $hlsUrl');
-
-            // Extract session ID for cleanup (URL format: /api/v1/hls/{session_id}/index.m3u8)
-            _hlsSessionId = _extractSessionIdFromHlsUrl(hlsUrl);
-            if (_hlsSessionId != null) {
-              debugPrint('HLS session ID: $_hlsSessionId');
-            }
-
-            // Wait for playlist to be ready with enough segments
-            await _waitForPlaylist(hlsUrl, token);
-
-            mediaSource = hlsUrl;
-            // HLS URLs don't need auth headers - token is in URL or handled by cookies
-          } else {
-            // Server didn't redirect to HLS, use original URL
-            debugPrint('No HLS redirect, using original URL');
-            mediaSource = streamUrl;
-            if (mediaToken == null) {
-              httpHeaders = {'Authorization': 'Bearer $token'};
-            }
-          }
-        } else {
-          mediaSource = streamUrl;
-
-          // Only set Authorization header if no media token (direct mode)
-          if (mediaToken == null) {
-            httpHeaders = {
-              'Authorization': 'Bearer $token',
-            };
-          }
-        }
+        debugPrint('Downloaded file not found, falling back to streaming');
       }
-
-      if (mounted) {
-        setState(() {
-          _loadingMessage = null;
-        });
-      }
-
-      // Open media with media_kit
-      await _player!.open(
-        Media(mediaSource, httpHeaders: httpHeaders),
-        play: false,
-      );
-
-      // Wait for player to be ready (get duration info)
-      // In media_kit, we listen to the stream for duration updates
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      // Check if we should show resume dialog
-      // Only show if we have valid duration and saved position
-      final duration = _player!.state.duration.inSeconds;
-      final savedPosition = _savedPositionSeconds;
-      if (mounted &&
-          savedPosition != null &&
-          savedPosition > _minResumeThresholdSeconds &&
-          duration > 0) {
-        final shouldResume = await showResumeDialog(
-          context,
-          savedPosition,
-          duration,
-        );
-
-        if (shouldResume == true) {
-          await _player!.seek(Duration(seconds: savedPosition));
-        }
-      }
-
-      // Start playback
-      await _player!.play();
-
-      // Start progress tracking
-      if (widget.mediaType == 'movie') {
-        _progressService!.startMovieSync(_player!, widget.mediaId);
-      } else if (widget.mediaType == 'episode') {
-        _progressService!.startEpisodeSync(_player!, widget.mediaId);
-      }
-
-      // Listen for playback completion to mark as watched
-      // Cancel any existing subscription before creating a new one
-      await _positionSubscription?.cancel();
-      _positionSubscription = _player!.stream.position.listen((_) {
-        _onPlaybackProgress();
-      });
-
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-
-      // Subtitle tracks are now extracted from GraphQL in _fetchProgressAndEpisodes
-      debugPrint(
-          'Loaded ${_subtitleTracks.length} subtitle tracks from GraphQL');
-    } catch (e) {
-      debugPrint('Error initializing player: $e');
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  /// Initialize P2P playback using iroh and local proxy.
-  ///
-  /// Uses the candidates API to determine the optimal strategy:
-  /// - Direct play (DIRECT_PLAY/REMUX/HLS_COPY on native): stream raw file over P2P
-  /// - Transcode: fall back to HLS transcoding over P2P
-  Future<void> _initializeP2PPlayback(
-    conn.ConnectionState connectionState,
-    GraphQLClient graphqlClient,
-    String token,
-  ) async {
-    try {
-      // Get server node address from connection state
-      final serverNodeAddr = connectionState.serverNodeAddr;
-      if (serverNodeAddr == null) {
-        throw Exception('Server node address not available for P2P connection');
-      }
-
-      // Store auth token for session cleanup
-      _authToken = token;
-
-      // Start local proxy service
-      if (mounted) {
-        setState(() {
-          _loadingMessage = 'Connecting via P2P...';
-        });
-      }
-
-      final localProxyService = ref.read(localProxyServiceProvider);
-      await localProxyService.start(
-        targetPeer: serverNodeAddr,
-        authToken: token,
-      );
-
-      debugPrint(
-          '[PlayerScreen] Local proxy started on port ${localProxyService.port}');
 
       // Fetch streaming candidates to determine optimal strategy
       if (mounted) {
@@ -427,32 +253,214 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         widget.mediaId,
       );
 
-      if (candidatesResult != null &&
-          _canDirectPlay(candidatesResult.candidates)) {
-        // Direct play: stream the raw file over P2P (no HLS session needed)
-        await _initializeP2PDirectPlayback(
-          localProxyService,
-          graphqlClient,
-          candidatesResult,
-        );
+      // Determine if direct play is possible
+      final canDirect = !kIsWeb &&
+          candidatesResult != null &&
+          _canDirectPlay(candidatesResult.candidates);
+
+      _isDirectPlay = canDirect;
+
+      // Set total duration from candidates metadata
+      if (candidatesResult != null) {
+        final duration = candidatesResult.metadata.duration;
+        if (duration != null) {
+          _totalDuration = Duration(
+            milliseconds: (duration * 1000).round(),
+          );
+          DurationOverride.value = _totalDuration;
+          debugPrint(
+              '[PlayerScreen] Total duration from candidates: $_totalDuration');
+        }
+      }
+
+      String mediaSource;
+      Map<String, String> httpHeaders = {};
+
+      if (canDirect) {
+        // Direct play path (native only)
+        final fileId = candidatesResult.fileId;
+        debugPrint('[PlayerScreen] Direct play for file_id=$fileId');
+
+        if (isP2PMode) {
+          mediaSource =
+              ref.read(localProxyServiceProvider).buildDirectStreamUrl(fileId);
+        } else {
+          // Get media token for URL (if available)
+          final mediaTokenService =
+              await ref.read(asyncMediaTokenServiceProvider.future);
+          await mediaTokenService.ensureValidToken();
+          final mediaToken = await mediaTokenService.getToken();
+
+          mediaSource =
+              '$serverUrl/api/v1/stream/file/$fileId?strategy=DIRECT_PLAY';
+          if (mediaToken != null) {
+            mediaSource += '&token=$mediaToken';
+          } else {
+            httpHeaders = {'Authorization': 'Bearer $token'};
+          }
+        }
       } else {
-        // Fall back to HLS transcoding over P2P
-        debugPrint('[PlayerScreen] Using HLS fallback for P2P playback');
-        await _initializeP2PHlsPlayback(
-          localProxyService,
-          graphqlClient,
+        // HLS path (both web and native fallback)
+        if (mounted) {
+          setState(() {
+            _loadingMessage = 'Starting stream...';
+          });
+        }
+
+        // Determine HLS strategy from candidates
+        final hlsStrategy = _pickHlsStrategy(candidatesResult?.candidates);
+
+        // Start HLS session via GraphQL mutation (works for both modes)
+        final result = await graphqlClient.mutate(
+          MutationOptions(
+            document: documentNodeMutationStartStreamingSession,
+            variables: Variables$Mutation$StartStreamingSession(
+              fileId: widget.fileId,
+              strategy: hlsStrategy,
+            ).toJson(),
+          ),
+        );
+
+        if (result.hasException) {
+          throw Exception(
+              'Failed to start streaming session: ${result.exception}');
+        }
+
+        final sessionData =
+            Mutation$StartStreamingSession.fromJson(result.data!);
+        final sessionResult = sessionData.startStreamingSession;
+        if (sessionResult == null) {
+          throw Exception('No session data returned from server');
+        }
+
+        _hlsSessionId = sessionResult.sessionId;
+        debugPrint('[PlayerScreen] HLS session started: $_hlsSessionId');
+
+        // Set total duration from session if not already set from candidates
+        if (_totalDuration == null && sessionResult.duration != null) {
+          _totalDuration = Duration(
+            milliseconds: (sessionResult.duration! * 1000).round(),
+          );
+          DurationOverride.value = _totalDuration;
+          debugPrint(
+              '[PlayerScreen] Total duration from session: $_totalDuration');
+        }
+
+        // Build HLS URL based on mode
+        if (isP2PMode) {
+          mediaSource =
+              ref.read(localProxyServiceProvider).buildHlsUrl(_hlsSessionId!);
+        } else {
+          mediaSource = '$serverUrl/api/v1/hls/$_hlsSessionId/index.m3u8';
+        }
+        debugPrint('[PlayerScreen] HLS URL: $mediaSource');
+
+        // Wait for playlist to be ready
+        // In P2P mode, proxy handles auth; in direct mode, pass bearer token
+        await _waitForPlaylist(
+          mediaSource,
+          headers: isP2PMode ? null : {'Authorization': 'Bearer $token'},
         );
       }
+
+      await _openPlayerAndStart(mediaSource, httpHeaders);
     } catch (e) {
-      debugPrint('[PlayerScreen] Error initializing P2P playback: $e');
+      debugPrint('Error initializing player: $e');
       if (mounted) {
         setState(() {
-          _error = 'Failed to start P2P playback: $e';
+          _error = e.toString();
           _isLoading = false;
-          _loadingMessage = null;
         });
       }
     }
+  }
+
+  /// Pick the best HLS strategy from streaming candidates.
+  ///
+  /// Prefers HLS_COPY (no transcoding) if available, falls back to TRANSCODE.
+  Enum$StreamingStrategy _pickHlsStrategy(
+    List<Query$StreamingCandidates$streamingCandidates$candidates>? candidates,
+  ) {
+    if (candidates != null) {
+      for (final c in candidates) {
+        if (c.strategy == Enum$StreamingCandidateStrategy.HLS_COPY) {
+          return Enum$StreamingStrategy.HLS_COPY;
+        }
+      }
+    }
+    return Enum$StreamingStrategy.TRANSCODE;
+  }
+
+  /// Shared tail of _initializePlayer: create player, resume dialog, start playback.
+  Future<void> _openPlayerAndStart(
+    String mediaSource,
+    Map<String, String> httpHeaders,
+  ) async {
+    if (mounted) {
+      setState(() {
+        _loadingMessage = null;
+      });
+    }
+
+    // Create media_kit player
+    _player = Player();
+    _videoController = VideoController(_player!);
+
+    // Open media
+    await _player!.open(
+      Media(mediaSource, httpHeaders: httpHeaders),
+      play: false,
+    );
+
+    // Wait for player to be ready
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // Detect available tracks from media_kit
+    _detectTracks();
+
+    // Check if we should show resume dialog
+    final duration = _player!.state.duration.inSeconds;
+    final savedPosition = _savedPositionSeconds;
+    if (mounted &&
+        savedPosition != null &&
+        savedPosition > _minResumeThresholdSeconds &&
+        duration > 0) {
+      final shouldResume = await showResumeDialog(
+        context,
+        savedPosition,
+        duration,
+      );
+
+      if (shouldResume == true) {
+        await _player!.seek(Duration(seconds: savedPosition));
+      }
+    }
+
+    // Start playback
+    await _player!.play();
+
+    // Start progress tracking
+    if (_progressService != null) {
+      if (widget.mediaType == 'movie') {
+        _progressService!.startMovieSync(_player!, widget.mediaId);
+      } else if (widget.mediaType == 'episode') {
+        _progressService!.startEpisodeSync(_player!, widget.mediaId);
+      }
+    }
+
+    // Listen for playback completion
+    await _positionSubscription?.cancel();
+    _positionSubscription = _player!.stream.position.listen((_) {
+      _onPlaybackProgress();
+    });
+
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+
+    debugPrint('Loaded ${_subtitleTracks.length} subtitle tracks from GraphQL');
   }
 
   /// Check if the first candidate supports direct play on native.
@@ -501,294 +509,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       debugPrint('[PlayerScreen] Error fetching streaming candidates: $e');
       return null;
     }
-  }
-
-  /// Initialize direct P2P playback (no HLS transcoding).
-  ///
-  /// Streams the raw file over the P2P connection via the local proxy.
-  Future<void> _initializeP2PDirectPlayback(
-    LocalProxyService localProxyService,
-    GraphQLClient graphqlClient,
-    Query$StreamingCandidates$streamingCandidates candidatesResult,
-  ) async {
-    if (mounted) {
-      setState(() {
-        _loadingMessage = 'Starting direct playback...';
-      });
-    }
-
-    final fileId = candidatesResult.fileId;
-    debugPrint('[PlayerScreen] P2P direct play for file_id=$fileId');
-
-    // Set total duration from candidates metadata
-    final duration = candidatesResult.metadata.duration;
-    if (duration != null) {
-      _totalDuration = Duration(
-        milliseconds: (duration * 1000).round(),
-      );
-      DurationOverride.value = _totalDuration;
-      debugPrint(
-          '[PlayerScreen] Total duration from candidates: $_totalDuration');
-    }
-
-    // Build direct stream URL via local proxy
-    // No HLS session ID needed — the "direct:{fileId}" convention handles it
-    final directUrl = localProxyService.buildDirectStreamUrl(fileId);
-    debugPrint('[PlayerScreen] P2P direct URL: $directUrl');
-
-    // Initialize progress service
-    _progressService = ProgressService(graphqlClient);
-
-    // Fetch saved progress and episode list for TV shows
-    await _fetchProgressAndEpisodes(graphqlClient);
-
-    // Create media_kit player
-    _player = Player();
-    _videoController = VideoController(_player!);
-
-    // Open media with media_kit (no auth headers needed for local proxy)
-    await _player!.open(
-      Media(directUrl),
-      play: false,
-    );
-
-    // Wait for player to be ready
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    // Check if we should show resume dialog
-    final playerDuration = _player!.state.duration.inSeconds;
-    final savedPosition = _savedPositionSeconds;
-    if (mounted &&
-        savedPosition != null &&
-        savedPosition > _minResumeThresholdSeconds &&
-        playerDuration > 0) {
-      final shouldResume = await showResumeDialog(
-        context,
-        savedPosition,
-        playerDuration,
-      );
-
-      if (shouldResume == true) {
-        await _player!.seek(Duration(seconds: savedPosition));
-      }
-    }
-
-    // Start playback
-    await _player!.play();
-
-    // Start progress tracking
-    if (widget.mediaType == 'movie') {
-      _progressService!.startMovieSync(_player!, widget.mediaId);
-    } else if (widget.mediaType == 'episode') {
-      _progressService!.startEpisodeSync(_player!, widget.mediaId);
-    }
-
-    // Listen for playback completion
-    await _positionSubscription?.cancel();
-    _positionSubscription = _player!.stream.position.listen((_) {
-      _onPlaybackProgress();
-    });
-
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-        _loadingMessage = null;
-      });
-    }
-
-    debugPrint('[PlayerScreen] P2P direct playback initialized successfully');
-  }
-
-  /// Initialize HLS P2P playback (transcoding fallback).
-  Future<void> _initializeP2PHlsPlayback(
-    LocalProxyService localProxyService,
-    GraphQLClient graphqlClient,
-  ) async {
-    if (mounted) {
-      setState(() {
-        _loadingMessage = 'Starting stream...';
-      });
-    }
-
-    // Start HLS streaming session via GraphQL
-    final result = await graphqlClient.mutate(
-      MutationOptions(
-        document: documentNodeMutationStartStreamingSession,
-        variables: Variables$Mutation$StartStreamingSession(
-          fileId: widget.fileId,
-          strategy: Enum$StreamingStrategy.TRANSCODE,
-        ).toJson(),
-      ),
-    );
-
-    if (result.hasException) {
-      throw Exception('Failed to start streaming session: ${result.exception}');
-    }
-
-    final sessionData = Mutation$StartStreamingSession.fromJson(result.data!);
-    final sessionResult = sessionData.startStreamingSession;
-    if (sessionResult == null) {
-      throw Exception('No session data returned from server');
-    }
-
-    _hlsSessionId = sessionResult.sessionId;
-    debugPrint('[PlayerScreen] P2P HLS session started: $_hlsSessionId');
-
-    // Set total duration if provided
-    if (sessionResult.duration != null) {
-      _totalDuration = Duration(
-        milliseconds: (sessionResult.duration! * 1000).round(),
-      );
-      DurationOverride.value = _totalDuration;
-      debugPrint('[PlayerScreen] Total duration from server: $_totalDuration');
-    }
-
-    // Build HLS URL via local proxy
-    final hlsUrl = localProxyService.buildHlsUrl(_hlsSessionId!);
-    debugPrint('[PlayerScreen] P2P HLS URL: $hlsUrl');
-
-    // Wait for playlist to be ready
-    await _waitForP2PPlaylist(hlsUrl);
-
-    // Initialize progress service
-    _progressService = ProgressService(graphqlClient);
-
-    // Fetch saved progress and episode list for TV shows
-    await _fetchProgressAndEpisodes(graphqlClient);
-
-    // Create media_kit player
-    _player = Player();
-    _videoController = VideoController(_player!);
-
-    // Open media with media_kit (no auth headers needed for local proxy)
-    await _player!.open(
-      Media(hlsUrl),
-      play: false,
-    );
-
-    // Wait for player to be ready
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    // Check if we should show resume dialog
-    final duration = _player!.state.duration.inSeconds;
-    final savedPosition = _savedPositionSeconds;
-    if (mounted &&
-        savedPosition != null &&
-        savedPosition > _minResumeThresholdSeconds &&
-        duration > 0) {
-      final shouldResume = await showResumeDialog(
-        context,
-        savedPosition,
-        duration,
-      );
-
-      if (shouldResume == true) {
-        await _player!.seek(Duration(seconds: savedPosition));
-      }
-    }
-
-    // Start playback
-    await _player!.play();
-
-    // Start progress tracking
-    if (widget.mediaType == 'movie') {
-      _progressService!.startMovieSync(_player!, widget.mediaId);
-    } else if (widget.mediaType == 'episode') {
-      _progressService!.startEpisodeSync(_player!, widget.mediaId);
-    }
-
-    // Listen for playback completion
-    await _positionSubscription?.cancel();
-    _positionSubscription = _player!.stream.position.listen((_) {
-      _onPlaybackProgress();
-    });
-
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-        _loadingMessage = null;
-      });
-    }
-
-    debugPrint('[PlayerScreen] P2P HLS playback initialized successfully');
-  }
-
-  /// Wait for P2P HLS playlist to be ready with enough segments.
-  Future<void> _waitForP2PPlaylist(String playlistUrl) async {
-    const maxRetries = 20;
-    const minSegments = 3;
-    const baseDelay = Duration(milliseconds: 500);
-    const maxDelay = Duration(milliseconds: 3000);
-
-    for (var i = 0; i < maxRetries; i++) {
-      try {
-        // Request via local proxy (no auth needed)
-        final response = await http.get(Uri.parse(playlistUrl));
-
-        if (response.statusCode == 200) {
-          final playlistText = response.body;
-          // Count .ts segments in playlist
-          final segmentCount = '.ts'.allMatches(playlistText).length;
-
-          if (segmentCount >= minSegments) {
-            if (i > 0) {
-              debugPrint(
-                  '[PlayerScreen] P2P playlist ready after ${i + 1} attempt(s) with $segmentCount segments');
-            }
-            return;
-          }
-
-          final percentage = (segmentCount / minSegments * 100).round();
-          debugPrint(
-              '[PlayerScreen] P2P playlist has $segmentCount/$minSegments segments ($percentage%)');
-          if (mounted) {
-            setState(() {
-              _loadingMessage = 'Preparing stream... $percentage%';
-            });
-          }
-        } else {
-          debugPrint(
-              '[PlayerScreen] P2P playlist not ready (${response.statusCode}), retrying...');
-          if (mounted) {
-            setState(() {
-              _loadingMessage =
-                  'Starting transcoding... (${i + 1}/$maxRetries)';
-            });
-          }
-        }
-
-        // Exponential backoff with max cap
-        final delay = Duration(
-          milliseconds: (baseDelay.inMilliseconds * (1.5 * i + 1))
-              .clamp(
-                baseDelay.inMilliseconds,
-                maxDelay.inMilliseconds,
-              )
-              .toInt(),
-        );
-        await Future.delayed(delay);
-      } catch (e) {
-        debugPrint(
-            '[PlayerScreen] Error checking P2P playlist (attempt ${i + 1}/$maxRetries): $e');
-        if (mounted) {
-          setState(() {
-            _loadingMessage = 'Starting transcoding... (${i + 1}/$maxRetries)';
-          });
-        }
-
-        final delay = Duration(
-          milliseconds: (baseDelay.inMilliseconds * (1.5 * i + 1))
-              .clamp(
-                baseDelay.inMilliseconds,
-                maxDelay.inMilliseconds,
-              )
-              .toInt(),
-        );
-        await Future.delayed(delay);
-      }
-    }
-
-    throw Exception('P2P playlist not ready after maximum retry attempts');
   }
 
   /// Initialize player for offline playback (no network services required).
@@ -903,6 +623,141 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         break;
       }
     }
+  }
+
+  /// Detect available audio and subtitle tracks from the media_kit player
+  /// and build mappings between app model tracks and media_kit track objects.
+  void _detectTracks() {
+    final player = _player;
+    if (player == null) return;
+
+    // --- Audio tracks ---
+    final mkAudioTracks = player.state.tracks.audio;
+    final audioTracks = <app_models_audio.AudioTrack>[];
+    final audioMap = <String, AudioTrack>{};
+
+    for (final mkTrack in mkAudioTracks) {
+      // Skip the "auto" and "no" sentinel tracks
+      if (mkTrack == AudioTrack.auto() || mkTrack == AudioTrack.no()) continue;
+
+      final appTrack = app_models_audio.AudioTrack(
+        id: mkTrack.id,
+        language: mkTrack.language ?? 'und',
+        title: mkTrack.title,
+      );
+      audioTracks.add(appTrack);
+      audioMap[appTrack.id] = mkTrack;
+    }
+
+    // Mark first track as default if available
+    if (audioTracks.isNotEmpty) {
+      final firstTrack = audioTracks.first;
+      audioTracks[0] = app_models_audio.AudioTrack(
+        id: firstTrack.id,
+        language: firstTrack.language,
+        title: firstTrack.title,
+        isDefault: true,
+      );
+    }
+
+    // --- Subtitle tracks ---
+    final mkSubtitleTracks = player.state.tracks.subtitle;
+    final subtitleMap = <String, SubtitleTrack>{};
+
+    if (_isDirectPlay) {
+      // For direct play, merge embedded subs from media_kit with external subs from GraphQL
+      final embeddedSubs = <app_models.SubtitleTrack>[];
+      for (final mkTrack in mkSubtitleTracks) {
+        if (mkTrack == SubtitleTrack.auto() || mkTrack == SubtitleTrack.no()) {
+          continue;
+        }
+
+        final appTrack = app_models.SubtitleTrack(
+          id: 'mk_${mkTrack.id}',
+          language: mkTrack.language ?? 'und',
+          title: mkTrack.title,
+          embedded: true,
+        );
+        embeddedSubs.add(appTrack);
+        subtitleMap[appTrack.id] = mkTrack;
+      }
+
+      // Add external subs from GraphQL (non-embedded ones with URLs)
+      final externalSubs =
+          _subtitleTracks.where((s) => !s.embedded && s.url != null).toList();
+
+      // Build URI-based media_kit tracks for external subs
+      for (final extSub in externalSubs) {
+        final fullUrl = _buildSubtitleUrl(extSub.url!);
+        final mkTrack = SubtitleTrack.uri(
+          fullUrl,
+          title: extSub.title,
+          language: extSub.language,
+        );
+        subtitleMap[extSub.id] = mkTrack;
+      }
+
+      // Combine: embedded first, then external
+      _subtitleTracks = [...embeddedSubs, ...externalSubs];
+    } else {
+      // For HLS mode: use only GraphQL subtitle tracks loaded via URI
+      for (final sub in _subtitleTracks) {
+        if (sub.url != null) {
+          final fullUrl = _buildSubtitleUrl(sub.url!);
+          final mkTrack = SubtitleTrack.uri(
+            fullUrl,
+            title: sub.title,
+            language: sub.language,
+          );
+          subtitleMap[sub.id] = mkTrack;
+        }
+      }
+    }
+
+    _audioTracks = audioTracks;
+    _mediaKitAudioTrackMap = audioMap;
+    _mediaKitSubtitleTrackMap = subtitleMap;
+
+    // Auto-select the current audio track
+    final currentMkAudio = player.state.track.audio;
+    if (currentMkAudio != AudioTrack.auto() &&
+        currentMkAudio != AudioTrack.no()) {
+      for (final appTrack in _audioTracks) {
+        if (_mediaKitAudioTrackMap[appTrack.id]?.id == currentMkAudio.id) {
+          _selectedAudioTrack = appTrack;
+          break;
+        }
+      }
+    }
+
+    debugPrint('[PlayerScreen] Detected ${_audioTracks.length} audio tracks, '
+        '${_subtitleTracks.length} subtitle tracks '
+        '(directPlay=$_isDirectPlay)');
+  }
+
+  /// Build a full subtitle URL from a relative URL path.
+  String _buildSubtitleUrl(String relativeUrl) {
+    // If already absolute, return as-is
+    if (relativeUrl.startsWith('http://') ||
+        relativeUrl.startsWith('https://')) {
+      return relativeUrl;
+    }
+
+    // Check if using P2P proxy
+    final connectionState = ref.read(conn.connectionProvider);
+    if (connectionState.isP2PMode) {
+      final proxy = ref.read(localProxyServiceProvider);
+      return 'http://127.0.0.1:${proxy.port}$relativeUrl';
+    }
+
+    // Direct server mode
+    final serverUrl =
+        ref.read(serverUrlProvider).whenOrNull(data: (url) => url);
+    if (serverUrl != null) {
+      return '$serverUrl$relativeUrl';
+    }
+
+    return relativeUrl;
   }
 
   Future<void> _fetchSeasonEpisodes(GraphQLClient client) async {
@@ -1058,101 +913,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     return 'S${nextEpisode.seasonNumber}E${nextEpisode.episodeNumber}${nextEpisode.title != null ? ' - ${nextEpisode.title}' : ''}';
   }
 
-  /// Get the HLS playlist URL from the stream endpoint.
-  /// On web, uses JSON response (browsers can't reliably follow redirects).
-  /// On native, follows redirects manually.
-  Future<String?> _getHlsPlaylistUrl(
-      String streamUrl, Map<String, String> headers) async {
-    try {
-      final client = http.Client();
-      try {
-        if (kIsWeb) {
-          // On web, request JSON response instead of redirect
-          final uri = Uri.parse(streamUrl);
-          final resolveUri = uri.replace(
-            queryParameters: {...uri.queryParameters, 'resolve': 'json'},
-          );
-
-          debugPrint('Requesting HLS URL via JSON: $resolveUri');
-          final response = await client.get(resolveUri, headers: headers);
-
-          if (response.statusCode == 200) {
-            final json = jsonDecode(response.body) as Map<String, dynamic>;
-            final hlsPath = json['hls_url'] as String?;
-
-            // Extract total duration from server (HLS live playlists don't include it)
-            final durationSeconds = json['duration'] as num?;
-            if (durationSeconds != null) {
-              _totalDuration =
-                  Duration(milliseconds: (durationSeconds * 1000).round());
-              DurationOverride.value = _totalDuration;
-              debugPrint('Total duration from server: $_totalDuration');
-            }
-
-            if (hlsPath != null) {
-              // Convert relative path to absolute URL
-              if (hlsPath.startsWith('/')) {
-                return '${uri.scheme}://${uri.host}:${uri.port}$hlsPath';
-              }
-              return hlsPath;
-            }
-          }
-          debugPrint(
-              'Failed to get HLS URL from JSON response: ${response.statusCode}');
-          return null;
-        } else {
-          // On native, follow redirects manually
-          final request = http.Request('HEAD', Uri.parse(streamUrl));
-          request.headers.addAll(headers);
-          request.followRedirects = false;
-
-          var response = await client.send(request);
-          var currentUrl = streamUrl;
-
-          // Follow redirects manually (up to 10 times)
-          int redirectCount = 0;
-          while (response.isRedirect && redirectCount < 10) {
-            final location = response.headers['location'];
-            if (location == null) break;
-
-            // Handle relative URLs
-            if (location.startsWith('/')) {
-              final uri = Uri.parse(currentUrl);
-              currentUrl = '${uri.scheme}://${uri.host}:${uri.port}$location';
-            } else if (!location.startsWith('http')) {
-              final uri = Uri.parse(currentUrl);
-              final basePath =
-                  uri.path.substring(0, uri.path.lastIndexOf('/') + 1);
-              currentUrl =
-                  '${uri.scheme}://${uri.host}:${uri.port}$basePath$location';
-            } else {
-              currentUrl = location;
-            }
-
-            debugPrint('Following redirect to: $currentUrl');
-
-            final nextRequest = http.Request('HEAD', Uri.parse(currentUrl));
-            nextRequest.headers.addAll(headers);
-            nextRequest.followRedirects = false;
-            response = await client.send(nextRequest);
-            redirectCount++;
-          }
-
-          return currentUrl;
-        }
-      } finally {
-        client.close();
-      }
-    } catch (e) {
-      debugPrint('Error getting HLS URL: $e');
-      return null;
-    }
-  }
-
   /// Wait for HLS playlist to be ready with enough segments.
+  ///
   /// Polls the playlist URL with exponential backoff until it has at least 3 segments.
-  Future<void> _waitForPlaylist(String playlistUrl, String token) async {
-    const maxRetries = 15;
+  /// Pass [headers] for direct mode (auth); omit for P2P (proxy handles auth).
+  Future<void> _waitForPlaylist(
+    String playlistUrl, {
+    Map<String, String>? headers,
+  }) async {
+    const maxRetries = 20;
     const minSegments = 3;
     const baseDelay = Duration(milliseconds: 500);
     const maxDelay = Duration(milliseconds: 3000);
@@ -1161,7 +930,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       try {
         final response = await http.get(
           Uri.parse(playlistUrl),
-          headers: {'Authorization': 'Bearer $token'},
+          headers: headers ?? {},
         );
 
         if (response.statusCode == 200) {
@@ -1172,14 +941,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           if (segmentCount >= minSegments) {
             if (i > 0) {
               debugPrint(
-                  'Playlist ready after ${i + 1} attempt(s) with $segmentCount segments');
+                  '[PlayerScreen] Playlist ready after ${i + 1} attempt(s) with $segmentCount segments');
             }
             return;
           }
 
           final percentage = (segmentCount / minSegments * 100).round();
           debugPrint(
-              'Playlist has $segmentCount/$minSegments segments ($percentage%), waiting for more...');
+              '[PlayerScreen] Playlist has $segmentCount/$minSegments segments ($percentage%)');
           if (mounted) {
             setState(() {
               _loadingMessage = 'Preparing stream... $percentage%';
@@ -1187,7 +956,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           }
         } else {
           debugPrint(
-              'Playlist not ready (${response.statusCode}), retrying...');
+              '[PlayerScreen] Playlist not ready (${response.statusCode}), retrying...');
           if (mounted) {
             setState(() {
               _loadingMessage =
@@ -1208,7 +977,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         await Future.delayed(delay);
       } catch (e) {
         debugPrint(
-            'Error checking playlist (attempt ${i + 1}/$maxRetries): $e');
+            '[PlayerScreen] Error checking playlist (attempt ${i + 1}/$maxRetries): $e');
         if (mounted) {
           setState(() {
             _loadingMessage = 'Starting transcoding... (${i + 1}/$maxRetries)';
@@ -1253,90 +1022,44 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
   }
 
-  /// Extract session ID from HLS URL.
-  /// URL format: /api/v1/hls/{session_id}/index.m3u8
-  String? _extractSessionIdFromHlsUrl(String hlsUrl) {
-    try {
-      final uri = Uri.parse(hlsUrl);
-      final segments = uri.pathSegments;
-      // Find 'hls' in path and get the next segment (session_id)
-      final hlsIndex = segments.indexOf('hls');
-      if (hlsIndex != -1 && hlsIndex + 1 < segments.length) {
-        return segments[hlsIndex + 1];
-      }
-    } catch (e) {
-      debugPrint('Error extracting session ID from HLS URL: $e');
-    }
-    return null;
-  }
-
   /// Terminate the HLS session on the server and clean up P2P resources.
   /// This stops FFmpeg and cleans up server-side resources.
   Future<void> _terminateHlsSession() async {
-    final sessionId = _hlsSessionId;
-    final token = _authToken;
-
-    if (_isP2PMode) {
-      // In P2P mode, always stop the local proxy
+    // Stop local proxy if P2P mode
+    final connectionState = ref.read(conn.connectionProvider);
+    if (connectionState.isP2PMode) {
       try {
         final localProxyService = ref.read(localProxyServiceProvider);
         await localProxyService.stop();
-        debugPrint('Local proxy stopped');
+        debugPrint('[PlayerScreen] Local proxy stopped');
       } catch (e) {
-        debugPrint('Error stopping local proxy: $e');
+        debugPrint('[PlayerScreen] Error stopping local proxy: $e');
       }
+    }
 
-      // Only terminate HLS session if one was started (not for direct play)
-      if (sessionId != null && token != null) {
-        debugPrint('Terminating P2P HLS session: $sessionId');
-        try {
-          final graphqlClient =
-              await ref.read(asyncGraphqlClientProvider.future);
-          final result = await graphqlClient.mutate(
-            MutationOptions(
-              document: documentNodeMutationEndStreamingSession,
-              variables: Variables$Mutation$EndStreamingSession(
-                sessionId: sessionId,
-              ).toJson(),
-            ),
-          );
-
-          if (result.hasException) {
-            debugPrint(
-                'Failed to terminate HLS session via GraphQL: ${result.exception}');
-          } else {
-            debugPrint('HLS session terminated successfully via GraphQL');
-          }
-        } catch (e) {
-          debugPrint('Error terminating HLS session: $e');
-        }
-      }
-    } else {
-      // Non-P2P mode: use HTTP DELETE
-      if (sessionId == null || token == null) {
-        return;
-      }
-
-      final serverUrl = _serverUrl;
-      if (serverUrl == null) {
-        return;
-      }
-
-      debugPrint('Terminating HLS session: $sessionId');
-
+    // End HLS session via GraphQL (works for both modes)
+    final sessionId = _hlsSessionId;
+    if (sessionId != null) {
+      debugPrint('[PlayerScreen] Terminating HLS session: $sessionId');
       try {
-        final response = await http.delete(
-          Uri.parse('$serverUrl/api/v1/hls/$sessionId'),
-          headers: {'Authorization': 'Bearer $token'},
+        final graphqlClient = await ref.read(asyncGraphqlClientProvider.future);
+        final result = await graphqlClient.mutate(
+          MutationOptions(
+            document: documentNodeMutationEndStreamingSession,
+            variables: Variables$Mutation$EndStreamingSession(
+              sessionId: sessionId,
+            ).toJson(),
+          ),
         );
 
-        if (response.statusCode == 200) {
-          debugPrint('HLS session terminated successfully');
+        if (result.hasException) {
+          debugPrint(
+              '[PlayerScreen] Failed to terminate HLS session: ${result.exception}');
         } else {
-          debugPrint('Failed to terminate HLS session: ${response.statusCode}');
+          debugPrint('[PlayerScreen] HLS session terminated successfully');
         }
       } catch (e) {
-        debugPrint('Error terminating HLS session: $e');
+        debugPrint('[PlayerScreen] Error terminating HLS session: $e');
       }
     }
   }
@@ -1344,7 +1067,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   // Note: Subtitle tracks are now loaded via GraphQL in _fetchProgressAndEpisodes
   // The _loadSubtitleTracks method has been removed.
 
-  /// Show subtitle track selector
+  /// Show subtitle track selector and apply selection via media_kit
   Future<void> _showSubtitleSelector() async {
     final selected = await showSubtitleTrackSelector(
       context,
@@ -1352,35 +1075,58 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       _selectedSubtitleTrack,
     );
 
-    // Note: selected can be null if user chose "Off"
-    // This is handled by the selector returning null explicitly
     if (selected != _selectedSubtitleTrack && mounted) {
       setState(() {
         _selectedSubtitleTrack = selected;
       });
 
-      if (selected != null) {
-        debugPrint('Selected subtitle: ${selected.displayName}');
-        // TODO: Apply subtitle track to video player
-        // Note: Chewie/video_player has limited subtitle support on web
-        _showSubtitleNotSupported();
+      final player = _player;
+      if (player == null) return;
+
+      if (selected == null) {
+        // "Off" - disable subtitles
+        await player.setSubtitleTrack(SubtitleTrack.no());
+        debugPrint('[PlayerScreen] Subtitles turned off');
       } else {
-        debugPrint('Subtitles turned off');
+        // Look up the corresponding media_kit track
+        final mkTrack = _mediaKitSubtitleTrackMap[selected.id];
+        if (mkTrack != null) {
+          await player.setSubtitleTrack(mkTrack);
+          debugPrint(
+              '[PlayerScreen] Set subtitle track: ${selected.displayName}');
+        } else {
+          debugPrint(
+              '[PlayerScreen] No media_kit track found for: ${selected.id}');
+        }
       }
     }
   }
 
-  /// Show a message that subtitle selection is not yet fully supported
-  void _showSubtitleNotSupported() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Subtitle selection is coming soon for web. '
-          'External subtitle support is in development.',
-        ),
-        duration: Duration(seconds: 3),
-      ),
+  /// Show audio track selector and apply selection via media_kit
+  Future<void> _showAudioSelector() async {
+    final selected = await showAudioTrackSelector(
+      context,
+      _audioTracks,
+      _selectedAudioTrack,
     );
+
+    if (selected != null && selected != _selectedAudioTrack && mounted) {
+      setState(() {
+        _selectedAudioTrack = selected;
+      });
+
+      final player = _player;
+      if (player == null) return;
+
+      final mkTrack = _mediaKitAudioTrackMap[selected.id];
+      if (mkTrack != null) {
+        await player.setAudioTrack(mkTrack);
+        debugPrint('[PlayerScreen] Set audio track: ${selected.displayName}');
+      } else {
+        debugPrint(
+            '[PlayerScreen] No media_kit track found for: ${selected.id}');
+      }
+    }
   }
 
   /// Show HLS quality selector (web only)
@@ -1420,6 +1166,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       onSubtitleTap: _showSubtitleSelector,
       selectedSubtitleTrack: _selectedSubtitleTrack,
       subtitleTrackCount: _subtitleTracks.length,
+      onAudioTap: _showAudioSelector,
+      selectedAudioTrack: _selectedAudioTrack,
+      audioTrackCount: _audioTracks.length,
       onQualityTap: PlatformFeatures.isWeb ? _showQualitySelector : null,
       selectedQuality: _selectedQuality,
     );
@@ -1619,7 +1368,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     Widget videoPlayer = SizedBox.expand(
       child: Video(
         controller: _videoController!,
-        controls: glassmorphicVideoControlsBuilder,
+        controls: glassmorphicVideoControlsBuilderWithCallback(
+          onVisibilityChanged: (visible) {
+            if (mounted) {
+              setState(() => _controlsVisible = visible);
+            }
+          },
+        ),
         fill: Colors.black,
       ),
     );
@@ -1644,66 +1399,57 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     return Stack(
       children: [
         videoPlayer,
-        Positioned(
-          top: 8,
-          left: 8,
-          child: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
-            onPressed: () {
-              if (context.canPop()) {
-                context.pop();
-              } else {
-                context.go('/');
-              }
-            },
-            style: IconButton.styleFrom(
-              backgroundColor: Colors.black.withValues(alpha: 0.5),
-            ),
-          ),
-        ),
-        if (widget.title != null)
-          Positioned(
-            top: 8,
-            left: 56,
-            right: 64,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                widget.title!,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
+        // Top bar + overlays - synced with video controls visibility
+        AnimatedOpacity(
+          opacity: _controlsVisible ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 200),
+          child: IgnorePointer(
+            ignoring: !_controlsVisible,
+            child: Stack(
+              children: [
+                // Top bar
+                Positioned(
+                  top: 16,
+                  left: 16,
+                  right: 16,
+                  child: _buildTopBar(),
+                ),
+                // Subtitle indicator (bottom right, near bottom controls)
+                if (_selectedSubtitleTrack != null)
+                  Positioned(
+                    bottom: 80,
+                    right: 16,
+                    child: GlassContainer(
+                      borderRadius: const BorderRadius.all(Radius.circular(6)),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
+                      backgroundOpacity: 0.4,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.subtitles_rounded,
+                              color: Colors.white, size: 14),
+                          const SizedBox(width: 5),
+                          Text(
+                            _selectedSubtitleTrack!.displayName,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+                  ),
+                // Episode navigation buttons
+                if (_seasonEpisodes != null && _currentEpisodeIndex != null)
+                  _buildEpisodeNavigation(),
+              ],
             ),
           ),
-        // Track settings overlay (settings button + subtitle indicator)
-        TrackSettingsOverlay(
-          onSettingsTap: _showTrackSettings,
-          selectedSubtitleTrack: _selectedSubtitleTrack,
         ),
-        // Cast button
-        Positioned(
-          top: 8,
-          right: 8,
-          child: _buildCastButton(),
-        ),
-        // AirPlay button (iOS only)
-        const Positioned(
-          top: 8,
-          right: 64,
-          child: AirPlayButton(),
-        ),
-        // Episode navigation buttons
-        if (_seasonEpisodes != null && _currentEpisodeIndex != null)
-          _buildEpisodeNavigation(),
-        // Up Next overlay for auto-play
+        // Up Next overlay for auto-play (always interactive, not tied to controls)
         if (_showUpNext && _getNextEpisodeTitle() != null)
           UpNextOverlay(
             nextEpisodeTitle: _getNextEpisodeTitle()!,
@@ -1712,6 +1458,74 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             onCancel: _cancelAutoPlay,
           ),
       ],
+    );
+  }
+
+  Widget _buildTopBar() {
+    return GlassContainer(
+      borderRadius: const BorderRadius.all(Radius.circular(12)),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(
+        children: [
+          // Back button
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () {
+                if (context.canPop()) {
+                  context.pop();
+                } else {
+                  context.go('/');
+                }
+              },
+              borderRadius: BorderRadius.circular(8),
+              child: const Padding(
+                padding: EdgeInsets.all(8),
+                child: Icon(
+                  Icons.arrow_back_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
+              ),
+            ),
+          ),
+          // Title
+          if (widget.title != null)
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  widget.title!,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            )
+          else
+            const Spacer(),
+          // Settings button
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: _showTrackSettings,
+              borderRadius: BorderRadius.circular(8),
+              child: const Padding(
+                padding: EdgeInsets.all(8),
+                child: Icon(
+                  Icons.settings_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1828,7 +1642,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
   }
 
+  // TODO: Re-enable cast button in top bar once casting is working
   /// Build the cast button that opens device picker.
+  // ignore: unused_element
   Widget _buildCastButton() {
     final isCasting = ref.watch(isCastingProvider);
     final castDevice = ref.watch(currentCastDeviceProvider);

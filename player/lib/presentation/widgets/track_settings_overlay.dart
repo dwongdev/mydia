@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import '../../domain/models/audio_track.dart';
 import '../../domain/models/subtitle_track.dart';
 import 'hls_quality_selector.dart';
 
@@ -71,6 +72,9 @@ Future<void> showTrackSettingsSheet(
   required VoidCallback onSubtitleTap,
   required SubtitleTrack? selectedSubtitleTrack,
   required int subtitleTrackCount,
+  VoidCallback? onAudioTap,
+  AudioTrack? selectedAudioTrack,
+  int audioTrackCount = 0,
   VoidCallback? onQualityTap,
   HlsQualityLevel? selectedQuality,
 }) async {
@@ -115,6 +119,28 @@ Future<void> showTrackSettingsSheet(
                 onQualityTap();
               },
             ),
+          // Audio track selection
+          ListTile(
+            leading: const Icon(Icons.audiotrack, color: Colors.white),
+            title: const Text(
+              'Audio',
+              style: TextStyle(color: Colors.white),
+            ),
+            subtitle: Text(
+              audioTrackCount > 0
+                  ? (selectedAudioTrack?.displayName ?? 'Default')
+                  : 'Default',
+              style: const TextStyle(color: Colors.grey),
+            ),
+            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            onTap: audioTrackCount > 0 && onAudioTap != null
+                ? () {
+                    Navigator.pop(context);
+                    onAudioTap();
+                  }
+                : null,
+          ),
+          // Subtitle selection
           ListTile(
             leading: const Icon(Icons.subtitles, color: Colors.white),
             title: const Text(
@@ -131,35 +157,16 @@ Future<void> showTrackSettingsSheet(
               onSubtitleTap();
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.audiotrack, color: Colors.white),
-            title: const Text(
-              'Audio Track',
-              style: TextStyle(color: Colors.white),
-            ),
-            subtitle: const Text(
-              'Coming soon',
-              style: TextStyle(color: Colors.grey),
-            ),
-            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Audio track selection is coming soon. '
-                    'The video player package has limited multi-audio support on web.',
-                  ),
-                  duration: Duration(seconds: 3),
-                ),
-              );
-            },
-          ),
-          if (subtitleTrackCount > 0)
+          // Track count summary
+          if (audioTrackCount > 0 || subtitleTrackCount > 0)
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
               child: Text(
-                '$subtitleTrackCount subtitle track(s) available',
+                [
+                  if (audioTrackCount > 0) '$audioTrackCount audio track(s)',
+                  if (subtitleTrackCount > 0)
+                    '$subtitleTrackCount subtitle track(s)',
+                ].join(', '),
                 style: const TextStyle(
                   color: Colors.grey,
                   fontSize: 12,

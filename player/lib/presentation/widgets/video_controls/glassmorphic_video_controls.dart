@@ -24,6 +24,25 @@ Widget glassmorphicVideoControlsBuilder(VideoState state) {
   return const _GlassmorphicVideoControls();
 }
 
+/// Creates a controls builder that notifies when controls visibility changes.
+///
+/// Usage:
+/// ```dart
+/// Video(
+///   controller: videoController,
+///   controls: glassmorphicVideoControlsBuilderWithCallback(
+///     onVisibilityChanged: (visible) { ... },
+///   ),
+/// )
+/// ```
+Widget Function(VideoState) glassmorphicVideoControlsBuilderWithCallback({
+  required ValueChanged<bool> onVisibilityChanged,
+}) {
+  return (VideoState state) => _GlassmorphicVideoControls(
+        onVisibilityChanged: onVisibilityChanged,
+      );
+}
+
 /// Custom glassmorphism-styled video controls overlay.
 ///
 /// Features:
@@ -34,7 +53,9 @@ Widget glassmorphicVideoControlsBuilder(VideoState state) {
 /// - Thin seekable progress bar
 /// - Time display, volume, and fullscreen controls
 class _GlassmorphicVideoControls extends StatefulWidget {
-  const _GlassmorphicVideoControls();
+  final ValueChanged<bool>? onVisibilityChanged;
+
+  const _GlassmorphicVideoControls({this.onVisibilityChanged});
 
   @override
   State<_GlassmorphicVideoControls> createState() =>
@@ -117,6 +138,7 @@ class _GlassmorphicVideoControlsState extends State<_GlassmorphicVideoControls>
     if (!_isVisible) {
       setState(() => _isVisible = true);
       _animationController.forward();
+      widget.onVisibilityChanged?.call(true);
     }
     _startHideTimer();
   }
@@ -125,6 +147,7 @@ class _GlassmorphicVideoControlsState extends State<_GlassmorphicVideoControls>
     if (_isVisible && !_isSeeking && _player(context).state.playing) {
       setState(() => _isVisible = false);
       _animationController.reverse();
+      widget.onVisibilityChanged?.call(false);
     }
   }
 

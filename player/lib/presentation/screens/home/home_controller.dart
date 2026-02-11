@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:graphql_flutter/graphql_flutter.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../core/graphql/graphql_provider.dart';
@@ -100,7 +101,17 @@ class HomeController extends _$HomeController {
   }
 
   Future<void> refresh() async {
+    final previousData = state.value;
     state = const AsyncValue.loading();
-    state = await AsyncValue.guard(() => _fetchHomeData());
+
+    final result = await AsyncValue.guard(() => _fetchHomeData());
+    if (result.hasError && previousData != null) {
+      // Keep showing stale data instead of replacing with error
+      debugPrint(
+          '[HomeController] Refresh failed, keeping previous data: ${result.error}');
+      state = AsyncValue.data(previousData);
+      return;
+    }
+    state = result;
   }
 }

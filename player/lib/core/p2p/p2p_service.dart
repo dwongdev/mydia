@@ -130,6 +130,12 @@ class P2pStatus {
   }
 }
 
+/// Max auto-reconnect attempts before giving up (reset on successful connect).
+const _maxAutoReconnectAttempts = 3;
+
+/// Delay before attempting auto-reconnect after a disconnect event.
+const _autoReconnectDelay = Duration(seconds: 2);
+
 /// Service to handle P2P networking via iroh-based Rust Native Core
 class P2pService {
   P2PHost? _host;
@@ -142,6 +148,11 @@ class P2pService {
   // Cached status fields - updated from P2P events to avoid sync FFI calls
   P2pConnectionType _currentConnectionType = P2pConnectionType.none;
   String? _cachedRelayUrl;
+
+  // Auto-reconnect state
+  String? _lastDialedEndpointAddr;
+  int _autoReconnectAttempts = 0;
+  Timer? _autoReconnectTimer;
 
   // Stream of P2P status updates
   final _statusController = StreamController<P2pStatus>.broadcast();
@@ -262,6 +273,8 @@ class P2pService {
           debugPrint('[P2P] Peer connected: $peerId ($connectionType)');
           _connectedPeers.add(peerId);
           _currentConnectionType = _parseConnectionType(connectionType);
+          _autoReconnectAttempts = 0;
+          _autoReconnectTimer?.cancel();
           _peerConnectedController.add(peerId);
           _emitStatus();
         } else if (event.startsWith('connection_type_changed:')) {
@@ -275,11 +288,13 @@ class P2pService {
           _emitStatus();
         } else if (event.startsWith('disconnected:')) {
           final peerId = event.substring('disconnected:'.length);
+          debugPrint('[P2P] Peer disconnected: $peerId');
           _connectedPeers.remove(peerId);
           if (_connectedPeers.isEmpty) {
             _currentConnectionType = P2pConnectionType.none;
           }
           _emitStatus();
+          _scheduleAutoReconnect();
         } else if (event == 'relay_connected') {
           debugPrint('[P2P] Connected to relay');
           _isRelayConnected = true;
@@ -307,6 +322,45 @@ class P2pService {
 
   void _emitStatus() {
     _statusController.add(status);
+  }
+
+  /// Schedule an auto-reconnect attempt after a disconnect event.
+  /// Uses the cached [_lastDialedEndpointAddr] to re-dial the peer.
+  /// Caps attempts at [_maxAutoReconnectAttempts] to avoid infinite loops.
+  void _scheduleAutoReconnect() {
+    final addr = _lastDialedEndpointAddr;
+    if (addr == null) return;
+    if (_autoReconnectAttempts >= _maxAutoReconnectAttempts) {
+      debugPrint(
+          '[P2P] Auto-reconnect attempts exhausted ($_autoReconnectAttempts/$_maxAutoReconnectAttempts)');
+      return;
+    }
+
+    // Cancel any pending reconnect timer
+    _autoReconnectTimer?.cancel();
+
+    _autoReconnectAttempts++;
+    debugPrint(
+        '[P2P] Scheduling auto-reconnect attempt $_autoReconnectAttempts/$_maxAutoReconnectAttempts '
+        'in ${_autoReconnectDelay.inSeconds}s');
+
+    _autoReconnectTimer = Timer(_autoReconnectDelay, () async {
+      // Don't reconnect if already connected or disposed
+      if (_host == null || !_isInitialized) return;
+      if (isConnectedToPeer(addr)) {
+        debugPrint('[P2P] Already reconnected, skipping auto-reconnect');
+        return;
+      }
+
+      try {
+        debugPrint('[P2P] Auto-reconnecting...');
+        await dial(addr);
+      } catch (e) {
+        debugPrint('[P2P] Auto-reconnect failed: $e');
+        // Schedule another attempt if we haven't exhausted retries
+        _scheduleAutoReconnect();
+      }
+    });
   }
 
   /// Dial a peer using their EndpointAddr JSON.
@@ -352,9 +406,13 @@ class P2pService {
 
     if (_host == null) throw Exception("P2P host initialization failed");
 
+    // Cache for auto-reconnect on disconnect
+    _lastDialedEndpointAddr = endpointAddrJson;
+
     // Check if already connected
     if (isConnectedToPeer(endpointAddrJson)) {
       debugPrint('[P2P] Already connected to peer');
+      _autoReconnectAttempts = 0;
       return;
     }
 
@@ -365,6 +423,9 @@ class P2pService {
     // Wait briefly for the connection event to be processed
     // This gives time for the 'connected:' event to be received
     await Future.delayed(const Duration(milliseconds: 100));
+
+    // Reset reconnect counter on successful dial
+    _autoReconnectAttempts = 0;
   }
 
   /// Get this node's EndpointAddr as JSON for sharing.
@@ -552,6 +613,9 @@ class P2pService {
   /// Reset the P2P host for re-initialization.
   /// This allows changing the relay URL by calling initialize() again.
   void reset() {
+    _autoReconnectTimer?.cancel();
+    _autoReconnectAttempts = 0;
+    _lastDialedEndpointAddr = null;
     _host = null;
     _isInitialized = false;
     _isRelayConnected = false;
@@ -601,6 +665,7 @@ class P2pService {
   }
 
   Future<void> dispose() async {
+    _autoReconnectTimer?.cancel();
     // Rust host is dropped when P2PHost is garbage collected
     _host = null;
     _isInitialized = false;

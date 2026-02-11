@@ -8,6 +8,10 @@ import 'package:media_kit/media_kit.dart';
 /// - Swipe up/down on right side: volume control
 /// - Double-tap left side: seek backward 10 seconds
 /// - Double-tap right side: seek forward 10 seconds
+///
+/// Uses [HitTestBehavior.translucent] to wrap the child so that both this
+/// widget's gesture recognizers and the child's (e.g. tap-to-show controls)
+/// participate in the gesture arena.
 class GestureControls extends StatefulWidget {
   final Player player;
   final Widget child;
@@ -33,24 +37,29 @@ class _GestureControlsState extends State<GestureControls> {
   double _volume = 1.0;
   double _brightness = 1.0;
 
+  Offset? _lastDoubleTapPosition;
+
   @override
   void initState() {
     super.initState();
     _volume = widget.player.state.volume / 100.0; // media_kit uses 0-100 scale
   }
 
-  void _handleDoubleTapLeft() {
-    _seekBackward();
-  }
-
-  void _handleDoubleTapRight() {
-    _seekForward();
+  void _handleDoubleTap() {
+    final screenWidth = context.size?.width ?? 0;
+    final isRight = (_lastDoubleTapPosition?.dx ?? 0) > screenWidth / 2;
+    if (isRight) {
+      _seekForward();
+    } else {
+      _seekBackward();
+    }
   }
 
   void _seekBackward() {
     final currentPosition = widget.player.state.position;
     final newPosition = currentPosition - const Duration(seconds: 10);
-    final targetPosition = newPosition < Duration.zero ? Duration.zero : newPosition;
+    final targetPosition =
+        newPosition < Duration.zero ? Duration.zero : newPosition;
 
     widget.player.seek(targetPosition);
     _showSeekFeedback(forward: false);
@@ -125,62 +134,55 @@ class _GestureControlsState extends State<GestureControls> {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        widget.child,
-        // Left side gesture detector (brightness + seek backward)
-        Positioned(
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: MediaQuery.of(context).size.width / 2,
-          child: GestureDetector(
-            onDoubleTap: _handleDoubleTapLeft,
-            onVerticalDragUpdate: (details) {
-              _handleVerticalDragLeft(details.delta.dy);
-            },
-            child: Container(color: Colors.transparent),
-          ),
-        ),
-        // Right side gesture detector (volume + seek forward)
-        Positioned(
-          right: 0,
-          top: 0,
-          bottom: 0,
-          width: MediaQuery.of(context).size.width / 2,
-          child: GestureDetector(
-            onDoubleTap: _handleDoubleTapRight,
-            onVerticalDragUpdate: (details) {
+        // Wrap child with gesture detection using translucent behavior.
+        // This ensures the child's own gesture detectors (e.g. tap-to-show
+        // video controls) are also hit-tested and participate in the arena.
+        GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onDoubleTapDown: (details) {
+            _lastDoubleTapPosition = details.localPosition;
+          },
+          onDoubleTap: _handleDoubleTap,
+          onVerticalDragUpdate: (details) {
+            final screenWidth = context.size?.width ?? 0;
+            final isRight = details.localPosition.dx > screenWidth / 2;
+            if (isRight) {
               _handleVerticalDragRight(details.delta.dy);
-            },
-            child: Container(color: Colors.transparent),
-          ),
+            } else {
+              _handleVerticalDragLeft(details.delta.dy);
+            }
+          },
+          child: widget.child,
         ),
         // Seek indicator
         if (_showSeekIndicator)
-          Center(
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.7),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    _isSeekForward ? Icons.fast_forward : Icons.fast_rewind,
-                    color: Colors.white,
-                    size: 32,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${_seekSeconds.toInt()} sec',
-                    style: const TextStyle(
+          IgnorePointer(
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.7),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _isSeekForward ? Icons.fast_forward : Icons.fast_rewind,
                       color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
+                      size: 32,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    Text(
+                      '${_seekSeconds.toInt()} sec',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -190,47 +192,50 @@ class _GestureControlsState extends State<GestureControls> {
             right: 16,
             top: 0,
             bottom: 0,
-            child: Center(
-              child: Container(
-                width: 48,
-                height: 200,
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.7),
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Column(
-                  children: [
-                    Icon(
-                      _volume > 0.5
-                          ? Icons.volume_up
-                          : _volume > 0
-                              ? Icons.volume_down
-                              : Icons.volume_off,
-                      color: Colors.white,
-                      size: 24,
-                    ),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: RotatedBox(
-                        quarterTurns: -1,
-                        child: LinearProgressIndicator(
-                          value: _volume,
-                          backgroundColor: Colors.grey[700],
-                          valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+            child: IgnorePointer(
+              child: Center(
+                child: Container(
+                  width: 48,
+                  height: 200,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Column(
+                    children: [
+                      Icon(
+                        _volume > 0.5
+                            ? Icons.volume_up
+                            : _volume > 0
+                                ? Icons.volume_down
+                                : Icons.volume_off,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: RotatedBox(
+                          quarterTurns: -1,
+                          child: LinearProgressIndicator(
+                            value: _volume,
+                            backgroundColor: Colors.grey[700],
+                            valueColor: const AlwaysStoppedAnimation<Color>(
+                                Colors.white),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${(_volume * 100).toInt()}%',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
+                      const SizedBox(height: 8),
+                      Text(
+                        '${(_volume * 100).toInt()}%',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -241,45 +246,48 @@ class _GestureControlsState extends State<GestureControls> {
             left: 16,
             top: 0,
             bottom: 0,
-            child: Center(
-              child: Container(
-                width: 48,
-                height: 200,
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.7),
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Column(
-                  children: [
-                    Icon(
-                      _brightness > 0.5
-                          ? Icons.brightness_high
-                          : Icons.brightness_low,
-                      color: Colors.white,
-                      size: 24,
-                    ),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: RotatedBox(
-                        quarterTurns: -1,
-                        child: LinearProgressIndicator(
-                          value: _brightness,
-                          backgroundColor: Colors.grey[700],
-                          valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+            child: IgnorePointer(
+              child: Center(
+                child: Container(
+                  width: 48,
+                  height: 200,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Column(
+                    children: [
+                      Icon(
+                        _brightness > 0.5
+                            ? Icons.brightness_high
+                            : Icons.brightness_low,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: RotatedBox(
+                          quarterTurns: -1,
+                          child: LinearProgressIndicator(
+                            value: _brightness,
+                            backgroundColor: Colors.grey[700],
+                            valueColor: const AlwaysStoppedAnimation<Color>(
+                                Colors.white),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${(_brightness * 100).toInt()}%',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
+                      const SizedBox(height: 8),
+                      Text(
+                        '${(_brightness * 100).toInt()}%',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),

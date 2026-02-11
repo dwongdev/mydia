@@ -114,6 +114,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     super.initState();
     _initializePlayer();
 
+    // Force landscape orientation on mobile devices
+    if (PlatformFeatures.isMobile) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
+
     // Register beforeunload handler for web to terminate HLS session on tab close
     if (kIsWeb) {
       web_lifecycle.registerBeforeUnload(_terminateHlsSession);
@@ -1508,6 +1516,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   @override
   void dispose() {
+    // Restore portrait orientation on mobile devices
+    if (PlatformFeatures.isMobile) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
+
     // Save progress before disposing (fire and forget - can't await in dispose)
     _saveProgress();
 

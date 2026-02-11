@@ -752,6 +752,8 @@ class ShowDetailScreen extends ConsumerWidget {
                   key: ValueKey(episode.id),
                   episode: episode,
                   showTitle: show?.title ?? 'Unknown Show',
+                  showId: show?.id,
+                  showPosterUrl: show?.artwork.posterUrl,
                   onTap: episode.hasFile
                       ? () async {
                           if (episode.files.isNotEmpty) {

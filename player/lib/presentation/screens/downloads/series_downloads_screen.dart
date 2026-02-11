@@ -30,8 +30,13 @@ class SeriesDownloadsScreen extends ConsumerWidget {
     final queue = downloadQueueAsync.value ?? [];
 
     // Filter for this show
-    final showDownloads = downloaded.where((m) => m.showId == showId).toList();
-    final showQueue = queue.where((t) => t.showId == showId).toList();
+    // Match by showId, or fall back to mediaId for episodes with missing showId
+    final showDownloads = downloaded
+        .where((m) => m.showId == showId || (m.showId == null && m.mediaId == showId))
+        .toList();
+    final showQueue = queue
+        .where((t) => t.showId == showId || (t.showId == null && t.mediaId == showId))
+        .toList();
 
     // Sort by Season/Episode
     showDownloads.sort((a, b) {

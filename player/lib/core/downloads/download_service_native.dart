@@ -678,7 +678,7 @@ class _NativeDownloadService implements DownloadService {
       mediaType: mediaType == MediaType.movie ? 'movie' : 'episode',
       posterUrl: posterUrl,
       createdAt: DateTime.now(),
-      isProgressive: true,
+      isProgressive: prepareResult.status != 'ready',
       transcodeJobId: jobId,
       transcodeProgress: prepareResult.progress,
       status: prepareResult.status == 'ready' ? 'downloading' : 'transcoding',
@@ -890,10 +890,14 @@ class _NativeDownloadService implements DownloadService {
               final estimatedTotal = lastKnownFileSize ?? total;
 
               if (estimatedTotal > 0) {
-                final downloadProgress = actualReceived / estimatedTotal;
+                final downloadProgress =
+                    (actualReceived / estimatedTotal).clamp(0.0, 1.0);
                 updatedTask = updatedTask.copyWith(
-                  downloadProgress: downloadProgress.clamp(0.0, 1.0),
-                  progress: updatedTask.combinedProgress,
+                  downloadProgress: downloadProgress,
+                  progress: updatedTask.isProgressive
+                      ? (updatedTask.transcodeProgress * 0.3) +
+                          (downloadProgress * 0.7)
+                      : downloadProgress,
                   downloadedBytes: actualReceived,
                 );
                 _speedTracker.recordProgress(task.id, actualReceived);

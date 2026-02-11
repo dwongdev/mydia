@@ -15,12 +15,16 @@ import 'quality_badge.dart';
 class EpisodeCard extends ConsumerStatefulWidget {
   final Episode episode;
   final String showTitle;
+  final String? showId;
+  final String? showPosterUrl;
   final VoidCallback? onTap;
 
   const EpisodeCard({
     super.key,
     required this.episode,
     required this.showTitle,
+    this.showId,
+    this.showPosterUrl,
     this.onTap,
   });
 
@@ -475,7 +479,9 @@ class _EpisodeCardState extends ConsumerState<EpisodeCard>
               runtime: widget.episode.runtime,
               seasonNumber: widget.episode.seasonNumber,
               episodeNumber: widget.episode.episodeNumber,
+              showId: widget.showId,
               showTitle: widget.showTitle,
+              showPosterUrl: widget.showPosterUrl,
               thumbnailUrl: widget.episode.thumbnailUrl,
               airDate: widget.episode.airDate,
               getDownloadUrl: (jobId) async {

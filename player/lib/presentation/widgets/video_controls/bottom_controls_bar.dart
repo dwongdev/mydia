@@ -5,7 +5,6 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../../../core/player/duration_override.dart';
 import '../../../core/player/platform_features.dart';
 import '../../../core/theme/colors.dart';
-import 'glass_container.dart';
 
 /// Bottom controls bar with time display, volume control, and fullscreen toggle.
 ///
@@ -19,10 +18,42 @@ class BottomControlsBar extends StatefulWidget {
   /// The video controller for fullscreen operations.
   final VideoController videoController;
 
+  /// Triggered when audio track selection is requested.
+  final VoidCallback? onAudioTap;
+
+  /// Triggered when subtitle selection is requested.
+  final VoidCallback? onSubtitleTap;
+
+  /// Triggered when quality selection is requested (web only).
+  final VoidCallback? onQualityTap;
+
+  /// Number of available audio tracks.
+  final int audioTrackCount;
+
+  /// Number of available subtitle tracks.
+  final int subtitleTrackCount;
+
+  /// Current audio track label, if available.
+  final String? selectedAudioLabel;
+
+  /// Current subtitle track label, if available.
+  final String? selectedSubtitleLabel;
+
+  /// Current quality label, if available.
+  final String? selectedQualityLabel;
+
   const BottomControlsBar({
     super.key,
     required this.player,
     required this.videoController,
+    this.onAudioTap,
+    this.onSubtitleTap,
+    this.onQualityTap,
+    this.audioTrackCount = 0,
+    this.subtitleTrackCount = 0,
+    this.selectedAudioLabel,
+    this.selectedSubtitleLabel,
+    this.selectedQualityLabel,
   });
 
   @override
@@ -44,18 +75,53 @@ class _BottomControlsBarState extends State<BottomControlsBar> {
 
   @override
   Widget build(BuildContext context) {
-    return GlassContainer(
-      borderRadius: const BorderRadius.all(Radius.circular(8)),
+    final canShowQuality = widget.onQualityTap != null;
+    final subtitleEnabled = widget.subtitleTrackCount > 0;
+    final audioEnabled = widget.audioTrackCount > 0;
+
+    return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.08),
+          width: 1,
+        ),
+      ),
       child: Row(
         children: [
-          // Time display
           _buildTimeDisplay(),
           const Spacer(),
-          // Volume control
+          _buildActionButton(
+            icon: Icons.subtitles_outlined,
+            tooltip: subtitleEnabled
+                ? 'Subtitles: ${widget.selectedSubtitleLabel ?? 'Off'}'
+                : 'No subtitles',
+            onTap: subtitleEnabled ? widget.onSubtitleTap : null,
+            enabled: subtitleEnabled,
+          ),
+          const SizedBox(width: 6),
+          _buildActionButton(
+            icon: Icons.audiotrack_outlined,
+            tooltip: audioEnabled
+                ? 'Audio: ${widget.selectedAudioLabel ?? 'Default'}'
+                : 'No audio tracks',
+            onTap: audioEnabled ? widget.onAudioTap : null,
+            enabled: audioEnabled,
+          ),
+          if (canShowQuality) ...[
+            const SizedBox(width: 6),
+            _buildActionButton(
+              icon: Icons.hd_outlined,
+              tooltip: 'Quality: ${widget.selectedQualityLabel ?? 'Auto'}',
+              onTap: widget.onQualityTap,
+              enabled: true,
+            ),
+          ],
+          const SizedBox(width: 8),
           _buildVolumeControl(),
           const SizedBox(width: 8),
-          // Fullscreen button
           _buildFullscreenButton(),
         ],
       ),
@@ -206,6 +272,35 @@ class _BottomControlsBarState extends State<BottomControlsBar> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onTap,
+    required bool enabled,
+  }) {
+    final button = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Icon(
+            icon,
+            color:
+                enabled ? Colors.white : Colors.white.withValues(alpha: 0.35),
+            size: 18,
+          ),
+        ),
+      ),
+    );
+
+    return Tooltip(
+      message: tooltip,
+      child: button,
     );
   }
 

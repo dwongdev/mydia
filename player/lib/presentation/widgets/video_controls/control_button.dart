@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'glass_container.dart';
-
-/// A reusable control button with glassmorphism effect.
+/// A reusable control button with a minimal flat style.
 ///
 /// Used throughout the video controls for actions like play/pause,
 /// seek forward/backward, fullscreen toggle, etc.
@@ -63,24 +61,25 @@ class ControlButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final button = GlassContainer.circular(
-      radius: size / 2,
-      padding: EdgeInsets.zero,
-      backgroundOpacity: enabled ? 0.3 : 0.15,
+    final button = Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: enabled
+            ? Colors.black.withValues(alpha: 0.4)
+            : Colors.black.withValues(alpha: 0.2),
+        shape: BoxShape.circle,
+      ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: enabled ? onTap : null,
           borderRadius: BorderRadius.circular(size / 2),
-          child: SizedBox(
-            width: size,
-            height: size,
-            child: Center(
-              child: Icon(
-                icon,
-                size: iconSize,
-                color: enabled ? iconColor : iconColor.withValues(alpha: 0.5),
-              ),
+          child: Center(
+            child: Icon(
+              icon,
+              size: iconSize,
+              color: enabled ? iconColor : iconColor.withValues(alpha: 0.5),
             ),
           ),
         ),

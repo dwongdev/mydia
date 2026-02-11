@@ -24,11 +24,9 @@ import '../../widgets/resume_dialog.dart';
 import '../../widgets/subtitle_track_selector.dart';
 import '../../widgets/audio_track_selector.dart';
 import '../../widgets/hls_quality_selector.dart';
-import '../../widgets/track_settings_overlay.dart';
 import '../../widgets/gesture_controls.dart';
 import '../../widgets/cast_device_picker.dart';
-import '../../widgets/video_controls/glass_container.dart';
-import '../../widgets/video_controls/glassmorphic_video_controls.dart';
+import '../../widgets/video_controls/custom_video_controls.dart';
 import '../../widgets/up_next_overlay.dart';
 import '../../../domain/models/audio_track.dart' as app_models_audio;
 import '../../../domain/models/subtitle_track.dart' as app_models;
@@ -1159,21 +1157,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
   }
 
-  /// Show track settings bottom sheet
-  Future<void> _showTrackSettings() async {
-    await showTrackSettingsSheet(
-      context,
-      onSubtitleTap: _showSubtitleSelector,
-      selectedSubtitleTrack: _selectedSubtitleTrack,
-      subtitleTrackCount: _subtitleTracks.length,
-      onAudioTap: _showAudioSelector,
-      selectedAudioTrack: _selectedAudioTrack,
-      audioTrackCount: _audioTracks.length,
-      onQualityTap: PlatformFeatures.isWeb ? _showQualitySelector : null,
-      selectedQuality: _selectedQuality,
-    );
-  }
-
   /// Handle keyboard shortcuts (desktop only)
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     final player = _player;
@@ -1368,12 +1351,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     Widget videoPlayer = SizedBox.expand(
       child: Video(
         controller: _videoController!,
-        controls: glassmorphicVideoControlsBuilderWithCallback(
+        controls: customVideoControlsBuilderWithCallback(
           onVisibilityChanged: (visible) {
             if (mounted) {
               setState(() => _controlsVisible = visible);
             }
           },
+          onAudioTap: _showAudioSelector,
+          onSubtitleTap: _showSubtitleSelector,
+          onQualityTap: PlatformFeatures.isWeb ? _showQualitySelector : null,
+          audioTrackCount: _audioTracks.length,
+          subtitleTrackCount: _subtitleTracks.length,
+          selectedAudioLabel: _selectedAudioTrack?.displayName,
+          selectedSubtitleLabel: _selectedSubtitleTrack?.displayName,
+          selectedQualityLabel: _selectedQuality.label,
         ),
         fill: Colors.black,
       ),
@@ -1414,34 +1405,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   right: 16,
                   child: _buildTopBar(),
                 ),
-                // Subtitle indicator (bottom right, near bottom controls)
-                if (_selectedSubtitleTrack != null)
-                  Positioned(
-                    bottom: 80,
-                    right: 16,
-                    child: GlassContainer(
-                      borderRadius: const BorderRadius.all(Radius.circular(6)),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
-                      backgroundOpacity: 0.4,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.subtitles_rounded,
-                              color: Colors.white, size: 14),
-                          const SizedBox(width: 5),
-                          Text(
-                            _selectedSubtitleTrack!.displayName,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
                 // Episode navigation buttons
                 if (_seasonEpisodes != null && _currentEpisodeIndex != null)
                   _buildEpisodeNavigation(),
@@ -1462,8 +1425,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   Widget _buildTopBar() {
-    return GlassContainer(
-      borderRadius: const BorderRadius.all(Radius.circular(12)),
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.08),
+          width: 1,
+        ),
+      ),
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: Row(
         children: [
@@ -1508,22 +1478,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             )
           else
             const Spacer(),
-          // Settings button
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: _showTrackSettings,
-              borderRadius: BorderRadius.circular(8),
-              child: const Padding(
-                padding: EdgeInsets.all(8),
-                child: Icon(
-                  Icons.settings_rounded,
-                  color: Colors.white,
-                  size: 22,
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );

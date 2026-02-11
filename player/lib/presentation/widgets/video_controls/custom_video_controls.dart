@@ -17,11 +17,11 @@ import 'video_progress_bar.dart';
 /// ```dart
 /// Video(
 ///   controller: videoController,
-///   controls: glassmorphicVideoControlsBuilder,
+///   controls: customVideoControlsBuilder,
 /// )
 /// ```
-Widget glassmorphicVideoControlsBuilder(VideoState state) {
-  return const _GlassmorphicVideoControls();
+Widget customVideoControlsBuilder(VideoState state) {
+  return const _CustomVideoControls();
 }
 
 /// Creates a controls builder that notifies when controls visibility changes.
@@ -30,39 +30,73 @@ Widget glassmorphicVideoControlsBuilder(VideoState state) {
 /// ```dart
 /// Video(
 ///   controller: videoController,
-///   controls: glassmorphicVideoControlsBuilderWithCallback(
+///   controls: customVideoControlsBuilderWithCallback(
 ///     onVisibilityChanged: (visible) { ... },
 ///   ),
 /// )
 /// ```
-Widget Function(VideoState) glassmorphicVideoControlsBuilderWithCallback({
+Widget Function(VideoState) customVideoControlsBuilderWithCallback({
   required ValueChanged<bool> onVisibilityChanged,
+  VoidCallback? onAudioTap,
+  VoidCallback? onSubtitleTap,
+  VoidCallback? onQualityTap,
+  int audioTrackCount = 0,
+  int subtitleTrackCount = 0,
+  String? selectedAudioLabel,
+  String? selectedSubtitleLabel,
+  String? selectedQualityLabel,
 }) {
-  return (VideoState state) => _GlassmorphicVideoControls(
+  return (VideoState state) => _CustomVideoControls(
         onVisibilityChanged: onVisibilityChanged,
+        onAudioTap: onAudioTap,
+        onSubtitleTap: onSubtitleTap,
+        onQualityTap: onQualityTap,
+        audioTrackCount: audioTrackCount,
+        subtitleTrackCount: subtitleTrackCount,
+        selectedAudioLabel: selectedAudioLabel,
+        selectedSubtitleLabel: selectedSubtitleLabel,
+        selectedQualityLabel: selectedQualityLabel,
       );
 }
 
-/// Custom glassmorphism-styled video controls overlay.
+/// Custom minimal video controls overlay with flat style.
 ///
 /// Features:
-/// - Frosted glass effect on control elements
+/// - Clean minimal flat design
 /// - Auto-hide after 3 seconds of inactivity
 /// - Tap/mouse move to show controls
 /// - Large centered play/pause button
 /// - Thin seekable progress bar
 /// - Time display, volume, and fullscreen controls
-class _GlassmorphicVideoControls extends StatefulWidget {
+/// - Audio and subtitle selection in bottom bar
+class _CustomVideoControls extends StatefulWidget {
   final ValueChanged<bool>? onVisibilityChanged;
+  final VoidCallback? onAudioTap;
+  final VoidCallback? onSubtitleTap;
+  final VoidCallback? onQualityTap;
+  final int audioTrackCount;
+  final int subtitleTrackCount;
+  final String? selectedAudioLabel;
+  final String? selectedSubtitleLabel;
+  final String? selectedQualityLabel;
 
-  const _GlassmorphicVideoControls({this.onVisibilityChanged});
+  const _CustomVideoControls({
+    this.onVisibilityChanged,
+    this.onAudioTap,
+    this.onSubtitleTap,
+    this.onQualityTap,
+    this.audioTrackCount = 0,
+    this.subtitleTrackCount = 0,
+    this.selectedAudioLabel,
+    this.selectedSubtitleLabel,
+    this.selectedQualityLabel,
+  });
 
   @override
-  State<_GlassmorphicVideoControls> createState() =>
-      _GlassmorphicVideoControlsState();
+  State<_CustomVideoControls> createState() => _CustomVideoControlsState();
 }
 
-class _GlassmorphicVideoControlsState extends State<_GlassmorphicVideoControls>
+class _CustomVideoControlsState extends State<_CustomVideoControls>
     with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -277,6 +311,14 @@ class _GlassmorphicVideoControlsState extends State<_GlassmorphicVideoControls>
                 BottomControlsBar(
                   player: player,
                   videoController: controller,
+                  onAudioTap: widget.onAudioTap,
+                  onSubtitleTap: widget.onSubtitleTap,
+                  onQualityTap: widget.onQualityTap,
+                  audioTrackCount: widget.audioTrackCount,
+                  subtitleTrackCount: widget.subtitleTrackCount,
+                  selectedAudioLabel: widget.selectedAudioLabel,
+                  selectedSubtitleLabel: widget.selectedSubtitleLabel,
+                  selectedQualityLabel: widget.selectedQualityLabel,
                 ),
               ],
             ),

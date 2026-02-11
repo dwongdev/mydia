@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'video_controls/glass_container.dart';
-
 /// A Netflix-style "Up Next" overlay that appears when an episode is near completion.
 ///
 /// Shows the next episode's information with a countdown timer for auto-play,
@@ -36,11 +34,16 @@ class UpNextOverlay extends StatelessWidget {
     return Positioned(
       right: 24,
       bottom: 120,
-      child: GlassContainer(
-        borderRadius: BorderRadius.circular(16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.7),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.1),
+            width: 1,
+          ),
+        ),
         padding: const EdgeInsets.all(16),
-        backgroundOpacity: 0.7,
-        blurSigma: 15.0,
         child: SizedBox(
           width: 320,
           child: Column(

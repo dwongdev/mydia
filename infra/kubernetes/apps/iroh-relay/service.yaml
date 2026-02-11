@@ -12,7 +12,7 @@ spec:
     - port: 443
       targetPort: https
       name: https
-    - port: 7824
+    - port: 7842
       targetPort: quic
       protocol: UDP
       name: quic

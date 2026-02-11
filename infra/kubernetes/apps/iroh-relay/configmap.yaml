@@ -10,7 +10,7 @@ data:
 
     http_bind_addr = "0.0.0.0:80"
     https_bind_addr = "0.0.0.0:443"
-    quic_bind_addr = "0.0.0.0:7824"
+    quic_bind_addr = "0.0.0.0:7842"
 
     metrics_addr = "0.0.0.0:9090"
 
@@ -19,4 +19,4 @@ data:
     manual_cert_path = "/certs/tls.crt"
     manual_key_path = "/certs/tls.key"
 
-    hostname = "p2p.mydia.dev"
+    hostname = "cae1-1.relay.mydia.dev"

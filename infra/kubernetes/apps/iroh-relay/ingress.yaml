@@ -4,7 +4,7 @@ metadata:
   name: iroh-relay-tls
   namespace: iroh-relay
 spec:
-  dnsNames: [p2p.mydia.dev]
+  dnsNames: [cae1-1.relay.mydia.dev]
   issuerRef:
     kind: ClusterIssuer
     name: letsencrypt-prod
@@ -18,7 +18,7 @@ metadata:
 spec:
   entryPoints: [websecure]
   routes:
-    - match: HostSNI(`p2p.mydia.dev`)
+    - match: HostSNI(`cae1-1.relay.mydia.dev`)
       services:
         - name: iroh-relay
           port: 443

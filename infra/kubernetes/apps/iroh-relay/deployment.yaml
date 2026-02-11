@@ -10,6 +10,7 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: iroh-relay
+      app.kubernetes.io/part-of: mydia
   template:
     metadata:
       labels:
@@ -18,7 +19,7 @@ spec:
     spec:
       containers:
         - name: iroh-relay
-          image: n0computer/iroh-relay:latest
+          image: n0computer/iroh-relay:v0.96.1
           args: ["--config-path", "/config/config.toml"]
           ports:
             - name: http
@@ -26,9 +27,9 @@ spec:
             - name: https
               containerPort: 443
             - name: quic
-              containerPort: 7824
+              containerPort: 7842
               protocol: UDP
-              hostPort: 7824
+              hostPort: 7842
             - name: stun
               containerPort: 3478
               protocol: UDP

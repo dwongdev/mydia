@@ -170,7 +170,7 @@ void main() {
 
     group('default relay URL constant', () {
       test('has expected value', () {
-        expect(defaultRelayUrl, equals('(iroh default relays)'));
+        expect(defaultRelayUrl, equals('https://cae1-1.relay.mydia.dev'));
       });
     });
   });

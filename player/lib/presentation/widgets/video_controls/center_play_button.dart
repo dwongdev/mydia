@@ -19,7 +19,7 @@ class CenterPlayButton extends StatelessWidget {
     super.key,
     required this.player,
     this.size = 72,
-    this.iconSize = 48,
+    this.iconSize = 56,
   });
 
   @override
@@ -30,13 +30,9 @@ class CenterPlayButton extends StatelessWidget {
       builder: (context, snapshot) {
         final isPlaying = snapshot.data ?? false;
 
-        return Container(
+        return SizedBox(
           width: size,
           height: size,
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.45),
-            shape: BoxShape.circle,
-          ),
           child: Material(
             color: Colors.transparent,
             child: InkWell(
@@ -65,6 +61,12 @@ class CenterPlayButton extends StatelessWidget {
                     key: ValueKey(isPlaying),
                     size: iconSize,
                     color: Colors.white,
+                    shadows: const [
+                      Shadow(
+                        color: Color(0x60000000),
+                        blurRadius: 8,
+                      ),
+                    ],
                   ),
                 ),
               ),

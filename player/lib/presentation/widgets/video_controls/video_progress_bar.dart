@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 
 import '../../../core/player/duration_override.dart';
-import '../../../core/theme/colors.dart';
 
 /// A thin, seekable progress bar for video playback.
 ///
@@ -37,8 +36,8 @@ class VideoProgressBar extends StatefulWidget {
     this.onSeekStart,
     this.onSeekEnd,
     this.onSeekUpdate,
-    this.height = 4,
-    this.activeHeight = 8,
+    this.height = 3,
+    this.activeHeight = 5,
   });
 
   @override
@@ -77,12 +76,13 @@ class _VideoProgressBarState extends State<VideoProgressBar> {
                 final positionMs = position.inMilliseconds.toDouble();
                 final bufferMs = buffer.inMilliseconds.toDouble();
 
-                final progress =
-                    durationMs > 0 ? (positionMs / durationMs).clamp(0.0, 1.0) : 0.0;
-                final buffered =
-                    durationMs > 0 ? (bufferMs / durationMs).clamp(0.0, 1.0) : 0.0;
-                final displayProgress =
-                    _isSeeking ? _seekPosition : progress;
+                final progress = durationMs > 0
+                    ? (positionMs / durationMs).clamp(0.0, 1.0)
+                    : 0.0;
+                final buffered = durationMs > 0
+                    ? (bufferMs / durationMs).clamp(0.0, 1.0)
+                    : 0.0;
+                final displayProgress = _isSeeking ? _seekPosition : progress;
 
                 return MouseRegion(
                   onEnter: (_) => setState(() => _isHovering = true),
@@ -133,8 +133,8 @@ class _VideoProgressBarState extends State<VideoProgressBar> {
                                     widthFactor: buffered,
                                     child: Container(
                                       decoration: BoxDecoration(
-                                        color: AppColors.primary
-                                            .withValues(alpha: 0.3),
+                                        color: Colors.white
+                                            .withValues(alpha: 0.35),
                                         borderRadius: BorderRadius.circular(
                                             _currentHeight / 2),
                                       ),
@@ -145,7 +145,7 @@ class _VideoProgressBarState extends State<VideoProgressBar> {
                                     widthFactor: displayProgress,
                                     child: Container(
                                       decoration: BoxDecoration(
-                                        color: AppColors.primary,
+                                        color: Colors.white,
                                         borderRadius: BorderRadius.circular(
                                             _currentHeight / 2),
                                       ),
@@ -156,11 +156,11 @@ class _VideoProgressBarState extends State<VideoProgressBar> {
                                     Positioned(
                                       left: (constraints.maxWidth *
                                               displayProgress) -
-                                          6,
-                                      top: (_currentHeight - 12) / 2,
+                                          7,
+                                      top: (_currentHeight - 14) / 2,
                                       child: Container(
-                                        width: 12,
-                                        height: 12,
+                                        width: 14,
+                                        height: 14,
                                         decoration: BoxDecoration(
                                           color: Colors.white,
                                           shape: BoxShape.circle,

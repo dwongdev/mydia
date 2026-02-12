@@ -1425,61 +1425,62 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   Widget _buildTopBar() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.08),
-          width: 1,
-        ),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      child: Row(
-        children: [
-          // Back button
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () {
-                if (context.canPop()) {
-                  context.pop();
-                } else {
-                  context.go('/');
-                }
-              },
-              borderRadius: BorderRadius.circular(8),
-              child: const Padding(
-                padding: EdgeInsets.all(8),
-                child: Icon(
-                  Icons.arrow_back_rounded,
-                  color: Colors.white,
-                  size: 22,
-                ),
+    return Row(
+      children: [
+        // Back button
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/');
+              }
+            },
+            borderRadius: BorderRadius.circular(8),
+            child: const Padding(
+              padding: EdgeInsets.all(8),
+              child: Icon(
+                Icons.chevron_left_rounded,
+                color: Colors.white,
+                size: 28,
+                shadows: [
+                  Shadow(
+                    color: Color(0x60000000),
+                    blurRadius: 8,
+                  ),
+                ],
               ),
             ),
           ),
-          // Title
-          if (widget.title != null)
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Text(
-                  widget.title!,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+        ),
+        // Title
+        if (widget.title != null)
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                widget.title!,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  shadows: [
+                    Shadow(
+                      color: Colors.black.withValues(alpha: 0.5),
+                      blurRadius: 6,
+                    ),
+                  ],
                 ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-            )
-          else
-            const Spacer(),
-        ],
-      ),
+            ),
+          )
+        else
+          const Spacer(),
+      ],
     );
   }
 
@@ -1501,7 +1502,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           if (hasPrevious)
             IconButton(
               icon: const Icon(Icons.skip_previous,
-                  color: Colors.white, size: 32),
+                  color: Colors.white,
+                  size: 32,
+                  shadows: [
+                    Shadow(
+                      color: Color(0x60000000),
+                      blurRadius: 8,
+                    ),
+                  ]),
               onPressed: () {
                 final prevEpisode = _seasonEpisodes![_currentEpisodeIndex! - 1];
                 final files = prevEpisode.files;
@@ -1515,15 +1523,22 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 }
               },
               style: IconButton.styleFrom(
-                backgroundColor: Colors.black.withValues(alpha: 0.7),
                 padding: const EdgeInsets.all(12),
               ),
               tooltip: 'Previous Episode',
             ),
-          if (hasPrevious && hasNext) const SizedBox(width: 24),
+          if (hasPrevious && hasNext) const SizedBox(width: 32),
           if (hasNext)
             IconButton(
-              icon: const Icon(Icons.skip_next, color: Colors.white, size: 32),
+              icon: const Icon(Icons.skip_next,
+                  color: Colors.white,
+                  size: 32,
+                  shadows: [
+                    Shadow(
+                      color: Color(0x60000000),
+                      blurRadius: 8,
+                    ),
+                  ]),
               onPressed: () {
                 final nextEpisode = _seasonEpisodes![_currentEpisodeIndex! + 1];
                 final files = nextEpisode.files;
@@ -1537,7 +1552,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 }
               },
               style: IconButton.styleFrom(
-                backgroundColor: Colors.black.withValues(alpha: 0.7),
                 padding: const EdgeInsets.all(12),
               ),
               tooltip: 'Next Episode',

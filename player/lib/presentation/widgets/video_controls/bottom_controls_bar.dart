@@ -4,7 +4,6 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../../core/player/duration_override.dart';
 import '../../../core/player/platform_features.dart';
-import '../../../core/theme/colors.dart';
 
 /// Bottom controls bar with time display, volume control, and fullscreen toggle.
 ///
@@ -79,19 +78,11 @@ class _BottomControlsBarState extends State<BottomControlsBar> {
     final subtitleEnabled = widget.subtitleTrackCount > 0;
     final audioEnabled = widget.audioTrackCount > 0;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.08),
-          width: 1,
-        ),
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: Row(
         children: [
-          _buildTimeDisplay(),
+          _buildPositionText(),
           const Spacer(),
           _buildActionButton(
             icon: Icons.subtitles_outlined,
@@ -123,12 +114,40 @@ class _BottomControlsBarState extends State<BottomControlsBar> {
           _buildVolumeControl(),
           const SizedBox(width: 8),
           _buildFullscreenButton(),
+          const Spacer(),
+          _buildRemainingTimeText(),
         ],
       ),
     );
   }
 
-  Widget _buildTimeDisplay() {
+  Widget _buildPositionText() {
+    return StreamBuilder<Duration>(
+      stream: widget.player.stream.position,
+      initialData: widget.player.state.position,
+      builder: (context, positionSnapshot) {
+        final position = positionSnapshot.data ?? Duration.zero;
+
+        return Text(
+          _formatDuration(position),
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            fontFeatures: const [FontFeature.tabularFigures()],
+            shadows: [
+              Shadow(
+                color: Colors.black.withValues(alpha: 0.5),
+                blurRadius: 4,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildRemainingTimeText() {
     return StreamBuilder<Duration>(
       stream: widget.player.stream.position,
       initialData: widget.player.state.position,
@@ -138,17 +157,25 @@ class _BottomControlsBarState extends State<BottomControlsBar> {
           initialData: widget.player.state.duration,
           builder: (context, durationSnapshot) {
             final position = positionSnapshot.data ?? Duration.zero;
-            // Use duration override if available (for HLS live playlists)
             final playerDuration = durationSnapshot.data ?? Duration.zero;
             final duration = DurationOverride.getDuration(playerDuration);
+            final remaining = duration - position;
+            final clampedRemaining =
+                remaining.isNegative ? Duration.zero : remaining;
 
             return Text(
-              '${_formatDuration(position)} / ${_formatDuration(duration)}',
-              style: const TextStyle(
-                color: Colors.white,
+              '-${_formatDuration(clampedRemaining)}',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.7),
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
-                fontFeatures: [FontFeature.tabularFigures()],
+                fontFeatures: const [FontFeature.tabularFigures()],
+                shadows: [
+                  Shadow(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    blurRadius: 4,
+                  ),
+                ],
               ),
             );
           },
@@ -194,12 +221,11 @@ class _BottomControlsBarState extends State<BottomControlsBar> {
                             overlayShape: const RoundSliderOverlayShape(
                               overlayRadius: 12,
                             ),
-                            activeTrackColor: AppColors.primary,
+                            activeTrackColor: Colors.white,
                             inactiveTrackColor:
                                 Colors.white.withValues(alpha: 0.3),
                             thumbColor: Colors.white,
-                            overlayColor:
-                                AppColors.primary.withValues(alpha: 0.2),
+                            overlayColor: Colors.white.withValues(alpha: 0.2),
                           ),
                           child: Slider(
                             value: volume / 100.0,
@@ -240,6 +266,12 @@ class _BottomControlsBarState extends State<BottomControlsBar> {
             _getVolumeIcon(isMuted ? 0 : widget.player.state.volume),
             color: Colors.white,
             size: 20,
+            shadows: const [
+              Shadow(
+                color: Color(0x60000000),
+                blurRadius: 6,
+              ),
+            ],
           ),
         ),
       ),
@@ -267,6 +299,12 @@ class _BottomControlsBarState extends State<BottomControlsBar> {
                 Icons.fullscreen_rounded,
                 color: Colors.white,
                 size: 20,
+                shadows: [
+                  Shadow(
+                    color: Color(0x60000000),
+                    blurRadius: 6,
+                  ),
+                ],
               ),
             ),
           ),
@@ -292,7 +330,13 @@ class _BottomControlsBarState extends State<BottomControlsBar> {
             icon,
             color:
                 enabled ? Colors.white : Colors.white.withValues(alpha: 0.35),
-            size: 18,
+            size: 20,
+            shadows: const [
+              Shadow(
+                color: Color(0x60000000),
+                blurRadius: 6,
+              ),
+            ],
           ),
         ),
       ),

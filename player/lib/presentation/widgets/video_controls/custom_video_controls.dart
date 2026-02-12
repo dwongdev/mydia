@@ -253,78 +253,102 @@ class _CustomVideoControlsState extends State<_CustomVideoControls>
   }
 
   Widget _buildControlsOverlay(Player player, VideoController controller) {
-    return Container(
-      decoration: BoxDecoration(
-        // Subtle gradient for better visibility of controls
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.black.withValues(alpha: 0.0),
-            Colors.black.withValues(alpha: 0.0),
-            Colors.black.withValues(alpha: 0.4),
-          ],
-          stops: const [0.0, 0.5, 1.0],
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Top gradient for top bar readability
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 120,
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withValues(alpha: 0.5),
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
         ),
-      ),
-      child: Stack(
-        children: [
-          // Center play button
-          Center(
-            child: CenterPlayButton(player: player),
-          ),
-          // Seek backward/forward buttons (left and right of center)
-          Positioned.fill(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                ControlButton(
-                  icon: Icons.replay_10_rounded,
-                  onTap: () => _seekBackward(player),
-                  tooltip: 'Rewind 10 seconds',
-                ),
-                const SizedBox(width: 100), // Space for play button
-                ControlButton(
-                  icon: Icons.forward_10_rounded,
-                  onTap: () => _seekForward(player),
-                  tooltip: 'Forward 10 seconds',
-                ),
-              ],
+        // Bottom gradient for bottom controls readability
+        Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 200,
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [
+                  Colors.black.withValues(alpha: 0.6),
+                  Colors.transparent,
+                ],
+              ),
             ),
           ),
-          // Bottom controls
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: 16,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Progress bar
-                VideoProgressBar(
-                  player: player,
-                  onSeekStart: _handleSeekStart,
-                  onSeekEnd: _handleSeekEnd,
-                ),
-                const SizedBox(height: 8),
-                // Bottom controls bar
-                BottomControlsBar(
-                  player: player,
-                  videoController: controller,
-                  onAudioTap: widget.onAudioTap,
-                  onSubtitleTap: widget.onSubtitleTap,
-                  onQualityTap: widget.onQualityTap,
-                  audioTrackCount: widget.audioTrackCount,
-                  subtitleTrackCount: widget.subtitleTrackCount,
-                  selectedAudioLabel: widget.selectedAudioLabel,
-                  selectedSubtitleLabel: widget.selectedSubtitleLabel,
-                  selectedQualityLabel: widget.selectedQualityLabel,
-                ),
-              ],
-            ),
+        ),
+        // Center play button
+        Center(
+          child: CenterPlayButton(player: player),
+        ),
+        // Seek backward/forward buttons (left and right of center)
+        Positioned.fill(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ControlButton(
+                icon: Icons.replay_10_rounded,
+                onTap: () => _seekBackward(player),
+                tooltip: 'Rewind 10 seconds',
+              ),
+              const SizedBox(width: 120), // Space for play button
+              ControlButton(
+                icon: Icons.forward_10_rounded,
+                onTap: () => _seekForward(player),
+                tooltip: 'Forward 10 seconds',
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+        // Bottom controls
+        Positioned(
+          left: 20,
+          right: 20,
+          bottom: 20,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Progress bar
+              VideoProgressBar(
+                player: player,
+                onSeekStart: _handleSeekStart,
+                onSeekEnd: _handleSeekEnd,
+              ),
+              const SizedBox(height: 8),
+              // Bottom controls bar
+              BottomControlsBar(
+                player: player,
+                videoController: controller,
+                onAudioTap: widget.onAudioTap,
+                onSubtitleTap: widget.onSubtitleTap,
+                onQualityTap: widget.onQualityTap,
+                audioTrackCount: widget.audioTrackCount,
+                subtitleTrackCount: widget.subtitleTrackCount,
+                selectedAudioLabel: widget.selectedAudioLabel,
+                selectedSubtitleLabel: widget.selectedSubtitleLabel,
+                selectedQualityLabel: widget.selectedQualityLabel,
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

@@ -31,7 +31,7 @@ class ControlButton extends StatelessWidget {
     required this.icon,
     this.onTap,
     this.size = 48,
-    this.iconSize = 24,
+    this.iconSize = 28,
     this.iconColor = Colors.white,
     this.tooltip,
     this.enabled = true,
@@ -61,15 +61,9 @@ class ControlButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final button = Container(
+    final button = SizedBox(
       width: size,
       height: size,
-      decoration: BoxDecoration(
-        color: enabled
-            ? Colors.black.withValues(alpha: 0.4)
-            : Colors.black.withValues(alpha: 0.2),
-        shape: BoxShape.circle,
-      ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
@@ -80,6 +74,12 @@ class ControlButton extends StatelessWidget {
               icon,
               size: iconSize,
               color: enabled ? iconColor : iconColor.withValues(alpha: 0.5),
+              shadows: const [
+                Shadow(
+                  color: Color(0x60000000),
+                  blurRadius: 8,
+                ),
+              ],
             ),
           ),
         ),

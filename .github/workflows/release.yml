@@ -439,6 +439,26 @@ jobs:
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
 
+      - name: Configure manual signing for CI
+        if: steps.check_ios.outputs.enabled == 'true' && env.IOS_CERTIFICATE_BASE64 != ''
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+        working-directory: ${{ env.PLAYER_PATH }}/ios
+        run: |
+          # Extract provisioning profile name
+          PP_PATH=$(ls ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision | head -1)
+          PP_NAME=$(security cms -D -i "$PP_PATH" | /usr/libexec/PlistBuddy -c "Print Name" /dev/stdin)
+          echo "Using provisioning profile: $PP_NAME"
+
+          # Switch Xcode project to manual signing
+          PROJECT="Runner.xcodeproj/project.pbxproj"
+          sed -i '' 's/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g' "$PROJECT"
+          sed -i '' 's/"CODE_SIGN_IDENTITY\[sdk=iphoneos\*\]" = "iPhone Developer"/"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Distribution"/g' "$PROJECT"
+
+          # Add provisioning profile specifier to Runner target build configs
+          sed -i '' "/PRODUCT_BUNDLE_IDENTIFIER = dev.mydia.player;/a\\
+          \\t\\t\\t\\tPROVISIONING_PROFILE_SPECIFIER = \"$PP_NAME\";" "$PROJECT"
+
       - name: Build iOS (unsigned)
         if: steps.check_ios.outputs.enabled == 'true' && env.IOS_CERTIFICATE_BASE64 == ''
         env:

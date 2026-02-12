@@ -372,7 +372,7 @@ jobs:
   player-ios:
     name: Player / iOS
     needs: prepare
-    runs-on: macos-latest
+    runs-on: macos-26
     steps:
       - name: Checkout
         uses: actions/checkout@v4

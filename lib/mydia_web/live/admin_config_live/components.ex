@@ -347,7 +347,9 @@ defmodule MydiaWeb.AdminConfigLive.Components do
                             job.media_file.media_item.title
 
                           true ->
-                            Path.basename(job.media_file.path)
+                            if job.media_file.path,
+                              do: Path.basename(job.media_file.path),
+                              else: "Unknown"
                         end %>
                       <div class="min-w-0 flex-1">
                         <div class="font-medium text-sm truncate" title={title}>{title}</div>

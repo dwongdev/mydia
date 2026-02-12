@@ -2,7 +2,7 @@
 app_identifier("dev.mydia.player")
 
 # Apple Developer Portal Team ID
-# team_id("XXXXXXXXXX")
+team_id("2JK76VE4AR")
 
 # App Store Connect Team ID (if different from Developer Portal)
 # itc_team_id("XXXXXXXXXX")

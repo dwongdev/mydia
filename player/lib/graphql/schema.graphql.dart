@@ -2,11 +2,10 @@ class Input$SortInput {
   factory Input$SortInput({
     Enum$SortField? field,
     Enum$SortDirection? direction,
-  }) =>
-      Input$SortInput._({
-        if (field != null) r'field': field,
-        if (direction != null) r'direction': direction,
-      });
+  }) => Input$SortInput._({
+    if (field != null) r'field': field,
+    if (direction != null) r'direction': direction,
+  });
 
   Input$SortInput._(this._$data);
 
@@ -14,8 +13,9 @@ class Input$SortInput {
     final result$data = <String, dynamic>{};
     if (data.containsKey('field')) {
       final l$field = data['field'];
-      result$data['field'] =
-          l$field == null ? null : fromJson$Enum$SortField((l$field as String));
+      result$data['field'] = l$field == null
+          ? null
+          : fromJson$Enum$SortField((l$field as String));
     }
     if (data.containsKey('direction')) {
       final l$direction = data['direction'];
@@ -37,13 +37,15 @@ class Input$SortInput {
     final result$data = <String, dynamic>{};
     if (_$data.containsKey('field')) {
       final l$field = field;
-      result$data['field'] =
-          l$field == null ? null : toJson$Enum$SortField(l$field);
+      result$data['field'] = l$field == null
+          ? null
+          : toJson$Enum$SortField(l$field);
     }
     if (_$data.containsKey('direction')) {
       final l$direction = direction;
-      result$data['direction'] =
-          l$direction == null ? null : toJson$Enum$SortDirection(l$direction);
+      result$data['direction'] = l$direction == null
+          ? null
+          : toJson$Enum$SortDirection(l$direction);
     }
     return result$data;
   }
@@ -139,14 +141,13 @@ class Input$LoginInput {
     required String deviceId,
     required String deviceName,
     required String platform,
-  }) =>
-      Input$LoginInput._({
-        r'username': username,
-        r'password': password,
-        r'deviceId': deviceId,
-        r'deviceName': deviceName,
-        r'platform': platform,
-      });
+  }) => Input$LoginInput._({
+    r'username': username,
+    r'password': password,
+    r'deviceId': deviceId,
+    r'deviceName': deviceName,
+    r'platform': platform,
+  });
 
   Input$LoginInput._(this._$data);
 
@@ -282,22 +283,21 @@ class _CopyWithImpl$Input$LoginInput<TRes>
     Object? deviceId = _undefined,
     Object? deviceName = _undefined,
     Object? platform = _undefined,
-  }) =>
-      _then(
-        Input$LoginInput._({
-          ..._instance._$data,
-          if (username != _undefined && username != null)
-            'username': (username as String),
-          if (password != _undefined && password != null)
-            'password': (password as String),
-          if (deviceId != _undefined && deviceId != null)
-            'deviceId': (deviceId as String),
-          if (deviceName != _undefined && deviceName != null)
-            'deviceName': (deviceName as String),
-          if (platform != _undefined && platform != null)
-            'platform': (platform as String),
-        }),
-      );
+  }) => _then(
+    Input$LoginInput._({
+      ..._instance._$data,
+      if (username != _undefined && username != null)
+        'username': (username as String),
+      if (password != _undefined && password != null)
+        'password': (password as String),
+      if (deviceId != _undefined && deviceId != null)
+        'deviceId': (deviceId as String),
+      if (deviceName != _undefined && deviceName != null)
+        'deviceName': (deviceName as String),
+      if (platform != _undefined && platform != null)
+        'platform': (platform as String),
+    }),
+  );
 }
 
 class _CopyWithStubImpl$Input$LoginInput<TRes>
@@ -312,8 +312,7 @@ class _CopyWithStubImpl$Input$LoginInput<TRes>
     String? deviceId,
     String? deviceName,
     String? platform,
-  }) =>
-      _res;
+  }) => _res;
 }
 
 enum Enum$DeviceEventType {

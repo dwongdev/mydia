@@ -77,6 +77,16 @@ defmodule MydiaWeb.MediaLive.Show.Loaders do
     end
   end
 
+  # Load transcode jobs for all media files in a media item
+  # Returns a map of media_file_id => list of transcode jobs
+  def load_transcode_jobs(media_item) do
+    media_item.media_files
+    |> Enum.flat_map(fn media_file ->
+      Downloads.list_transcode_jobs_for_media_file(media_file.id)
+    end)
+    |> Enum.group_by(& &1.media_file_id)
+  end
+
   # Load subtitles for all media files in a media item
   # Returns a map of media_file_id => list of subtitles
   def load_media_file_subtitles(media_item) do

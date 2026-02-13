@@ -23,6 +23,7 @@ defmodule MydiaWeb.MediaLive.Show do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Mydia.PubSub, "downloads")
       Phoenix.PubSub.subscribe(Mydia.PubSub, "events:all")
+      Phoenix.PubSub.subscribe(Mydia.PubSub, "transcodes")
     end
 
     media_item = load_media_item(id)
@@ -88,6 +89,8 @@ defmodule MydiaWeb.MediaLive.Show do
      |> assign(:auto_searching, false)
      |> assign(:auto_searching_season, nil)
      |> assign(:auto_searching_episode, nil)
+     # Pre-transcode state
+     |> assign(:transcode_jobs, load_transcode_jobs(media_item))
      # File metadata refresh state
      |> assign(:refreshing_file_metadata, false)
      |> assign(:rescanning_season, nil)
@@ -756,6 +759,40 @@ defmodule MydiaWeb.MediaLive.Show do
      socket
      |> assign(:show_file_details_modal, false)
      |> assign(:file_details, nil)}
+  end
+
+  def handle_event(
+        "pre_transcode",
+        %{"media-file-id" => media_file_id, "resolution" => resolution},
+        socket
+      ) do
+    media_item = socket.assigns.media_item
+
+    case Downloads.DownloadService.prepare_by_file(media_file_id, resolution) do
+      {:ok, _job_info} ->
+        {:noreply,
+         socket
+         |> assign(:transcode_jobs, load_transcode_jobs(media_item))
+         |> put_flash(:info, "Pre-transcode started for #{resolution}")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to start pre-transcode: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("cancel_transcode", %{"job-id" => job_id}, socket) do
+    case Downloads.DownloadService.cancel_job(job_id) do
+      {:ok, :cancelled} ->
+        media_item = socket.assigns.media_item
+
+        {:noreply,
+         socket
+         |> assign(:transcode_jobs, load_transcode_jobs(media_item))
+         |> put_flash(:info, "Transcode cancelled")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to cancel: #{inspect(reason)}")}
+    end
   end
 
   def handle_event("show_rename_modal", _params, socket) do
@@ -1504,6 +1541,13 @@ defmodule MydiaWeb.MediaLive.Show do
     else
       {:noreply, socket}
     end
+  end
+
+  def handle_info({:job_updated, _job_id}, socket) do
+    # Refresh transcode jobs for the current media item
+    media_item = socket.assigns.media_item
+
+    {:noreply, assign(socket, :transcode_jobs, load_transcode_jobs(media_item))}
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}

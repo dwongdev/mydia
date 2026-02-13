@@ -1780,6 +1780,19 @@ defmodule Mydia.Downloads do
   end
 
   @doc """
+  Lists transcode jobs for a specific media file.
+
+  Returns all download-type transcode jobs regardless of status.
+  """
+  def list_transcode_jobs_for_media_file(media_file_id) do
+    TranscodeJob
+    |> where([j], j.media_file_id == ^media_file_id)
+    |> where([j], j.type == "download")
+    |> order_by([j], desc: j.updated_at)
+    |> Repo.all()
+  end
+
+  @doc """
   Lists transcode jobs.
   """
   def list_transcode_jobs(opts \\ []) do

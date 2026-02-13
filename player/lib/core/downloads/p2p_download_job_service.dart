@@ -68,6 +68,9 @@ class P2pDownloadJobService implements DownloadJobService {
         resolution: map['resolution'] as String,
         label: map['label'] as String,
         estimatedSize: map['estimatedSize'] as int,
+        transcodeStatus: map['transcodeStatus'] as String?,
+        transcodeProgress: (map['transcodeProgress'] as num?)?.toDouble(),
+        actualSize: map['actualSize'] as int?,
       );
     }).toList();
 

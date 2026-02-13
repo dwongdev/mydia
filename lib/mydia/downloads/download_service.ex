@@ -178,6 +178,43 @@ defmodule Mydia.Downloads.DownloadService do
     end
   end
 
+  @doc """
+  Prepares a download by media file ID directly.
+
+  Used by the admin pre-transcode UI where the file is already known.
+
+  ## Parameters
+    - media_file_id: The media file ID
+    - resolution: Target resolution ("original", "1080p", "720p", "480p")
+
+  ## Returns
+    - `{:ok, job_info}` - Map with job_id, status, progress, file_size
+    - `{:error, reason}` - Error tuple
+  """
+  def prepare_by_file(media_file_id, resolution) do
+    case Repo.get(Mydia.Library.MediaFile, media_file_id) do
+      nil ->
+        {:error, :no_media_file}
+
+      media_file ->
+        media_file = Repo.preload(media_file, :library_path)
+
+        with {:ok, validated_resolution} <- validate_resolution(resolution),
+             {:ok, job} <- Downloads.get_or_create_job(media_file.id, validated_resolution),
+             :ok <- maybe_start_transcode(job, media_file) do
+          job = Repo.get(TranscodeJob, job.id)
+
+          {:ok,
+           %{
+             job_id: job.id,
+             status: job.status,
+             progress: job.progress || 0.0,
+             file_size: job.file_size
+           }}
+        end
+    end
+  end
+
   ## Private Helpers
 
   @doc false
@@ -215,8 +252,14 @@ defmodule Mydia.Downloads.DownloadService do
     source_size = media_file.size || 0
     source_resolution = parse_resolution_height(media_file.resolution)
 
+    # Look up existing transcode jobs for this file
+    transcode_jobs = Downloads.list_transcode_jobs_for_media_file(media_file.id)
+    jobs_by_resolution = Map.new(transcode_jobs, fn job -> {job.resolution, job} end)
+
     # Always include "original" as the first option (no transcoding)
-    original_option = %{resolution: "original", label: "Original", estimated_size: source_size}
+    original_option =
+      %{resolution: "original", label: "Original", estimated_size: source_size}
+      |> enrich_with_transcode_status(Map.get(jobs_by_resolution, "original"))
 
     available_resolutions =
       [
@@ -229,11 +272,25 @@ defmodule Mydia.Downloads.DownloadService do
     transcoded_options =
       Enum.map(available_resolutions, fn {resolution, height, label} ->
         estimated_size = estimate_file_size(source_size, source_resolution, height)
+
         %{resolution: resolution, label: label, estimated_size: estimated_size}
+        |> enrich_with_transcode_status(Map.get(jobs_by_resolution, resolution))
       end)
 
     # Original first, then transcoded options
     [original_option | transcoded_options]
+  end
+
+  defp enrich_with_transcode_status(option, nil) do
+    Map.merge(option, %{transcode_status: nil, transcode_progress: nil, actual_size: nil})
+  end
+
+  defp enrich_with_transcode_status(option, job) do
+    Map.merge(option, %{
+      transcode_status: job.status,
+      transcode_progress: job.progress,
+      actual_size: job.file_size
+    })
   end
 
   @doc false

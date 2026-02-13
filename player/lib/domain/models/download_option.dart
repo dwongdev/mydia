@@ -10,14 +10,35 @@ class DownloadOption {
   /// Estimated file size in bytes
   final int estimatedSize;
 
+  /// Pre-transcode status: "ready", "transcoding", "pending", or null
+  final String? transcodeStatus;
+
+  /// Transcode progress (0.0 to 1.0)
+  final double? transcodeProgress;
+
+  /// Actual file size in bytes when transcoded
+  final int? actualSize;
+
   const DownloadOption({
     required this.resolution,
     String? label,
     required this.estimatedSize,
+    this.transcodeStatus,
+    this.transcodeProgress,
+    this.actualSize,
   }) : _label = label;
 
   /// Display label - uses server-provided label or falls back to resolution
   String get label => _label ?? resolution;
+
+  /// Whether this option is pre-transcoded and ready for instant download
+  bool get isPreTranscoded => transcodeStatus == 'ready';
+
+  /// Whether this option is currently being transcoded
+  bool get isTranscoding => transcodeStatus == 'transcoding';
+
+  /// Whether this option is queued for transcoding
+  bool get isPending => transcodeStatus == 'pending';
 
   factory DownloadOption.fromJson(Map<String, dynamic> json) {
     final resolution = json['resolution'] as String;
@@ -25,6 +46,9 @@ class DownloadOption {
       resolution: resolution,
       label: json['label'] as String?,
       estimatedSize: json['estimated_size'] as int,
+      transcodeStatus: json['transcode_status'] as String?,
+      transcodeProgress: (json['transcode_progress'] as num?)?.toDouble(),
+      actualSize: json['actual_size'] as int?,
     );
   }
 
@@ -33,6 +57,9 @@ class DownloadOption {
       'resolution': resolution,
       'label': label,
       'estimated_size': estimatedSize,
+      if (transcodeStatus != null) 'transcode_status': transcodeStatus,
+      if (transcodeProgress != null) 'transcode_progress': transcodeProgress,
+      if (actualSize != null) 'actual_size': actualSize,
     };
   }
 
@@ -46,6 +73,20 @@ class DownloadOption {
       return '${(estimatedSize / (1024 * 1024)).toStringAsFixed(1)} MB';
     } else {
       return '${(estimatedSize / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+    }
+  }
+
+  /// Format the display size - uses actual size when available, otherwise estimated
+  String get formattedDisplaySize {
+    final size = actualSize ?? estimatedSize;
+    if (size < 1024) {
+      return '$size B';
+    } else if (size < 1024 * 1024) {
+      return '${(size / 1024).toStringAsFixed(1)} KB';
+    } else if (size < 1024 * 1024 * 1024) {
+      return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
+    } else {
+      return '${(size / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
     }
   }
 }
@@ -63,7 +104,8 @@ class DownloadOptionsResponse {
     final optionsList = json['options'] as List<dynamic>? ?? [];
     return DownloadOptionsResponse(
       options: optionsList
-          .map((option) => DownloadOption.fromJson(option as Map<String, dynamic>))
+          .map((option) =>
+              DownloadOption.fromJson(option as Map<String, dynamic>))
           .toList(),
     );
   }
@@ -144,10 +186,14 @@ class DownloadJobStatus {
   }
 
   /// Whether the job is complete (ready or failed)
-  bool get isComplete => status == DownloadJobStatusType.ready || status == DownloadJobStatusType.failed;
+  bool get isComplete =>
+      status == DownloadJobStatusType.ready ||
+      status == DownloadJobStatusType.failed;
 
   /// Whether the job is in progress (pending or transcoding)
-  bool get isInProgress => status == DownloadJobStatusType.pending || status == DownloadJobStatusType.transcoding;
+  bool get isInProgress =>
+      status == DownloadJobStatusType.pending ||
+      status == DownloadJobStatusType.transcoding;
 
   /// Format progress as percentage string
   String get progressPercentage => '${(progress * 100).toStringAsFixed(0)}%';

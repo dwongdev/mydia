@@ -881,6 +881,7 @@ defmodule MydiaWeb.MediaLive.Show.Components do
   """
   attr :media_item, :map, required: true
   attr :refreshing_file_metadata, :boolean, required: true
+  attr :transcode_jobs, :map, default: %{}
 
   def media_files_section(assigns) do
     ~H"""
@@ -891,69 +892,76 @@ defmodule MydiaWeb.MediaLive.Show.Components do
           <%!-- DaisyUI list component --%>
           <ul class="menu bg-base-100 rounded-box p-0">
             <li :for={file <- @media_item.media_files}>
-              <div class="flex items-start justify-between gap-4 p-4 hover:bg-base-200 rounded-none transition-colors">
-                <%!-- Left side: File info --%>
-                <div class="flex-1 min-w-0 flex flex-col gap-2">
-                  <%!-- File path --%>
-                  <% absolute_path = Mydia.Library.MediaFile.absolute_path(file) %>
-                  <p
-                    class="text-sm font-mono text-base-content break-all leading-relaxed"
-                    title={absolute_path}
-                  >
-                    {absolute_path}
-                  </p>
-                  <%!-- Technical details with quality badge --%>
-                  <div class="flex flex-wrap gap-4 text-xs text-base-content/70 items-center">
-                    <span class="badge badge-primary badge-sm">
-                      {file.resolution || "Unknown"}
-                    </span>
-                    <div class="flex items-center gap-1.5">
-                      <.icon name="hero-film" class="w-3.5 h-3.5" />
-                      <span>{file.codec || "Unknown"}</span>
-                    </div>
-                    <div class="flex items-center gap-1.5">
-                      <.icon name="hero-speaker-wave" class="w-3.5 h-3.5" />
-                      <span>{file.audio_codec || "Unknown"}</span>
-                    </div>
-                    <div class="flex items-center gap-1.5">
-                      <.icon name="hero-circle-stack" class="w-3.5 h-3.5" />
-                      <span class="font-mono">{format_file_size(file.size)}</span>
+              <div class="flex flex-col gap-3 p-4 hover:bg-base-200 rounded-none transition-colors">
+                <div class="flex items-start justify-between gap-4">
+                  <%!-- Left side: File info --%>
+                  <div class="flex-1 min-w-0 flex flex-col gap-2">
+                    <%!-- File path --%>
+                    <% absolute_path = Mydia.Library.MediaFile.absolute_path(file) %>
+                    <p
+                      class="text-sm font-mono text-base-content break-all leading-relaxed"
+                      title={absolute_path}
+                    >
+                      {absolute_path}
+                    </p>
+                    <%!-- Technical details with quality badge --%>
+                    <div class="flex flex-wrap gap-4 text-xs text-base-content/70 items-center">
+                      <span class="badge badge-primary badge-sm">
+                        {file.resolution || "Unknown"}
+                      </span>
+                      <div class="flex items-center gap-1.5">
+                        <.icon name="hero-film" class="w-3.5 h-3.5" />
+                        <span>{file.codec || "Unknown"}</span>
+                      </div>
+                      <div class="flex items-center gap-1.5">
+                        <.icon name="hero-speaker-wave" class="w-3.5 h-3.5" />
+                        <span>{file.audio_codec || "Unknown"}</span>
+                      </div>
+                      <div class="flex items-center gap-1.5">
+                        <.icon name="hero-circle-stack" class="w-3.5 h-3.5" />
+                        <span class="font-mono">{format_file_size(file.size)}</span>
+                      </div>
                     </div>
                   </div>
+                  <%!-- Right side: Icon-only action buttons --%>
+                  <div class="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      type="button"
+                      phx-click="show_file_details"
+                      phx-value-file-id={file.id}
+                      class="btn btn-ghost btn-sm btn-square"
+                      aria-label="View file details"
+                      title="View file details"
+                    >
+                      <.icon name="hero-information-circle" class="w-5 h-5" />
+                    </button>
+                    <button
+                      type="button"
+                      phx-click="mark_file_preferred"
+                      phx-value-file-id={file.id}
+                      class="btn btn-ghost btn-sm btn-square"
+                      aria-label="Mark this file as preferred"
+                      title="Mark as preferred"
+                    >
+                      <.icon name="hero-star" class="w-5 h-5" />
+                    </button>
+                    <button
+                      type="button"
+                      phx-click="show_file_delete_confirm"
+                      phx-value-file-id={file.id}
+                      class="btn btn-ghost btn-sm btn-square text-error hover:bg-error hover:text-error-content"
+                      aria-label="Delete this file"
+                      title="Delete file"
+                    >
+                      <.icon name="hero-trash" class="w-5 h-5" />
+                    </button>
+                  </div>
                 </div>
-                <%!-- Right side: Icon-only action buttons --%>
-                <div class="flex items-center gap-1 flex-shrink-0">
-                  <button
-                    type="button"
-                    phx-click="show_file_details"
-                    phx-value-file-id={file.id}
-                    class="btn btn-ghost btn-sm btn-square"
-                    aria-label="View file details"
-                    title="View file details"
-                  >
-                    <.icon name="hero-information-circle" class="w-5 h-5" />
-                  </button>
-                  <button
-                    type="button"
-                    phx-click="mark_file_preferred"
-                    phx-value-file-id={file.id}
-                    class="btn btn-ghost btn-sm btn-square"
-                    aria-label="Mark this file as preferred"
-                    title="Mark as preferred"
-                  >
-                    <.icon name="hero-star" class="w-5 h-5" />
-                  </button>
-                  <button
-                    type="button"
-                    phx-click="show_file_delete_confirm"
-                    phx-value-file-id={file.id}
-                    class="btn btn-ghost btn-sm btn-square text-error hover:bg-error hover:text-error-content"
-                    aria-label="Delete this file"
-                    title="Delete file"
-                  >
-                    <.icon name="hero-trash" class="w-5 h-5" />
-                  </button>
-                </div>
+                <%!-- Pre-transcode status and controls --%>
+                <.transcode_controls
+                  file={file}
+                  transcode_jobs={Map.get(@transcode_jobs, file.id, [])}
+                />
               </div>
             </li>
           </ul>
@@ -961,6 +969,113 @@ defmodule MydiaWeb.MediaLive.Show.Components do
       </div>
     <% end %>
     """
+  end
+
+  attr :file, :map, required: true
+  attr :transcode_jobs, :list, default: []
+
+  defp transcode_controls(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :jobs_by_resolution,
+        Map.new(assigns.transcode_jobs, fn j -> {j.resolution, j} end)
+      )
+
+    ~H"""
+    <div class="flex flex-wrap items-center gap-2">
+      <%!-- Status badges for existing transcode jobs --%>
+      <.transcode_badge
+        :for={job <- @transcode_jobs}
+        job={job}
+        file={@file}
+      />
+      <%!-- Pre-transcode dropdown for resolutions not yet queued --%>
+      <% available = available_transcode_resolutions(@file, @jobs_by_resolution) %>
+      <%= if available != [] do %>
+        <div class="dropdown dropdown-end">
+          <div tabindex="0" role="button" class="btn btn-ghost btn-xs gap-1">
+            <.icon name="hero-bolt" class="w-3.5 h-3.5" /> Pre-Transcode
+          </div>
+          <ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box z-[1] w-44 p-2 shadow">
+            <li :for={res <- available}>
+              <button
+                type="button"
+                phx-click="pre_transcode"
+                phx-value-media-file-id={@file.id}
+                phx-value-resolution={res}
+              >
+                {res}
+              </button>
+            </li>
+          </ul>
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  attr :job, :map, required: true
+  attr :file, :map, required: true
+
+  defp transcode_badge(assigns) do
+    ~H"""
+    <div class={[
+      "badge badge-sm gap-1",
+      transcode_badge_class(@job.status)
+    ]}>
+      <%= case @job.status do %>
+        <% "ready" -> %>
+          <.icon name="hero-check-circle-mini" class="w-3 h-3" />
+          {@job.resolution}
+        <% "transcoding" -> %>
+          <span class="loading loading-spinner loading-xs"></span>
+          {@job.resolution} {format_transcode_progress(@job.progress)}
+        <% "pending" -> %>
+          <.icon name="hero-clock" class="w-3 h-3" />
+          {@job.resolution} queued
+        <% "failed" -> %>
+          <.icon name="hero-exclamation-triangle-mini" class="w-3 h-3" />
+          {@job.resolution} failed
+        <% _other -> %>
+          {@job.resolution}
+      <% end %>
+      <%= if @job.status in ["pending", "transcoding"] do %>
+        <button
+          type="button"
+          phx-click="cancel_transcode"
+          phx-value-job-id={@job.id}
+          class="ml-1 hover:text-error"
+          title="Cancel transcode"
+        >
+          <.icon name="hero-x-mark-mini" class="w-3 h-3" />
+        </button>
+      <% end %>
+    </div>
+    """
+  end
+
+  defp transcode_badge_class("ready"), do: "badge-success"
+  defp transcode_badge_class("transcoding"), do: "badge-warning"
+  defp transcode_badge_class("pending"), do: "badge-info"
+  defp transcode_badge_class("failed"), do: "badge-error"
+  defp transcode_badge_class(_), do: "badge-ghost"
+
+  defp format_transcode_progress(nil), do: ""
+
+  defp format_transcode_progress(progress) when is_float(progress) do
+    "#{round(progress * 100)}%"
+  end
+
+  defp format_transcode_progress(_), do: ""
+
+  defp available_transcode_resolutions(file, jobs_by_resolution) do
+    source_height = Mydia.Downloads.DownloadService.parse_resolution_height(file.resolution)
+
+    [{"1080p", 1080}, {"720p", 720}, {"480p", 480}]
+    |> Enum.filter(fn {_res, height} -> height <= source_height end)
+    |> Enum.reject(fn {res, _height} -> Map.has_key?(jobs_by_resolution, res) end)
+    |> Enum.map(fn {res, _height} -> res end)
   end
 
   @doc """

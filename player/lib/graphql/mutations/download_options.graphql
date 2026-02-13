@@ -3,5 +3,8 @@ mutation DownloadOptions($contentType: String!, $id: ID!) {
     resolution
     label
     estimatedSize
+    transcodeStatus
+    transcodeProgress
+    actualSize
   }
 }

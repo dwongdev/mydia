@@ -93,12 +93,25 @@ class _QualityDownloadDialogState extends ConsumerState<QualityDownloadDialog> {
       );
     }
 
-    // Pre-select first option if none selected
-    if (_selectedResolution == null && response.options.isNotEmpty) {
+    // Sort options: pre-transcoded first, then by resolution
+    final sortedOptions = List<DownloadOption>.from(response.options)
+      ..sort((a, b) {
+        // Pre-transcoded options first
+        if (a.isPreTranscoded && !b.isPreTranscoded) return -1;
+        if (!a.isPreTranscoded && b.isPreTranscoded) return 1;
+        return 0;
+      });
+
+    // Pre-select the best option: prefer pre-transcoded, fallback to first
+    if (_selectedResolution == null && sortedOptions.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
+          final preTranscoded =
+              sortedOptions.where((o) => o.isPreTranscoded).toList();
           setState(() {
-            _selectedResolution = response.options.first.resolution;
+            _selectedResolution = preTranscoded.isNotEmpty
+                ? preTranscoded.first.resolution
+                : sortedOptions.first.resolution;
           });
         }
       });
@@ -115,7 +128,7 @@ class _QualityDownloadDialogState extends ConsumerState<QualityDownloadDialog> {
               ),
         ),
         const SizedBox(height: 12),
-        ...response.options.map((option) => _buildQualityOption(option)),
+        ...sortedOptions.map((option) => _buildQualityOption(option)),
       ],
     );
   }
@@ -147,7 +160,9 @@ class _QualityDownloadDialogState extends ConsumerState<QualityDownloadDialog> {
         child: Row(
           children: [
             Icon(
-              isSelected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+              isSelected
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_unchecked,
               color: isSelected ? AppColors.primary : AppColors.textSecondary,
               size: 24,
             ),
@@ -156,18 +171,36 @@ class _QualityDownloadDialogState extends ConsumerState<QualityDownloadDialog> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    option.label,
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                  Row(
+                    children: [
+                      Text(
+                        option.label,
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      if (option.isPreTranscoded) ...[
+                        const SizedBox(width: 8),
+                        _buildTranscodeBadge(option),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    '~${option.formattedSize}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.textSecondary,
-                        ),
+                  Row(
+                    children: [
+                      Text(
+                        option.isPreTranscoded
+                            ? option.formattedDisplaySize
+                            : '~${option.formattedSize}',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                      ),
+                      if (option.isTranscoding) ...[
+                        const SizedBox(width: 8),
+                        _buildTranscodeBadge(option),
+                      ],
+                    ],
                   ),
                 ],
               ),
@@ -181,6 +214,42 @@ class _QualityDownloadDialogState extends ConsumerState<QualityDownloadDialog> {
         ),
       ),
     );
+  }
+
+  Widget _buildTranscodeBadge(DownloadOption option) {
+    if (option.isPreTranscoded) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: AppColors.success.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          'Ready',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: AppColors.success,
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+      );
+    } else if (option.isTranscoding) {
+      final progress = option.transcodeProgress ?? 0.0;
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: AppColors.warning.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          'Transcoding ${(progress * 100).toStringAsFixed(0)}%',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: AppColors.warning,
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+      );
+    }
+    return const SizedBox.shrink();
   }
 
   Widget _buildLoadingContent() {
@@ -244,9 +313,8 @@ class _QualityDownloadDialogState extends ConsumerState<QualityDownloadDialog> {
 
     return [
       TextButton(
-        onPressed: _isStartingDownload
-            ? null
-            : () => Navigator.of(context).pop(null),
+        onPressed:
+            _isStartingDownload ? null : () => Navigator.of(context).pop(null),
         child: Text(
           'Cancel',
           style: TextStyle(
@@ -304,7 +372,6 @@ class _QualityDownloadDialogState extends ConsumerState<QualityDownloadDialog> {
       }
     }
   }
-
 }
 
 /// Shows the quality download dialog and returns the selected resolution.

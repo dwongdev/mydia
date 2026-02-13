@@ -4,10 +4,11 @@ class Variables$Mutation$DownloadOptions {
   factory Variables$Mutation$DownloadOptions({
     required String contentType,
     required String id,
-  }) => Variables$Mutation$DownloadOptions._({
-    r'contentType': contentType,
-    r'id': id,
-  });
+  }) =>
+      Variables$Mutation$DownloadOptions._({
+        r'contentType': contentType,
+        r'id': id,
+      });
 
   Variables$Mutation$DownloadOptions._(this._$data);
 
@@ -38,9 +39,9 @@ class Variables$Mutation$DownloadOptions {
   }
 
   CopyWith$Variables$Mutation$DownloadOptions<
-    Variables$Mutation$DownloadOptions
-  >
-  get copyWith => CopyWith$Variables$Mutation$DownloadOptions(this, (i) => i);
+          Variables$Mutation$DownloadOptions>
+      get copyWith =>
+          CopyWith$Variables$Mutation$DownloadOptions(this, (i) => i);
 
   @override
   bool operator ==(Object other) {
@@ -142,9 +143,8 @@ class Mutation$DownloadOptions {
   Map<String, dynamic> toJson() {
     final _resultData = <String, dynamic>{};
     final l$downloadOptions = downloadOptions;
-    _resultData['downloadOptions'] = l$downloadOptions
-        ?.map((e) => e.toJson())
-        .toList();
+    _resultData['downloadOptions'] =
+        l$downloadOptions?.map((e) => e.toJson()).toList();
     final l$$__typename = $__typename;
     _resultData['__typename'] = l$$__typename;
     return _resultData;
@@ -218,12 +218,9 @@ abstract class CopyWith$Mutation$DownloadOptions<TRes> {
   TRes downloadOptions(
     Iterable<Mutation$DownloadOptions$downloadOptions>? Function(
       Iterable<
-        CopyWith$Mutation$DownloadOptions$downloadOptions<
-          Mutation$DownloadOptions$downloadOptions
-        >
-      >?,
-    )
-    _fn,
+          CopyWith$Mutation$DownloadOptions$downloadOptions<
+              Mutation$DownloadOptions$downloadOptions>>?,
+    ) _fn,
   );
 }
 
@@ -240,34 +237,34 @@ class _CopyWithImpl$Mutation$DownloadOptions<TRes>
   TRes call({
     Object? downloadOptions = _undefined,
     Object? $__typename = _undefined,
-  }) => _then(
-    Mutation$DownloadOptions(
-      downloadOptions: downloadOptions == _undefined
-          ? _instance.downloadOptions
-          : (downloadOptions
-                as List<Mutation$DownloadOptions$downloadOptions>?),
-      $__typename: $__typename == _undefined || $__typename == null
-          ? _instance.$__typename
-          : ($__typename as String),
-    ),
-  );
+  }) =>
+      _then(
+        Mutation$DownloadOptions(
+          downloadOptions: downloadOptions == _undefined
+              ? _instance.downloadOptions
+              : (downloadOptions
+                  as List<Mutation$DownloadOptions$downloadOptions>?),
+          $__typename: $__typename == _undefined || $__typename == null
+              ? _instance.$__typename
+              : ($__typename as String),
+        ),
+      );
 
   TRes downloadOptions(
     Iterable<Mutation$DownloadOptions$downloadOptions>? Function(
       Iterable<
-        CopyWith$Mutation$DownloadOptions$downloadOptions<
-          Mutation$DownloadOptions$downloadOptions
-        >
-      >?,
-    )
-    _fn,
-  ) => call(
-    downloadOptions: _fn(
-      _instance.downloadOptions?.map(
-        (e) => CopyWith$Mutation$DownloadOptions$downloadOptions(e, (i) => i),
-      ),
-    )?.toList(),
-  );
+          CopyWith$Mutation$DownloadOptions$downloadOptions<
+              Mutation$DownloadOptions$downloadOptions>>?,
+    ) _fn,
+  ) =>
+      call(
+        downloadOptions: _fn(
+          _instance.downloadOptions?.map(
+            (e) =>
+                CopyWith$Mutation$DownloadOptions$downloadOptions(e, (i) => i),
+          ),
+        )?.toList(),
+      );
 }
 
 class _CopyWithStubImpl$Mutation$DownloadOptions<TRes>
@@ -279,7 +276,8 @@ class _CopyWithStubImpl$Mutation$DownloadOptions<TRes>
   call({
     List<Mutation$DownloadOptions$downloadOptions>? downloadOptions,
     String? $__typename,
-  }) => _res;
+  }) =>
+      _res;
 
   downloadOptions(_fn) => _res;
 }
@@ -344,6 +342,27 @@ const documentNodeMutationDownloadOptions = DocumentNode(
                   selectionSet: null,
                 ),
                 FieldNode(
+                  name: NameNode(value: 'transcodeStatus'),
+                  alias: null,
+                  arguments: [],
+                  directives: [],
+                  selectionSet: null,
+                ),
+                FieldNode(
+                  name: NameNode(value: 'transcodeProgress'),
+                  alias: null,
+                  arguments: [],
+                  directives: [],
+                  selectionSet: null,
+                ),
+                FieldNode(
+                  name: NameNode(value: 'actualSize'),
+                  alias: null,
+                  arguments: [],
+                  directives: [],
+                  selectionSet: null,
+                ),
+                FieldNode(
                   name: NameNode(value: '__typename'),
                   alias: null,
                   arguments: [],
@@ -371,6 +390,9 @@ class Mutation$DownloadOptions$downloadOptions {
     required this.resolution,
     required this.label,
     required this.estimatedSize,
+    this.transcodeStatus,
+    this.transcodeProgress,
+    this.actualSize,
     this.$__typename = 'DownloadOption',
   });
 
@@ -380,11 +402,17 @@ class Mutation$DownloadOptions$downloadOptions {
     final l$resolution = json['resolution'];
     final l$label = json['label'];
     final l$estimatedSize = json['estimatedSize'];
+    final l$transcodeStatus = json['transcodeStatus'];
+    final l$transcodeProgress = json['transcodeProgress'];
+    final l$actualSize = json['actualSize'];
     final l$$__typename = json['__typename'];
     return Mutation$DownloadOptions$downloadOptions(
       resolution: (l$resolution as String),
       label: (l$label as String),
       estimatedSize: (l$estimatedSize as int),
+      transcodeStatus: (l$transcodeStatus as String?),
+      transcodeProgress: (l$transcodeProgress as num?)?.toDouble(),
+      actualSize: (l$actualSize as int?),
       $__typename: (l$$__typename as String),
     );
   }
@@ -394,6 +422,12 @@ class Mutation$DownloadOptions$downloadOptions {
   final String label;
 
   final int estimatedSize;
+
+  final String? transcodeStatus;
+
+  final double? transcodeProgress;
+
+  final int? actualSize;
 
   final String $__typename;
 
@@ -405,6 +439,12 @@ class Mutation$DownloadOptions$downloadOptions {
     _resultData['label'] = l$label;
     final l$estimatedSize = estimatedSize;
     _resultData['estimatedSize'] = l$estimatedSize;
+    final l$transcodeStatus = transcodeStatus;
+    _resultData['transcodeStatus'] = l$transcodeStatus;
+    final l$transcodeProgress = transcodeProgress;
+    _resultData['transcodeProgress'] = l$transcodeProgress;
+    final l$actualSize = actualSize;
+    _resultData['actualSize'] = l$actualSize;
     final l$$__typename = $__typename;
     _resultData['__typename'] = l$$__typename;
     return _resultData;
@@ -415,11 +455,17 @@ class Mutation$DownloadOptions$downloadOptions {
     final l$resolution = resolution;
     final l$label = label;
     final l$estimatedSize = estimatedSize;
+    final l$transcodeStatus = transcodeStatus;
+    final l$transcodeProgress = transcodeProgress;
+    final l$actualSize = actualSize;
     final l$$__typename = $__typename;
     return Object.hashAll([
       l$resolution,
       l$label,
       l$estimatedSize,
+      l$transcodeStatus,
+      l$transcodeProgress,
+      l$actualSize,
       l$$__typename,
     ]);
   }
@@ -448,6 +494,21 @@ class Mutation$DownloadOptions$downloadOptions {
     if (l$estimatedSize != lOther$estimatedSize) {
       return false;
     }
+    final l$transcodeStatus = transcodeStatus;
+    final lOther$transcodeStatus = other.transcodeStatus;
+    if (l$transcodeStatus != lOther$transcodeStatus) {
+      return false;
+    }
+    final l$transcodeProgress = transcodeProgress;
+    final lOther$transcodeProgress = other.transcodeProgress;
+    if (l$transcodeProgress != lOther$transcodeProgress) {
+      return false;
+    }
+    final l$actualSize = actualSize;
+    final lOther$actualSize = other.actualSize;
+    if (l$actualSize != lOther$actualSize) {
+      return false;
+    }
     final l$$__typename = $__typename;
     final lOther$$__typename = other.$__typename;
     if (l$$__typename != lOther$$__typename) {
@@ -460,10 +521,9 @@ class Mutation$DownloadOptions$downloadOptions {
 extension UtilityExtension$Mutation$DownloadOptions$downloadOptions
     on Mutation$DownloadOptions$downloadOptions {
   CopyWith$Mutation$DownloadOptions$downloadOptions<
-    Mutation$DownloadOptions$downloadOptions
-  >
-  get copyWith =>
-      CopyWith$Mutation$DownloadOptions$downloadOptions(this, (i) => i);
+          Mutation$DownloadOptions$downloadOptions>
+      get copyWith =>
+          CopyWith$Mutation$DownloadOptions$downloadOptions(this, (i) => i);
 }
 
 abstract class CopyWith$Mutation$DownloadOptions$downloadOptions<TRes> {
@@ -479,6 +539,9 @@ abstract class CopyWith$Mutation$DownloadOptions$downloadOptions<TRes> {
     String? resolution,
     String? label,
     int? estimatedSize,
+    String? transcodeStatus,
+    double? transcodeProgress,
+    int? actualSize,
     String? $__typename,
   });
 }
@@ -500,23 +563,36 @@ class _CopyWithImpl$Mutation$DownloadOptions$downloadOptions<TRes>
     Object? resolution = _undefined,
     Object? label = _undefined,
     Object? estimatedSize = _undefined,
+    Object? transcodeStatus = _undefined,
+    Object? transcodeProgress = _undefined,
+    Object? actualSize = _undefined,
     Object? $__typename = _undefined,
-  }) => _then(
-    Mutation$DownloadOptions$downloadOptions(
-      resolution: resolution == _undefined || resolution == null
-          ? _instance.resolution
-          : (resolution as String),
-      label: label == _undefined || label == null
-          ? _instance.label
-          : (label as String),
-      estimatedSize: estimatedSize == _undefined || estimatedSize == null
-          ? _instance.estimatedSize
-          : (estimatedSize as int),
-      $__typename: $__typename == _undefined || $__typename == null
-          ? _instance.$__typename
-          : ($__typename as String),
-    ),
-  );
+  }) =>
+      _then(
+        Mutation$DownloadOptions$downloadOptions(
+          resolution: resolution == _undefined || resolution == null
+              ? _instance.resolution
+              : (resolution as String),
+          label: label == _undefined || label == null
+              ? _instance.label
+              : (label as String),
+          estimatedSize: estimatedSize == _undefined || estimatedSize == null
+              ? _instance.estimatedSize
+              : (estimatedSize as int),
+          transcodeStatus: transcodeStatus == _undefined
+              ? _instance.transcodeStatus
+              : (transcodeStatus as String?),
+          transcodeProgress: transcodeProgress == _undefined
+              ? _instance.transcodeProgress
+              : (transcodeProgress as double?),
+          actualSize: actualSize == _undefined
+              ? _instance.actualSize
+              : (actualSize as int?),
+          $__typename: $__typename == _undefined || $__typename == null
+              ? _instance.$__typename
+              : ($__typename as String),
+        ),
+      );
 }
 
 class _CopyWithStubImpl$Mutation$DownloadOptions$downloadOptions<TRes>
@@ -529,6 +605,10 @@ class _CopyWithStubImpl$Mutation$DownloadOptions$downloadOptions<TRes>
     String? resolution,
     String? label,
     int? estimatedSize,
+    String? transcodeStatus,
+    double? transcodeProgress,
+    int? actualSize,
     String? $__typename,
-  }) => _res;
+  }) =>
+      _res;
 }

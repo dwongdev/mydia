@@ -255,7 +255,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: player-web
+          name: mydia-player-web
           path: ${{ env.PLAYER_PATH }}/build/web
           retention-days: 7
 
@@ -365,7 +365,7 @@ jobs:
         if: steps.check_android.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: player-android-apk
+          name: mydia-player-android-apk
           path: ${{ env.PLAYER_PATH }}/build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
 
@@ -576,7 +576,7 @@ jobs:
         run: |
           codesign --deep --force --options runtime \
             --sign "${{ secrets.MACOS_SIGNING_IDENTITY }}" \
-            ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/Mydia.app
+            "${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/Mydia Player.app"
 
       - name: Notarize app bundle
         if: steps.check_macos.outputs.enabled == 'true' && env.MACOS_CERTIFICATE != ''
@@ -584,20 +584,20 @@ jobs:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
         working-directory: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release
         run: |
-          ditto -c -k --keepParent Mydia.app Mydia.zip
-          xcrun notarytool submit Mydia.zip \
+          ditto -c -k --keepParent "Mydia Player.app" "Mydia Player.zip"
+          xcrun notarytool submit "Mydia Player.zip" \
             --apple-id "${{ secrets.APPLE_ID }}" \
             --password "${{ secrets.APPLE_APP_PASSWORD }}" \
             --team-id "${{ secrets.APPLE_TEAM_ID }}" \
             --wait
-          rm Mydia.zip
+          rm "Mydia Player.zip"
 
       - name: Staple notarization ticket
         if: steps.check_macos.outputs.enabled == 'true' && env.MACOS_CERTIFICATE != ''
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
         run: |
-          xcrun stapler staple ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/Mydia.app
+          xcrun stapler staple "${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/Mydia Player.app"
 
       - name: Create DMG
         if: steps.check_macos.outputs.enabled == 'true'
@@ -605,13 +605,13 @@ jobs:
         run: |
           # Create a temporary directory for DMG contents
           mkdir -p dmg_contents
-          cp -R Mydia.app dmg_contents/
+          cp -R "Mydia Player.app" dmg_contents/
 
           # Create a symlink to Applications folder
           ln -s /Applications dmg_contents/Applications
 
           # Create DMG
-          hdiutil create -volname "Mydia" -srcfolder dmg_contents -ov -format UDZO Mydia.dmg
+          hdiutil create -volname "Mydia Player" -srcfolder dmg_contents -ov -format UDZO "Mydia Player.dmg"
 
           rm -rf dmg_contents
 
@@ -629,8 +629,8 @@ jobs:
         working-directory: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          DMG_FILE="Mydia.dmg"
-          DMG_URL="https://github.com/getmydia/mydia/releases/download/v${VERSION}/player-macos-v${VERSION}.dmg"
+          DMG_FILE="Mydia Player.dmg"
+          DMG_URL="https://github.com/getmydia/mydia/releases/download/v${VERSION}/mydia-player-macos-v${VERSION}.dmg"
 
           # Sign the DMG and get the EdDSA signature
           SIGNATURE=$(echo "$SPARKLE_EDDSA_KEY" | $GITHUB_WORKSPACE/sparkle-tools/bin/sign_update "$DMG_FILE" --ed-key-file -)
@@ -660,8 +660,8 @@ jobs:
         if: steps.check_macos.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: player-macos-dmg
-          path: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/Mydia.dmg
+          name: mydia-player-macos-dmg
+          path: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/Mydia Player.dmg
           retention-days: 30
 
       - name: Upload appcast artifact
@@ -670,7 +670,7 @@ jobs:
           SPARKLE_EDDSA_KEY: ${{ secrets.SPARKLE_EDDSA_KEY }}
         uses: actions/upload-artifact@v4
         with:
-          name: player-macos-appcast
+          name: mydia-player-macos-appcast
           path: ${{ env.PLAYER_PATH }}/build/macos/Build/Products/Release/appcast.xml
           retention-days: 30
 
@@ -740,8 +740,8 @@ jobs:
         if: steps.check_windows.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: player-windows-installer
-          path: ${{ env.PLAYER_PATH }}/build/installer/player-windows-v${{ needs.prepare.outputs.version }}.exe
+          name: mydia-player-windows-installer
+          path: ${{ env.PLAYER_PATH }}/build/installer/mydia-player-windows-v${{ needs.prepare.outputs.version }}.exe
           retention-days: 30
 
   player-linux:
@@ -811,7 +811,7 @@ jobs:
         if: steps.check_linux.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: player-linux-bundle
+          name: mydia-player-linux-bundle
           path: ${{ env.PLAYER_PATH }}/build/linux/x64/release/bundle
           retention-days: 30
 
@@ -839,7 +839,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: player-*
+          pattern: mydia-player-*
 
       - name: List artifacts
         run: |
@@ -849,26 +849,26 @@ jobs:
       - name: Create release archives
         run: |
           cd artifacts
-          [ -d "player-android-apk" ] && \
-            mv player-android-apk/app-release.apk player-android-v${{ needs.prepare.outputs.version }}.apk || true
+          [ -d "mydia-player-android-apk" ] && \
+            mv mydia-player-android-apk/app-release.apk mydia-player-android-v${{ needs.prepare.outputs.version }}.apk || true
 
-          [ -d "player-macos-dmg" ] && \
-            mv player-macos-dmg/Mydia.dmg player-macos-v${{ needs.prepare.outputs.version }}.dmg || true
+          [ -d "mydia-player-macos-dmg" ] && \
+            mv "mydia-player-macos-dmg/Mydia Player.dmg" mydia-player-macos-v${{ needs.prepare.outputs.version }}.dmg || true
 
-          [ -d "player-windows-installer" ] && \
-            mv player-windows-installer/player-windows-v${{ needs.prepare.outputs.version }}.exe . || true
+          [ -d "mydia-player-windows-installer" ] && \
+            mv mydia-player-windows-installer/mydia-player-windows-v${{ needs.prepare.outputs.version }}.exe . || true
 
-          [ -d "player-linux-bundle" ] && \
-            chmod +x player-linux-bundle/mydia && \
-            tar -czf player-linux-v${{ needs.prepare.outputs.version }}.tar.gz -C player-linux-bundle . || true
+          [ -d "mydia-player-linux-bundle" ] && \
+            chmod +x mydia-player-linux-bundle/mydia-player && \
+            tar -czf mydia-player-linux-v${{ needs.prepare.outputs.version }}.tar.gz -C mydia-player-linux-bundle . || true
 
-          [ -d "player-macos-appcast" ] && \
-            mv player-macos-appcast/appcast.xml . || true
+          [ -d "mydia-player-macos-appcast" ] && \
+            mv mydia-player-macos-appcast/appcast.xml . || true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Mydia v${{ needs.prepare.outputs.version }}
+          name: Mydia Player v${{ needs.prepare.outputs.version }}
           tag_name: ${{ github.ref_name }}
           draft: false
           prerelease: ${{ needs.prepare.outputs.is_prerelease }}
@@ -900,10 +900,10 @@ jobs:
             ---
 
           files: |
-            artifacts/player-android-*.apk
-            artifacts/player-macos-*.dmg
-            artifacts/player-windows-*.exe
-            artifacts/player-linux-*.tar.gz
+            artifacts/mydia-player-android-*.apk
+            artifacts/mydia-player-macos-*.dmg
+            artifacts/mydia-player-windows-*.exe
+            artifacts/mydia-player-linux-*.tar.gz
             artifacts/appcast.xml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

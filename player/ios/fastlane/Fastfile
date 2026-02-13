@@ -19,7 +19,7 @@ platform :ios do
       scheme: "Runner",
       export_method: "app-store",
       output_directory: "../build/ios/ipa",
-      output_name: "Mydia.ipa"
+      output_name: "Mydia Player.ipa"
     )
 
     # Upload to TestFlight
@@ -44,7 +44,7 @@ platform :ios do
       scheme: "Runner",
       export_method: "app-store",
       output_directory: "../build/ios/ipa",
-      output_name: "Mydia.ipa"
+      output_name: "Mydia Player.ipa"
     )
 
     # Upload to App Store Connect for review
@@ -65,7 +65,7 @@ platform :ios do
       scheme: "Runner",
       export_method: "app-store",
       output_directory: "../build/ios/ipa",
-      output_name: "Mydia.ipa"
+      output_name: "Mydia Player.ipa"
     )
   end
 end

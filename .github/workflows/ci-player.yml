@@ -32,19 +32,19 @@ jobs:
           - platform: Windows
             os: windows-latest
             platform_dir: windows
-            artifact_name: player-windows-release
+            artifact_name: mydia-player-windows-release
             artifact_path: player/build/windows/x64/runner/Release/
             shell: bash
           - platform: macOS
             os: macos-latest
             platform_dir: macos
-            artifact_name: player-macos-app
-            artifact_path: player/build/macos/Build/Products/Release/Mydia.app
+            artifact_name: mydia-player-macos-app
+            artifact_path: player/build/macos/Build/Products/Release/Mydia Player.app
             shell: bash
           - platform: Linux
             os: ubuntu-latest
             platform_dir: linux
-            artifact_name: player-linux-bundle
+            artifact_name: mydia-player-linux-bundle
             artifact_path: player/build/linux/x64/release/bundle
             shell: bash
 

@@ -10,7 +10,7 @@
 
 #define MyAppName "Mydia Player"
 #define MyAppPublisher "dev.mydia"
-#define MyAppExeName "player.exe"
+#define MyAppExeName "mydia-player.exe"
 #define MyAppUrl "https://github.com/getmydia/mydia"
 
 ; The Flutter release build output, relative to this .iss file
@@ -28,7 +28,7 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\build\installer
-OutputBaseFilename=player-windows-v{#MyAppVersion}
+OutputBaseFilename=mydia-player-windows-v{#MyAppVersion}
 SetupIconFile=runner\resources\app_icon.ico
 Compression=lzma2
 SolidCompression=yes

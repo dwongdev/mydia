@@ -240,7 +240,7 @@ defmodule Mydia.Downloads.DownloadServiceTest do
 
   describe "calculate_quality_options/1" do
     test "includes original option first" do
-      media_file = %{size: 1_000_000_000, resolution: "1080p"}
+      media_file = %{id: Ecto.UUID.generate(), size: 1_000_000_000, resolution: "1080p"}
 
       options = DownloadService.calculate_quality_options(media_file)
 
@@ -250,7 +250,7 @@ defmodule Mydia.Downloads.DownloadServiceTest do
 
     test "filters resolutions based on source" do
       # 720p source should not offer 1080p
-      media_file = %{size: 500_000_000, resolution: "720p"}
+      media_file = %{id: Ecto.UUID.generate(), size: 500_000_000, resolution: "720p"}
 
       options = DownloadService.calculate_quality_options(media_file)
 
@@ -261,7 +261,7 @@ defmodule Mydia.Downloads.DownloadServiceTest do
     end
 
     test "estimates file size based on resolution" do
-      media_file = %{size: 1_000_000_000, resolution: "1080p"}
+      media_file = %{id: Ecto.UUID.generate(), size: 1_000_000_000, resolution: "1080p"}
 
       options = DownloadService.calculate_quality_options(media_file)
 

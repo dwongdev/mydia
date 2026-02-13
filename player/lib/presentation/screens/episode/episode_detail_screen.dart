@@ -167,26 +167,57 @@ class EpisodeDetailScreen extends ConsumerWidget {
 
   Widget _buildContent(
       BuildContext context, WidgetRef ref, EpisodeDetail episode) {
-    return CustomScrollView(
-      slivers: [
-        _buildHeroSection(context, episode),
-        SliverToBoxAdapter(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildShowLink(context, episode),
-              const SizedBox(height: 8),
-              _buildTitleSection(context, episode),
-              const SizedBox(height: 20),
-              _buildActionButtons(context, ref, episode),
-              const SizedBox(height: 24),
-              _buildMetadata(context, episode),
-              if (episode.overview != null && episode.overview!.isNotEmpty) ...[
-                const SizedBox(height: 24),
-                _buildOverview(context, episode),
-              ],
-              const SizedBox(height: 32),
-            ],
+    final hasFiles = episode.files.isNotEmpty;
+
+    return Stack(
+      children: [
+        CustomScrollView(
+          slivers: [
+            _buildHeroSection(context, episode),
+            SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Space for the floating play button overlap
+                  const SizedBox(height: 44),
+                  _buildShowLink(context, episode),
+                  const SizedBox(height: 8),
+                  _buildTitleSection(context, episode),
+                  const SizedBox(height: 20),
+                  if (isDownloadSupported) ...[
+                    _buildDownloadRow(context, ref, episode),
+                    const SizedBox(height: 20),
+                  ],
+                  _buildMetadata(context, episode),
+                  if (episode.overview != null &&
+                      episode.overview!.isNotEmpty) ...[
+                    const SizedBox(height: 24),
+                    _buildOverview(context, episode),
+                  ],
+                  const SizedBox(height: 32),
+                ],
+              ),
+            ),
+          ],
+        ),
+        // Floating play button anchored to bottom of hero
+        Positioned(
+          top: 300 - 36, // expandedHeight minus half the button height
+          right: 24,
+          child: _PlayButton(
+            onPressed: hasFiles
+                ? () async {
+                    final selectedFile = await showQualitySelector(
+                      context,
+                      episode.files,
+                    );
+                    if (selectedFile != null && context.mounted) {
+                      context.push(
+                        '/player/episode/${episode.id}?fileId=${selectedFile.id}&title=${Uri.encodeComponent(episode.fullTitle)}',
+                      );
+                    }
+                  }
+                : null,
           ),
         ),
       ],
@@ -374,57 +405,13 @@ class EpisodeDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildActionButtons(
+  Widget _buildDownloadRow(
       BuildContext context, WidgetRef ref, EpisodeDetail episode) {
-    final hasFiles = episode.files.isNotEmpty;
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
         children: [
-          // Play button
-          Expanded(
-            child: FilledButton.icon(
-              onPressed: hasFiles
-                  ? () async {
-                      final selectedFile = await showQualitySelector(
-                        context,
-                        episode.files,
-                      );
-                      if (selectedFile != null && context.mounted) {
-                        context.push(
-                          '/player/episode/${episode.id}?fileId=${selectedFile.id}&title=${Uri.encodeComponent(episode.fullTitle)}',
-                        );
-                      }
-                    }
-                  : null,
-              icon: Icon(
-                episode.progress != null && episode.progress!.percentage > 0
-                    ? Icons.play_arrow_rounded
-                    : Icons.play_arrow_rounded,
-              ),
-              label: Text(
-                hasFiles
-                    ? (episode.progress != null &&
-                            episode.progress!.percentage > 0 &&
-                            !episode.progress!.watched
-                        ? 'Resume'
-                        : 'Play')
-                    : 'No Files',
-              ),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          ),
-          // Download button
-          if (isDownloadSupported) ...[
-            const SizedBox(width: 12),
-            _buildDownloadButton(context, ref, episode),
-          ],
+          _buildDownloadButton(context, ref, episode),
         ],
       ),
     );
@@ -671,6 +658,100 @@ class EpisodeDetailScreen extends ConsumerWidget {
                 ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PlayButton extends StatefulWidget {
+  final VoidCallback? onPressed;
+
+  const _PlayButton({
+    this.onPressed,
+  });
+
+  @override
+  State<_PlayButton> createState() => _PlayButtonState();
+}
+
+class _PlayButtonState extends State<_PlayButton>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _scaleAnimation;
+
+  bool get _enabled => widget.onPressed != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 100),
+      vsync: this,
+    );
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 0.90).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  static const double _size = 72.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: _scaleAnimation,
+      child: SizedBox(
+        width: _size,
+        height: _size,
+        child: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: _enabled
+                ? const LinearGradient(
+                    colors: [AppColors.primary, AppColors.secondary],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  )
+                : null,
+            color: _enabled ? null : AppColors.surfaceVariant,
+            boxShadow: _enabled
+                ? [
+                    BoxShadow(
+                      color: AppColors.primary.withValues(alpha: 0.5),
+                      blurRadius: 24,
+                      spreadRadius: 2,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Material(
+            color: Colors.transparent,
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: widget.onPressed,
+              onTapDown: _enabled ? (_) => _controller.forward() : null,
+              onTapUp: _enabled ? (_) => _controller.reverse() : null,
+              onTapCancel: _enabled ? () => _controller.reverse() : null,
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Icon(
+                    Icons.play_arrow_rounded,
+                    size: 40,
+                    color: _enabled ? Colors.white : AppColors.textDisabled,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

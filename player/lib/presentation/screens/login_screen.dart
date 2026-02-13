@@ -259,7 +259,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           showUpdateRequiredDialog(context, next.updateRequiredError!)
               .then((_) {
             if (mounted) {
-              ref.read(loginControllerProvider.notifier).clearUpdateRequiredError();
+              ref
+                  .read(loginControllerProvider.notifier)
+                  .clearUpdateRequiredError();
             }
           });
         }
@@ -276,7 +278,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
             end: Alignment.bottomRight,
             colors: [
               AppColors.background,
-              Color(0xFF162032),
+              Color(0xFF0E1828),
               AppColors.background,
             ],
             stops: [0.0, 0.5, 1.0],
@@ -478,7 +480,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         ),
         SizedBox(height: isCompact ? 12 : 16),
         Text(
-          'Mydia',
+          'Mydia Player',
           style: TextStyle(
             fontSize: titleSize,
             fontWeight: FontWeight.bold,
@@ -611,7 +613,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           _buildProgressIndicator(loginState),
         ],
 
-        if (loginState.error != null && loginState.mode != ConnectionMode.direct) ...[
+        if (loginState.error != null &&
+            loginState.mode != ConnectionMode.direct) ...[
           const SizedBox(height: 14),
           _buildErrorMessage(loginState.error!),
         ],
@@ -665,7 +668,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
               ? null
               : () {
                   setState(() => _showDirectConnection = true);
-                  ref.read(loginControllerProvider.notifier).setMode(ConnectionMode.direct);
+                  ref
+                      .read(loginControllerProvider.notifier)
+                      .setMode(ConnectionMode.direct);
                 },
           child: Container(
             padding: const EdgeInsets.all(14),
@@ -741,7 +746,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   ? null
                   : () {
                       setState(() => _showDirectConnection = false);
-                      ref.read(loginControllerProvider.notifier).setMode(ConnectionMode.claimCode);
+                      ref
+                          .read(loginControllerProvider.notifier)
+                          .setMode(ConnectionMode.claimCode);
                     },
               child: Container(
                 width: 32,
@@ -878,7 +885,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                 return null;
               },
             ),
-            if (loginState.error != null && loginState.mode == ConnectionMode.direct) ...[
+            if (loginState.error != null &&
+                loginState.mode == ConnectionMode.direct) ...[
               const SizedBox(height: 14),
               _buildErrorMessage(loginState.error!),
             ],
@@ -920,7 +928,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         ),
         filled: true,
         fillColor: AppColors.surfaceVariant.withValues(alpha: 0.4),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
@@ -1039,7 +1048,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         filled: true,
         fillColor: AppColors.surfaceVariant.withValues(alpha: 0.4),
         isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide.none,
@@ -1077,7 +1087,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       ),
       child: Row(
         children: [
-          const Icon(Icons.error_outline_rounded, color: AppColors.error, size: 16),
+          const Icon(Icons.error_outline_rounded,
+              color: AppColors.error, size: 16),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -1341,8 +1352,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                             'The relay server used for P2P connections',
                             style: TextStyle(
                               fontSize: 11,
-                              color:
-                                  AppColors.textSecondary.withValues(alpha: 0.7),
+                              color: AppColors.textSecondary
+                                  .withValues(alpha: 0.7),
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -1356,13 +1367,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                             decoration: InputDecoration(
                               hintText: defaultRelayUrl,
                               hintStyle: TextStyle(
-                                color:
-                                    AppColors.textDisabled.withValues(alpha: 0.5),
+                                color: AppColors.textDisabled
+                                    .withValues(alpha: 0.5),
                                 fontSize: 13,
                               ),
                               filled: true,
-                              fillColor:
-                                  AppColors.surfaceVariant.withValues(alpha: 0.4),
+                              fillColor: AppColors.surfaceVariant
+                                  .withValues(alpha: 0.4),
                               isDense: true,
                               contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 12,
@@ -1375,7 +1386,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
                                 borderSide: BorderSide(
-                                  color: AppColors.border.withValues(alpha: 0.15),
+                                  color:
+                                      AppColors.border.withValues(alpha: 0.15),
                                 ),
                               ),
                               focusedBorder: OutlineInputBorder(
@@ -1385,17 +1397,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                   width: 1.5,
                                 ),
                               ),
-                              suffixIcon: _relayUrlController.text != defaultRelayUrl
-                                  ? IconButton(
-                                      onPressed: _resetRelayUrlToDefault,
-                                      icon: const Icon(
-                                        Icons.refresh,
-                                        size: 18,
-                                        color: AppColors.textSecondary,
-                                      ),
-                                      tooltip: 'Reset to default',
-                                    )
-                                  : null,
+                              suffixIcon:
+                                  _relayUrlController.text != defaultRelayUrl
+                                      ? IconButton(
+                                          onPressed: _resetRelayUrlToDefault,
+                                          icon: const Icon(
+                                            Icons.refresh,
+                                            size: 18,
+                                            color: AppColors.textSecondary,
+                                          ),
+                                          tooltip: 'Reset to default',
+                                        )
+                                      : null,
                             ),
                             onChanged: (_) => setState(() {}),
                           ),
@@ -1406,7 +1419,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                 Icon(
                                   Icons.info_outline,
                                   size: 12,
-                                  color: AppColors.primary.withValues(alpha: 0.7),
+                                  color:
+                                      AppColors.primary.withValues(alpha: 0.7),
                                 ),
                                 const SizedBox(width: 6),
                                 Expanded(
@@ -1414,8 +1428,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                     'Using custom relay URL',
                                     style: TextStyle(
                                       fontSize: 11,
-                                      color:
-                                          AppColors.primary.withValues(alpha: 0.7),
+                                      color: AppColors.primary
+                                          .withValues(alpha: 0.7),
                                     ),
                                   ),
                                 ),

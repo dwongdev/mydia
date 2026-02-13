@@ -57,13 +57,15 @@ class HomeScreen extends ConsumerWidget {
                         final item = data.continueWatching.first;
                         return _HeroSection(
                           item: item,
-                          onTap: () => _handleItemTap(context, item.id, item.type),
+                          onTap: () =>
+                              _handleItemTap(context, item.id, item.type),
                         );
                       } else {
                         final item = data.recentlyAdded.first;
                         return _HeroSection(
                           item: item,
-                          onTap: () => _handleItemTap(context, item.id, item.type),
+                          onTap: () =>
+                              _handleItemTap(context, item.id, item.type),
                         );
                       }
                     }),
@@ -250,7 +252,7 @@ class _ModernAppBar extends StatelessWidget implements PreferredSizeWidget {
               ),
               const SizedBox(width: 10),
               const Text(
-                'Mydia',
+                'Mydia Player',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   letterSpacing: -0.5,

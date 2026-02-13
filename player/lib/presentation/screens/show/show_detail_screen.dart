@@ -154,33 +154,53 @@ class ShowDetailScreen extends ConsumerWidget {
   }
 
   Widget _buildContent(BuildContext context, WidgetRef ref, ShowDetail show) {
-    return CustomScrollView(
-      slivers: [
-        _buildHeroSection(context, ref, show),
-        SliverToBoxAdapter(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildActionButtons(context, ref, show),
-              const SizedBox(height: 24),
-              _buildMetadata(context, show),
-              const SizedBox(height: 24),
-              if (show.overview != null) ...[
-                _buildOverview(context, show),
-                const SizedBox(height: 24),
-              ],
-              if (show.genres.isNotEmpty) ...[
-                _buildGenres(context, show),
-                const SizedBox(height: 24),
-              ],
-              if (show.seasons.isNotEmpty) _buildSeasonSelector(context, ref, show),
-              const SizedBox(height: 8),
-            ],
-          ),
+    final hasNextEpisode = show.nextEpisode != null;
+
+    return Stack(
+      children: [
+        CustomScrollView(
+          slivers: [
+            _buildHeroSection(context, ref, show),
+            SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Space for the floating play button overlap
+                  const SizedBox(height: 44),
+                  _buildMetadata(context, show),
+                  const SizedBox(height: 24),
+                  if (show.overview != null) ...[
+                    _buildOverview(context, show),
+                    const SizedBox(height: 24),
+                  ],
+                  if (show.genres.isNotEmpty) ...[
+                    _buildGenres(context, show),
+                    const SizedBox(height: 24),
+                  ],
+                  if (show.seasons.isNotEmpty)
+                    _buildSeasonSelector(context, ref, show),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+            _buildEpisodeList(context, ref),
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 32),
+            ),
+          ],
         ),
-        _buildEpisodeList(context, ref),
-        const SliverToBoxAdapter(
-          child: SizedBox(height: 32),
+        // Floating play button anchored to bottom of hero
+        Positioned(
+          top: 380 - 36, // expandedHeight minus half the button height
+          right: 24,
+          child: _PlayButton(
+            onPressed: hasNextEpisode
+                ? () {
+                    // TODO: Navigate to episode player
+                    debugPrint('Playing next episode: ${show.nextEpisode!.id}');
+                  }
+                : null,
+          ),
         ),
       ],
     );
@@ -210,7 +230,8 @@ class ShowDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildHeroSection(BuildContext context, WidgetRef ref, ShowDetail show) {
+  Widget _buildHeroSection(
+      BuildContext context, WidgetRef ref, ShowDetail show) {
     return SliverAppBar(
       expandedHeight: 380,
       pinned: true,
@@ -231,7 +252,9 @@ class ShowDetailScreen extends ConsumerWidget {
               child: Padding(
                 padding: const EdgeInsets.all(8),
                 child: Icon(
-                  show.isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                  show.isFavorite
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
                   color: show.isFavorite ? AppColors.error : Colors.white,
                 ),
               ),
@@ -304,14 +327,14 @@ class ShowDetailScreen extends ConsumerWidget {
                               .textTheme
                               .headlineSmall
                               ?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                shadows: [
-                                  Shadow(
-                                    color: Colors.black.withValues(alpha: 0.8),
-                                    blurRadius: 8,
-                                  ),
-                                ],
+                            fontWeight: FontWeight.bold,
+                            shadows: [
+                              Shadow(
+                                color: Colors.black.withValues(alpha: 0.8),
+                                blurRadius: 8,
                               ),
+                            ],
+                          ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -319,9 +342,10 @@ class ShowDetailScreen extends ConsumerWidget {
                           const SizedBox(height: 6),
                           Text(
                             show.yearDisplay,
-                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                  color: AppColors.textSecondary,
-                                ),
+                            style:
+                                Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                      color: AppColors.textSecondary,
+                                    ),
                           ),
                         ],
                         const SizedBox(height: 8),
@@ -365,12 +389,14 @@ class ShowDetailScreen extends ConsumerWidget {
                   ),
                   errorWidget: (context, url, error) => Container(
                     color: AppColors.surfaceVariant,
-                    child: const Icon(Icons.tv_rounded, color: AppColors.textSecondary),
+                    child: const Icon(Icons.tv_rounded,
+                        color: AppColors.textSecondary),
                   ),
                 )
               : Container(
                   color: AppColors.surfaceVariant,
-                  child: const Icon(Icons.tv_rounded, color: AppColors.textSecondary),
+                  child: const Icon(Icons.tv_rounded,
+                      color: AppColors.textSecondary),
                 ),
         ),
       ),
@@ -434,74 +460,6 @@ class ShowDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildActionButtons(BuildContext context, WidgetRef ref, ShowDetail show) {
-    final hasNextEpisode = show.nextEpisode != null;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Row(
-        children: [
-          Expanded(
-            child: FilledButton.icon(
-              onPressed: hasNextEpisode
-                  ? () {
-                      // TODO: Navigate to episode player
-                      debugPrint('Playing next episode: ${show.nextEpisode!.id}');
-                    }
-                  : null,
-              icon: const Icon(Icons.play_arrow_rounded),
-              label: Text(
-                hasNextEpisode
-                    ? 'Play ${show.nextEpisode!.episodeCode}'
-                    : 'No Episodes',
-              ),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: IconButton(
-              onPressed: () {
-                // TODO: Add to list functionality
-              },
-              icon: const Icon(Icons.add_rounded),
-              tooltip: 'Add to list',
-              style: IconButton.styleFrom(
-                padding: const EdgeInsets.all(14),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: IconButton(
-              onPressed: () {
-                // TODO: Share functionality
-              },
-              icon: const Icon(Icons.share_rounded),
-              tooltip: 'Share',
-              style: IconButton.styleFrom(
-                padding: const EdgeInsets.all(14),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildMetadata(BuildContext context, show) {
     final items = <Widget>[];
 
@@ -509,12 +467,15 @@ class ShowDetailScreen extends ConsumerWidget {
       items.add(_buildMetadataChip(
         context,
         show.statusDisplay,
-        show.statusDisplay == 'Ended' ? AppColors.textSecondary : AppColors.success,
+        show.statusDisplay == 'Ended'
+            ? AppColors.textSecondary
+            : AppColors.success,
       ));
     }
 
     if (show.contentRating != null) {
-      items.add(_buildMetadataChip(context, show.contentRating!, AppColors.accent));
+      items.add(
+          _buildMetadataChip(context, show.contentRating!, AppColors.accent));
     }
 
     if (items.isEmpty) return const SizedBox.shrink();
@@ -611,7 +572,8 @@ class ShowDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildSeasonSelector(BuildContext context, WidgetRef ref, ShowDetail show) {
+  Widget _buildSeasonSelector(
+      BuildContext context, WidgetRef ref, ShowDetail show) {
     final selectedSeason = ref.watch(selectedSeasonProvider(id));
     // Only show seasons that have files available in Mydia
     final availableSeasons = show.seasons.where((s) => s.hasFiles).toList();
@@ -897,6 +859,101 @@ class _SeasonChipState extends State<_SeasonChip>
               fontSize: 14,
               fontWeight: FontWeight.w600,
               color: widget.isSelected ? Colors.white : AppColors.textPrimary,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlayButton extends StatefulWidget {
+  final VoidCallback? onPressed;
+
+  const _PlayButton({
+    this.onPressed,
+  });
+
+  @override
+  State<_PlayButton> createState() => _PlayButtonState();
+}
+
+class _PlayButtonState extends State<_PlayButton>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _scaleAnimation;
+
+  bool get _enabled => widget.onPressed != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 100),
+      vsync: this,
+    );
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 0.90).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  static const double _size = 72.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: _scaleAnimation,
+      child: SizedBox(
+        width: _size,
+        height: _size,
+        child: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: _enabled
+                ? const LinearGradient(
+                    colors: [AppColors.primary, AppColors.secondary],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  )
+                : null,
+            color: _enabled ? null : AppColors.surfaceVariant,
+            boxShadow: _enabled
+                ? [
+                    BoxShadow(
+                      color: AppColors.primary.withValues(alpha: 0.5),
+                      blurRadius: 24,
+                      spreadRadius: 2,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Material(
+            color: Colors.transparent,
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: widget.onPressed,
+              onTapDown: _enabled ? (_) => _controller.forward() : null,
+              onTapUp: _enabled ? (_) => _controller.reverse() : null,
+              onTapCancel: _enabled ? () => _controller.reverse() : null,
+              child: Center(
+                child: Padding(
+                  // Slight right offset to optically center the play triangle
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Icon(
+                    Icons.play_arrow_rounded,
+                    size: 40,
+                    color: _enabled ? Colors.white : AppColors.textDisabled,
+                  ),
+                ),
+              ),
             ),
           ),
         ),

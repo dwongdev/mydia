@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -269,7 +268,8 @@ class _AppShellState extends ConsumerState<AppShell> {
               children: [
                 _DesktopSidebar(
                   selectedIndex: selectedIndex,
-                  onItemTapped: (index) => _onItemTapped(index, isOffline: isOffline),
+                  onItemTapped: (index) =>
+                      _onItemTapped(index, isOffline: isOffline),
                   showBackToMydia: showBackToMydia,
                   isOffline: isOffline,
                 ),
@@ -316,6 +316,72 @@ class _AppShellState extends ConsumerState<AppShell> {
   }
 }
 
+/// Mydia squircle logo painted via CustomPainter.
+class _MydiaLogo extends StatelessWidget {
+  final double size;
+
+  const _MydiaLogo({required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size(size, size),
+      painter: const _MydiaLogoPainter(),
+    );
+  }
+}
+
+class _MydiaLogoPainter extends CustomPainter {
+  const _MydiaLogoPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.width; // square
+    final scale = s / 48.0; // SVG viewBox is 48x48
+
+    // Outer squircle – primary fill
+    final outerRect = RRect.fromLTRBR(
+      1 * scale,
+      1 * scale,
+      47 * scale,
+      47 * scale,
+      Radius.circular(10 * scale),
+    );
+    canvas.drawRRect(outerRect, Paint()..color = AppColors.primary);
+
+    // Inner squircle – background fill
+    final innerRect = RRect.fromLTRBR(
+      5 * scale,
+      5 * scale,
+      43 * scale,
+      43 * scale,
+      Radius.circular(7 * scale),
+    );
+    canvas.drawRRect(innerRect, Paint()..color = AppColors.background);
+
+    // M letterform
+    final mPath = Path()
+      ..moveTo(12 * scale, 34 * scale)
+      ..lineTo(12 * scale, 14 * scale)
+      ..lineTo(18 * scale, 14 * scale)
+      ..lineTo(24 * scale, 24 * scale)
+      ..lineTo(30 * scale, 14 * scale)
+      ..lineTo(36 * scale, 14 * scale)
+      ..lineTo(36 * scale, 34 * scale)
+      ..lineTo(31 * scale, 34 * scale)
+      ..lineTo(31 * scale, 22 * scale)
+      ..lineTo(25.5 * scale, 31 * scale)
+      ..lineTo(22.5 * scale, 31 * scale)
+      ..lineTo(17 * scale, 22 * scale)
+      ..lineTo(17 * scale, 34 * scale)
+      ..close();
+    canvas.drawPath(mPath, Paint()..color = AppColors.primary);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
 /// Desktop sidebar navigation with full labels
 class _DesktopSidebar extends StatelessWidget {
   final int selectedIndex;
@@ -332,123 +398,111 @@ class _DesktopSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          width: Breakpoints.sidebarWidth,
-          decoration: BoxDecoration(
-            color: AppColors.surface.withValues(alpha: 0.95),
-            border: Border(
-              right: BorderSide(
-                color: AppColors.divider.withValues(alpha: 0.3),
-                width: 1,
-              ),
-            ),
+    return Container(
+      width: Breakpoints.sidebarWidth,
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        border: Border(
+          right: BorderSide(
+            color: AppColors.divider.withValues(alpha: 0.15),
+            width: 1,
           ),
-          child: SafeArea(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Back to Mydia link (shown in embed mode)
-                if (showBackToMydia)
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(12, 12, 12, 0),
-                    child: _BackToMydiaButton(),
-                  ),
-                // Logo header
-                Padding(
-                  padding: EdgeInsets.fromLTRB(
-                      20, showBackToMydia ? 16 : 24, 20, 32),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
-                          gradient: const LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [AppColors.primary, AppColors.secondary],
-                          ),
-                        ),
-                        child: const Icon(
-                          Icons.play_arrow_rounded,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        'Mydia',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+        ),
+      ),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Back to Mydia link (shown in embed mode)
+            if (showBackToMydia)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(12, 12, 12, 0),
+                child: _BackToMydiaButton(),
+              ),
+            // Logo header
+            Padding(
+              padding:
+                  EdgeInsets.fromLTRB(20, showBackToMydia ? 16 : 20, 20, 24),
+              child: Row(
+                children: [
+                  const _MydiaLogo(size: 36),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Mydia Player',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                           fontWeight: FontWeight.bold,
                           letterSpacing: -0.5,
                         ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Navigation items
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Column(
+                  children: [
+                    _SidebarItem(
+                      icon: Icons.home_outlined,
+                      selectedIcon: Icons.home_rounded,
+                      label: 'Home',
+                      isSelected: selectedIndex == 0,
+                      isDisabled: isOffline,
+                      onTap: () => onItemTapped(0),
+                    ),
+                    const SizedBox(height: 4),
+                    _SidebarItem(
+                      icon: Icons.movie_outlined,
+                      selectedIcon: Icons.movie_rounded,
+                      label: 'Movies',
+                      isSelected: selectedIndex == 1,
+                      isDisabled: isOffline,
+                      onTap: () => onItemTapped(1),
+                    ),
+                    const SizedBox(height: 4),
+                    _SidebarItem(
+                      icon: Icons.tv_outlined,
+                      selectedIcon: Icons.tv_rounded,
+                      label: 'TV Shows',
+                      isSelected: selectedIndex == 2,
+                      isDisabled: isOffline,
+                      onTap: () => onItemTapped(2),
+                    ),
+                    if (isDownloadSupported) ...[
+                      const SizedBox(height: 4),
+                      _SidebarItem(
+                        icon: Icons.download_outlined,
+                        selectedIcon: Icons.download_rounded,
+                        label: 'Downloads',
+                        isSelected: selectedIndex == 3,
+                        onTap: () => onItemTapped(3),
                       ),
                     ],
-                  ),
-                ),
-
-                // Navigation items
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Column(
-                      children: [
-                        _SidebarItem(
-                          icon: Icons.home_outlined,
-                          selectedIcon: Icons.home_rounded,
-                          label: 'Home',
-                          isSelected: selectedIndex == 0,
-                          isDisabled: isOffline,
-                          onTap: () => onItemTapped(0),
-                        ),
-                        const SizedBox(height: 4),
-                        _SidebarItem(
-                          icon: Icons.movie_outlined,
-                          selectedIcon: Icons.movie_rounded,
-                          label: 'Movies',
-                          isSelected: selectedIndex == 1,
-                          isDisabled: isOffline,
-                          onTap: () => onItemTapped(1),
-                        ),
-                        const SizedBox(height: 4),
-                        _SidebarItem(
-                          icon: Icons.tv_outlined,
-                          selectedIcon: Icons.tv_rounded,
-                          label: 'TV Shows',
-                          isSelected: selectedIndex == 2,
-                          isDisabled: isOffline,
-                          onTap: () => onItemTapped(2),
-                        ),
-                        if (isDownloadSupported) ...[
-                          const SizedBox(height: 4),
-                          _SidebarItem(
-                            icon: Icons.download_outlined,
-                            selectedIcon: Icons.download_rounded,
-                            label: 'Downloads',
-                            isSelected: selectedIndex == 3,
-                            onTap: () => onItemTapped(3),
-                          ),
-                        ],
-                        const Spacer(),
-                        _SettingsSidebarItem(
-                          isSelected: isDownloadSupported
-                              ? selectedIndex == 4
-                              : selectedIndex == 3,
-                          isDisabled: isOffline,
-                          onTap: () => onItemTapped(isDownloadSupported ? 4 : 3),
-                        ),
-                        const SizedBox(height: 16),
-                      ],
+                    const Spacer(),
+                    // Subtle divider above Settings
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Divider(
+                        height: 1,
+                        color: AppColors.divider.withValues(alpha: 0.15),
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                    _SettingsSidebarItem(
+                      isSelected: isDownloadSupported
+                          ? selectedIndex == 4
+                          : selectedIndex == 3,
+                      isDisabled: isOffline,
+                      onTap: () => onItemTapped(isDownloadSupported ? 4 : 3),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -484,55 +538,53 @@ class _SidebarItemState extends State<_SidebarItem> {
 
   @override
   Widget build(BuildContext context) {
-    final isActive = !widget.isDisabled && (widget.isSelected || _isHovered);
-    final effectiveColor = widget.isDisabled
+    final isSelected = widget.isSelected && !widget.isDisabled;
+    final iconColor = widget.isDisabled
         ? AppColors.textDisabled
-        : isActive
+        : isSelected
             ? AppColors.primary
-            : AppColors.textSecondary;
+            : _isHovered
+                ? AppColors.textPrimary
+                : AppColors.textSecondary;
+    final textColor = widget.isDisabled
+        ? AppColors.textDisabled
+        : isSelected
+            ? AppColors.textPrimary
+            : _isHovered
+                ? AppColors.textPrimary
+                : AppColors.textSecondary;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      cursor: widget.isDisabled ? SystemMouseCursors.forbidden : SystemMouseCursors.click,
+      cursor: widget.isDisabled
+          ? SystemMouseCursors.forbidden
+          : SystemMouseCursors.click,
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
             color: widget.isDisabled
                 ? Colors.transparent
-                : widget.isSelected
-                    ? AppColors.primary.withValues(alpha: 0.15)
+                : isSelected
+                    ? AppColors.primary.withValues(alpha: 0.12)
                     : _isHovered
-                        ? AppColors.surfaceVariant.withValues(alpha: 0.5)
+                        ? AppColors.surfaceVariant.withValues(alpha: 0.3)
                         : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
             children: [
-              // Active indicator bar
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                width: 3,
-                height: 24,
-                margin: const EdgeInsets.only(right: 12),
-                decoration: BoxDecoration(
-                  color: widget.isSelected && !widget.isDisabled
-                      ? AppColors.primary
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
               Stack(
                 clipBehavior: Clip.none,
                 children: [
                   Icon(
-                    widget.isSelected && !widget.isDisabled ? widget.selectedIcon : widget.icon,
+                    isSelected ? widget.selectedIcon : widget.icon,
                     size: 22,
-                    color: effectiveColor,
+                    color: iconColor,
                   ),
                   if (widget.badge != null)
                     Positioned(
@@ -547,12 +599,8 @@ class _SidebarItemState extends State<_SidebarItem> {
                 widget.label,
                 style: TextStyle(
                   fontSize: 15,
-                  fontWeight: widget.isSelected && !widget.isDisabled ? FontWeight.w600 : FontWeight.w500,
-                  color: widget.isDisabled
-                      ? AppColors.textDisabled
-                      : isActive
-                          ? AppColors.textPrimary
-                          : AppColors.textSecondary,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                  color: textColor,
                 ),
               ),
             ],
@@ -579,18 +627,18 @@ class _ModernBottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: AppColors.background,
         border: Border(
           top: BorderSide(
-            color: AppColors.divider.withValues(alpha: 0.5),
+            color: AppColors.divider.withValues(alpha: 0.3),
             width: 0.5,
           ),
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.2),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 8,
+            offset: const Offset(0, -1),
           ),
         ],
       ),
@@ -670,7 +718,8 @@ class _NavItem extends StatefulWidget {
   State<_NavItem> createState() => _NavItemState();
 }
 
-class _NavItemState extends State<_NavItem> with SingleTickerProviderStateMixin {
+class _NavItemState extends State<_NavItem>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _scaleAnimation;
 
@@ -725,7 +774,7 @@ class _NavItemState extends State<_NavItem> with SingleTickerProviderStateMixin 
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
             color: widget.isSelected && !widget.isDisabled
-                ? AppColors.primary.withValues(alpha: 0.15)
+                ? AppColors.primary.withValues(alpha: 0.12)
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
           ),
@@ -738,8 +787,11 @@ class _NavItemState extends State<_NavItem> with SingleTickerProviderStateMixin 
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 200),
                     child: Icon(
-                      widget.isSelected && !widget.isDisabled ? widget.selectedIcon : widget.icon,
-                      key: ValueKey('${widget.isSelected}_${widget.isDisabled}'),
+                      widget.isSelected && !widget.isDisabled
+                          ? widget.selectedIcon
+                          : widget.icon,
+                      key:
+                          ValueKey('${widget.isSelected}_${widget.isDisabled}'),
                       color: effectiveColor,
                       size: 24,
                     ),
@@ -757,8 +809,9 @@ class _NavItemState extends State<_NavItem> with SingleTickerProviderStateMixin 
                 duration: const Duration(milliseconds: 200),
                 style: TextStyle(
                   fontSize: 11,
-                  fontWeight:
-                      widget.isSelected && !widget.isDisabled ? FontWeight.w600 : FontWeight.w500,
+                  fontWeight: widget.isSelected && !widget.isDisabled
+                      ? FontWeight.w600
+                      : FontWeight.w500,
                   color: effectiveColor,
                 ),
                 child: Text(widget.label),
@@ -872,7 +925,7 @@ class _BackToMydiaButtonState extends State<_BackToMydiaButton> {
                 ),
                 SizedBox(width: 6),
                 Text(
-                  'Back to Mydia',
+                  'Back to Mydia Player',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
@@ -911,12 +964,13 @@ class _BackToMydiaButtonState extends State<_BackToMydiaButton> {
               ),
               const SizedBox(width: 12),
               Text(
-                'Back to Mydia',
+                'Back to Mydia Player',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
-                  color:
-                      _isHovered ? AppColors.textPrimary : AppColors.textSecondary,
+                  color: _isHovered
+                      ? AppColors.textPrimary
+                      : AppColors.textSecondary,
                 ),
               ),
             ],

@@ -156,57 +156,30 @@ class MovieDetailScreen extends ConsumerWidget {
   }
 
   Widget _buildContent(BuildContext context, WidgetRef ref, movie) {
-    final hasFiles = movie.files.isNotEmpty;
-
-    return Stack(
-      children: [
-        CustomScrollView(
-          slivers: [
-            _buildHeroSection(context, ref, movie),
-            SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Space for the floating play button overlap
-                  const SizedBox(height: 44),
-                  if (movie.progress != null &&
-                      !movie.progress!.watched &&
-                      movie.progress!.percentage > 0) ...[
-                    _buildProgressBar(context, movie),
-                    const SizedBox(height: 24),
-                  ],
-                  if (movie.overview != null) ...[
-                    _buildOverview(context, movie),
-                    const SizedBox(height: 24),
-                  ],
-                  if (movie.genres.isNotEmpty) ...[
-                    _buildGenres(context, movie),
-                    const SizedBox(height: 24),
-                  ],
-                  const SizedBox(height: 32),
-                ],
-              ),
-            ),
-          ],
-        ),
-        // Floating play button anchored to bottom of hero
-        Positioned(
-          top: 380 - 36, // expandedHeight minus half the button height
-          right: 24,
-          child: _PlayButton(
-            onPressed: hasFiles
-                ? () async {
-                    final selectedFile = await showQualitySelector(
-                      context,
-                      movie.files,
-                    );
-                    if (selectedFile != null && context.mounted) {
-                      context.push(
-                        '/player/movie/${movie.id}?fileId=${selectedFile.id}&title=${Uri.encodeComponent(movie.title)}',
-                      );
-                    }
-                  }
-                : null,
+    return CustomScrollView(
+      slivers: [
+        _buildHeroSection(context, ref, movie),
+        SliverToBoxAdapter(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 20),
+              if (movie.progress != null &&
+                  !movie.progress!.watched &&
+                  movie.progress!.percentage > 0) ...[
+                _buildProgressBar(context, movie),
+                const SizedBox(height: 24),
+              ],
+              if (movie.overview != null) ...[
+                _buildOverview(context, movie),
+                const SizedBox(height: 24),
+              ],
+              if (movie.genres.isNotEmpty) ...[
+                _buildGenres(context, movie),
+                const SizedBox(height: 24),
+              ],
+              const SizedBox(height: 32),
+            ],
           ),
         ),
       ],
@@ -358,6 +331,22 @@ class MovieDetailScreen extends ConsumerWidget {
                         _buildQuickStats(context, movie),
                       ],
                     ),
+                  ),
+                  const SizedBox(width: 12),
+                  _PlayButton(
+                    onPressed: movie.files.isNotEmpty
+                        ? () async {
+                            final selectedFile = await showQualitySelector(
+                              context,
+                              movie.files,
+                            );
+                            if (selectedFile != null && context.mounted) {
+                              context.push(
+                                '/player/movie/${movie.id}?fileId=${selectedFile.id}&title=${Uri.encodeComponent(movie.title)}',
+                              );
+                            }
+                          }
+                        : null,
                   ),
                 ],
               ),

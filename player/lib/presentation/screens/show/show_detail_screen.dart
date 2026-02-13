@@ -154,53 +154,33 @@ class ShowDetailScreen extends ConsumerWidget {
   }
 
   Widget _buildContent(BuildContext context, WidgetRef ref, ShowDetail show) {
-    final hasNextEpisode = show.nextEpisode != null;
-
-    return Stack(
-      children: [
-        CustomScrollView(
-          slivers: [
-            _buildHeroSection(context, ref, show),
-            SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Space for the floating play button overlap
-                  const SizedBox(height: 44),
-                  _buildMetadata(context, show),
-                  const SizedBox(height: 24),
-                  if (show.overview != null) ...[
-                    _buildOverview(context, show),
-                    const SizedBox(height: 24),
-                  ],
-                  if (show.genres.isNotEmpty) ...[
-                    _buildGenres(context, show),
-                    const SizedBox(height: 24),
-                  ],
-                  if (show.seasons.isNotEmpty)
-                    _buildSeasonSelector(context, ref, show),
-                  const SizedBox(height: 8),
-                ],
-              ),
-            ),
-            _buildEpisodeList(context, ref),
-            const SliverToBoxAdapter(
-              child: SizedBox(height: 32),
-            ),
-          ],
-        ),
-        // Floating play button anchored to bottom of hero
-        Positioned(
-          top: 380 - 36, // expandedHeight minus half the button height
-          right: 24,
-          child: _PlayButton(
-            onPressed: hasNextEpisode
-                ? () {
-                    // TODO: Navigate to episode player
-                    debugPrint('Playing next episode: ${show.nextEpisode!.id}');
-                  }
-                : null,
+    return CustomScrollView(
+      slivers: [
+        _buildHeroSection(context, ref, show),
+        SliverToBoxAdapter(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 20),
+              _buildMetadata(context, show),
+              const SizedBox(height: 24),
+              if (show.overview != null) ...[
+                _buildOverview(context, show),
+                const SizedBox(height: 24),
+              ],
+              if (show.genres.isNotEmpty) ...[
+                _buildGenres(context, show),
+                const SizedBox(height: 24),
+              ],
+              if (show.seasons.isNotEmpty)
+                _buildSeasonSelector(context, ref, show),
+              const SizedBox(height: 8),
+            ],
           ),
+        ),
+        _buildEpisodeList(context, ref),
+        const SliverToBoxAdapter(
+          child: SizedBox(height: 32),
         ),
       ],
     );
@@ -352,6 +332,16 @@ class ShowDetailScreen extends ConsumerWidget {
                         _buildQuickStats(context, show),
                       ],
                     ),
+                  ),
+                  const SizedBox(width: 12),
+                  _PlayButton(
+                    onPressed: show.nextEpisode != null
+                        ? () {
+                            // TODO: Navigate to episode player
+                            debugPrint(
+                                'Playing next episode: ${show.nextEpisode!.id}');
+                          }
+                        : null,
                   ),
                 ],
               ),

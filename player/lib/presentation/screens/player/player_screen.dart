@@ -105,6 +105,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   final FocusNode _focusNode = FocusNode();
   DateTime? _lastClickTime;
 
+  // Fullscreen state
+  bool _isFullscreen = false;
+
   // Controls overlay visibility (synced with video controls)
   bool _controlsVisible = true;
 
@@ -1207,8 +1210,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         return KeyEventResult.handled;
 
       case LogicalKeyboardKey.keyF:
-        // Toggle fullscreen
-        // Note: media_kit fullscreen is handled by the Video widget controls
+        _toggleFullscreen();
         return KeyEventResult.handled;
 
       case LogicalKeyboardKey.keyM:
@@ -1221,12 +1223,23 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         return KeyEventResult.handled;
 
       case LogicalKeyboardKey.escape:
-        // Exit fullscreen - handled by video controller
-        // Note: media_kit fullscreen is handled by the Video widget controls
+        if (_isFullscreen) {
+          _toggleFullscreen();
+        }
         return KeyEventResult.handled;
 
       default:
         return KeyEventResult.ignored;
+    }
+  }
+
+  /// Toggle fullscreen mode across all platforms.
+  void _toggleFullscreen() {
+    setState(() => _isFullscreen = !_isFullscreen);
+    if (_isFullscreen) {
+      defaultEnterNativeFullscreen();
+    } else {
+      defaultExitNativeFullscreen();
     }
   }
 
@@ -1237,17 +1250,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final now = DateTime.now();
     if (_lastClickTime != null &&
         now.difference(_lastClickTime!) < const Duration(milliseconds: 300)) {
-      // Double click detected
-      // Note: media_kit fullscreen is handled by the Video widget controls
       _lastClickTime = null;
+      _toggleFullscreen();
     } else {
-      // First click
       _lastClickTime = now;
     }
   }
 
   @override
   void dispose() {
+    // Exit fullscreen if active
+    if (_isFullscreen) {
+      defaultExitNativeFullscreen();
+    }
+
     // Restore portrait orientation on mobile devices
     if (PlatformFeatures.isMobile) {
       SystemChrome.setPreferredOrientations([
@@ -1360,6 +1376,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           onAudioTap: _showAudioSelector,
           onSubtitleTap: _showSubtitleSelector,
           onQualityTap: PlatformFeatures.isWeb ? _showQualitySelector : null,
+          onFullscreenTap: _toggleFullscreen,
+          isFullscreen: _isFullscreen,
           audioTrackCount: _audioTracks.length,
           subtitleTrackCount: _subtitleTracks.length,
           selectedAudioLabel: _selectedAudioTrack?.displayName,

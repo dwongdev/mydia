@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../../core/player/duration_override.dart';
 import '../../../core/player/platform_features.dart';
@@ -13,9 +12,6 @@ import '../../../core/player/platform_features.dart';
 class BottomControlsBar extends StatefulWidget {
   /// The media_kit player instance.
   final Player player;
-
-  /// The video controller for fullscreen operations.
-  final VideoController videoController;
 
   /// Triggered when audio track selection is requested.
   final VoidCallback? onAudioTap;
@@ -41,10 +37,15 @@ class BottomControlsBar extends StatefulWidget {
   /// Current quality label, if available.
   final String? selectedQualityLabel;
 
+  /// Callback for toggling fullscreen.
+  final VoidCallback? onFullscreenTap;
+
+  /// Whether the player is currently in fullscreen mode.
+  final bool isFullscreen;
+
   const BottomControlsBar({
     super.key,
     required this.player,
-    required this.videoController,
     this.onAudioTap,
     this.onSubtitleTap,
     this.onQualityTap,
@@ -53,6 +54,8 @@ class BottomControlsBar extends StatefulWidget {
     this.selectedAudioLabel,
     this.selectedSubtitleLabel,
     this.selectedQualityLabel,
+    this.onFullscreenTap,
+    this.isFullscreen = false,
   });
 
   @override
@@ -279,37 +282,28 @@ class _BottomControlsBarState extends State<BottomControlsBar> {
   }
 
   Widget _buildFullscreenButton() {
-    return StreamBuilder<bool>(
-      stream: widget.videoController.player.stream.playing,
-      initialData: false,
-      builder: (context, _) {
-        // Note: media_kit doesn't expose fullscreen state through streams
-        // We track it locally or check document.fullscreenElement on web
-        return Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () {
-              // Toggle fullscreen using media_kit's built-in method
-              defaultEnterNativeFullscreen();
-            },
-            borderRadius: BorderRadius.circular(16),
-            child: const Padding(
-              padding: EdgeInsets.all(4),
-              child: Icon(
-                Icons.fullscreen_rounded,
-                color: Colors.white,
-                size: 20,
-                shadows: [
-                  Shadow(
-                    color: Color(0x60000000),
-                    blurRadius: 6,
-                  ),
-                ],
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: widget.onFullscreenTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(
+            widget.isFullscreen
+                ? Icons.fullscreen_exit_rounded
+                : Icons.fullscreen_rounded,
+            color: Colors.white,
+            size: 20,
+            shadows: const [
+              Shadow(
+                color: Color(0x60000000),
+                blurRadius: 6,
               ),
-            ),
+            ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 

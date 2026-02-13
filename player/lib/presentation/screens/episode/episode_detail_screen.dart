@@ -167,57 +167,55 @@ class EpisodeDetailScreen extends ConsumerWidget {
 
   Widget _buildContent(
       BuildContext context, WidgetRef ref, EpisodeDetail episode) {
-    final hasFiles = episode.files.isNotEmpty;
-
-    return Stack(
-      children: [
-        CustomScrollView(
-          slivers: [
-            _buildHeroSection(context, episode),
-            SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Space for the floating play button overlap
-                  const SizedBox(height: 44),
-                  _buildShowLink(context, episode),
-                  const SizedBox(height: 8),
-                  _buildTitleSection(context, episode),
-                  const SizedBox(height: 20),
-                  if (isDownloadSupported) ...[
-                    _buildDownloadRow(context, ref, episode),
-                    const SizedBox(height: 20),
+    return CustomScrollView(
+      slivers: [
+        _buildHeroSection(context, episode),
+        SliverToBoxAdapter(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 20),
+              _buildShowLink(context, episode),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: _buildTitleSectionInline(context, episode),
+                    ),
+                    const SizedBox(width: 12),
+                    _PlayButton(
+                      onPressed: episode.files.isNotEmpty
+                          ? () async {
+                              final selectedFile = await showQualitySelector(
+                                context,
+                                episode.files,
+                              );
+                              if (selectedFile != null && context.mounted) {
+                                context.push(
+                                  '/player/episode/${episode.id}?fileId=${selectedFile.id}&title=${Uri.encodeComponent(episode.fullTitle)}',
+                                );
+                              }
+                            }
+                          : null,
+                    ),
                   ],
-                  _buildMetadata(context, episode),
-                  if (episode.overview != null &&
-                      episode.overview!.isNotEmpty) ...[
-                    const SizedBox(height: 24),
-                    _buildOverview(context, episode),
-                  ],
-                  const SizedBox(height: 32),
-                ],
+                ),
               ),
-            ),
-          ],
-        ),
-        // Floating play button anchored to bottom of hero
-        Positioned(
-          top: 300 - 36, // expandedHeight minus half the button height
-          right: 24,
-          child: _PlayButton(
-            onPressed: hasFiles
-                ? () async {
-                    final selectedFile = await showQualitySelector(
-                      context,
-                      episode.files,
-                    );
-                    if (selectedFile != null && context.mounted) {
-                      context.push(
-                        '/player/episode/${episode.id}?fileId=${selectedFile.id}&title=${Uri.encodeComponent(episode.fullTitle)}',
-                      );
-                    }
-                  }
-                : null,
+              const SizedBox(height: 20),
+              if (isDownloadSupported) ...[
+                _buildDownloadRow(context, ref, episode),
+                const SizedBox(height: 20),
+              ],
+              _buildMetadata(context, episode),
+              if (episode.overview != null && episode.overview!.isNotEmpty) ...[
+                const SizedBox(height: 24),
+                _buildOverview(context, episode),
+              ],
+              const SizedBox(height: 32),
+            ],
           ),
         ),
       ],
@@ -367,41 +365,39 @@ class EpisodeDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildTitleSection(BuildContext context, EpisodeDetail episode) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Episode code badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: AppColors.primary.withValues(alpha: 0.3),
-              ),
+  /// Title section without padding, for use inside a parent Row.
+  Widget _buildTitleSectionInline(BuildContext context, EpisodeDetail episode) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Episode code badge
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: AppColors.primary.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: AppColors.primary.withValues(alpha: 0.3),
             ),
-            child: Text(
-              episode.episodeCode,
-              style: const TextStyle(
-                fontSize: 13,
+          ),
+          child: Text(
+            episode.episodeCode,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: AppColors.primary,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        // Episode title
+        Text(
+          episode.title,
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.bold,
-                color: AppColors.primary,
               ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          // Episode title
-          Text(
-            episode.title,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 

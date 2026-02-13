@@ -40,6 +40,8 @@ Widget Function(VideoState) customVideoControlsBuilderWithCallback({
   VoidCallback? onAudioTap,
   VoidCallback? onSubtitleTap,
   VoidCallback? onQualityTap,
+  VoidCallback? onFullscreenTap,
+  bool isFullscreen = false,
   int audioTrackCount = 0,
   int subtitleTrackCount = 0,
   String? selectedAudioLabel,
@@ -51,6 +53,8 @@ Widget Function(VideoState) customVideoControlsBuilderWithCallback({
         onAudioTap: onAudioTap,
         onSubtitleTap: onSubtitleTap,
         onQualityTap: onQualityTap,
+        onFullscreenTap: onFullscreenTap,
+        isFullscreen: isFullscreen,
         audioTrackCount: audioTrackCount,
         subtitleTrackCount: subtitleTrackCount,
         selectedAudioLabel: selectedAudioLabel,
@@ -74,6 +78,8 @@ class _CustomVideoControls extends StatefulWidget {
   final VoidCallback? onAudioTap;
   final VoidCallback? onSubtitleTap;
   final VoidCallback? onQualityTap;
+  final VoidCallback? onFullscreenTap;
+  final bool isFullscreen;
   final int audioTrackCount;
   final int subtitleTrackCount;
   final String? selectedAudioLabel;
@@ -85,6 +91,8 @@ class _CustomVideoControls extends StatefulWidget {
     this.onAudioTap,
     this.onSubtitleTap,
     this.onQualityTap,
+    this.onFullscreenTap,
+    this.isFullscreen = false,
     this.audioTrackCount = 0,
     this.subtitleTrackCount = 0,
     this.selectedAudioLabel,
@@ -109,12 +117,9 @@ class _CustomVideoControlsState extends State<_CustomVideoControls>
 
   static const _autoHideDuration = Duration(seconds: 3);
 
-  /// Access the VideoController from the inherited widget
-  VideoController _controller(BuildContext context) =>
-      VideoStateInheritedWidget.of(context).state.widget.controller;
-
   /// Access the Player from the inherited widget
-  Player _player(BuildContext context) => _controller(context).player;
+  Player _player(BuildContext context) =>
+      VideoStateInheritedWidget.of(context).state.widget.controller.player;
 
   @override
   void initState() {
@@ -218,8 +223,6 @@ class _CustomVideoControlsState extends State<_CustomVideoControls>
   @override
   Widget build(BuildContext context) {
     final player = _player(context);
-    final controller = _controller(context);
-
     // Use MouseRegion for desktop/web to show on mouse move
     Widget controls = Stack(
       fit: StackFit.expand,
@@ -235,7 +238,7 @@ class _CustomVideoControlsState extends State<_CustomVideoControls>
           opacity: _fadeAnimation,
           child: IgnorePointer(
             ignoring: !_isVisible,
-            child: _buildControlsOverlay(player, controller),
+            child: _buildControlsOverlay(player),
           ),
         ),
       ],
@@ -252,7 +255,7 @@ class _CustomVideoControlsState extends State<_CustomVideoControls>
     return controls;
   }
 
-  Widget _buildControlsOverlay(Player player, VideoController controller) {
+  Widget _buildControlsOverlay(Player player) {
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -335,10 +338,11 @@ class _CustomVideoControlsState extends State<_CustomVideoControls>
               // Bottom controls bar
               BottomControlsBar(
                 player: player,
-                videoController: controller,
                 onAudioTap: widget.onAudioTap,
                 onSubtitleTap: widget.onSubtitleTap,
                 onQualityTap: widget.onQualityTap,
+                onFullscreenTap: widget.onFullscreenTap,
+                isFullscreen: widget.isFullscreen,
                 audioTrackCount: widget.audioTrackCount,
                 subtitleTrackCount: widget.subtitleTrackCount,
                 selectedAudioLabel: widget.selectedAudioLabel,

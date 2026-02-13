@@ -1,4 +1,7 @@
-import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+import 'dart:ui';
+
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, debugPrint, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -138,11 +141,19 @@ class _PulsingDotState extends State<_PulsingDot>
   }
 }
 
+/// Extra top padding on macOS to clear the traffic light window controls
+/// when using fullSizeContentView.
+final double _macOSTitleBarPadding =
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS ? 28.0 : 0.0;
+
 /// Modern app shell with adaptive navigation.
 /// Shows sidebar on desktop (≥900px) and bottom nav on mobile.
 class AppShell extends ConsumerStatefulWidget {
   final Widget child;
   final String location;
+
+  /// Key for the mobile scaffold, used to open the drawer from inner screens.
+  static final scaffoldKey = GlobalKey<ScaffoldState>();
 
   const AppShell({
     super.key,
@@ -156,15 +167,36 @@ class AppShell extends ConsumerStatefulWidget {
 
 class _AppShellState extends ConsumerState<AppShell> {
   AppLifecycleListener? _lifecycleListener;
+  bool _homeExpanded = true;
+  bool _libraryExpanded = false;
+
+  static bool _isHomeSection(String loc) =>
+      loc == '/' ||
+      loc.startsWith('/recently-added') ||
+      loc.startsWith('/unwatched') ||
+      loc.startsWith('/favorites') ||
+      loc.startsWith('/collections');
+
+  static bool _isLibrarySection(String loc) =>
+      loc.startsWith('/movies') || loc.startsWith('/shows');
 
   @override
   void initState() {
     super.initState();
+    _autoExpandForRoute(widget.location);
     // Only add lifecycle listener on native platforms (not web)
     if (!kIsWeb) {
       _lifecycleListener = AppLifecycleListener(
         onResume: _onAppResume,
       );
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant AppShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.location != widget.location) {
+      _autoExpandForRoute(widget.location);
     }
   }
 
@@ -181,18 +213,13 @@ class _AppShellState extends ConsumerState<AppShell> {
     // Connection health checks are handled by the connection provider
   }
 
-  int _getSelectedIndex() {
-    final location = widget.location;
-    if (location.startsWith('/movies')) return 1;
-    if (location.startsWith('/shows')) return 2;
-    if (isDownloadSupported) {
-      if (location.startsWith('/downloads')) return 3;
-      if (location.startsWith('/settings')) return 4;
-    } else {
-      // On web, settings is at index 3 (no downloads)
-      if (location.startsWith('/settings')) return 3;
+  void _autoExpandForRoute(String location) {
+    if (_isHomeSection(location) && !_homeExpanded) {
+      setState(() => _homeExpanded = true);
     }
-    return 0; // Home
+    if (_isLibrarySection(location) && !_libraryExpanded) {
+      setState(() => _libraryExpanded = true);
+    }
   }
 
   /// Check if the app is currently in offline mode
@@ -219,42 +246,17 @@ class _AppShellState extends ConsumerState<AppShell> {
     );
   }
 
-  void _onItemTapped(int index, {bool isOffline = false}) {
-    // In offline mode, only allow Downloads (index 3 when downloads supported)
-    if (isOffline) {
-      final downloadsIndex = isDownloadSupported ? 3 : -1;
-      if (index != downloadsIndex) {
-        _showOfflineSnackbar();
-        return;
-      }
+  void _navigateTo(String route) {
+    if (_isOfflineMode() && route != '/downloads') {
+      _showOfflineSnackbar();
+      return;
     }
-
-    switch (index) {
-      case 0:
-        context.go('/');
-        break;
-      case 1:
-        context.go('/movies');
-        break;
-      case 2:
-        context.go('/shows');
-        break;
-      case 3:
-        if (isDownloadSupported) {
-          context.go('/downloads');
-        } else {
-          context.go('/settings');
-        }
-        break;
-      case 4:
-        context.go('/settings');
-        break;
-    }
+    context.go(route);
   }
 
   @override
   Widget build(BuildContext context) {
-    final selectedIndex = _getSelectedIndex();
+    final location = widget.location;
     final showBackToMydia = isEmbedMode;
     final isOffline = _isOfflineMode();
 
@@ -267,15 +269,21 @@ class _AppShellState extends ConsumerState<AppShell> {
             body: Row(
               children: [
                 _DesktopSidebar(
-                  selectedIndex: selectedIndex,
-                  onItemTapped: (index) =>
-                      _onItemTapped(index, isOffline: isOffline),
+                  location: location,
+                  onNavigate: _navigateTo,
+                  homeExpanded: _homeExpanded,
+                  libraryExpanded: _libraryExpanded,
+                  onToggleHome: () =>
+                      setState(() => _homeExpanded = !_homeExpanded),
+                  onToggleLibrary: () =>
+                      setState(() => _libraryExpanded = !_libraryExpanded),
                   showBackToMydia: showBackToMydia,
                   isOffline: isOffline,
                 ),
                 Expanded(
                   child: Column(
                     children: [
+                      SizedBox(height: _macOSTitleBarPadding),
                       if (isOffline) const OfflineBanner(),
                       Expanded(child: widget.child),
                     ],
@@ -287,28 +295,33 @@ class _AppShellState extends ConsumerState<AppShell> {
         }
 
         return Scaffold(
+          key: AppShell.scaffoldKey,
+          extendBody: true,
+          drawer: _MobileDrawer(
+            location: location,
+            onNavigate: (route) {
+              Navigator.of(context).pop();
+              _navigateTo(route);
+            },
+            homeExpanded: _homeExpanded,
+            libraryExpanded: _libraryExpanded,
+            onToggleHome: () => setState(() => _homeExpanded = !_homeExpanded),
+            onToggleLibrary: () =>
+                setState(() => _libraryExpanded = !_libraryExpanded),
+            showBackToMydia: showBackToMydia,
+            isOffline: isOffline,
+          ),
           body: Column(
             children: [
               if (isOffline) const OfflineBanner(),
-              Expanded(
-                child: Stack(
-                  children: [
-                    widget.child,
-                    if (showBackToMydia)
-                      Positioned(
-                        top: MediaQuery.of(context).padding.top + 8,
-                        left: 8,
-                        child: const _BackToMydiaButton(compact: true),
-                      ),
-                  ],
-                ),
-              ),
+              Expanded(child: widget.child),
             ],
           ),
           bottomNavigationBar: _ModernBottomNav(
-            selectedIndex: selectedIndex,
-            onItemTapped: (index) => _onItemTapped(index, isOffline: isOffline),
+            location: location,
+            onNavigate: _navigateTo,
             isOffline: isOffline,
+            showBackToMydia: showBackToMydia,
           ),
         );
       },
@@ -317,22 +330,22 @@ class _AppShellState extends ConsumerState<AppShell> {
 }
 
 /// Mydia squircle logo painted via CustomPainter.
-class _MydiaLogo extends StatelessWidget {
+class MydiaLogo extends StatelessWidget {
   final double size;
 
-  const _MydiaLogo({required this.size});
+  const MydiaLogo({super.key, required this.size});
 
   @override
   Widget build(BuildContext context) {
     return CustomPaint(
       size: Size(size, size),
-      painter: const _MydiaLogoPainter(),
+      painter: const MydiaLogoPainter(),
     );
   }
 }
 
-class _MydiaLogoPainter extends CustomPainter {
-  const _MydiaLogoPainter();
+class MydiaLogoPainter extends CustomPainter {
+  const MydiaLogoPainter();
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -382,16 +395,203 @@ class _MydiaLogoPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-/// Desktop sidebar navigation with full labels
+/// Shared sidebar navigation content used by both desktop and mobile drawers.
+class _SidebarContent extends StatelessWidget {
+  final String location;
+  final ValueChanged<String> onNavigate;
+  final bool homeExpanded;
+  final bool libraryExpanded;
+  final VoidCallback onToggleHome;
+  final VoidCallback onToggleLibrary;
+  final bool isOffline;
+  final double topPadding;
+  final Widget? backToMydiaWidget;
+
+  const _SidebarContent({
+    required this.location,
+    required this.onNavigate,
+    required this.homeExpanded,
+    required this.libraryExpanded,
+    required this.onToggleHome,
+    required this.onToggleLibrary,
+    required this.isOffline,
+    this.topPadding = 0,
+    this.backToMydiaWidget,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasBackWidget = backToMydiaWidget != null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(height: topPadding),
+        // Back to Mydia link (shown in embed mode)
+        if (hasBackWidget)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: backToMydiaWidget!,
+          ),
+        // Logo header
+        Padding(
+          padding: EdgeInsets.fromLTRB(20, hasBackWidget ? 16 : 20, 20, 24),
+          child: Row(
+            children: [
+              const MydiaLogo(size: 36),
+              const SizedBox(width: 12),
+              Text(
+                'Mydia Player',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: -0.5,
+                    ),
+              ),
+            ],
+          ),
+        ),
+
+        // Navigation items
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Column(
+              children: [
+                // Home section (navigates to / AND toggles)
+                _SidebarSection(
+                  icon: Icons.home_outlined,
+                  selectedIcon: Icons.home_rounded,
+                  label: 'Home',
+                  route: '/',
+                  isExpanded: homeExpanded,
+                  onToggleExpanded: onToggleHome,
+                  isActive: _AppShellState._isHomeSection(location),
+                  isDisabled: isOffline,
+                  onNavigate: onNavigate,
+                  location: location,
+                  children: [
+                    _SidebarItem(
+                      icon: Icons.fiber_new_outlined,
+                      selectedIcon: Icons.fiber_new_rounded,
+                      label: 'Recently Added',
+                      isSelected: location.startsWith('/recently-added'),
+                      isDisabled: isOffline,
+                      onTap: () => onNavigate('/recently-added'),
+                    ),
+                    const SizedBox(height: 2),
+                    _SidebarItem(
+                      icon: Icons.visibility_off_outlined,
+                      selectedIcon: Icons.visibility_off_rounded,
+                      label: 'Unwatched',
+                      isSelected: location.startsWith('/unwatched'),
+                      isDisabled: isOffline,
+                      onTap: () => onNavigate('/unwatched'),
+                    ),
+                    const SizedBox(height: 2),
+                    _SidebarItem(
+                      icon: Icons.favorite_outline_rounded,
+                      selectedIcon: Icons.favorite_rounded,
+                      label: 'Favorites',
+                      isSelected: location.startsWith('/favorites'),
+                      isDisabled: isOffline,
+                      onTap: () => onNavigate('/favorites'),
+                    ),
+                    const SizedBox(height: 2),
+                    _SidebarItem(
+                      icon: Icons.collections_bookmark_outlined,
+                      selectedIcon: Icons.collections_bookmark_rounded,
+                      label: 'Collections',
+                      isSelected: location.startsWith('/collections'),
+                      isDisabled: isOffline,
+                      onTap: () => onNavigate('/collections'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                // Library section (toggle only, no route)
+                _SidebarSection(
+                  icon: Icons.video_library_outlined,
+                  selectedIcon: Icons.video_library_rounded,
+                  label: 'Library',
+                  route: null,
+                  isExpanded: libraryExpanded,
+                  onToggleExpanded: onToggleLibrary,
+                  isActive: _AppShellState._isLibrarySection(location),
+                  isDisabled: isOffline,
+                  onNavigate: onNavigate,
+                  location: location,
+                  children: [
+                    _SidebarItem(
+                      icon: Icons.movie_outlined,
+                      selectedIcon: Icons.movie_rounded,
+                      label: 'Movies',
+                      isSelected: location.startsWith('/movies'),
+                      isDisabled: isOffline,
+                      onTap: () => onNavigate('/movies'),
+                    ),
+                    const SizedBox(height: 2),
+                    _SidebarItem(
+                      icon: Icons.tv_outlined,
+                      selectedIcon: Icons.tv_rounded,
+                      label: 'TV Shows',
+                      isSelected: location.startsWith('/shows'),
+                      isDisabled: isOffline,
+                      onTap: () => onNavigate('/shows'),
+                    ),
+                  ],
+                ),
+                if (isDownloadSupported) ...[
+                  const SizedBox(height: 8),
+                  _SidebarItem(
+                    icon: Icons.download_outlined,
+                    selectedIcon: Icons.download_rounded,
+                    label: 'Downloads',
+                    isSelected: location.startsWith('/downloads'),
+                    onTap: () => onNavigate('/downloads'),
+                  ),
+                ],
+                const Spacer(),
+                // Subtle divider above Settings
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Divider(
+                    height: 1,
+                    color: AppColors.divider.withValues(alpha: 0.15),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _SettingsSidebarItem(
+                  isSelected: location.startsWith('/settings'),
+                  isDisabled: isOffline,
+                  onTap: () => onNavigate('/settings'),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Desktop sidebar navigation with collapsible sections
 class _DesktopSidebar extends StatelessWidget {
-  final int selectedIndex;
-  final ValueChanged<int> onItemTapped;
+  final String location;
+  final ValueChanged<String> onNavigate;
+  final bool homeExpanded;
+  final bool libraryExpanded;
+  final VoidCallback onToggleHome;
+  final VoidCallback onToggleLibrary;
   final bool showBackToMydia;
   final bool isOffline;
 
   const _DesktopSidebar({
-    required this.selectedIndex,
-    required this.onItemTapped,
+    required this.location,
+    required this.onNavigate,
+    required this.homeExpanded,
+    required this.libraryExpanded,
+    required this.onToggleHome,
+    required this.onToggleLibrary,
     this.showBackToMydia = false,
     this.isOffline = false,
   });
@@ -410,101 +610,173 @@ class _DesktopSidebar extends StatelessWidget {
         ),
       ),
       child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Back to Mydia link (shown in embed mode)
-            if (showBackToMydia)
-              const Padding(
-                padding: EdgeInsets.fromLTRB(12, 12, 12, 0),
-                child: _BackToMydiaButton(),
+        top: false,
+        child: _SidebarContent(
+          location: location,
+          onNavigate: onNavigate,
+          homeExpanded: homeExpanded,
+          libraryExpanded: libraryExpanded,
+          onToggleHome: onToggleHome,
+          onToggleLibrary: onToggleLibrary,
+          isOffline: isOffline,
+          topPadding: _macOSTitleBarPadding,
+          backToMydiaWidget:
+              showBackToMydia ? const _BackToMydiaButton() : null,
+        ),
+      ),
+    );
+  }
+}
+
+/// Collapsible sidebar section with animated chevron and children
+class _SidebarSection extends StatefulWidget {
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final String? route;
+  final bool isExpanded;
+  final VoidCallback onToggleExpanded;
+  final bool isActive;
+  final bool isDisabled;
+  final ValueChanged<String> onNavigate;
+  final String location;
+  final List<Widget> children;
+
+  const _SidebarSection({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.route,
+    required this.isExpanded,
+    required this.onToggleExpanded,
+    required this.isActive,
+    required this.isDisabled,
+    required this.onNavigate,
+    required this.location,
+    required this.children,
+  });
+
+  @override
+  State<_SidebarSection> createState() => _SidebarSectionState();
+}
+
+class _SidebarSectionState extends State<_SidebarSection> {
+  bool _isHovered = false;
+
+  bool get _isHeaderSelected {
+    // Header is selected only if the section route matches exactly
+    if (widget.route == null) return false;
+    return widget.location == widget.route;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isSelected = _isHeaderSelected && !widget.isDisabled;
+    final hasActiveChild = widget.isActive && !_isHeaderSelected;
+    final iconColor = widget.isDisabled
+        ? AppColors.textDisabled
+        : isSelected
+            ? AppColors.primary
+            : hasActiveChild
+                ? AppColors.primary.withValues(alpha: 0.7)
+                : _isHovered
+                    ? AppColors.textPrimary
+                    : AppColors.textSecondary;
+    final textColor = widget.isDisabled
+        ? AppColors.textDisabled
+        : isSelected
+            ? AppColors.textPrimary
+            : hasActiveChild
+                ? AppColors.textPrimary
+                : _isHovered
+                    ? AppColors.textPrimary
+                    : AppColors.textSecondary;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Section header
+        MouseRegion(
+          onEnter: (_) => setState(() => _isHovered = true),
+          onExit: (_) => setState(() => _isHovered = false),
+          cursor: widget.isDisabled
+              ? SystemMouseCursors.forbidden
+              : SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: () {
+              widget.onToggleExpanded();
+              if (widget.route != null) {
+                widget.onNavigate(widget.route!);
+              }
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: widget.isDisabled
+                    ? Colors.transparent
+                    : isSelected
+                        ? AppColors.primary.withValues(alpha: 0.12)
+                        : _isHovered
+                            ? AppColors.surfaceVariant.withValues(alpha: 0.3)
+                            : Colors.transparent,
+                borderRadius: BorderRadius.circular(12),
               ),
-            // Logo header
-            Padding(
-              padding:
-                  EdgeInsets.fromLTRB(20, showBackToMydia ? 16 : 20, 20, 24),
               child: Row(
                 children: [
-                  const _MydiaLogo(size: 36),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Mydia Player',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: -0.5,
-                        ),
+                  Icon(
+                    isSelected || hasActiveChild
+                        ? widget.selectedIcon
+                        : widget.icon,
+                    size: 22,
+                    color: iconColor,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      widget.label,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: isSelected || hasActiveChild
+                            ? FontWeight.w600
+                            : FontWeight.w500,
+                        color: textColor,
+                      ),
+                    ),
+                  ),
+                  AnimatedRotation(
+                    turns: widget.isExpanded ? 0 : -0.25,
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOutCubic,
+                    child: Icon(
+                      Icons.expand_more_rounded,
+                      size: 20,
+                      color: widget.isDisabled
+                          ? AppColors.textDisabled
+                          : AppColors.textSecondary.withValues(alpha: 0.6),
+                    ),
                   ),
                 ],
               ),
             ),
-
-            // Navigation items
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Column(
-                  children: [
-                    _SidebarItem(
-                      icon: Icons.home_outlined,
-                      selectedIcon: Icons.home_rounded,
-                      label: 'Home',
-                      isSelected: selectedIndex == 0,
-                      isDisabled: isOffline,
-                      onTap: () => onItemTapped(0),
-                    ),
-                    const SizedBox(height: 4),
-                    _SidebarItem(
-                      icon: Icons.movie_outlined,
-                      selectedIcon: Icons.movie_rounded,
-                      label: 'Movies',
-                      isSelected: selectedIndex == 1,
-                      isDisabled: isOffline,
-                      onTap: () => onItemTapped(1),
-                    ),
-                    const SizedBox(height: 4),
-                    _SidebarItem(
-                      icon: Icons.tv_outlined,
-                      selectedIcon: Icons.tv_rounded,
-                      label: 'TV Shows',
-                      isSelected: selectedIndex == 2,
-                      isDisabled: isOffline,
-                      onTap: () => onItemTapped(2),
-                    ),
-                    if (isDownloadSupported) ...[
-                      const SizedBox(height: 4),
-                      _SidebarItem(
-                        icon: Icons.download_outlined,
-                        selectedIcon: Icons.download_rounded,
-                        label: 'Downloads',
-                        isSelected: selectedIndex == 3,
-                        onTap: () => onItemTapped(3),
-                      ),
-                    ],
-                    const Spacer(),
-                    // Subtle divider above Settings
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: Divider(
-                        height: 1,
-                        color: AppColors.divider.withValues(alpha: 0.15),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    _SettingsSidebarItem(
-                      isSelected: isDownloadSupported
-                          ? selectedIndex == 4
-                          : selectedIndex == 3,
-                      isDisabled: isOffline,
-                      onTap: () => onItemTapped(isDownloadSupported ? 4 : 3),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
-      ),
+        // Expandable children
+        AnimatedSize(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: widget.isExpanded
+              ? Padding(
+                  padding: const EdgeInsets.only(left: 16, top: 2),
+                  child: Column(
+                    children: widget.children,
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
     );
   }
 }
@@ -613,82 +885,160 @@ class _SidebarItemState extends State<_SidebarItem> {
 
 /// Mobile bottom navigation bar
 class _ModernBottomNav extends StatelessWidget {
-  final int selectedIndex;
-  final ValueChanged<int> onItemTapped;
+  final String location;
+  final ValueChanged<String> onNavigate;
   final bool isOffline;
+  final bool showBackToMydia;
 
   const _ModernBottomNav({
-    required this.selectedIndex,
-    required this.onItemTapped,
+    required this.location,
+    required this.onNavigate,
+    this.isOffline = false,
+    this.showBackToMydia = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(22),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+            child: Container(
+              decoration: BoxDecoration(
+                color: AppColors.surface.withValues(alpha: 0.65),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(
+                  color: AppColors.border.withValues(alpha: 0.2),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.1),
+                    blurRadius: 16,
+                    spreadRadius: 2,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    if (showBackToMydia)
+                      _NavItem(
+                        icon: Icons.arrow_back_rounded,
+                        selectedIcon: Icons.arrow_back_rounded,
+                        label: 'Mydia',
+                        isSelected: false,
+                        onTap: navigateToMydiaApp,
+                      ),
+                    _NavItem(
+                      icon: Icons.home_outlined,
+                      selectedIcon: Icons.home_rounded,
+                      label: 'Home',
+                      isSelected: _AppShellState._isHomeSection(location),
+                      isDisabled: isOffline,
+                      onTap: () => onNavigate('/'),
+                    ),
+                    _NavItem(
+                      icon: Icons.movie_outlined,
+                      selectedIcon: Icons.movie_rounded,
+                      label: 'Movies',
+                      isSelected: location.startsWith('/movies'),
+                      isDisabled: isOffline,
+                      onTap: () => onNavigate('/movies'),
+                    ),
+                    _NavItem(
+                      icon: Icons.tv_outlined,
+                      selectedIcon: Icons.tv_rounded,
+                      label: 'Shows',
+                      isSelected: location.startsWith('/shows'),
+                      isDisabled: isOffline,
+                      onTap: () => onNavigate('/shows'),
+                    ),
+                    if (isDownloadSupported)
+                      _NavItem(
+                        icon: Icons.download_outlined,
+                        selectedIcon: Icons.download_rounded,
+                        label: 'Downloads',
+                        isSelected: location.startsWith('/downloads'),
+                        onTap: () => onNavigate('/downloads'),
+                      )
+                    else
+                      _NavItem(
+                        icon: Icons.favorite_outline_rounded,
+                        selectedIcon: Icons.favorite_rounded,
+                        label: 'Favorites',
+                        isSelected: location.startsWith('/favorites'),
+                        isDisabled: isOffline,
+                        onTap: () => onNavigate('/favorites'),
+                      ),
+                    _SettingsNavItem(
+                      isSelected: location.startsWith('/settings'),
+                      isDisabled: isOffline,
+                      onTap: () => onNavigate('/settings'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-screen drawer for mobile navigation, mirrors the desktop sidebar.
+class _MobileDrawer extends StatelessWidget {
+  final String location;
+  final ValueChanged<String> onNavigate;
+  final bool homeExpanded;
+  final bool libraryExpanded;
+  final VoidCallback onToggleHome;
+  final VoidCallback onToggleLibrary;
+  final bool showBackToMydia;
+  final bool isOffline;
+
+  const _MobileDrawer({
+    required this.location,
+    required this.onNavigate,
+    required this.homeExpanded,
+    required this.libraryExpanded,
+    required this.onToggleHome,
+    required this.onToggleLibrary,
+    this.showBackToMydia = false,
     this.isOffline = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.background,
-        border: Border(
-          top: BorderSide(
-            color: AppColors.divider.withValues(alpha: 0.3),
-            width: 0.5,
-          ),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: const Offset(0, -1),
-          ),
-        ],
-      ),
+    return Drawer(
+      backgroundColor: AppColors.background,
       child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _NavItem(
-                icon: Icons.home_outlined,
-                selectedIcon: Icons.home_rounded,
-                label: 'Home',
-                isSelected: selectedIndex == 0,
-                isDisabled: isOffline,
-                onTap: () => onItemTapped(0),
-              ),
-              _NavItem(
-                icon: Icons.movie_outlined,
-                selectedIcon: Icons.movie_rounded,
-                label: 'Movies',
-                isSelected: selectedIndex == 1,
-                isDisabled: isOffline,
-                onTap: () => onItemTapped(1),
-              ),
-              _NavItem(
-                icon: Icons.tv_outlined,
-                selectedIcon: Icons.tv_rounded,
-                label: 'Shows',
-                isSelected: selectedIndex == 2,
-                isDisabled: isOffline,
-                onTap: () => onItemTapped(2),
-              ),
-              if (isDownloadSupported)
-                _NavItem(
-                  icon: Icons.download_outlined,
-                  selectedIcon: Icons.download_rounded,
-                  label: 'Downloads',
-                  isSelected: selectedIndex == 3,
-                  onTap: () => onItemTapped(3),
-                ),
-              _SettingsNavItem(
-                isSelected: isDownloadSupported
-                    ? selectedIndex == 4
-                    : selectedIndex == 3,
-                isDisabled: isOffline,
-                onTap: () => onItemTapped(isDownloadSupported ? 4 : 3),
-              ),
-            ],
-          ),
+        child: _SidebarContent(
+          location: location,
+          onNavigate: onNavigate,
+          homeExpanded: homeExpanded,
+          libraryExpanded: libraryExpanded,
+          onToggleHome: onToggleHome,
+          onToggleLibrary: onToggleLibrary,
+          isOffline: isOffline,
+          backToMydiaWidget: showBackToMydia
+              ? _SidebarItem(
+                  icon: Icons.arrow_back_rounded,
+                  selectedIcon: Icons.arrow_back_rounded,
+                  label: 'Back to Mydia',
+                  isSelected: false,
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    navigateToMydiaApp();
+                  },
+                )
+              : null,
         ),
       ),
     );
@@ -879,9 +1229,7 @@ class _SettingsNavItem extends ConsumerWidget {
 /// Button to navigate back to the main Mydia app.
 /// Shown when the player is running in embed mode.
 class _BackToMydiaButton extends StatefulWidget {
-  final bool compact;
-
-  const _BackToMydiaButton({this.compact = false});
+  const _BackToMydiaButton();
 
   @override
   State<_BackToMydiaButton> createState() => _BackToMydiaButtonState();
@@ -892,54 +1240,6 @@ class _BackToMydiaButtonState extends State<_BackToMydiaButton> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.compact) {
-      // Compact floating button for mobile
-      return Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: navigateToMydiaApp,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.surface.withValues(alpha: 0.9),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: AppColors.divider.withValues(alpha: 0.3),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.2),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.arrow_back_rounded,
-                  size: 18,
-                  color: AppColors.textSecondary,
-                ),
-                SizedBox(width: 6),
-                Text(
-                  'Back to Mydia Player',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    // Full sidebar button
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
@@ -964,7 +1264,7 @@ class _BackToMydiaButtonState extends State<_BackToMydiaButton> {
               ),
               const SizedBox(width: 12),
               Text(
-                'Back to Mydia Player',
+                'Back to Mydia',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w500,

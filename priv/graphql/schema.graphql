@@ -38,6 +38,12 @@ type RootQueryType {
   "Get next episodes to watch across all TV shows"
   upNext(first: Int, after: String): [UpNextItem]
 
+  "Get the user's favorite items"
+  favorites(first: Int, after: String, types: [MediaType]): [RecentlyAddedItem]
+
+  "Get unwatched items with files"
+  unwatched(first: Int, after: String, types: [MediaType]): [RecentlyAddedItem]
+
   "Search across movies and TV shows"
   search(query: String!, types: [MediaType], first: Int): SearchResults
 
@@ -52,6 +58,15 @@ type RootQueryType {
 
   "Get streaming candidates for a media item"
   streamingCandidates(contentType: String!, id: ID!): StreamingCandidatesResult
+
+  "List user's collections (excluding system collections)"
+  collections(first: Int): [Collection]
+
+  "Get a single collection by ID"
+  collection(id: ID!): Collection
+
+  "Get items in a collection"
+  collectionItems(collectionId: ID!, first: Int): [RecentlyAddedItem]
 }
 
 type RootMutationType {
@@ -101,7 +116,14 @@ type RootMutationType {
   revokeDevice(id: ID!): RevokeDeviceResult
 
   "Start an HLS streaming session for a media file"
-  startStreamingSession(fileId: ID!, strategy: StreamingStrategy!, maxBitrate: Int): StreamingSessionResult
+  startStreamingSession(
+    fileId: ID!
+
+    strategy: StreamingStrategy!
+
+    "Total kbps cap (video + audio), e.g. 2000"
+    maxBitrate: Int
+  ): StreamingSessionResult
 
   "End an HLS streaming session"
   endStreamingSession(sessionId: String!): Boolean
@@ -263,6 +285,17 @@ type UpNextItem {
 
   "One of: continue, next, start"
   progressState: String!
+}
+
+"A user-created collection of media items"
+type Collection {
+  id: ID!
+  name: String!
+  description: String
+  type: String!
+  visibility: String!
+  itemCount: Int!
+  posterPaths: [String]
 }
 
 "A movie"
@@ -786,6 +819,15 @@ type DownloadOption {
 
   "Estimated file size in bytes"
   estimatedSize: Int!
+
+  "Pre-transcode status: ready, transcoding, pending, or null"
+  transcodeStatus: String
+
+  "Transcode progress (0.0 to 1.0)"
+  transcodeProgress: Float
+
+  "Actual file size in bytes when transcoded"
+  actualSize: Int
 }
 
 "Result of preparing a download job"

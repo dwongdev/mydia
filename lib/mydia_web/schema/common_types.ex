@@ -228,6 +228,13 @@ defmodule MydiaWeb.Schema.CommonTypes do
 
     field :label, non_null(:string), description: "Human-readable label"
     field :estimated_size, non_null(:integer), description: "Estimated file size in bytes"
+
+    field :transcode_status, :string,
+      description: "Pre-transcode status: ready, transcoding, pending, or null"
+
+    field :transcode_progress, :float, description: "Transcode progress (0.0 to 1.0)"
+
+    field :actual_size, :integer, description: "Actual file size in bytes when transcoded"
   end
 
   @desc "Result of preparing a download job"

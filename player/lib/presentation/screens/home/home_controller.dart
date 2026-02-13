@@ -7,7 +7,7 @@ import '../../../domain/models/home_data.dart';
 part 'home_controller.g.dart';
 
 const String homeScreenQuery = r'''
-query HomeScreen($continueWatchingLimit: Int, $recentlyAddedLimit: Int, $upNextLimit: Int) {
+query HomeScreen($continueWatchingLimit: Int, $recentlyAddedLimit: Int, $upNextLimit: Int, $favoritesLimit: Int) {
   continueWatching(first: $continueWatchingLimit) {
     id
     type
@@ -63,6 +63,19 @@ query HomeScreen($continueWatchingLimit: Int, $recentlyAddedLimit: Int, $upNextL
       }
     }
   }
+
+  favorites(first: $favoritesLimit) {
+    id
+    type
+    title
+    year
+    artwork {
+      posterUrl
+      backdropUrl
+      thumbnailUrl
+    }
+    addedAt
+  }
 }
 ''';
 
@@ -84,6 +97,7 @@ class HomeController extends _$HomeController {
           'continueWatchingLimit': 10,
           'recentlyAddedLimit': 20,
           'upNextLimit': 10,
+          'favoritesLimit': 10,
         },
         fetchPolicy: FetchPolicy.cacheAndNetwork,
       ),

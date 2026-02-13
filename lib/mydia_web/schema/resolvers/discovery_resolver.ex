@@ -110,7 +110,67 @@ defmodule MydiaWeb.Schema.Resolvers.DiscoveryResolver do
     end
   end
 
+  def favorites(_parent, args, %{context: context}) do
+    first = Map.get(args, :first, 50)
+    after_cursor = Map.get(args, :after)
+    types = Map.get(args, :types)
+
+    case context[:current_user] do
+      nil ->
+        {:ok, []}
+
+      user ->
+        all_items =
+          Media.list_user_favorites(user.id)
+          |> maybe_filter_by_type(types)
+          |> Enum.map(&build_recently_added_item/1)
+
+        items = paginate_simple(all_items, first, after_cursor)
+        {:ok, items}
+    end
+  end
+
+  def unwatched(_parent, args, %{context: context}) do
+    first = Map.get(args, :first, 50)
+    after_cursor = Map.get(args, :after)
+    types = Map.get(args, :types)
+
+    case context[:current_user] do
+      nil ->
+        {:ok, []}
+
+      user ->
+        # Get all media items with files
+        media_items = Media.list_media_items(has_files: true)
+
+        # Get IDs of fully watched items
+        watched_ids =
+          Playback.list_user_progress(user.id, watched: true)
+          |> Enum.map(& &1.media_item_id)
+          |> Enum.reject(&is_nil/1)
+          |> MapSet.new()
+
+        all_items =
+          media_items
+          |> Enum.reject(&MapSet.member?(watched_ids, &1.id))
+          |> maybe_filter_by_type(types)
+          |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
+          |> Enum.map(&build_recently_added_item/1)
+
+        items = paginate_simple(all_items, first, after_cursor)
+        {:ok, items}
+    end
+  end
+
   # Private helper functions
+
+  defp maybe_filter_by_type(items, nil), do: items
+  defp maybe_filter_by_type(items, []), do: items
+
+  defp maybe_filter_by_type(items, types) do
+    type_strings = Enum.map(types, &to_string/1)
+    Enum.filter(items, &(&1.type in type_strings))
+  end
 
   # Simple pagination for lists (not connection-style)
   defp paginate_simple(items, first, nil) do

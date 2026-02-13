@@ -8,6 +8,7 @@ import '../widgets/content_rail.dart';
 import '../widgets/shimmer_card.dart';
 import '../../core/layout/breakpoints.dart';
 import '../../core/theme/colors.dart';
+import '../widgets/app_shell.dart';
 import 'home/home_controller.dart';
 
 class HomeScreen extends ConsumerWidget {
@@ -88,6 +89,15 @@ class HomeScreen extends ConsumerWidget {
                         items: data.recentlyAdded,
                         onItemTap: (id, type) =>
                             _handleItemTap(context, id, type),
+                        onSeeAllTap: () => context.push('/recently-added'),
+                      ),
+                    if (data.favorites.isNotEmpty)
+                      ContentRail(
+                        title: 'Favorites',
+                        items: data.favorites,
+                        onItemTap: (id, type) =>
+                            _handleItemTap(context, id, type),
+                        onSeeAllTap: () => context.push('/favorites'),
                       ),
                     if (data.upNext.isNotEmpty)
                       ContentRail(
@@ -231,25 +241,18 @@ class _ModernAppBar extends StatelessWidget implements PreferredSizeWidget {
         child: AppBar(
           backgroundColor: AppColors.background.withValues(alpha: 0.8),
           elevation: 0,
+          titleSpacing: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.menu_rounded),
+            onPressed: () {
+              AppShell.scaffoldKey.currentState?.openDrawer();
+            },
+            tooltip: 'Menu',
+          ),
           title: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [AppColors.primary, AppColors.secondary],
-                  ),
-                ),
-                child: const Icon(
-                  Icons.play_arrow_rounded,
-                  color: Colors.white,
-                  size: 20,
-                ),
-              ),
+              const MydiaLogo(size: 32),
               const SizedBox(width: 10),
               const Text(
                 'Mydia Player',

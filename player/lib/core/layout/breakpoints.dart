@@ -21,7 +21,7 @@ abstract class Breakpoints {
   static const double widescreen = 1600;
 
   /// Width of the sidebar on desktop
-  static const double sidebarWidth = 220;
+  static const double sidebarWidth = 260;
 
   /// Check if current screen is mobile size
   static bool isMobile(BuildContext context) =>

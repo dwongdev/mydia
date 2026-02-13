@@ -10,6 +10,7 @@ defmodule MydiaWeb.Schema.QueryTypes do
   alias MydiaWeb.Schema.Resolvers.SearchResolver
   alias MydiaWeb.Schema.Resolvers.ApiKeyResolver
   alias MydiaWeb.Schema.Resolvers.StreamingResolver
+  alias MydiaWeb.Schema.Resolvers.CollectionResolver
 
   # Node interface for global node resolution with hierarchical navigation
   interface :node do
@@ -148,6 +149,22 @@ defmodule MydiaWeb.Schema.QueryTypes do
       arg(:after, :string)
       resolve(&DiscoveryResolver.up_next/3)
     end
+
+    @desc "Get the user's favorite items"
+    field :favorites, list_of(:recently_added_item) do
+      arg(:first, :integer, default_value: 50)
+      arg(:after, :string)
+      arg(:types, list_of(:media_type))
+      resolve(&DiscoveryResolver.favorites/3)
+    end
+
+    @desc "Get unwatched items with files"
+    field :unwatched, list_of(:recently_added_item) do
+      arg(:first, :integer, default_value: 50)
+      arg(:after, :string)
+      arg(:types, list_of(:media_type))
+      resolve(&DiscoveryResolver.unwatched/3)
+    end
   end
 
   # Search queries
@@ -208,5 +225,39 @@ defmodule MydiaWeb.Schema.QueryTypes do
     field :episode, non_null(:episode)
     field :show, non_null(:tv_show)
     field :progress_state, non_null(:string), description: "One of: continue, next, start"
+  end
+
+  # Collection types
+  @desc "A user-created collection of media items"
+  object :collection do
+    field :id, non_null(:id)
+    field :name, non_null(:string)
+    field :description, :string
+    field :type, non_null(:string)
+    field :visibility, non_null(:string)
+    field :item_count, non_null(:integer)
+    field :poster_paths, list_of(:string)
+  end
+
+  # Collection queries
+  object :collection_queries do
+    @desc "List user's collections (excluding system collections)"
+    field :collections, list_of(:collection) do
+      arg(:first, :integer, default_value: 50)
+      resolve(&CollectionResolver.list_collections/3)
+    end
+
+    @desc "Get a single collection by ID"
+    field :collection, :collection do
+      arg(:id, non_null(:id))
+      resolve(&CollectionResolver.collection/3)
+    end
+
+    @desc "Get items in a collection"
+    field :collection_items, list_of(:recently_added_item) do
+      arg(:collection_id, non_null(:id))
+      arg(:first, :integer, default_value: 50)
+      resolve(&CollectionResolver.collection_items/3)
+    end
   end
 end

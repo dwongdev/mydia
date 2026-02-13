@@ -15,6 +15,11 @@ import '../../presentation/screens/settings/devices_screen.dart';
 import '../../presentation/screens/player/player_screen.dart';
 import '../../presentation/screens/player/queue_player_screen.dart';
 import '../../presentation/screens/downloads/downloads_screen.dart';
+import '../../presentation/screens/favorites/favorites_screen.dart';
+import '../../presentation/screens/recently_added/recently_added_screen.dart';
+import '../../presentation/screens/unwatched/unwatched_screen.dart';
+import '../../presentation/screens/collections/collections_screen.dart';
+import '../../presentation/screens/collections/collection_detail_screen.dart';
 import '../../presentation/screens/search/search_screen.dart';
 import '../../presentation/widgets/app_shell.dart';
 import '../auth/auth_status.dart';
@@ -77,7 +82,8 @@ GoRouter appRouter(Ref ref) {
       final isDownloadsRoute = state.matchedLocation == '/downloads';
       final isPlayerRoute = state.matchedLocation.startsWith('/player');
 
-      debugPrint('[AppRouter] Redirect check: authStatus=$authStatus, isLoading=$isLoading, path=${state.matchedLocation}');
+      debugPrint(
+          '[AppRouter] Redirect check: authStatus=$authStatus, isLoading=$isLoading, path=${state.matchedLocation}');
 
       // While loading, allow navigation to continue
       if (isLoading) {
@@ -100,7 +106,8 @@ GoRouter appRouter(Ref ref) {
 
       // Authenticated on login: go home
       if (authStatus == AuthStatus.authenticated && isLoginRoute) {
-        debugPrint('[AppRouter] Redirecting to / (authenticated on login page)');
+        debugPrint(
+            '[AppRouter] Redirecting to / (authenticated on login page)');
         return '/';
       }
 
@@ -144,6 +151,26 @@ GoRouter appRouter(Ref ref) {
             ),
           ),
           GoRoute(
+            path: '/favorites',
+            name: 'favorites',
+            builder: (context, state) => const FavoritesScreen(),
+          ),
+          GoRoute(
+            path: '/recently-added',
+            name: 'recently_added',
+            builder: (context, state) => const RecentlyAddedScreen(),
+          ),
+          GoRoute(
+            path: '/unwatched',
+            name: 'unwatched',
+            builder: (context, state) => const UnwatchedScreen(),
+          ),
+          GoRoute(
+            path: '/collections',
+            name: 'collections',
+            builder: (context, state) => const CollectionsScreen(),
+          ),
+          GoRoute(
             path: '/downloads',
             name: 'downloads',
             builder: (context, state) => const DownloadsScreen(),
@@ -170,6 +197,15 @@ GoRouter appRouter(Ref ref) {
         name: 'devices',
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const DevicesScreen(),
+      ),
+      GoRoute(
+        path: '/collection/:id',
+        name: 'collection_detail',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) {
+          final id = state.pathParameters['id']!;
+          return CollectionDetailScreen(id: id);
+        },
       ),
       GoRoute(
         path: '/movie/:id',
@@ -212,7 +248,8 @@ GoRouter appRouter(Ref ref) {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                    const Icon(Icons.error_outline,
+                        size: 64, color: Colors.red),
                     const SizedBox(height: 16),
                     const Text('No items in queue'),
                     const SizedBox(height: 24),
@@ -253,7 +290,8 @@ GoRouter appRouter(Ref ref) {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                    const Icon(Icons.error_outline,
+                        size: 64, color: Colors.red),
                     const SizedBox(height: 16),
                     const Text('No file selected for playback'),
                     const SizedBox(height: 24),

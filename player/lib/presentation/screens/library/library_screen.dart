@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'library_controller.dart';
+import '../../widgets/app_shell.dart';
 import '../../widgets/media_poster.dart';
 import '../../../core/layout/breakpoints.dart';
 import '../../../core/theme/colors.dart';
@@ -97,8 +98,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         ref.watch(libraryControllerProvider(widget.libraryType));
     final title =
         widget.libraryType == LibraryType.movies ? 'Movies' : 'TV Shows';
-    final icon =
-        widget.libraryType == LibraryType.movies ? Icons.movie_rounded : Icons.tv_rounded;
+    final icon = widget.libraryType == LibraryType.movies
+        ? Icons.movie_rounded
+        : Icons.tv_rounded;
     final isDesktop = Breakpoints.isDesktop(context);
 
     // On desktop, always show search bar expanded
@@ -143,7 +145,8 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     );
   }
 
-  PreferredSizeWidget _buildAppBar(String title, IconData icon, bool isDesktop, bool showSearch) {
+  PreferredSizeWidget _buildAppBar(
+      String title, IconData icon, bool isDesktop, bool showSearch) {
     final horizontalPadding = Breakpoints.getHorizontalPadding(context);
 
     return PreferredSize(
@@ -161,12 +164,22 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                   SizedBox(
                     height: kToolbarHeight,
                     child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: isDesktop ? horizontalPadding - 8 : 8),
+                      padding: EdgeInsets.symmetric(
+                          horizontal: isDesktop ? horizontalPadding - 8 : 8),
                       child: Row(
                         children: [
+                          // Hamburger menu on mobile
+                          if (!isDesktop)
+                            IconButton(
+                              icon: const Icon(Icons.menu_rounded),
+                              onPressed: () {
+                                AppShell.scaffoldKey.currentState?.openDrawer();
+                              },
+                              tooltip: 'Menu',
+                            ),
                           // Title with icon
                           Padding(
-                            padding: const EdgeInsets.only(left: 8),
+                            padding: EdgeInsets.only(left: isDesktop ? 8 : 0),
                             child: Row(
                               children: [
                                 Icon(
@@ -225,16 +238,19 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                       duration: const Duration(milliseconds: 200),
                       opacity: showSearch ? 1.0 : 0.0,
                       child: Padding(
-                        padding: EdgeInsets.fromLTRB(horizontalPadding, 0, horizontalPadding, 12),
+                        padding: EdgeInsets.fromLTRB(
+                            horizontalPadding, 0, horizontalPadding, 12),
                         child: TextField(
                           controller: _searchController,
                           autofocus: !isDesktop && _showSearch,
                           decoration: InputDecoration(
                             hintText: 'Search ${title.toLowerCase()}...',
-                            prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                            prefixIcon:
+                                const Icon(Icons.search_rounded, size: 20),
                             suffixIcon: _searchController.text.isNotEmpty
                                 ? IconButton(
-                                    icon: const Icon(Icons.clear_rounded, size: 18),
+                                    icon: const Icon(Icons.clear_rounded,
+                                        size: 18),
                                     onPressed: () {
                                       _searchController.clear();
                                       setState(() {});
@@ -242,7 +258,8 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                                   )
                                 : null,
                             filled: true,
-                            fillColor: AppColors.surfaceVariant.withValues(alpha: 0.5),
+                            fillColor:
+                                AppColors.surfaceVariant.withValues(alpha: 0.5),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
                               borderSide: BorderSide.none,
@@ -313,13 +330,15 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
             FilledButton.icon(
               onPressed: () {
                 ref
-                    .read(libraryControllerProvider(widget.libraryType).notifier)
+                    .read(
+                        libraryControllerProvider(widget.libraryType).notifier)
                     .refresh();
               },
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('Try Again'),
               style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
               ),
             ),
           ],
@@ -441,7 +460,8 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
 
         return GridView.builder(
           controller: _scrollController,
-          padding: EdgeInsets.fromLTRB(horizontalPadding, topPadding, horizontalPadding, bottomPadding),
+          padding: EdgeInsets.fromLTRB(
+              horizontalPadding, topPadding, horizontalPadding, bottomPadding),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: crossAxisCount,
             childAspectRatio: 0.58,
@@ -474,7 +494,8 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
 
     return ListView.builder(
       controller: _scrollController,
-      padding: EdgeInsets.fromLTRB(horizontalPadding, topPadding, horizontalPadding, bottomPadding),
+      padding: EdgeInsets.fromLTRB(
+          horizontalPadding, topPadding, horizontalPadding, bottomPadding),
       itemCount: items.length,
       itemBuilder: (context, index) {
         final item = items[index];
@@ -586,9 +607,10 @@ class _ListItem extends StatelessWidget {
                     children: [
                       Text(
                         item.title,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -596,9 +618,10 @@ class _ListItem extends StatelessWidget {
                         const SizedBox(height: 4),
                         Text(
                           item.subtitle!,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: AppColors.textSecondary,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: AppColors.textSecondary,
+                                  ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),

@@ -30,10 +30,15 @@ defmodule MydiaWeb.Live.Components.TrendingDetailModal do
   @impl true
   def render(assigns) do
     ~H"""
-    <div>
-      <div class="modal modal-open" id={@id} phx-window-keydown="close_details" phx-key="Escape">
-        <div class="modal-backdrop bg-black/70" phx-click="close_details"></div>
-        <div class="modal-box max-w-5xl w-11/12 max-h-[90vh] p-0 overflow-hidden">
+    <dialog
+      id={@id}
+      class="modal"
+      open={@open}
+      phx-window-keydown={@open && "close_details"}
+      phx-key="Escape"
+    >
+      <%= if @open do %>
+        <div class="modal-box max-w-5xl w-11/12 max-h-[90vh] p-0 overflow-y-auto">
           <%!-- Header with backdrop --%>
           <div class="relative h-48 md:h-64 bg-base-300">
             <%= if backdrop_path(@item, @metadata) do %>
@@ -51,7 +56,7 @@ defmodule MydiaWeb.Live.Components.TrendingDetailModal do
             <%!-- Close button --%>
             <button
               phx-click="close_details"
-              class="btn btn-circle btn-ghost btn-sm absolute top-4 right-4 bg-base-100/50 hover:bg-base-100"
+              class="btn btn-circle btn-ghost btn-sm absolute top-4 right-4 z-10 bg-base-100/50 hover:bg-base-100"
             >
               <.icon name="hero-x-mark" class="w-5 h-5" />
             </button>
@@ -96,7 +101,7 @@ defmodule MydiaWeb.Live.Components.TrendingDetailModal do
           </div>
 
           <%!-- Body content --%>
-          <div class="p-4 md:p-6 overflow-y-auto max-h-[calc(90vh-16rem)]">
+          <div class="p-4 md:p-6">
             <%= if @loading do %>
               <div class="flex items-center justify-center py-12">
                 <span class="loading loading-spinner loading-lg"></span>
@@ -192,8 +197,13 @@ defmodule MydiaWeb.Live.Components.TrendingDetailModal do
             <% end %>
           </div>
         </div>
-      </div>
-    </div>
+
+        <%!-- Backdrop --%>
+        <div class="modal-backdrop bg-black/70">
+          <button type="button" phx-click="close_details">close</button>
+        </div>
+      <% end %>
+    </dialog>
     """
   end
 
@@ -202,6 +212,7 @@ defmodule MydiaWeb.Live.Components.TrendingDetailModal do
     {:ok,
      socket
      |> assign(assigns)
+     |> assign_new(:open, fn -> false end)
      |> assign_new(:loading, fn -> false end)
      |> assign_new(:metadata, fn -> nil end)}
   end
@@ -244,6 +255,7 @@ defmodule MydiaWeb.Live.Components.TrendingDetailModal do
     end
   end
 
+  defp in_library?(nil), do: false
   defp in_library?(item), do: Map.get(item, :in_library, false)
 
   defp media_type_string(item) do

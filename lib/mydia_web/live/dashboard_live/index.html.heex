@@ -464,14 +464,13 @@
   <% end %>
 
   <%!-- Trending Detail Modal --%>
-  <%= if @selected_item do %>
-    <.live_component
-      module={MydiaWeb.Live.Components.TrendingDetailModal}
-      id="trending-detail-modal"
-      item={@selected_item}
-      metadata={@selected_metadata}
-      loading={@detail_loading}
-      current_user={@current_user}
-    />
-  <% end %>
+  <.live_component
+    module={MydiaWeb.Live.Components.TrendingDetailModal}
+    id="trending-detail-modal"
+    item={@selected_item}
+    metadata={@selected_metadata}
+    loading={@detail_loading}
+    current_user={@current_user}
+    open={@selected_item != nil}
+  />
 </Layouts.app>

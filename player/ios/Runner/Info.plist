@@ -52,5 +52,7 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Camera access is needed to scan QR codes for pairing with your Mydia server.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>
